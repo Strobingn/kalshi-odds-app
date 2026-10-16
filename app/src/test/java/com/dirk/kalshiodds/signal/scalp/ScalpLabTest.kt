@@ -25,9 +25,9 @@ class ScalpLabTest {
         assertTrue("open=$open", open >= 10)
         val cheap = lab.snapshot().accounts.first { it.id == "all_in_cheap" }.position!!
         assertEquals("YES", cheap.side)
-        assertTrue(cheap.contracts > 8_000)
-        assertTrue(cheap.stakeUsd > 1_500.0)
-        assertTrue(cheap.stakeUsd < 2_500.0)
+        assertTrue(cheap.contracts > 4_000)
+        assertTrue(cheap.stakeUsd > 4_000.0)
+        assertTrue(cheap.stakeUsd < 5_500.0)
     }
 
     @Test
@@ -58,12 +58,12 @@ class ScalpLabTest {
         assertTrue(bought.position != null)
         assertEquals("YES", bought.position!!.side)
         assertTrue(bought.position!!.stakeUsd > 1_500.0)
-        lab.onQuote(busyTape(yesBid = 0.30, yesAsk = 0.31, yesBids = listOf(0.19, 0.22, 0.26, 0.30)))
+        lab.onQuote(busyTape(yesBid = 0.80, yesAsk = 0.81, yesBids = listOf(0.89, 0.86, 0.83, 0.80)))
         val sold = lab.snapshot().accounts.first { it.id == "all_in_under_50" }
         assertNull(sold.position)
         assertEquals(1, sold.trades)
-        assertEquals(1, sold.wins)
-        assertTrue(sold.realizedPnlUsd > 0.0)
+        assertEquals(0, sold.wins)
+        assertTrue(sold.realizedPnlUsd < 0.0)
         assertTrue(sold.lastNote.contains("SELL"))
     }
 
@@ -111,13 +111,13 @@ class ScalpLabTest {
         lab.onQuote(busyTape())
         val bought = lab.snapshot().accounts.first { it.id == "first_5" }
         assertTrue(bought.position != null)
-        lab.onQuote(busyTape(yesBid = 0.22, yesAsk = 0.23))
+        lab.onQuote(busyTape(yesBid = 0.87, yesAsk = 0.88))
         val still = lab.snapshot().accounts.first { it.id == "first_5" }
         assertTrue(still.position != null)
     }
 
     @Test
-    fun lateSmallSkipsANinetyCentFavorite() {
+    fun lateFavoriteSkipsUntilTheLastTwoMinutes() {
         val lab = ScalpLab()
         lab.onQuote(
             tape(
@@ -129,8 +129,33 @@ class ScalpLabTest {
                 tteMs = 3L * 60L * 1000L
             )
         )
+        assertNull(lab.snapshot().accounts.first { it.id == "late_squeeze" }.position)
+        lab.onQuote(
+            tape(
+                yesAsk = 0.90,
+                yesBid = 0.89,
+                noAsk = 0.12,
+                noBid = 0.10,
+                elapsedMs = 14L * 60L * 1000L,
+                tteMs = 60_000L
+            )
+        )
         val pos = lab.snapshot().accounts.first { it.id == "late_squeeze" }.position
-        if (pos != null) assertEquals("NO", pos.side)
+        assertEquals("YES", pos?.side)
+    }
+
+    @Test
+    fun zeroStopHoldsACrashToTheClose() {
+        val lab = ScalpLab()
+        lab.onQuote(busyTape())
+        val before = ScalpSettings.stopLoss
+        ScalpSettings.stopLoss = 0.0
+        try {
+            lab.onQuote(busyTape(yesBid = 0.40, yesAsk = 0.41, yesBids = listOf(0.89, 0.70, 0.55, 0.40)))
+            assertTrue(lab.snapshot().accounts.first { it.id == "all_in_cheap" }.position != null)
+        } finally {
+            ScalpSettings.stopLoss = before
+        }
     }
 
     @Test
@@ -167,22 +192,23 @@ class ScalpLabTest {
         lab.onQuote(busyTape())
         val late = lab.snapshot().accounts.first { it.id == "late_squeeze" }
         assertTrue(late.position != null)
-        assertTrue(late.position!!.stakeUsd < 3_000.0)
+        assertTrue(late.position!!.stakeUsd > 4_000.0)
+        assertTrue(late.position!!.stakeUsd < 6_000.0)
     }
 
     private fun busyTape(
-        yesBid: Double = 0.19,
-        yesAsk: Double = 0.20,
-        yesBids: List<Double> = listOf(0.10, 0.13, 0.16, 0.19)
+        yesBid: Double = 0.89,
+        yesAsk: Double = 0.90,
+        yesBids: List<Double> = listOf(0.80, 0.84, 0.87, 0.89)
     ) = tape(
         yesAsk = yesAsk,
         yesBid = yesBid,
-        noAsk = 0.82,
-        noBid = 0.80,
-        elapsedMs = 6L * 60L * 1000L,
-        tteMs = 9L * 60L * 1000L,
+        noAsk = 0.12,
+        noBid = 0.10,
+        elapsedMs = 13L * 60L * 1000L,
+        tteMs = 100_000L,
         yesBids = yesBids,
-        yesHigh = 0.32
+        yesHigh = yesAsk
     )
 
     private fun tape(

@@ -37,22 +37,29 @@ sealed class ScalpIntent {
 }
 
 object ScalpSettings {
-    /** Sell when the bid is this much above the entry. */
-    var takeProfit: Double = 0.08
-    /** Sell when the bid is this much below the entry. */
-    var stopLoss: Double = 0.05
-    /** Max ask to buy. */
-    var maxAsk: Double = 0.50
-    /** Fraction of cash per entry. */
+    /** Off skips new buys. An open bet still follows the stop. */
+    var enabled: Boolean = true
+
+    /** Buy only when this many minutes, or fewer, are left in the window. */
+    var lastMinutes: Int = 2
+
+    /** Lowest ask it will pay, in dollars. */
+    var minAsk: Double = 0.85
+
+    /** Highest ask it will pay, in dollars. */
+    var maxAsk: Double = 0.99
+
+    /** Fraction of the book's cash (or the $20k start) per entry. */
     var fraction: Double = 0.25
-    /** Minutes left above which the price is treated as range-bound. */
-    var rangeMinutes: Int = 10
-    /** Minutes left below which the price is treated as a rapid shift. */
-    var shiftMinutes: Int = 5
-    /** Bottom of the range to buy when time is long. */
-    var rangeLow: Double = 0.30
-    /** Top of the range to buy when time is long. */
-    var rangeHigh: Double = 0.75
+
+    /**
+     * Sell when the bid is this far under the entry.
+     * 0 holds to the close: no stop, no giveback sell, no last-minute flatten.
+     */
+    var stopLoss: Double = 0.05
+
+    /** Don't open again until this many milliseconds after the last look. 0 looks every quote. */
+    var cadenceMs: Long = 0L
 }
 
 object ScalpCatalog {
@@ -173,12 +180,18 @@ object ScalpCatalog {
         algo(id, name, rule) { a, t ->
             val pos = a.position
             if (pos == null) {
+                if (!ScalpSettings.enabled) return@algo ScalpIntent.Hold
                 val mins = t.tteMs / 60_000.0
-                if (mins > 2.0) return@algo ScalpIntent.Hold
+                if (mins > ScalpSettings.lastMinutes) return@algo ScalpIntent.Hold
                 val side = if (t.yesBid > t.noBid) "YES" else "NO"
                 val aPx = ask(t, side)
-                if (aPx >= 0.85) ScalpIntent.Buy(side, ScalpSettings.fraction) else ScalpIntent.Hold
+                if (aPx + 1e-9 < ScalpSettings.minAsk || aPx > ScalpSettings.maxAsk + 1e-9) {
+                    return@algo ScalpIntent.Hold
+                }
+                ScalpIntent.Buy(side, ScalpSettings.fraction)
             } else {
+                val stop = ScalpSettings.stopLoss
+                if (stop <= 1e-9) return@algo ScalpIntent.Hold
                 val b = bid(t, pos.side)
                 val mins = t.tteMs / 60_000.0
                 val drop = pos.peakBid - b
@@ -186,7 +199,7 @@ object ScalpCatalog {
                 when {
                     recover -> ScalpIntent.Hold
                     drop + 1e-9 >= 0.03 -> ScalpIntent.Sell(force = true)
-                    b + 1e-9 <= pos.entry - 0.05 -> ScalpIntent.Sell(force = true)
+                    b + 1e-9 <= pos.entry - stop -> ScalpIntent.Sell(force = true)
                     t.tteMs in 1..60_000L -> ScalpIntent.Sell(force = true)
                     else -> ScalpIntent.Hold
                 }

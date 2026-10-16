@@ -23,7 +23,11 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Switch
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -43,6 +47,7 @@ import com.dirk.kalshiodds.signal.scalp.ScalpAccount
 import com.dirk.kalshiodds.signal.scalp.ScalpLabState
 import com.dirk.kalshiodds.ui.theme.DipTheme
 import java.util.Locale
+import kotlin.math.roundToInt
 import kotlin.math.abs
 
 /**
@@ -57,6 +62,11 @@ fun ScalpScreen(
     onExport: () -> Unit = {}
 ) {
     val colors = DipTheme.colors
+    val ctx = LocalContext.current
+    remember(ctx) {
+        loadScalpSettings(ctx.getSharedPreferences("scalp_settings", Context.MODE_PRIVATE))
+        true
+    }
     val ranked = state.accounts.sortedByDescending { it.pnlUsd() }
     val total = state.accounts.sumOf { it.pnlUsd() }
     Column(
@@ -122,76 +132,148 @@ private fun ScalpSettingsCard() {
     val colors = DipTheme.colors
     val ctx = LocalContext.current
     val prefs = remember { ctx.getSharedPreferences("scalp_settings", Context.MODE_PRIVATE) }
-    val tp = remember { mutableStateOf(prefs.getFloat("tp", ScalpSettings.takeProfit.toFloat()).toDouble()) }
-    val sl = remember { mutableStateOf(prefs.getFloat("sl", ScalpSettings.stopLoss.toFloat()).toDouble()) }
-    val maxAsk = remember { mutableStateOf(prefs.getFloat("maxAsk", ScalpSettings.maxAsk.toFloat()).toDouble()) }
-    val frac = remember { mutableStateOf(prefs.getFloat("frac", ScalpSettings.fraction.toFloat()).toDouble()) }
-    val rangeMin = remember { mutableStateOf(prefs.getInt("rangeMin", ScalpSettings.rangeMinutes).toDouble()) }
-    val shiftMin = remember { mutableStateOf(prefs.getInt("shiftMin", ScalpSettings.shiftMinutes).toDouble()) }
-    val rangeLow = remember { mutableStateOf(prefs.getFloat("rangeLow", ScalpSettings.rangeLow.toFloat()).toDouble()) }
-    val rangeHigh = remember { mutableStateOf(prefs.getFloat("rangeHigh", ScalpSettings.rangeHigh.toFloat()).toDouble()) }
-    ScalpSettings.takeProfit = tp.value
-    ScalpSettings.stopLoss = sl.value
-    ScalpSettings.maxAsk = maxAsk.value
-    ScalpSettings.fraction = frac.value
-    ScalpSettings.rangeMinutes = rangeMin.value.toInt()
-    ScalpSettings.shiftMinutes = shiftMin.value.toInt()
-    ScalpSettings.rangeLow = rangeLow.value
-    ScalpSettings.rangeHigh = rangeHigh.value
-    fun save() {
+    val on = remember { mutableStateOf(prefs.getBoolean("on", ScalpSettings.enabled)) }
+    val lastMin = remember { mutableStateOf(prefs.getInt("lastMin", ScalpSettings.lastMinutes).toDouble()) }
+    val lo = remember { mutableStateOf(prefs.getFloat("loAsk", ScalpSettings.minAsk.toFloat()).toDouble()) }
+    val hi = remember { mutableStateOf(prefs.getFloat("hiAsk", ScalpSettings.maxAsk.toFloat()).toDouble()) }
+    val frac = remember { mutableStateOf(prefs.getFloat("frac2", ScalpSettings.fraction.toFloat()).toDouble()) }
+    val stop = remember { mutableStateOf(prefs.getFloat("stop2", ScalpSettings.stopLoss.toFloat()).toDouble()) }
+    val every = remember { mutableStateOf(prefs.getInt("cadence", (ScalpSettings.cadenceMs / 1000L).toInt()).toDouble()) }
+    fun push() {
+        ScalpSettings.enabled = on.value
+        ScalpSettings.lastMinutes = lastMin.value.toInt().coerceIn(1, 14)
+        ScalpSettings.minAsk = lo.value
+        ScalpSettings.maxAsk = hi.value
+        ScalpSettings.fraction = frac.value
+        ScalpSettings.stopLoss = stop.value
+        ScalpSettings.cadenceMs = every.value.toLong() * 1000L
         prefs.edit()
-            .putFloat("tp", tp.value.toFloat()).putFloat("sl", sl.value.toFloat())
-            .putFloat("maxAsk", maxAsk.value.toFloat()).putFloat("frac", frac.value.toFloat())
-            .putInt("rangeMin", rangeMin.value.toInt()).putInt("shiftMin", shiftMin.value.toInt())
-            .putFloat("rangeLow", rangeLow.value.toFloat()).putFloat("rangeHigh", rangeHigh.value.toFloat())
+            .putBoolean("on", on.value)
+            .putInt("lastMin", ScalpSettings.lastMinutes)
+            .putFloat("loAsk", lo.value.toFloat())
+            .putFloat("hiAsk", hi.value.toFloat())
+            .putFloat("frac2", frac.value.toFloat())
+            .putFloat("stop2", stop.value.toFloat())
+            .putInt("cadence", every.value.toInt())
             .apply()
     }
+    push()
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(colors.surface, RoundedCornerShape(16.dp))
             .border(1.dp, colors.border, RoundedCornerShape(16.dp))
             .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+        verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Settings", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
+                Text(
+                    if (on.value) "Running · changes count from its next order" else "Off · it opens nothing new",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.textSecondary
+                )
+            }
+            Switch(checked = on.value, onCheckedChange = { on.value = it; push() })
+        }
+        KnobSlider("Buys in the last", lastMin.value, 1.0, 14.0, 1.0, { "${it.toInt()} min" }) {
+            lastMin.value = it; push()
+        }
+        KnobSlider("Lowest price it buys", lo.value, 0.01, 0.99, 0.01, { "${(it * 100).roundToInt()}¢" }) {
+            lo.value = it
+            if (hi.value + 1e-9 < it) hi.value = it
+            push()
+        }
+        KnobSlider("Highest price it buys", hi.value, 0.01, 0.99, 0.01, { "${(it * 100).roundToInt()}¢" }) {
+            hi.value = it
+            if (lo.value > it + 1e-9) lo.value = it
+            push()
+        }
+        KnobSlider("Size of each bet", frac.value, 0.05, 0.50, 0.01, { "${(it * 100).roundToInt()}%" }) {
+            frac.value = it; push()
+        }
+        KnobSlider("Stop loss (0 = hold to the close)", stop.value, 0.0, 0.30, 0.01, { "${(it * 100).roundToInt()}¢" }) {
+            stop.value = it; push()
+        }
+        KnobSlider("Looks every", every.value, 0.0, 30.0, 1.0, { if (it.toInt() == 0) "every quote" else "${it.toInt()} s" }) {
+            every.value = it; push()
+        }
         Text(
-            String.format(Locale.US, "Last 2 min · favourite at %.0f¢+ · size %.0f%% · TP %.0f¢ · SL %.0f¢",
-                maxAsk.value * 100, frac.value * 100, tp.value * 100, sl.value * 100),
+            "One open bet per book. It buys the favourite between those prices. A rise that gives back 2¢ still sells, unless the stop is 0.",
             style = MaterialTheme.typography.labelSmall,
-            color = colors.accentBlue
+            color = colors.textSecondary
         )
-        SettingSlider("Take profit", tp.value, 0.02, 0.25) { tp.value = it; ScalpSettings.takeProfit = it; save() }
-        SettingSlider("Stop loss", sl.value, 0.02, 0.15) { sl.value = it; ScalpSettings.stopLoss = it; save() }
-        SettingSlider("Max ask", maxAsk.value, 0.50, 0.99) { maxAsk.value = it; ScalpSettings.maxAsk = it; save() }
-        SettingSlider("Size", frac.value, 0.05, 0.50) { frac.value = it; ScalpSettings.fraction = it; save() }
-        SettingSlider("Range minutes", rangeMin.value, 1.0, 15.0) { rangeMin.value = it; ScalpSettings.rangeMinutes = it.toInt(); save() }
-        SettingSlider("Shift minutes", shiftMin.value, 1.0, 15.0) { shiftMin.value = it; ScalpSettings.shiftMinutes = it.toInt(); save() }
-        SettingSlider("Range low", rangeLow.value, 0.10, 0.50) { rangeLow.value = it; ScalpSettings.rangeLow = it; save() }
-        SettingSlider("Range high", rangeHigh.value, 0.50, 0.90) { rangeHigh.value = it; ScalpSettings.rangeHigh = it; save() }
     }
 }
 
+private fun loadScalpSettings(prefs: android.content.SharedPreferences) {
+    ScalpSettings.enabled = prefs.getBoolean("on", ScalpSettings.enabled)
+    ScalpSettings.lastMinutes = prefs.getInt("lastMin", ScalpSettings.lastMinutes).coerceIn(1, 14)
+    ScalpSettings.minAsk = prefs.getFloat("loAsk", ScalpSettings.minAsk.toFloat()).toDouble()
+    ScalpSettings.maxAsk = prefs.getFloat("hiAsk", ScalpSettings.maxAsk.toFloat()).toDouble()
+    ScalpSettings.fraction = prefs.getFloat("frac2", ScalpSettings.fraction.toFloat()).toDouble()
+    ScalpSettings.stopLoss = prefs.getFloat("stop2", ScalpSettings.stopLoss.toFloat()).toDouble()
+    ScalpSettings.cadenceMs = prefs.getInt("cadence", (ScalpSettings.cadenceMs / 1000L).toInt()).toLong() * 1000L
+}
+
 @Composable
-private fun SettingSlider(label: String, value: Double, min: Double, max: Double, onChange: (Double) -> Unit) {
+private fun KnobSlider(
+    label: String,
+    value: Double,
+    min: Double,
+    max: Double,
+    step: Double,
+    text: (Double) -> String,
+    onChange: (Double) -> Unit
+) {
     val colors = DipTheme.colors
+    val interaction = remember { MutableInteractionSource() }
+    val sliderColors = SliderDefaults.colors(
+        thumbColor = colors.accentBlue,
+        activeTrackColor = colors.accentBlue,
+        inactiveTrackColor = colors.textSecondary.copy(alpha = 0.28f),
+        activeTickColor = Color.Transparent,
+        inactiveTickColor = Color.Transparent,
+    )
+    fun snap(x: Float): Double = (min + Math.round((x - min) / step) * step).coerceIn(min, max)
     Column {
-        Text(
-            when (label) {
-                "Size" -> String.format(Locale.US, "%s  %.0f%%", label, value * 100)
-                "Range minutes", "Shift minutes" -> String.format(Locale.US, "%s  %.0f", label, value)
-                else -> String.format(Locale.US, "%s  %.0f¢", label, value * 100)
-            },
-            style = MaterialTheme.typography.labelMedium,
-            color = colors.textSecondary
-        )
-        Slider(
-            value = value.toFloat(),
-            onValueChange = { onChange(it.toDouble()) },
-            valueRange = min.toFloat()..max.toFloat(),
-            colors = androidx.compose.material3.SliderDefaults.colors(
-                thumbColor = colors.accentBlue,
-                activeTrackColor = colors.accentBlue
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                label,
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.textPrimary,
+                modifier = Modifier.weight(1f)
             )
+            Text(
+                text(snap(value.toFloat())),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = colors.textPrimary
+            )
+        }
+        Slider(
+            value = value.toFloat().coerceIn(min.toFloat(), max.toFloat()),
+            onValueChange = { onChange(snap(it)) },
+            valueRange = min.toFloat()..max.toFloat(),
+            steps = 0,
+            interactionSource = interaction,
+            colors = sliderColors,
+            thumb = {
+                SliderDefaults.Thumb(
+                    interactionSource = interaction,
+                    colors = sliderColors,
+                    thumbSize = DpSize(22.dp, 22.dp),
+                )
+            },
+            track = { state ->
+                SliderDefaults.Track(
+                    sliderState = state,
+                    colors = sliderColors,
+                    thumbTrackGapSize = 0.dp,
+                    drawStopIndicator = null,
+                )
+            },
         )
     }
 }

@@ -90,6 +90,8 @@ class ScalpLab(
     private var yesLow = 1.0
     private var noHigh = 0.0
     private var noLow = 1.0
+    /** Last time a buy was allowed to look. Reset with the lab. */
+    private var lastLookMs = Long.MIN_VALUE
 
     fun snapshot(): ScalpLabState = _state.value
 
@@ -118,6 +120,7 @@ class ScalpLab(
     fun reset() {
         synchronized(lock) {
             clearTape()
+            lastLookMs = Long.MIN_VALUE
             publish(ScalpLabState(accounts = ScalpCatalog.merge(emptyList())))
         }
     }
@@ -130,10 +133,11 @@ class ScalpLab(
 
     fun onQuote(tape: ScalpTape) {
         synchronized(lock) {
+            val looking = lookAllowed()
             val next = ArrayList<ScalpAccount>(_state.value.accounts.size)
             var changed = false
             for (account in _state.value.accounts) {
-                val stepped = step(account, tape)
+                val stepped = step(account, tape, looking)
                 if (stepped != account) changed = true
                 next += stepped
             }
@@ -166,21 +170,21 @@ class ScalpLab(
         }
     }
 
-    private fun step(account: ScalpAccount, tape: ScalpTape): ScalpAccount {
+    private fun step(account: ScalpAccount, tape: ScalpTape, looking: Boolean): ScalpAccount {
         val held = account.position
         if (held != null && !held.ticker.equals(tape.ticker, true)) {
-            return stamp(trade(scratch(account, held), tape))
+            return stamp(trade(scratch(account, held), tape, looking))
         }
-        return stamp(trade(account, tape))
+        return stamp(trade(account, tape, looking))
     }
 
-    private fun trade(account: ScalpAccount, tape: ScalpTape): ScalpAccount {
+    private fun trade(account: ScalpAccount, tape: ScalpTape, looking: Boolean): ScalpAccount {
         val marked = if (account.position?.ticker?.equals(tape.ticker, true) == true) mark(account, tape) else account
         val pos = marked.position
         val rule = ScalpCatalog.ALL.first { it.id == marked.id }.decide(marked, tape)
         val intent = adapt(marked, tape, rule)
         return when (intent) {
-            is ScalpIntent.Buy -> if (pos == null) buy(marked, tape, intent) else marked
+            is ScalpIntent.Buy -> if (pos == null && looking) buy(marked, tape, intent) else marked
             is ScalpIntent.Sell -> {
                 if (pos == null || !pos.ticker.equals(tape.ticker, true)) marked
                 else if (intent.force || profitable(pos, ScalpCatalog.bid(tape, pos.side))) sell(marked, pos, tape)
@@ -190,19 +194,30 @@ class ScalpLab(
         }
     }
 
+    /** "Looks every" gates new buys only. A stop still runs on every quote. */
+    private fun lookAllowed(): Boolean {
+        val gap = ScalpSettings.cadenceMs
+        if (gap <= 0L) return true
+        val now = nowMs()
+        if (lastLookMs != Long.MIN_VALUE && now - lastLookMs < gap) return false
+        lastLookMs = now
+        return true
+    }
+
     /**
-     * Nothing holds to settlement. A rise that gives back 2¢ is sold.
-     * A trade that never rose and is 3¢ under the entry is cut.
-     * Anything still open in the last 90 seconds is closed.
+     * Stop at the setting. 0 holds to the close, including through a giveback
+     * and the last minute. Otherwise a 2¢ giveback after a rise, the stop, or
+     * the last 90 seconds still closes it.
      */
     private fun adapt(account: ScalpAccount, tape: ScalpTape, intent: ScalpIntent): ScalpIntent {
         val pos = account.position ?: return intent
         if (!pos.ticker.equals(tape.ticker, true)) return intent
+        if (ScalpSettings.stopLoss <= 1e-9) return intent
         val bid = ScalpCatalog.bid(tape, pos.side)
         if (tape.tteMs in 1..NINETY_SEC) return ScalpIntent.Sell(force = true)
         val rose = pos.peakBid + 1e-9 >= pos.entry + 0.02
         if (rose && pos.peakBid - bid + 1e-9 >= 0.02) return ScalpIntent.Sell(force = true)
-        if (!rose && bid + 1e-9 <= pos.entry - 0.03) return ScalpIntent.Sell(force = true)
+        if (bid + 1e-9 <= pos.entry - ScalpSettings.stopLoss) return ScalpIntent.Sell(force = true)
         return intent
     }
 
