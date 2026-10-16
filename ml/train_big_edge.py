@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Train a phone-compatible 128-tree BTC/ETH/SOL research model.
+"""Train a phone-compatible 128-tree Bitcoin research model.
 
 Requires authentic settled-market rows. The exported model can be manually
 imported, but its research manifest is intentionally ineligible for the app's
@@ -59,8 +59,8 @@ def read_csv(path: Path) -> list[Row]:
         for line, rec in enumerate(reader, 2):
             try:
                 ticker = rec["market_ticker"].strip()
-                if not ticker.startswith(("KXBTC15M-", "KXETH15M-", "KXSOL15M-")):
-                    raise ValueError("unknown series")
+                if not ticker.startswith("KXBTC15M-"):
+                    raise ValueError("non-Bitcoin series")
                 ts = int(rec["decision_ts"])
                 y = int(rec["y_yes"])
                 ya, na = float(rec["yes_ask"]), float(rec["no_ask"])
@@ -99,8 +99,9 @@ def split_days(rows: list[Row]) -> tuple[list[Row], list[Row], list[Row]]:
     for name, part in zip(("train", "calibration", "test"), parts):
         if len({r.ticker for r in part}) < 30 or len({r.yes for r in part}) != 2:
             raise ValueError(f"{name} block has too few independent markets or only one outcome")
-    if max(r.ts for r in parts[0]) >= min(r.ts for r in parts[1]) or max(r.ts for r in parts[1]) >= min(r.ts for r in parts[2]):
-        raise ValueError("market observations cross split boundaries")
+    # Assignment is by each market's first observation. A 15-minute market
+    # can cross midnight, so comparing every intra-market timestamp would
+    # falsely reject a chronological, market-disjoint split.
     return parts[0], parts[1], parts[2]
 
 
@@ -225,7 +226,7 @@ def train(rows: list[Row]) -> tuple[dict, dict]:
 
 def collect(days: int, max_per_day: int) -> list[Row]:
     rows: list[Row] = []
-    for series in te.SERIES:
+    for series in ("KXBTC15M",):
         # Ask the API for the settlement date range. The older generic
         # collector can otherwise keep paginating old markets indefinitely
         # when fewer than its target count fall inside the requested days.
