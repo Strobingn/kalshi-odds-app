@@ -122,9 +122,15 @@ object ScalpTabCopy {
 
 @Composable
 fun ScalpTabScreen(viewModel: OddsViewModel, onOpenScalpData: () -> Unit, onOpenScalpRules: () -> Unit, onOpenAlgo: (ScalpModels.Model) -> Unit = {}) {
-    DisposableEffect(Unit) {
-        viewModel.setScalpTabVisible(true)
-        onDispose { viewModel.setScalpTabVisible(false) }
+    val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(owner, viewModel) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_START) viewModel.setScalpTabVisible(true)
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) viewModel.setScalpTabVisible(false)
+        }
+        owner.lifecycle.addObserver(observer)
+        if (owner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) viewModel.setScalpTabVisible(true)
+        onDispose { owner.lifecycle.removeObserver(observer); viewModel.setScalpTabVisible(false) }
     }
     val st by viewModel.scalpTab.collectAsStateWithLifecycle()
     var settings by remember { mutableStateOf(false) }
@@ -161,8 +167,19 @@ fun ScalpTabContent(
     showCoinCards: Boolean = true,
     onOpenSettings: () -> Unit = {}
 ) {
-    var page by rememberSaveable { mutableIntStateOf(0) }
-    var v2Only by rememberSaveable { mutableStateOf(true) }
+    if (showCoinCards) {
+        var ladder by rememberSaveable { mutableStateOf(false) }
+        if (ladder) {
+            Column(Modifier.fillMaxSize()) {
+                TextButton(onClick = { ladder = false }) { Text("← Back to scalping arena") }
+                Box(Modifier.weight(1f)) {
+                    ScalpTabContent(st, onOpenScalpData, onOpenScalpRules, onSelectMarket, onSelectSide,
+                        onPlace, onCancel, onReprice, onSellOwnedAt, onOpenAlgo, showCoinCards = false, onOpenSettings = onOpenSettings)
+                }
+            }
+        } else KashiArenaContent(st, onOpenAlgo, onOpenSettings, onOpenScalpData, { ladder = true })
+        return
+    }
     var qty by remember { mutableIntStateOf(PriceLadder.PRESET_SIZES[1]) }
     var buyMode by remember { mutableStateOf(true) }
     var info by remember { mutableStateOf(false) }
@@ -185,58 +202,12 @@ fun ScalpTabContent(
             if (st.debugTiming.isNotBlank()) item(key = "dbg") { Text(st.debugTiming, style = MaterialTheme.typography.labelSmall, color = DipTheme.colors.textSecondary) }
 
         item(key = "hdr") {
-            Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(ScalpTabCopy.TITLE, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = c.textPrimary)
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    "PAPER", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = c.textSecondary,
-                    modifier = Modifier.border(1.dp, c.border, RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp)
-                )
-                Spacer(Modifier.weight(1f))
-                TextButton(onClick = onOpenScalpData) { Text("Scalp Data", maxLines = 1) }
-                IconButton(onClick = { info = true }) { Icon(Icons.Outlined.Info, contentDescription = "How it works", tint = c.textSecondary) }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Manual ladder", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = c.textPrimary, modifier = Modifier.weight(1f))
+                TextButton(onClick = onOpenSettings) { Text("Settings") }
+                IconButton(onClick = { info = true }) { Icon(Icons.Outlined.Info, "How the ladder works", tint = c.textSecondary) }
             }
         }
-        item(key = "navigation") {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf("Overview", "Algorithms", "Ladder").forEachIndexed { i, title -> Pill(title, page == i) { page = i } }
-            }
-            TextButton(onClick = onOpenSettings) { Text("Scalping settings") }
-        }
-        if (showCoinCards && page == 0) {
-            item(key = "run-status") { Text(
-                (if (st.controls.enabled && !st.controls.killSwitch) "V2 entries on" else "V2 entries paused") +
-                    (if (st.controls.maxTradesPerHour == 0) " · unlimited trades" else " · ${st.controls.maxTradesPerHour}/hour") +
-                    (if (st.controls.manual) " · manual parameters" else " · strategy parameters") +
-                    (if (st.controls.peakTrailEnabled) " · ${st.controls.peakTrailCents}¢ peak trail / ${st.controls.stopLossPercent}% fill stop" else " · legacy exits"), color = c.textSecondary, style = MaterialTheme.typography.bodySmall) }
-            item(key = "scope") { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Pill("V2 strategies", v2Only) { v2Only = true }
-                Pill("Originals", !v2Only) { v2Only = false }
-            } }
-            val rows = st.algoAllTime.values.filter { ScalpModels.isV2(it.model) == v2Only }
-            val today = st.algoToday.values.filter { ScalpModels.isV2(it.model) == v2Only }
-            item(key = "swarm-summary") { SwarmScalpSummary(rows, today) }
-            item(key = "swarm-curve") { SwarmScalpCurve(st.windows, v2Only, st.updatedAtMs.takeIf { it > 0 } ?: System.currentTimeMillis()) }
-            val positions = st.activeScalps.filter { com.dirk.kalshiodds.decision.ScalpV2.isV2(it.variantId) == v2Only }
-            item(key = "open-title") { Text("Open positions · ${positions.size}", color = c.textPrimary, fontWeight = FontWeight.SemiBold) }
-            if (positions.isEmpty()) item(key = "flat") { Text("No open positions in this group", color = c.textSecondary) }
-            items(positions, key = { "swarm-open-" + it.id }) { SwarmOpenPosition(it, st.scalpBids[it.id]) { ScalpModels.modelOf(it)?.let(onOpenAlgo) } }
-            item(key = "by-strategy") { Text("By strategy · net after fees", color = c.textPrimary, fontWeight = FontWeight.SemiBold) }
-            items(rows.sortedByDescending { it.netUsd }, key = { "swarm-strategy-" + it.model.code }) { r -> SwarmStrategyRow(r, st.feedback[r.model.code], enabled = !v2Only || st.controls.permits(r.model.code)) { onOpenAlgo(r.model) } }
-            if (rows.isEmpty()) item(key = "no-results") { Text("No completed trades yet. Strategies and settings are available above.", color = c.textSecondary) }
-        }
-        if (showCoinCards && page == 1) {
-            item(key = "algo-h") {
-                Text("Algorithms", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
-            }
-            items(ScalpModels.CARD_ORDER, key = { "algo-" + it.code }) { m ->
-                AlgoCard(m, st.algoAllTime[m], st.algoToday[m], emptyMap()) { onOpenAlgo(m) }
-            }
-            // 0.3.59: one combined Bitcoin leaderboard (no per-coin boards).
-            item(key = "board") { CombinedBoard(ScalpModels.combinedBoard(st.algoAllTime)) }
-            item(key = "v2cmp") { val cmp = androidx.compose.runtime.remember(st.algoAllTime) { ScalpModels.v2Compare(st.algoAllTime) }; V2CompareCard(cmp) }
-        }
-        if (page == 2 || !showCoinCards) {
         item(key = "ladder-card") {
             FieldCard {
                 Text("Trade the ladder", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
@@ -286,7 +257,6 @@ fun ScalpTabContent(
                 Spacer(Modifier.height(12.dp))
                 Ladder(st, buyMode, qty, onPlace, onCancel, onReprice)
             }
-        }
         }
         item(key = "end") { Spacer(Modifier.height(16.dp)) }
     }

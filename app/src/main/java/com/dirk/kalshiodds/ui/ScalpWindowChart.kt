@@ -39,14 +39,14 @@ internal fun markerName(kind: ScalpWindowChartData.Kind): String = when (kind) {
 }
 
 @Composable
-internal fun ScalpWindowChart(d: ScalpAlgoDetail, onWindow: (String) -> Unit = {}, onLive: () -> Unit = {}, onTrade: (String) -> Unit = {}) {
+internal fun ScalpWindowChart(d: ScalpAlgoDetail, onWindow: (String) -> Unit = {}, onLive: () -> Unit = {}, title: String = "Live strategy window · 15 minutes", onTrade: (String) -> Unit = {}) {
     val c = DipTheme.colors
     val data = d.chart
     var side by remember(d.model) { mutableStateOf("YES") }
     var selected by remember(data.ticker, side) { mutableStateOf<String?>(null) }
     val markers = remember(data.trades, data.ticker, side) { data.markers(side) }
     val selectedMarker = markers.firstOrNull { it.id == selected }
-    SwarmCard("Live strategy window · 15 minutes") {
+    SwarmCard(title) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             val status = when {
                 data.ticker.isEmpty() -> "Waiting for a market"

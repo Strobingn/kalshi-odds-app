@@ -215,6 +215,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setScalpTabVisible(visible: Boolean) {
         scalpTabVisible = visible
+        if (!visible) { scalpTabJob?.cancel(); scalpTabJob = null; return }
         if (visible) ensureScalpMigration()
         if (visible && scalpTabJob?.isActive != true) {
             scalpTabJob = vmScope.launch(Dispatchers.Default) {
@@ -246,6 +247,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     fun selectScalpCoin(coin: String?) { _scalpTab.update { it.copy(coin = coin) }; scalpTabBoardsAtMs = 0L }
     fun selectScalpMarket(ticker: String) { _scalpTab.update { it.copy(selectedTicker = ticker) } }
     fun selectScalpSide(side: String) { _scalpTab.update { it.copy(side = if (side.equals("NO", true)) "NO" else "YES") } }
+
+    private var arenaChartReadAtMs = 0L
 
     private fun refreshScalpTab(now: Long = container.clock.nowMs()) {
         val cur = _scalpTab.value
@@ -315,6 +318,21 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 secondsLeft = close?.let { ((it - now) / 1000L).coerceAtLeast(0L) }
             )
         }
+        // One indexed ticker read, only while the foreground arena is visible. No history scan.
+        val live = markets.firstOrNull { (it.closeMs ?: 0) in (now + 1)..(now + 900_000) }
+        val liveTicker = live?.ticker.orEmpty()
+        if (next.arenaChart.ticker != liveTicker || now - arenaChartReadAtMs >= 3_000) {
+            arenaChartReadAtMs = now
+            val end = live?.closeMs ?: 0L
+            val mine = if (liveTicker.isEmpty()) emptyList() else
+                (container.scalp.windowPrimaryTrades(liveTicker) + trades.filter { it.ticker == liveTicker && it.isPrimary })
+                    .associateBy { it.id }.values.sortedBy { it.signalAtMs }
+            val points = if (liveTicker.isEmpty()) emptyList() else
+                com.dirk.kalshiodds.chart.ChartDownsampler.downsample(com.dirk.kalshiodds.chart.ChartSeriesMerge.merge(
+                    container.archive.chartTicks(liveTicker, end - 900_000, end, 2000).map { it.toBidPoint() },
+                    hub.scoring.book.bidHistory(liveTicker)).filter { it.tMs in (end - 900_000)..now }, 360)
+            next = next.copy(arenaChart = ScalpWindowChartData(liveTicker, end, now, marks[liveTicker]?.bookAtMs, points, mine))
+        } else next = next.copy(arenaChart = next.arenaChart.copy(nowMs = now, bookAtMs = marks[liveTicker]?.bookAtMs))
         _scalpTab.value = next
     }
 
