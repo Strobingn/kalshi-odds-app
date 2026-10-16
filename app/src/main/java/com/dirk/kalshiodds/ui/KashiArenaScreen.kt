@@ -20,7 +20,7 @@ import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.decision.*
 import com.dirk.kalshiodds.ui.theme.DipTheme
 
-internal enum class KashiArenaTab(val label: String) { OVERVIEW("Overview"), STRATEGIES("Strategies"), ANALYSIS("Analysis"), TRADES("Trades") }
+internal enum class KashiArenaTab(val label: String) { OVERVIEW("Overview"), STRATEGIES("Strategies"), ANALYSIS("Analysis"), TRADES("Trades"), CHAT("AI chat") }
 
 /** Claude's Arena layout, backed by Kashi's existing primary strategy ledger. */
 @Composable
@@ -104,6 +104,7 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
                 } }
                 item(key = "analysis-data") { OutlinedButton(onClick = onHistory, modifier = Modifier.fillMaxWidth()) { Text("Detailed results & comparison") } }
             }
+            KashiArenaTab.CHAT -> item(key = "chat") { LlmChatPanel(rows) }
             KashiArenaTab.TRADES -> {
                 item(key = "trade-hero") { ArenaSummary(rows, st.algoToday.values.filter { it.model in models }, active.size) }
                 item(key = "open-head") { ArenaSectionHeader("Open now · ${active.size}", "Ladder", onLadder) }
@@ -144,6 +145,11 @@ internal fun ArenaStrategyRow(row: ScalpModels.Row, st: ScalpTabState, onOpen: (
                 Text(if (row.roundTrips > 0) ScalpTabCopy.money(row.netUsd) else "—", color = pnlColor(row.netUsd), style = ArenaUi.mono(MaterialTheme.typography.titleMedium), fontWeight = FontWeight.Bold)
                 if (points.size >= 2) Box(Modifier.width(76.dp)) { ArenaProfitChart(points, compact = true) }
             }
+        }
+        if (row.model == ScalpModels.Model.V2_LLM) {
+            val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as? com.dirk.kalshiodds.KalshiOddsApp
+            val s = app?.let { runCatching { it.container.llmStrategy.status }.getOrNull() }?.collectAsState()?.value ?: "needs key"
+            Text("LLM: $s", color = c.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 2)
         }
         if (ScalpModels.isV2(row.model)) Text(com.dirk.kalshiodds.decision.ScalperBrain.summary(row.model.code), color = c.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 2)
         Text(if (paused) "Entries paused · view chart →" else "Live 15m chart & trades →", color = c.accentBlue, style = MaterialTheme.typography.labelSmall)

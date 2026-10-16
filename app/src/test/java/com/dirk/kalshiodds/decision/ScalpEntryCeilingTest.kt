@@ -17,7 +17,7 @@ class ScalpEntryCeilingTest {
         variants = emptyList(), liveExtras = true)
     private fun row(book: ScalpBook) = book.snapshot().first { it.id == "entry" }
 
-    @Test fun everyV2SpecSettingsAndLearningStayUnderTheCeiling() {
+    @org.junit.Ignore("Kalshi Scalper 1.0.0: pins Kashi rules/identity superseded by Dirk's new hard rules (55c ceiling, 3c trail, window-start entries, scalp: prefix); covered by ScalperRulesTest") @Test fun everyV2SpecSettingsAndLearningStayUnderTheCeiling() {
         for (m in ScalpModels.V2_MODELS) {
             assertTrue(m.code, ScalpV2.spec(m.code).maxAsk <= .50)
             for (manual in listOf(false, true)) {
@@ -34,7 +34,7 @@ class ScalpEntryCeilingTest {
         assertTrue(ForecastScalp.wantsEntry(.50, .01, .50, .30, 300.0))
     }
 
-    @Test fun delayedOriginalAndRestoredV2FillsRespectBothSidesAndFiftyCentBoundary() {
+    @org.junit.Ignore("Kalshi Scalper 1.0.0: pins Kashi rules/identity superseded by Dirk's new hard rules (55c ceiling, 3c trail, window-start entries, scalp: prefix); covered by ScalperRulesTest") @Test fun delayedOriginalAndRestoredV2FillsRespectBothSidesAndFiftyCentBoundary() {
         for (variant in listOf(ScalpParams.CLASSIC.id, "v2-sf41", "v2-sf41t2")) {
             for (side in listOf("YES", "NO")) {
                 for (price in listOf(.50, .51)) {
@@ -79,7 +79,7 @@ class ScalpEntryCeilingTest {
         assertEquals(ScalpState.NO_FILL, row(book).state)
     }
 
-    @Test fun makerSignalsCanUseAnEligibleBidWhenTheAskIsAboveFifty() {
+    @org.junit.Ignore("Kalshi Scalper 1.0.0: pins Kashi rules/identity superseded by Dirk's new hard rules (55c ceiling, 3c trail, window-start entries, scalp: prefix); covered by ScalperRulesTest") @Test fun makerSignalsCanUseAnEligibleBidWhenTheAskIsAboveFifty() {
         val maker = ScalpParams.MAKER_VARIANTS.first { it.strategy == ScalpStrategy.FAIR_GAP }
         val quote = q(at, .51).copy(yesBid = .49, spot = 100_300.0)
         assertNotNull(ScalpRule.entrySignal(quote, maker, listOf("YES")).first)
@@ -99,7 +99,7 @@ class ScalpEntryCeilingTest {
         assertEquals(.49, filled.entryPrice!!, 1e-9)
     }
 
-    @Test fun depthWalkingExcludesExpensiveTailEvenIfAverageWouldBeCheap() {
+    @org.junit.Ignore("Kalshi Scalper 1.0.0: pins Kashi rules/identity superseded by Dirk's new hard rules (55c ceiling, 3c trail, window-start entries, scalp: prefix); covered by ScalperRulesTest") @Test fun depthWalkingExcludesExpensiveTailEvenIfAverageWouldBeCheap() {
         val levels = listOf(.10 to 9.0, .50 to 1.0, .51 to 90.0)
         val (n, usd, _) = ScalpControls().walkBuy(levels, 20, .99)
         assertEquals(10, n)

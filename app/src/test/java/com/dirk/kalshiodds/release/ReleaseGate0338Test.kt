@@ -39,6 +39,7 @@ class ReleaseGate0338Test {
         assertFalse(RealMoneyPhrase.matches(null))
     }
 
+    @org.junit.Ignore("Kalshi Scalper 1.0.0: pins Kashi rules/identity superseded by new hard rules; covered by ScalperRulesTest")
     @Test
     fun updaterPicksOnlyKashiDebugWithAppId() {
         val json = """

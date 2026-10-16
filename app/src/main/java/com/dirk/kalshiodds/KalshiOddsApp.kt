@@ -40,6 +40,7 @@ class KalshiOddsApp : Application() {
         runCatching { com.dirk.kalshiodds.signal.paper.LiveOffMigration.deleteLegacyArming(this) }
         runCatching { com.dirk.kalshiodds.decision.ScalperBrain.init(filesDir) }
         container = AppContainer(this)
+        runCatching { container.llmStrategy.start(appScope) }
         appScope.launch { runCatching { container.preferences.migrateAutopilotModePaperOnly() } }
         runCatching { container.lastOrderError.clearStaleLifecycleNotice() }
         HeavyMlGuard.persistHook = { reason ->

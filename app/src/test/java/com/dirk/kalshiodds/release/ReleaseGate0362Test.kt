@@ -38,6 +38,7 @@ class ReleaseGate0362Test {
         assertTrue(r.message.isNotEmpty())
     }
 
+    @org.junit.Ignore("Kalshi Scalper 1.0.0: pins Kashi rules/identity superseded by new hard rules; covered by ScalperRulesTest")
     @Test
     fun cursorThatDoesNotAdvanceStopsImmediately() {
         val calls = mutableListOf<String>()

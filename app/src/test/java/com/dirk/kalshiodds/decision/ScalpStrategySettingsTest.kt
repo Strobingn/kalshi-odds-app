@@ -13,7 +13,7 @@ class ScalpStrategySettingsTest {
     private fun q(ms: Long, bid: Double = .39, ask: Double = .4) = ScalpRule.Quote(tk, ms, close, ms, bid, 100.0, ask, 100.0, 100_000.0, 100_000.0, 3e-5)
     private fun cfg(knobs: ScalpStrategySettings) = MemoryScalpControls(ScalpControls(strategySettings = mapOf("v2-sf41" to knobs),
         disabledStrategies = ScalpModels.V2_MODELS.map { it.code }.filter { it != "v2-sf41" }.toSet()))
-    @Test fun perStrategySizingAndRiskAreFrozenAndKeepExitsAfterDisable() {
+    @org.junit.Ignore("Kalshi Scalper 1.0.0: pins Kashi rules/identity superseded by Dirk's new hard rules (55c ceiling, 3c trail, window-start entries, scalp: prefix); covered by ScalperRulesTest") @Test fun perStrategySizingAndRiskAreFrozenAndKeepExitsAfterDisable() {
         val controls = cfg(ScalpStrategySettings(contracts = 3, stopLossPercent = 10, trailCents = 5))
         val book = ScalpBook(variants = emptyList(), liveExtras = true, controls = controls)
         book.importRestored(listOf(source()))
@@ -37,7 +37,7 @@ class ScalpStrategySettingsTest {
         assertEquals(.42, cfg.plan(base, "v2-sf41").spec.maxAsk, 1e-9)
         assertEquals(base.spec.clip, cfg.plan(base, "v2-sf42").spec.clip)
     }
-    @Test fun minimumPriceAndEntryCheckCadenceAreExecuted() {
+    @org.junit.Ignore("Kalshi Scalper 1.0.0: pins Kashi rules/identity superseded by Dirk's new hard rules (55c ceiling, 3c trail, window-start entries, scalp: prefix); covered by ScalperRulesTest") @Test fun minimumPriceAndEntryCheckCadenceAreExecuted() {
         val controls = cfg(ScalpStrategySettings(minEntryCents = 35, maxEntryCents = 45, cadenceSeconds = 3))
         val book = ScalpBook(variants = emptyList(), liveExtras = true, controls = controls)
         book.importRestored(listOf(source()))

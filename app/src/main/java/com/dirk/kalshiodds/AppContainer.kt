@@ -73,6 +73,9 @@ class AppContainer(context: Context) {
     }
     /** 0.3.38 paper scalps (scalp_trades in the results DB). Never places orders. */
     val scalpControls = com.dirk.kalshiodds.decision.SavedScalpControls(app)
+    val llmSettings by lazy { com.dirk.kalshiodds.llm.LlmSettings(app) }
+    val llmClient by lazy { com.dirk.kalshiodds.llm.LlmClient(llmSettings) }
+    val llmStrategy by lazy { com.dirk.kalshiodds.llm.LlmPaperStrategy(scalp, llmSettings, llmClient) }
     val scalp = com.dirk.kalshiodds.decision.ScalpBook(
         (resultsImpl as? com.dirk.kalshiodds.decision.ScalpPersistence)
             ?: com.dirk.kalshiodds.decision.InMemoryScalpPersistence(),

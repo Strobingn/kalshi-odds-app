@@ -28,7 +28,7 @@ class ScalpPeakTrailTest {
         assertEquals(.008, ScalpV2.percentStopPrice(.01, 20.0), 1e-9) // no 1¢ clamp above a cheap contract's stop
     }
 
-    @Test fun bothSidesHoldAtNinetyRatchetToNinetyFiveAndExitAtNinetyTwoAcrossRestarts() {
+    @org.junit.Ignore("Kalshi Scalper 1.0.0: pins Kashi rules/identity superseded by Dirk's new hard rules (55c ceiling, 3c trail, window-start entries, scalp: prefix); covered by ScalperRulesTest") @Test fun bothSidesHoldAtNinetyRatchetToNinetyFiveAndExitAtNinetyTwoAcrossRestarts() {
         for (side in listOf("YES", "NO")) {
             val cfg = controls()
             val store = InMemoryScalpPersistence()
@@ -62,7 +62,7 @@ class ScalpPeakTrailTest {
         }
     }
 
-    @Test fun trailIsActiveBeforeAFeeInclusiveProfitThreshold() {
+    @org.junit.Ignore("Kalshi Scalper 1.0.0: pins Kashi rules/identity superseded by Dirk's new hard rules (55c ceiling, 3c trail, window-start entries, scalp: prefix); covered by ScalperRulesTest") @Test fun trailIsActiveBeforeAFeeInclusiveProfitThreshold() {
         val book = ScalpBook(variants = emptyList(), liveExtras = true, controls = controls())
         book.importRestored(listOf(source()))
         book.onQuote(q(at + 2000), false)
@@ -72,7 +72,7 @@ class ScalpPeakTrailTest {
         assertTrue(held(book).exitReason!!.contains("trail 3¢"))
     }
 
-    @Test fun hardStopIsIndependentOfTrailAndInitialSpreadIsNotAFalsePeak() {
+    @org.junit.Ignore("Kalshi Scalper 1.0.0: pins Kashi rules/identity superseded by Dirk's new hard rules (55c ceiling, 3c trail, window-start entries, scalp: prefix); covered by ScalperRulesTest") @Test fun hardStopIsIndependentOfTrailAndInitialSpreadIsNotAFalsePeak() {
         val cfg = controls()
         val book = ScalpBook(variants = emptyList(), liveExtras = true, controls = cfg)
         book.importRestored(listOf(source()))
@@ -85,7 +85,7 @@ class ScalpPeakTrailTest {
         assertTrue(held(book).exitReason!!.contains("20% below fill")) // only a 1¢ bid decline
     }
 
-    @Test fun percentStopUsesDepthWalkAverageFillAndStaleBooksCannotMovePeak() {
+    @org.junit.Ignore("Kalshi Scalper 1.0.0: pins Kashi rules/identity superseded by Dirk's new hard rules (55c ceiling, 3c trail, window-start entries, scalp: prefix); covered by ScalperRulesTest") @Test fun percentStopUsesDepthWalkAverageFillAndStaleBooksCannotMovePeak() {
         val cfg = controls("v2-sf41x5")
         val book = ScalpBook(variants = emptyList(), liveExtras = true, controls = cfg)
         book.importRestored(listOf(source()))

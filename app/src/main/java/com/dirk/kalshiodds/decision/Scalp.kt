@@ -1522,6 +1522,28 @@ class ScalpBook(
         }
     }
 
+    /**
+     * Kalshi Scalper LLM paper strategy entry. The LLM's side/confidence is only a proposal: this enforces window
+     * start (≤ 3 min), ask ≤ 55¢, one entry per window, and the V2 exit rules (3¢ peak trail, >95% hold gate).
+     * Returns a rejection reason, or null when a paper entry was queued. PAPER ONLY.
+     */
+    fun llmEntry(q: ScalpRule.Quote, side: String, conf: Double): String? = synchronized(lock) {
+        if (side != "YES" && side != "NO") return@synchronized "bad side"
+        val minuteIn = 15.0 - q.tauS / 60.0
+        if (minuteIn < 0 || minuteIn > 3.0) return@synchronized "not window start"
+        val ask = q.ask(side) ?: return@synchronized "no ask"
+        if (!ScalpV2.entryOk(ask, ScalpV2.MAX_ASK)) return@synchronized "ask above 55¢"
+        if (conf < ScalperBrain.minConf("v2-llm")) return@synchronized "confidence below learned minimum"
+        if (_all.value.any { it.variantId == "v2-llm" && it.ticker.equals(q.ticker, true) }) return@synchronized "already traded this window"
+        val bx = ScalperBrain.features(ask, conf, minuteIn)
+        save(ScalpTrade(id = idFactory(), ticker = q.ticker.uppercase(), side = side, state = ScalpState.PENDING_ENTRY,
+            signalAtMs = q.nowMs, signalAsk = ask, fairAtSignal = conf,
+            note = String.format(Locale.US, "LLM paper entry · conf=%.3f · v2stop=%.4f · v2ask=%.4f · v2trail=%.4f · v2arm=%.4f · v2tp=0 · v2hold=0 · v2clip=%d · v2peakrule=1 · v2stopPct=20 · %s · v2min=0.01 · v2until=3 · v2sidecap=1 · v2cadence=0",
+                conf, 0.10, ScalpV2.MAX_ASK, ScalpV2.TRAIL, 0.10, ScalpV2.CLIP, ScalperBrain.tag(bx)),
+            ruleVersion = "${ScalpRule.VERSION}|v2-llm|P"))
+        null
+    }
+
     /** Lift ask levels (best first) up to [maxPx] for [want] contracts → (filled, $ cost, fees per level). */
     private fun walkBuy(q: ScalpRule.Quote, side: String, want: Int, maxPx: Double): Triple<Int, Double, Double> {
         var n = 0; var usd = 0.0; var fee = 0.0

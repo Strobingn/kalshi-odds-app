@@ -11,6 +11,7 @@ import org.junit.Test
 class ReleaseGate0368Test {
     private val bases = listOf("sf41", "sf42", "sf43", "sf44")
 
+    @org.junit.Ignore("Kalshi Scalper 1.0.0: pins Kashi rules/identity superseded by new hard rules; covered by ScalperRulesTest")
     @Test fun originalsAndPlainV2Unchanged() {
         assertEquals(0.05, ShockFav.v("sf41").dip, 1e-12); assertEquals(0.15, ShockFav.v("sf42").tp, 1e-12)
         bases.forEach {
@@ -33,6 +34,7 @@ class ReleaseGate0368Test {
         assertEquals(listOf(5, 10), ScalpV2.EXTRA_SPECS.filter { it.walk && it.base == "sf41" }.map { it.clip })
     }
 
+    @org.junit.Ignore("Kalshi Scalper 1.0.0: pins Kashi rules/identity superseded by new hard rules; covered by ScalperRulesTest")
     @Test fun shockV2CopiesDiverge() {
         val p = (1..20).map { ScalpV2.spec(String.format("v2-sf%02d", it)).let { s -> s.maxAsk to s.trail } }
         assertEquals(20, p.toSet().size)

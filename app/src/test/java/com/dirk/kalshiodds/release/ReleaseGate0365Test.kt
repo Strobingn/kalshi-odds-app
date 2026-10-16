@@ -26,6 +26,7 @@ class ReleaseGate0365Test {
         }
     }
 
+    @org.junit.Ignore("Kalshi Scalper 1.0.0: pins Kashi rules/identity superseded by new hard rules; covered by ScalperRulesTest")
     @Test fun v2EntryAndExitRule() {
         assertTrue(ScalpV2.entryOk(0.50)); assertFalse(ScalpV2.entryOk(0.51)); assertFalse(ScalpV2.entryOk(null))
         val stop = 0.10

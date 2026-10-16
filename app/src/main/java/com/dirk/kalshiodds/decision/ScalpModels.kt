@@ -78,6 +78,8 @@ object ScalpModels {
         V2_CF_REPRICE("v2-cfr", "v2 · CF-reprice", V2_BLURB),
         V2_MAKER_DIP("v2-mkdip", "v2 · Maker dip-rebound", V2_BLURB),
         V2_FORECAST_RIDE("v2-fcride", "v2 · Forecast ride", V2_BLURB),
+        /** Kalshi Scalper: the one LLM paper strategy (needs an API key in Settings). Same hard rules, enforced in code. */
+        V2_LLM("v2-llm", "LLM · paper", "One LLM call per BTC window at the window start proposes YES/NO + confidence; code enforces ask ≤ 55¢, 3¢ peak trail and the > 95% hold gate. Paper only."),
         V2_FORECAST_FADE("v2-fcfade", "v2 · Forecast fade", V2_BLURB),
         V2_DIP_HOLD("v2-diph60", "v2 · Dip-hunter hold", V2_BLURB),
         V2_MOMO_HOLD("v2-momoh60", "v2 · Momentum-sniper hold", V2_BLURB),
@@ -226,6 +228,7 @@ object ScalpModels {
     private val NONE = Any()
     private val MODEL_BY_VARIANT = java.util.concurrent.ConcurrentHashMap<String, Any>()
     private fun modelOfVariant(vid: String): Model? {
+        if (vid == "v2-llm") return Model.V2_LLM
         if (ScalpV2.isExtra(vid)) return ALL.firstOrNull { it.code == vid }
         if (ScalpV2.isV2(vid)) return modelOfVariant(vid.removePrefix(ScalpV2.PREFIX))?.let { v2Of(it) }
         if (vid.startsWith(ForecastScalp.RIDE_PREFIX)) return Model.FORECAST_RIDE
