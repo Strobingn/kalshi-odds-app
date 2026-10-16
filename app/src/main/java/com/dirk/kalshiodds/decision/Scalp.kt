@@ -1432,6 +1432,9 @@ class ScalpBook(
     }
 
     /** New primary signal of an original (BTC, not v2, model has a v2 copy) → a v2 pending entry with the same side. */
+    private val strategyEntryChecks = HashMap<String, Long>()
+    private val pendingEntryChecks = HashMap<String, Long>()
+
     private fun spawnV2(t: ScalpTrade) {
         if (!t.isPrimary || ScalpV2.isV2(t.variantId) || t.coin != ShockFav.TRADE_COIN) return
         if (t.state != ScalpState.PENDING_ENTRY && t.state != ScalpState.OPEN) return
@@ -1450,8 +1453,18 @@ class ScalpBook(
             // Every completed trade updates this EWMA; completed-window evidence still controls promotion.
             val informed = if (learned.adjusted && feedback.trades > 0 && feedback.recentNetPerContract < 0)
                 learned.copy(arm = (learned.arm + feedback.recentNetPerContract * .1).coerceIn(.01, learned.arm)) else learned
-            val plan = cfg.plan(informed)
-            val sp = if (cfg.peakTrailEnabled) plan.spec.copy(trail = cfg.peakTrailCents / 100.0) else plan.spec
+            val knobs = cfg.settings(model.code)
+            val close = ScalpTicker.closeMs(t.ticker)
+            if (close != null && !knobs.timeOk(t.signalAtMs, close)) continue
+            val checkKey = "${t.ticker}|${model.code}|${t.side}"
+            val lastCheck = strategyEntryChecks[checkKey]
+            if (lastCheck != null && t.signalAtMs - lastCheck < knobs.cadenceSeconds * 1000L) continue
+            strategyEntryChecks[checkKey] = t.signalAtMs
+            if (strategyEntryChecks.size > 2000) strategyEntryChecks.keys.filter { (ScalpTicker.closeMs(it.substringBefore('|')) ?: 0) < t.signalAtMs }.forEach { strategyEntryChecks.remove(it) }
+            val plan = cfg.plan(informed, model.code)
+            val sp = if (cfg.peakTrailEnabled) plan.spec.copy(trail = (knobs.trailCents ?: cfg.peakTrailCents) / 100.0)
+                else plan.spec.copy(trail = knobs.trailCents?.div(100.0) ?: plan.spec.trail)
+            val stopPct = knobs.stopLossPercent ?: cfg.stopLossPercent
             val stop = plan.stop
             save(ScalpTrade(id = idFactory(), ticker = t.ticker.uppercase(), side = t.side, state = ScalpState.PENDING_ENTRY,
                 signalAtMs = t.signalAtMs, signalAsk = t.signalAsk, fairAtSignal = t.fairAtSignal,
@@ -1459,8 +1472,9 @@ class ScalpBook(
                     m.label, t.variantId, if (sp.tag.isNotEmpty()) " " + sp.tag else "", sp.maxAsk * 100, sp.trail * 100, sp.clip,
                     if (sp.walk) " depth-walk" else "", stop) +
                     String.format(Locale.US, " · v2ask=%.4f · v2trail=%.4f · v2arm=%.4f · %s", sp.maxAsk, sp.trail, plan.arm, plan.note + "; learned ${feedback.trades} closed; recent net/ct ${feedback.recentNetPerContract}") +
-                    String.format(Locale.US, " · v2tp=%.4f · v2hold=%d · v2clip=%d", if (cfg.manual) cfg.takeProfitCents / 100.0 else 0.0, cfg.maxHoldSeconds, sp.clip) +
-                    (if (cfg.peakTrailEnabled) " · v2peakrule=1 · v2stopPct=${cfg.stopLossPercent} · exit policy: ${cfg.stopLossPercent}% below fill / ${cfg.peakTrailCents}¢ below bid peak, active from entry" else ""),
+                    String.format(Locale.US, " · v2tp=%.4f · v2hold=%d · v2clip=%d", (knobs.takeProfitCents ?: if (cfg.manual) cfg.takeProfitCents else 0) / 100.0, knobs.maxHoldSeconds ?: cfg.maxHoldSeconds, sp.clip) +
+                    (if (cfg.peakTrailEnabled) " · v2peakrule=1 · v2stopPct=$stopPct · exit policy: $stopPct% below fill / ${Math.round(sp.trail * 100)}¢ below bid peak, active from entry" else "")
+                    + " · v2min=${knobs.minEntryCents / 100.0} · v2until=${knobs.untilMinute} · v2sidecap=${knobs.maxOpenPerSide} · v2cadence=${knobs.cadenceSeconds}",
                 ruleVersion = "${ScalpRule.VERSION}|${sp.id}|P"))
         }
     }
@@ -1487,12 +1501,30 @@ class ScalpBook(
                     val blocked = cfg.entryBlock(code, openCount, controls.entries(q.nowMs), controlDailyNet + unflushedNet)
                     if (blocked != null) { out += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; $blocked"); continue }
                     if (q.tauS <= ScalpV2.EXIT_BY_S || age > ScalpV2.GIVE_UP_MS) { out += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; no fill: final minute, expired signal, or no executable entry"); continue }
+                    val until = ScalpV2.savedNumber(t.note, "v2until", 14.0).toInt().coerceIn(1, 14)
+                    if (q.nowMs >= q.closeMs - 900_000 + until * 60_000L) {
+                        out += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; entry minute limit reached"); continue
+                    }
+                    val sideCap = ScalpV2.savedNumber(t.note, "v2sidecap", 1.0).toInt().coerceIn(1, 20)
+                    val activeSide = (_all.value + out).associateBy { it.id }.values.count {
+                        it.variantId == t.variantId && it.ticker == t.ticker && it.side == t.side && it.state in listOf(ScalpState.OPEN, ScalpState.PENDING_EXIT)
+                    }
+                    if (activeSide >= sideCap) continue
                     if (age < ScalpV2.ENTRY_DELAY_MS || !ScalpV2.fresh(q) || q.bookAtMs <= t.signalAtMs) continue
+                    val cadenceMs = ScalpV2.savedNumber(t.note, "v2cadence", 0.0).coerceIn(0.0, 30.0).toLong() * 1000
+                    val lastCheck = pendingEntryChecks[t.id]
+                    if (lastCheck != null && q.nowMs - lastCheck < cadenceMs) continue
+                    pendingEntryChecks[t.id] = q.nowMs
+                    if (pendingEntryChecks.size > 2000) {
+                        val activeIds = _all.value.filter { it.state == ScalpState.PENDING_ENTRY }.map { it.id }.toSet()
+                        pendingEntryChecks.keys.retainAll(activeIds)
+                    }
                     val seed = ScalpV2.spec(t.variantId)
                     val sp = seed.copy(maxAsk = minOf(ScalpRule.ENTRY_HI, ScalpV2.savedNumber(t.note, "v2ask", seed.maxAsk)),
                         clip = ScalpV2.savedNumber(t.note, "v2clip", seed.clip.toDouble()).toInt().coerceIn(1, 1000))
                     val ask = q.ask(t.side) ?: continue
-                    if (!ScalpV2.entryOk(ask, sp.maxAsk)) continue
+                    val minAsk = ScalpV2.savedNumber(t.note, "v2min", .01).coerceIn(.01, .50)
+                    if (ask < minAsk - 1e-9 || !ScalpV2.entryOk(ask, sp.maxAsk)) continue
                     if (cfg.dipCents > 0) {
                         val historyPrices = history[key].orEmpty().filter { it.atMs in (q.nowMs - cfg.windowSeconds * 1000L)..q.nowMs }
                             .groupBy { it.atMs / 1000L }.values.map { it.maxBy { p -> p.atMs } }.sortedBy { it.atMs }
@@ -1501,7 +1533,7 @@ class ScalpBook(
                     }
                     if (sp.walk) {
                         // 0.3.68: lift real ask levels up to max ask; partial fill allowed, avg price gets worse with depth.
-                        val (n, usd, fee) = cfg.walkBuy(q.askLadder(t.side), sp.clip, sp.maxAsk)
+                        val (n, usd, fee) = cfg.walkBuy(q.askLadder(t.side).filter { it.first >= minAsk - 1e-9 }, sp.clip, sp.maxAsk)
                         if (n <= 0) continue
                         val avg = usd / n
                         controls.recordEntry(q.nowMs); openCount++

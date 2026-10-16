@@ -66,24 +66,33 @@ object ScalpAlgoCopy {
 @Composable
 fun ScalpAlgoScreen(viewModel: OddsViewModel, onBack: () -> Unit) {
     val d by viewModel.scalpAlgo.collectAsStateWithLifecycle()
+    val controls by viewModel.scalpStrategyControls.collectAsStateWithLifecycle()
+    var settingsOpen by androidx.compose.runtime.remember(d.model) { androidx.compose.runtime.mutableStateOf(false) }
     val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
-    androidx.compose.runtime.DisposableEffect(owner, viewModel) {
+    androidx.compose.runtime.DisposableEffect(owner, viewModel, settingsOpen) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_START) viewModel.setScalpAlgoVisible(true)
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_START) viewModel.setScalpAlgoVisible(!settingsOpen)
             if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) viewModel.setScalpAlgoVisible(false)
         }
         owner.lifecycle.addObserver(observer)
-        if (owner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) viewModel.setScalpAlgoVisible(true)
+        if (owner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) viewModel.setScalpAlgoVisible(!settingsOpen)
         onDispose { owner.lifecycle.removeObserver(observer); viewModel.setScalpAlgoVisible(false) }
     }
     val pagerFlow = androidx.compose.runtime.remember(d.model) { d.model?.let { viewModel.scalpTradePager(it) } }
     val paged = pagerFlow?.collectAsLazyPagingItems()
-    ScalpAlgoContent(d, onBack, paged, viewModel::selectScalpChartWindow, viewModel::followScalpChartLive)
+    val model = d.model
+    if (settingsOpen && model != null) {
+        androidx.activity.compose.BackHandler { settingsOpen = false }
+        ScalpStrategySettingsContent(model, controls, onBack = { settingsOpen = false },
+            onChange = { viewModel.saveScalpStrategySettings(model.code, it) },
+            onEnabled = { viewModel.enableScalpStrategy(model.code, it) })
+    } else ScalpAlgoContent(d, onBack, paged, viewModel::selectScalpChartWindow, viewModel::followScalpChartLive,
+        onSettings = if (model != null && com.dirk.kalshiodds.decision.ScalpModels.isV2(model)) ({ settingsOpen = true }) else null)
 }
 
 @Composable
 fun ScalpAlgoContent(d: ScalpAlgoDetail, onBack: () -> Unit = {}, paged: androidx.paging.compose.LazyPagingItems<ScalpTrade>? = null,
-    onWindow: (String) -> Unit = {}, onLive: () -> Unit = {}) {
+    onWindow: (String) -> Unit = {}, onLive: () -> Unit = {}, onSettings: (() -> Unit)? = null) {
     val c = DipTheme.colors
     var selectedTrade by androidx.compose.runtime.remember(d.chart.ticker) { androidx.compose.runtime.mutableStateOf<String?>(null) }
     var showHistory by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
@@ -94,6 +103,7 @@ fun ScalpAlgoContent(d: ScalpAlgoDetail, onBack: () -> Unit = {}, paged: android
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = c.textPrimary) }
                 Text(d.model?.label ?: "Algorithm", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = c.textPrimary, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                onSettings?.let { open -> androidx.compose.material3.TextButton(onClick = open) { Text("Settings", color = c.accentBlue) } }
             }
             Text("PAPER · individual strategy · live window & fills", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
         }

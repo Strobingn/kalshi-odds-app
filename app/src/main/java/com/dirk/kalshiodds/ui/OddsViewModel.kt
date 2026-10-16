@@ -355,6 +355,17 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             ScalpTradePagingSource(container.scalp, model.code)
         }.flow
 
+    val scalpStrategyControls = container.scalpControls.state
+    fun saveScalpStrategySettings(code: String, settings: com.dirk.kalshiodds.decision.ScalpStrategySettings) {
+        if (!code.startsWith("v2-")) return
+        val current = container.scalpControls.state.value
+        container.scalpControls.save(current.copy(strategySettings = current.strategySettings + (code to settings.normalized())))
+    }
+    fun enableScalpStrategy(code: String, enabled: Boolean) {
+        val current = container.scalpControls.state.value
+        container.scalpControls.save(current.copy(disabledStrategies = if (enabled) current.disabledStrategies - code else current.disabledStrategies + code))
+    }
+
     private var scalpAlgoJob: Job? = null
     fun openScalpAlgo(model: com.dirk.kalshiodds.decision.ScalpModels.Model) {
         scalpAlgoJob?.cancel()

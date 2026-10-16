@@ -17,9 +17,11 @@ data class ScalpControls(
     val maxTradesPerHour: Int = 0, val maxDailyLossUsd: Double = 0.0, val maxOpen: Int = 0,
     val windowSeconds: Int = 30, val dipCents: Double = 0.0,
     val disabledStrategies: Set<String> = emptySet(),
-    val peakTrailEnabled: Boolean = true, val peakTrailCents: Int = 3, val stopLossPercent: Int = 20
+    val peakTrailEnabled: Boolean = true, val peakTrailCents: Int = 3, val stopLossPercent: Int = 20,
+    val strategySettings: Map<String, ScalpStrategySettings> = emptyMap()
 ) {
-    fun normalized() = copy(peakTrailCents = peakTrailCents.coerceIn(1, 20), stopLossPercent = stopLossPercent.coerceIn(1, 99), maxAskCents = maxAskCents.coerceIn(1, 50), stopCents = stopCents.coerceIn(1, 99),
+    fun settings(code: String): ScalpStrategySettings = strategySettings[code]?.normalized() ?: ScalpStrategySettings()
+    fun normalized() = copy(strategySettings = strategySettings.filterKeys { it.startsWith("v2-") }.mapValues { it.value.normalized() }, peakTrailCents = peakTrailCents.coerceIn(1, 20), stopLossPercent = stopLossPercent.coerceIn(1, 99), maxAskCents = maxAskCents.coerceIn(1, 50), stopCents = stopCents.coerceIn(1, 99),
         takeProfitCents = takeProfitCents.coerceIn(0, 99), trailCents = trailCents.coerceIn(1, 20),
         armCents = armCents.coerceIn(1, 99), contracts = contracts.coerceIn(1, 1000),
         maxStakeUsd = maxStakeUsd.takeIf { it.isFinite() }?.coerceIn(0.0, 100_000.0) ?: 0.0,
@@ -28,11 +30,12 @@ data class ScalpControls(
         maxOpen = maxOpen.coerceIn(0, 1000), windowSeconds = windowSeconds.coerceIn(10, 600),
         dipCents = dipCents.takeIf { it.isFinite() }?.coerceIn(0.0, 30.0) ?: 0.0)
     fun permits(modelCode: String) = enabled && !killSwitch && modelCode !in disabledStrategies
-    fun plan(base: ScalpV2.Plan): ScalpV2.Plan {
+    fun plan(base: ScalpV2.Plan, modelCode: String? = null): ScalpV2.Plan {
         val chosen = if (!manual) base else base.copy(
             spec = base.spec.copy(maxAsk = maxAskCents.coerceIn(1, 50) / 100.0, trail = trailCents / 100.0, clip = contracts),
             stop = stopCents / 100.0, arm = armCents / 100.0, adjusted = false, note = "v2ai=manual; user parameters")
-        return chosen.copy(spec = chosen.spec.copy(maxAsk = minOf(ScalpRule.ENTRY_HI, chosen.spec.maxAsk)))
+        val scoped = modelCode?.let { settings(it).plan(chosen) } ?: chosen
+        return scoped.copy(spec = scoped.spec.copy(maxAsk = minOf(ScalpRule.ENTRY_HI, scoped.spec.maxAsk)))
     }
     fun entryBlock(modelCode: String, open: Int, entriesLastHour: Int, todayNet: Double): String? = when {
         !permits(modelCode) -> "V2 entries paused or strategy disabled"
