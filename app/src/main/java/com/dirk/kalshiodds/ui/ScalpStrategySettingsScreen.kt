@@ -44,7 +44,8 @@ internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: Sc
     val settings = controls.settings(model.code)
     val spec = ScalpV2.spec(model.code)
     val enabled = model.code !in controls.disabledStrategies
-    val high = settings.maxEntryCents ?: if (controls.manual) controls.maxAskCents else (spec.maxAsk * 100).roundToInt()
+    val inheritedHigh = if (controls.manual) controls.maxAskCents else (spec.maxAsk * 100).roundToInt()
+    val high = maxOf(settings.minEntryCents, settings.maxEntryCents ?: inheritedHigh).coerceAtMost(50)
     val low = settings.minEntryCents.coerceAtMost(high)
     LazyColumn(Modifier.fillMaxSize().background(c.bg), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item(key = "settings-header") {
@@ -77,7 +78,7 @@ internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: Sc
             StrategyKnob("Entry checks every", settings.cadenceSeconds, 0..30, "KNOB_CADENCE", { if (it == 0) "Live" else "$it s" }) { onChange(settings.copy(cadenceSeconds = it)) }
             StrategyKnob("Take profit after fees", settings.takeProfitCents ?: if (controls.manual) controls.takeProfitCents else 0, 0..99, "KNOB_TARGET", { if (it == 0) "Off" else "$it¢ / ct" }) { onChange(settings.copy(takeProfitCents = it)) }
             StrategyKnob("Maximum hold", settings.maxHoldSeconds ?: controls.maxHoldSeconds, 0..3600, "KNOB_HOLD", { if (it == 0) "No timer" else "$it s" }) { onChange(settings.copy(maxHoldSeconds = it)) }
-            Text("Applies only to this V2 strategy. Unchanged values inherit global settings and learned adjustments. Filled positions keep their saved stops. Entry checks never slow protective exits.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+            Text("Applies only to this V2 strategy. Overrides take priority over global and learned defaults; a chosen price floor also keeps the inherited ceiling from falling below it. Filled positions keep their saved stops. Entry checks never slow protective exits.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
             Text("50¢ buy ceiling · stop loss always active · total trade count stays unlimited unless you set a global limit. Until minute limits new entries; the final-minute exit policy still applies. Open-position limits do not create extra entry signals.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
             OutlinedButton(onClick = { onChange(ScalpStrategySettings()) }, modifier = Modifier.fillMaxWidth()) { Text("Back to its defaults") }
         } }
