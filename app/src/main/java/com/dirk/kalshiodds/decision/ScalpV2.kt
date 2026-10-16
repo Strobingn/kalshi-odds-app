@@ -2,7 +2,7 @@ package com.dirk.kalshiodds.decision
 
 /**
  * V2 copies (PAPER, BTC): each original's signals are copied as a separate trade that
- *  - buys only when the ask is ≤ 50¢ (2 s entry delay, displayed-size fill, 10-contract clip, taker fee),
+ *  - buys only when the ask is ≤ 55¢ (2 s entry delay, displayed-size fill, 10-contract clip, taker fee),
  *  - keeps positive/inconclusive settings; tests bounded adjustments after sustained losses,
  *  - exits before the final minute unless fresh CF evidence supports a profitable hold,
  *  - new trades default to an immediate 3¢ bid-peak trail and independent 20% fill-price stop;
@@ -11,7 +11,7 @@ package com.dirk.kalshiodds.decision
  */
 object ScalpV2 {
     const val PREFIX = "v2-"
-    const val MAX_ASK = 0.50
+    const val MAX_ASK = ScalpRule.ENTRY_HI
     const val TRAIL = 0.02
     const val ENTRY_DELAY_MS = 2_000L
     const val GIVE_UP_MS = 6_000L
@@ -100,7 +100,7 @@ object ScalpV2 {
     data class Spec(val id: String, val base: String, val maxAsk: Double = MAX_ASK, val trail: Double = TRAIL,
                     val stop: Double? = null, val clip: Int = CLIP, val walk: Boolean = false, val tag: String = "")
 
-    private val SHOCK_ASK = listOf(0.50, 0.48, 0.46, 0.44, 0.42)
+    private val SHOCK_ASK = listOf(MAX_ASK, 0.48, 0.46, 0.44, 0.42)
     private val SHOCK_TRAIL = listOf(0.02, 0.01, 0.03, 0.04)
     private val SHOCK_SPECS: List<Spec> = (1..20).map { i ->
         val b = String.format(java.util.Locale.US, "sf%02d", i)

@@ -11,7 +11,7 @@ import kotlinx.serialization.json.Json
 @Serializable
 data class ScalpControls(
     val enabled: Boolean = true, val killSwitch: Boolean = false, val adaptive: Boolean = true,
-    val manual: Boolean = false, val maxAskCents: Int = 50, val stopCents: Int = 6,
+    val manual: Boolean = false, val maxAskCents: Int = 55, val stopCents: Int = 6,
     val takeProfitCents: Int = 0, val trailCents: Int = 2, val armCents: Int = 4,
     val contracts: Int = 10, val maxStakeUsd: Double = 0.0, val maxHoldSeconds: Int = 0,
     val maxTradesPerHour: Int = 0, val maxDailyLossUsd: Double = 0.0, val maxOpen: Int = 0,
@@ -21,7 +21,7 @@ data class ScalpControls(
     val strategySettings: Map<String, ScalpStrategySettings> = emptyMap()
 ) {
     fun settings(code: String): ScalpStrategySettings = strategySettings[code]?.normalized() ?: ScalpStrategySettings()
-    fun normalized() = copy(strategySettings = strategySettings.filterKeys { it.startsWith("v2-") }.mapValues { it.value.normalized() }, peakTrailCents = peakTrailCents.coerceIn(1, 20), stopLossPercent = stopLossPercent.coerceIn(1, 99), maxAskCents = maxAskCents.coerceIn(1, 50), stopCents = stopCents.coerceIn(1, 99),
+    fun normalized() = copy(strategySettings = strategySettings.filterKeys { it.startsWith("v2-") }.mapValues { it.value.normalized() }, peakTrailCents = peakTrailCents.coerceIn(1, 20), stopLossPercent = stopLossPercent.coerceIn(1, 99), maxAskCents = maxAskCents.coerceIn(1, 55), stopCents = stopCents.coerceIn(1, 99),
         takeProfitCents = takeProfitCents.coerceIn(0, 99), trailCents = trailCents.coerceIn(1, 20),
         armCents = armCents.coerceIn(1, 99), contracts = contracts.coerceIn(1, 1000),
         maxStakeUsd = maxStakeUsd.takeIf { it.isFinite() }?.coerceIn(0.0, 100_000.0) ?: 0.0,
@@ -32,7 +32,7 @@ data class ScalpControls(
     fun permits(modelCode: String) = enabled && !killSwitch && modelCode !in disabledStrategies
     fun plan(base: ScalpV2.Plan, modelCode: String? = null): ScalpV2.Plan {
         val chosen = if (!manual) base else base.copy(
-            spec = base.spec.copy(maxAsk = maxAskCents.coerceIn(1, 50) / 100.0, trail = trailCents / 100.0, clip = contracts),
+            spec = base.spec.copy(maxAsk = maxAskCents.coerceIn(1, 55) / 100.0, trail = trailCents / 100.0, clip = contracts),
             stop = stopCents / 100.0, arm = armCents / 100.0, adjusted = false, note = "v2ai=manual; user parameters")
         val scoped = modelCode?.let { settings(it).plan(chosen) } ?: chosen
         return scoped.copy(spec = scoped.spec.copy(maxAsk = minOf(ScalpRule.ENTRY_HI, scoped.spec.maxAsk)))

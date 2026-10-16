@@ -19,31 +19,31 @@ class ScalpEntryCeilingTest {
 
     @Test fun everyV2SpecSettingsAndLearningStayUnderTheCeiling() {
         for (m in ScalpModels.V2_MODELS) {
-            assertTrue(m.code, ScalpV2.spec(m.code).maxAsk <= .50)
+            assertTrue(m.code, ScalpV2.spec(m.code).maxAsk <= .55)
             for (manual in listOf(false, true)) {
                 val plan = ScalpControls(manual = manual, maxAskCents = 99).plan(
                     ScalpV2.plan(m.code, emptyList(), at))
-                assertTrue(plan.spec.maxAsk <= .50)
+                assertTrue(plan.spec.maxAsk <= .55)
             }
         }
-        assertEquals(50, ScalpControls(maxAskCents = 99).normalized().maxAskCents)
-        assertTrue(ScalpV2.entryOk(.50, .99))
-        listOf(.51, .90, Double.NaN, Double.POSITIVE_INFINITY).forEach { assertFalse(ScalpV2.entryOk(it, .99)) }
+        assertEquals(55, ScalpControls(maxAskCents = 99).normalized().maxAskCents)
+        assertTrue(ScalpV2.entryOk(.55, .99))
+        listOf(.56, .90, Double.NaN, Double.POSITIVE_INFINITY).forEach { assertFalse(ScalpV2.entryOk(it, .99)) }
         assertFalse(ScalpV2.entryOk(.50, .49))
-        assertFalse(ForecastScalp.wantsEntry(.50, .01, .51, .30, 300.0))
-        assertTrue(ForecastScalp.wantsEntry(.50, .01, .50, .30, 300.0))
+        assertFalse(ForecastScalp.wantsEntry(.50, .01, .56, .30, 300.0))
+        assertTrue(ForecastScalp.wantsEntry(.50, .01, .55, .30, 300.0))
     }
 
-    @Test fun delayedOriginalAndRestoredV2FillsRespectBothSidesAndFiftyCentBoundary() {
+    @Test fun delayedOriginalAndRestoredV2FillsRespectBothSidesAndFiftyFiveCentBoundary() {
         for (variant in listOf(ScalpParams.CLASSIC.id, "v2-sf41", "v2-sf41t2")) {
             for (side in listOf("YES", "NO")) {
-                for (price in listOf(.50, .51)) {
+                for (price in listOf(.55, .56)) {
                     val book = book(pending(variant, side).copy(note = "v2ask=0.99"))
                     book.onQuote(q(at + 3_000, price, side), false)
                     val t = row(book)
-                    if (price == .50) {
+                    if (price == .55) {
                         assertEquals("$variant $side", ScalpState.OPEN, t.state)
-                        assertEquals(.50, t.entryPrice!!, 1e-9)
+                        assertEquals(.55, t.entryPrice!!, 1e-9)
                     } else {
                         assertNotEquals("$variant $side", ScalpState.OPEN, t.state)
                         assertEquals(0, t.contracts)
@@ -53,7 +53,7 @@ class ScalpEntryCeilingTest {
         }
     }
 
-    @Test fun oldMakerAndForecastLimitsAboveFiftyAreCancelledInsteadOfFilled() {
+    @Test fun oldMakerAndForecastLimitsAboveFiftyFiveAreCancelledInsteadOfFilled() {
         val maker = ScalpModels.MAKER_DIP_PARAMS.id
         val cf = ScalpParams.STRATEGY_SEEDS.getValue(ScalpStrategy.CF_REPRICE).id
         for (variant in listOf(maker, cf, ForecastScalp.variantId(true, 60))) {
@@ -66,7 +66,7 @@ class ScalpEntryCeilingTest {
         }
     }
 
-    @Test fun shockDelayedTakerAndMakerJoinCannotBuyAboveFifty() {
+    @Test fun shockDelayedTakerAndMakerJoinCannotBuyAboveFiftyFive() {
         for (variant in listOf("sf41", "sf28")) {
             val book = book(pending(variant).copy(restingLimit = if (variant == "sf28") .60 else null))
             for (sec in -130..0) book.tickSpot("BTC", 100_000.0, at + sec * 1000L)
@@ -79,35 +79,35 @@ class ScalpEntryCeilingTest {
         assertEquals(ScalpState.NO_FILL, row(book).state)
     }
 
-    @Test fun makerSignalsCanUseAnEligibleBidWhenTheAskIsAboveFifty() {
+    @Test fun makerSignalsCanUseAnEligibleBidWhenTheAskIsAboveFiftyFive() {
         val maker = ScalpParams.MAKER_VARIANTS.first { it.strategy == ScalpStrategy.FAIR_GAP }
-        val quote = q(at, .51).copy(yesBid = .49, spot = 100_300.0)
+        val quote = q(at, .56).copy(yesBid = .54, spot = 100_300.0)
         assertNotNull(ScalpRule.entrySignal(quote, maker, listOf("YES")).first)
         assertNull(ScalpRule.entrySignal(quote, maker.copy(maker = false), listOf("YES")).first)
 
         val book = ScalpBook(variants = emptyList())
         for (sec in -300..0) book.tickSpot("BTC", 100_000.0, at + sec * 1000L)
-        // Downward spot shock creates a YES fade-maker signal. Ask 51¢, bid 49¢.
+        // Downward spot shock creates a YES fade-maker signal. Ask 56¢, bid 54¢.
         book.onShockFavQuote(quote.copy(nowMs = at + 5_000, bookAtMs = at + 5_000, spot = 99_900.0), true)
         val signal = book.snapshot().first { it.variantId == "sf28" }
         assertEquals("YES", signal.side)
         book.onShockFavQuote(quote.copy(nowMs = at + 7_000, bookAtMs = at + 7_000, spot = 99_900.0), false)
-        assertEquals(.49, book.snapshot().first { it.id == signal.id }.restingLimit!!, 1e-9)
+        assertEquals(.54, book.snapshot().first { it.id == signal.id }.restingLimit!!, 1e-9)
         book.onShockFavQuote(q(at + 8_000, .48).copy(spot = 99_900.0), false)
         val filled = book.snapshot().first { it.id == signal.id }
         assertEquals(ScalpState.OPEN, filled.state)
-        assertEquals(.49, filled.entryPrice!!, 1e-9)
+        assertEquals(.54, filled.entryPrice!!, 1e-9)
     }
 
     @Test fun depthWalkingExcludesExpensiveTailEvenIfAverageWouldBeCheap() {
-        val levels = listOf(.10 to 9.0, .50 to 1.0, .51 to 90.0)
+        val levels = listOf(.10 to 9.0, .55 to 1.0, .56 to 90.0)
         val (n, usd, _) = ScalpControls().walkBuy(levels, 20, .99)
         assertEquals(10, n)
-        assertEquals(1.40, usd, 1e-9)
+        assertEquals(1.45, usd, 1e-9)
         for (side in listOf("YES", "NO")) {
             val book = book(pending("v2-sf41x5", side, .40).copy(note = "v2ask=0.99"))
             val quote = q(at + 2_000, .40, side)
-            val bids = listOf(.60 to 2.0, .49 to 100.0) // asks 40¢ then 51¢
+            val bids = listOf(.60 to 2.0, .44 to 100.0) // asks 40¢ then 56¢
             book.onQuote(if (side == "YES") quote.copy(noBidsDesc = bids) else quote.copy(yesBidsDesc = bids), false)
             assertEquals(ScalpState.OPEN, row(book).state)
             assertEquals(2, row(book).contracts)
@@ -115,7 +115,7 @@ class ScalpEntryCeilingTest {
         }
     }
 
-    @Test fun existingPositionsCanStillExitAboveFifty() {
+    @Test fun existingPositionsCanStillExitAboveFiftyFive() {
         for (variant in listOf(ScalpParams.CLASSIC.id, "v2-sf41")) {
             val book = book(pending(variant, price = .80).copy(state = ScalpState.PENDING_EXIT,
                 contracts = 10, entryPrice = .80, entryAtMs = at, exitDecidedAtMs = at, exitReason = "saved stop"))

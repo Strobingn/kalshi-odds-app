@@ -1,5 +1,7 @@
 package com.dirk.kalshiodds.ui
 
+import com.dirk.kalshiodds.decision.ScalpRule
+
 import android.graphics.Paint
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -101,7 +103,7 @@ internal fun ScalpWindowChart(d: ScalpAlgoDetail, onWindow: (String) -> Unit = {
                     paint.textAlign = when (minute) { 0 -> Paint.Align.LEFT; 15 -> Paint.Align.RIGHT; else -> Paint.Align.CENTER }
                     drawContext.canvas.nativeCanvas.drawText("${minute}m", xx, size.height - 2.dp.toPx(), paint)
                 }
-                drawLine(c.accentOrange.copy(alpha = .65f), Offset(left, y(.50)), Offset(left + w, y(.50)), 1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 5.dp.toPx())))
+                drawLine(c.accentOrange.copy(alpha = .65f), Offset(left, y(ScalpRule.ENTRY_HI)), Offset(left + w, y(ScalpRule.ENTRY_HI)), 1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 5.dp.toPx())))
                 var previous: Pair<Long, Offset>? = null
                 data.points.filter { it.tMs in data.startMs..minOf(data.nowMs, data.closeMs) }.forEach { point ->
                     val bid = if (side == "YES") point.upBidCents else point.downBidCents
@@ -131,7 +133,7 @@ internal fun ScalpWindowChart(d: ScalpAlgoDetail, onWindow: (String) -> Unit = {
                 Text(windowTime(data.closeMs) + " ET", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
             }
             Text("○ Buy order   ▲ Buy fill   ■ Sell fill   · Signal", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
-            Text("Dashed 50¢ buy ceiling · tap a marker for price and time", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
+            Text("Dashed 55¢ buy ceiling · tap a marker for price and time", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
             if (data.points.none { (if (side == "YES") it.upBidCents else it.downBidCents) != null }) Text("No recorded bids for this side yet. Missing history is left blank.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
             selectedMarker?.let { m -> Text("${markerName(m.kind)} · ${m.qty.takeIf { it > 0 }?.let { "$it ct · " }.orEmpty()}${ScalpTabCopy.cents(m.price)} · ${windowTime(m.recordedAtMs)} ET", color = c.textPrimary, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall) }
             data.error?.let { Text(it, color = c.down, style = MaterialTheme.typography.bodySmall) }
