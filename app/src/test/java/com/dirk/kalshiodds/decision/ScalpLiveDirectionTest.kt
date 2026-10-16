@@ -9,7 +9,7 @@ class ScalpLiveDirectionTest {
     private val start = close - 900_000L
     private fun quote(sec: Long, bid: Double, ask: Double) = ScalpRule.Quote(
         ticker, start + sec * 1000, close, start + sec * 1000, bid, 100.0, ask, 100.0, null, null, null)
-    private fun book() = ScalpBook(variants = emptyList(), liveExtras = true,
+    private fun book(store: InMemoryScalpPersistence = InMemoryScalpPersistence()) = ScalpBook(store = store, variants = emptyList(), liveExtras = true,
         controls = MemoryScalpControls(ScalpControls(disabledStrategies = ScalpModels.V2_MODELS
             .map { it.code }.filter { it != "v2-sf51" }.toSet())))
     private fun tick(book: ScalpBook, q: ScalpRule.Quote) {
@@ -84,6 +84,55 @@ class ScalpLiveDirectionTest {
             tick(book, signal.copy(nowMs = start + 5000, bookAtMs = start + 5000))
             assertEquals(ScalpState.OPEN, book.snapshot().single { it.variantId == "v2-sf51" }.state)
         }
+    }
+
+    @Test fun neutralAndOneSidedOrdersExpireWithoutSpotDataAndCannotFillLater() {
+        for (oneSided in listOf(false, true)) {
+            val book = book()
+            tick(book, quote(0, .49, .51))
+            tick(book, quote(1, .53, .55))
+            val ids = book.snapshot().filter { it.variantId in listOf("sf51", "v2-sf51") }.map { it.id }.toSet()
+            val uncertain = quote(8, .49, .51).let { if (oneSided) it.copy(yesBid = null) else it }
+            book.onQuote(uncertain, false)
+            book.onShockFavQuote(uncertain, false)
+            assertTrue(book.snapshot().filter { it.id in ids }.all { it.state == ScalpState.NO_FILL })
+            tick(book, quote(40, .53, .55))
+            assertTrue(book.snapshot().filter { it.id in ids }.all { it.state == ScalpState.NO_FILL })
+        }
+    }
+
+    @Test fun openingCutoffExpiresOrdersEvenBeforeTheirSixSecondTtl() {
+        val book = book()
+        tick(book, quote(0, .49, .51))
+        tick(book, quote(29, .53, .55))
+        val ids = book.snapshot().filter { it.variantId in listOf("sf51", "v2-sf51") }.map { it.id }.toSet()
+        book.onQuote(quote(31, .53, .55), false)
+        assertEquals(2, ids.size)
+        assertTrue(book.snapshot().filter { it.id in ids }.all { it.state == ScalpState.NO_FILL })
+    }
+
+    @Test fun restartKeepsTheOriginalOpeningMidpointDespiteRetracement() {
+        val store = InMemoryScalpPersistence()
+        val first = book(store)
+        tick(first, quote(0, .49, .51))
+        tick(first, quote(1, .53, .55))
+        first.flushWrites()
+        val restarted = book(store)
+        tick(restarted, quote(3, .51, .53)) // down since the signal, still UP relative to this window's 50¢ open
+        val trade = restarted.snapshot().single { it.variantId == "v2-sf51" }
+        assertEquals("YES", trade.side)
+        assertEquals(ScalpState.OPEN, trade.state)
+        assertEquals(.50, ScalpV2.savedNumber(trade.note, "o50open", 0.0), 1e-9)
+    }
+
+    @Test fun legacyPendingOrderWithoutOpeningReferenceIsCancelledInsteadOfRebased() {
+        val store = InMemoryScalpPersistence()
+        store.seed(listOf("sf51", "v2-sf51").map { variant -> ScalpTrade(
+            variant, ticker, "YES", ScalpState.PENDING_ENTRY, start + 1000, .55, .5,
+            ruleVersion = "${ScalpRule.VERSION}|$variant|P") })
+        val restored = book(store)
+        restored.onQuote(quote(3, .45, .47), false)
+        assertTrue(restored.snapshot().filter { it.id in listOf("sf51", "v2-sf51") }.all { it.state == ScalpState.NO_FILL })
     }
 
     @Test fun dipSelectionComparesBothEligibleSidesAndWaitsOnEqualStrength() {
