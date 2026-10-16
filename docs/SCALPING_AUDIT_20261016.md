@@ -379,9 +379,22 @@ ordering by themselves.
 ### Bounded public API probe
 
 Using only unauthenticated read-only requests (no credentials were printed,
-created, or transmitted), the public markets endpoint returned 10 finalized
-KXBTC15M markets and a pagination cursor; one sample was
-`KXBTC15M-26OCT152315-15`, closed at `2026-10-16T03:15:00Z`, result `yes`.
+created, or transmitted), the public markets endpoint returned a bounded page
+of three recent finalized KXBTC15M markets and a pagination cursor. The
+documented series-market candlestick route then returned 15 one-minute candles
+for each market after serial backoff. The exact request windows and observed
+close-of-bar fields were:
+
+| Market | UTC candle window | Candles | First YES bid/ask | Last YES bid/ask | Volume sum |
+|---|---|---:|---:|---:|---:|
+| `KXBTC15M-26OCT152315-15` | `1792119600..1792120500` | 15 | 0.5400 / 0.5500 | 0.9990 / 1.0000 | 3,085,656.82 |
+| `KXBTC15M-26OCT152300-00` | `1792118700..1792119600` | 15 | 0.2500 / 0.2600 | 0.0000 / 0.0010 | 3,452,327.85 |
+| `KXBTC15M-26OCT152245-45` | `1792117800..1792118700` | 15 | 0.3600 / 0.3700 | 0.9990 / 1.0000 | 3,573,079.78 |
+
+The first market closed at `2026-10-16T03:15:00Z` with result `yes`. The
+values above are a bounded API availability/markout sample, not a strategy
+backtest: they do not include full depth, queue position, exact order arrival,
+or intrabar fill ordering.
 The public historical cutoff endpoint returned:
 
 ```text
@@ -390,9 +403,9 @@ trades_created_ts:  2026-08-16T00:00:00Z
 orders_updated_ts:  2026-10-01T00:00:00Z
 ```
 
-Subsequent bounded historical-market and candlestick requests received HTTP
-429 rate limits in this environment, so no new historical candle sample is
-claimed here. The official historical API documents show that 1-minute bars
+Initial broad and rapid requests received HTTP 429; serial backoff recovered
+the three-market sample above. The official historical API documents show that
+1-minute bars
 include YES bid/ask OHLC, trade-price OHLC, volume, and open interest; those
 bars can support bounded markout analysis but cannot prove within-minute order
 arrival, depth, queue position, or fill ordering. The documented historical
