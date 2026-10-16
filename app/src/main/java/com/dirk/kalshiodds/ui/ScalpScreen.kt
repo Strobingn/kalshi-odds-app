@@ -20,6 +20,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -50,6 +54,15 @@ fun ScalpScreen(
     onSetPaperTrading: (Boolean) -> Unit,
     onResetPaper: () -> Unit
 ) {
+    var activeTab by rememberSaveable { mutableIntStateOf(0) }
+    if (activeTab == 1) {
+        V3LabScreen(
+            state = state.v3,
+            onBack = onBack,
+            onOpenArena = { activeTab = 0 }
+        )
+        return
+    }
     val colors = DipTheme.colors
     val scalpFills = state.paper.fills.filter(PaperFill::isScalp).sortedByDescending { it.createdAtMs }
     val openFills = scalpFills.filterNot { it.settled }
@@ -99,6 +112,10 @@ fun ScalpScreen(
                     )
                 }
             }
+        }
+
+        item {
+            ScalpModeTabs(selected = 0, onSelect = { selected -> activeTab = selected })
         }
 
         item {
