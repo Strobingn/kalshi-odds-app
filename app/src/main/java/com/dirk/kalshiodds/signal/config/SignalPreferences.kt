@@ -439,10 +439,10 @@ class SignalPreferences(
             hasPrivateKey = SecureCredentialStore.looksLikePem(secrets.privateKeyPem),
             kalshiDemoEnabled = this[KEY_KALSHI_DEMO] ?: false,
             demoCredentialsConfigured = extras?.hasDemoCredentials == true,
-            winningStrategyEnabled = this[KEY_WINNING_STRATEGY] ?: def.winningStrategyEnabled,
-            winningStrategyMaxAsk = this[KEY_WINNING_STRATEGY_MAX_ASK] ?: def.winningStrategyMaxAsk,
-            winningStrategyTimeWindowMs = this[KEY_WINNING_STRATEGY_TIME] ?: def.winningStrategyTimeWindowMs,
-            winningStrategyMinTimeMs = this[KEY_WINNING_STRATEGY_MIN_TIME] ?: def.winningStrategyMinTimeMs
+            winningStrategyEnabled = this[KEY_WINNING_STRATEGY] ?: SignalConstants.DEFAULT_WINNING_STRATEGY_ENABLED,
+            winningStrategyMaxAsk = this[KEY_WINNING_STRATEGY_MAX_ASK] ?: SignalConstants.DEFAULT_WINNING_STRATEGY_MAX_ASK,
+            winningStrategyTimeWindowMs = this[KEY_WINNING_STRATEGY_TIME] ?: SignalConstants.DEFAULT_WINNING_STRATEGY_TIME_WINDOW_MS,
+            winningStrategyMinTimeMs = this[KEY_WINNING_STRATEGY_MIN_TIME] ?: SignalConstants.DEFAULT_WINNING_STRATEGY_MIN_TIME_MS
         )
     }
 

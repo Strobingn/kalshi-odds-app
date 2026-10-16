@@ -261,18 +261,19 @@ class AdaptiveStrategyTest {
     @Test
     fun `best ask range identified correctly`() {
         val fills = listOf(
-            createFill(won = true, pnl = 4.5, limitPrice = 0.15),  // 15c - win
-            createFill(won = true, pnl = 4.5, limitPrice = 0.25),  // 25c - win
-            createFill(won = false, pnl = -5.0, limitPrice = 0.75), // 75c - loss
-            createFill(won = false, pnl = -5.0, limitPrice = 0.85)  // 85c - loss
+            createFill(won = true, pnl = 4.5, limitPrice = 0.15),
+            createFill(won = true, pnl = 4.5, limitPrice = 0.16),
+            createFill(won = true, pnl = 4.5, limitPrice = 0.17),
+            createFill(won = false, pnl = -5.0, limitPrice = 0.75),
+            createFill(won = false, pnl = -5.0, limitPrice = 0.76),
+            createFill(won = false, pnl = -5.0, limitPrice = 0.77)
         )
         val state = createPaperState(*fills.toTypedArray())
         val strategy = AdaptiveStrategy(state, minSamplesForLearning = 2)
         val metrics = strategy.calculateMetrics()
         
-        // 0-20c range should have 100% win rate (1 win, 0 losses in that range)
-        // 20-40c range should have 100% win rate (1 win, 0 losses)
-        // So best range should be one of these
+        // The cheap range has three wins; range statistics require three
+        // observations to avoid adapting to a one-trade outlier.
         assertNotNull(metrics.bestAskRange)
         assertTrue(metrics.bestAskRange!!.second <= 0.40)
     }

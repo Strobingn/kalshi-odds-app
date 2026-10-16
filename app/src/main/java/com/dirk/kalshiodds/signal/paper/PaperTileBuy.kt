@@ -79,7 +79,8 @@ object PaperTileBuy {
             feeUsd = clip.feeUsd,
             allInUsd = clip.costUsd,
             source = SOURCE,
-            message = confirmMessage(want, clip)
+            message = confirmMessage(want, clip),
+            closeTimeMs = market.closeTimeEpochMs
         )
     }
 }

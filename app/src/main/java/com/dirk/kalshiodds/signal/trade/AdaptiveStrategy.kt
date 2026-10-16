@@ -18,6 +18,7 @@ class AdaptiveStrategy(
 ) {
 
     data class AdaptiveConfig(
+        val enabled: Boolean = true,
         val maxAskFilter: Double,
         val timeWindowMs: Long,
         val minTimeToCloseMs: Long,
@@ -26,8 +27,8 @@ class AdaptiveStrategy(
         val reason: String
     ) {
         fun toWinningStrategyConfig(): WinningStrategy.Config = WinningStrategy.Config(
-            enabled = true,
-            maxAskFilter = maxAskFilter,
+            enabled = enabled,
+            maxAskFilter = maxAskFilter.coerceIn(0.01, SignalConstants.MAX_PAPER_ENTRY_ASK),
             timeWindowMs = timeWindowMs,
             minTimeToCloseMs = minTimeToCloseMs,
             minProfitIfWinUsd = 10.0
@@ -46,10 +47,11 @@ class AdaptiveStrategy(
         val maxDrawdown: Double,
         val currentStreak: Int,
         val bestAskRange: Pair<Double, Double>?,
-        val bestTimeRange: Pair<Long, Long>?
+        val bestTimeRange: Pair<Long, Long>?,
+        val minSamples: Int = 10
     ) {
         val isProfitable: Boolean get() = totalPnl > 0
-        val hasEnoughData: Boolean get() = totalTrades >= minSamplesForLearning
+        val hasEnoughData: Boolean get() = totalTrades >= minSamples
     }
 
     /**
@@ -70,7 +72,8 @@ class AdaptiveStrategy(
                 maxDrawdown = 0.0,
                 currentStreak = 0,
                 bestAskRange = null,
-                bestTimeRange = null
+                bestTimeRange = null,
+                minSamples = minSamplesForLearning
             )
         }
 
@@ -118,7 +121,8 @@ class AdaptiveStrategy(
             maxDrawdown = maxDrawdown,
             currentStreak = streak,
             bestAskRange = bestAskRange,
-            bestTimeRange = bestTimeRange
+            bestTimeRange = bestTimeRange,
+            minSamples = minSamplesForLearning
         )
     }
 
@@ -156,7 +160,7 @@ class AdaptiveStrategy(
         
         // Find range with highest win rate and at least 3 samples
         val bestRange = rangeStats
-            .filter { it.third >= 3 }
+            .filter { it.third >= 3 && it.second > 0.5 }
             .maxByOrNull { it.second }
         
         return bestRange?.first
@@ -179,7 +183,10 @@ class AdaptiveStrategy(
     private fun calculateCurrentStreak(fills: List<PaperFill>): Int {
         if (fills.isEmpty()) return 0
         
-        val sorted = fills.sortedByDescending { it.createdAtMs }
+        val sorted = fills.mapIndexed { index, fill -> index to fill }
+            .sortedWith(compareByDescending<Pair<Int, PaperFill>> { it.second.createdAtMs }
+                .thenByDescending { it.first })
+            .map { it.second }
         var streak = 0
         var isWinning = sorted.first().won == true
         
@@ -226,12 +233,12 @@ class AdaptiveStrategy(
         when {
             metrics.isProfitable && metrics.winRate > 0.6 -> {
                 // Doing great - be more aggressive
-                maxAsk = minOf(maxAsk + 0.10, 0.60)
+                maxAsk = minOf(maxAsk + 0.10, SignalConstants.MAX_PAPER_ENTRY_ASK)
                 reasons.add("High win rate (${"%.1f%%".format(metrics.winRate * 100)}) - increasing max ask")
             }
             metrics.isProfitable && metrics.winRate > 0.55 -> {
                 // Doing well - slightly more aggressive
-                maxAsk = minOf(maxAsk + 0.05, 0.55)
+                maxAsk = minOf(maxAsk + 0.05, SignalConstants.MAX_PAPER_ENTRY_ASK)
                 reasons.add("Good performance - slightly increasing max ask")
             }
             !metrics.isProfitable && metrics.winRate < 0.45 -> {
@@ -268,7 +275,7 @@ class AdaptiveStrategy(
         when {
             metrics.currentStreak >= 3 -> {
                 // On a winning streak - increase aggression
-                maxAsk = minOf(maxAsk + 0.05, 0.60)
+                maxAsk = minOf(maxAsk + 0.05, SignalConstants.MAX_PAPER_ENTRY_ASK)
                 reasons.add("Winning streak (${metrics.currentStreak}) - increasing aggression")
             }
             metrics.currentStreak <= -3 -> {
@@ -283,7 +290,8 @@ class AdaptiveStrategy(
         val reason = if (reasons.isEmpty()) "Using default settings" else reasons.joinToString(" | ")
         
         return AdaptiveConfig(
-            maxAskFilter = maxAsk.coerceIn(0.10, 0.70),
+            enabled = true,
+            maxAskFilter = maxAsk.coerceIn(0.10, SignalConstants.MAX_PAPER_ENTRY_ASK),
             timeWindowMs = timeWindow,
             minTimeToCloseMs = minTime,
             stakeUsd = stake.coerceIn(1.0, 10.0),
@@ -295,9 +303,7 @@ class AdaptiveStrategy(
     /**
      * Get current adaptive config as a winning strategy config
      */
-    fun getAdaptiveConfig(): WinningStrategy.Config {
-        return adapt().toWinningStrategyConfig()
-    }
+    fun getAdaptiveConfig(): AdaptiveConfig = adapt()
 
     /**
      * Check if we should trade based on adaptive metrics
@@ -306,8 +312,6 @@ class AdaptiveStrategy(
         val metrics = calculateMetrics()
         
         // If we don't have enough data, allow trading
-        if (!metrics.hasEnoughData) return true
-        
         // If on a losing streak of 4+, pause
         if (metrics.currentStreak <= -4) {
             return false
@@ -317,6 +321,10 @@ class AdaptiveStrategy(
         if (metrics.totalPnl < -100.0) {
             return false
         }
+
+        // Do not adapt thresholds until the sample floor is met, but still
+        // honor an unmistakable risk stop in a small sample.
+        if (!metrics.hasEnoughData) return true
         
         return true
     }
@@ -326,10 +334,6 @@ class AdaptiveStrategy(
      */
     fun getLearningSummary(): String {
         val metrics = calculateMetrics()
-        
-        if (!metrics.hasEnoughData) {
-            return "Learning: Need ${minSamplesForLearning}+ settled trades to adapt"
-        }
         
         val config = adapt()
         val parts = mutableListOf<String>()
@@ -344,7 +348,8 @@ class AdaptiveStrategy(
             parts.add("Streak: ${metrics.currentStreak}")
         }
         
-        parts.add("Adapted: ${config.reason}")
+        parts.add(if (metrics.hasEnoughData) "Adapted: ${config.reason}"
+        else "Learning: Need ${minSamplesForLearning}+ settled trades to adapt")
         
         return parts.joinToString(" | ")
     }

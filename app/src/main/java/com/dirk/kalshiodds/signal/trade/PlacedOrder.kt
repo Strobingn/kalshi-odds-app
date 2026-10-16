@@ -25,6 +25,27 @@ data class PlacedOrder(
     /** Error message if order failed or was cancelled */
     val error: String? = null
 ) {
+    val filledContracts: Int
+        get() = kotlin.math.floor(fillCount + 1e-9).toInt().coerceAtLeast(0)
+
+    val unfilledContracts: Int
+        get() = (ticket.contracts - filledContracts).coerceAtLeast(0)
+
+    /** IoC reduce-only sells never rest; ordinary buys can remain working. */
+    val isResting: Boolean
+        get() = !ticket.isSell && remainingCount > 1e-9 && orderId != null
+
+    fun fillSummary(): String {
+        val wanted = ticket.contracts
+        val filled = filledContracts
+        val leftover = unfilledContracts
+        return when {
+            filled <= 0 -> "Sold 0 of $wanted contracts. Nothing filled — no leftover order."
+            leftover <= 0 -> "Sold $filled of $wanted contracts."
+            else -> "Sold $filled of $wanted contracts. $leftover didn't fill — no leftover order."
+        }
+    }
+
     /** Total contracts in the order */
     val totalCount: Double get() = fillCount + remainingCount
     

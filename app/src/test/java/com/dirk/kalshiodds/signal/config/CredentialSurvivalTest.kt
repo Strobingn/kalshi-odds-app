@@ -44,7 +44,7 @@ class CredentialSurvivalTest {
         }
         val book = PaperBook()
         book.reset()
-        assertEquals(100.0, book.snapshot().cashUsd, 1e-9)
+        assertEquals(SignalConstants.PAPER_START_USD, book.snapshot().cashUsd, 1e-9)
         val cold = FileBackedCredentialStore(file)
         assertEquals("keep-me", cold.apiKeyId)
         assertTrue(cold.hasCredentials)

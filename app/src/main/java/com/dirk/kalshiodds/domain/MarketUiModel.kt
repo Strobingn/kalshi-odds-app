@@ -12,20 +12,20 @@ const val EDGE_ALERT_THRESHOLD_PP = 5.0
 
 data class MarketUiModel(
     val ticker: String,
-    val title: String,
-    val subtitle: String?,
-    val floorStrike: Double?,
-    val yesBid: Double?,
-    val yesAsk: Double?,
-    val noBid: Double?,
-    val noAsk: Double?,
+    val title: String = "",
+    val subtitle: String? = null,
+    val floorStrike: Double? = null,
+    val yesBid: Double? = null,
+    val yesAsk: Double? = null,
+    val noBid: Double? = null,
+    val noAsk: Double? = null,
     /** Contracts at the YES ask (`yes_ask_size_fp`). */
     val yesAskSize: Double? = null,
-    val lastPrice: Double?,
+    val lastPrice: Double? = null,
     /** Raw Kalshi YES mid 0–100 (secondary display). */
-    val yesProbabilityPercent: Double?,
+    val yesProbabilityPercent: Double? = null,
     /** Raw Kalshi NO mid 0–100 (secondary display). */
-    val noProbabilityPercent: Double?,
+    val noProbabilityPercent: Double? = null,
     /** Dip Hunter on-device predicted YES 0–100 (primary). */
     val aiYesPercent: Double? = null,
     /** Dip Hunter on-device predicted NO 0–100 (primary). */
@@ -39,14 +39,14 @@ data class MarketUiModel(
     val edgeAlert: Boolean = false,
     /** yes_ask − yes_bid in dollars (0–1). */
     val spreadDollars: Double? = null,
-    val volume: Double?,
-    val volume24h: Double?,
+    val volume: Double? = null,
+    val volume24h: Double? = null,
     val openInterest: Double? = null,
     val liquidityDollars: Double? = null,
-    val closeTimeLocal: String?,
+    val closeTimeLocal: String? = null,
     val closeTimeEpochMs: Long? = null,
-    val status: String?,
-    val seriesLabel: String,
+    val status: String? = null,
+    val seriesLabel: String = "",
     val regimeTag: String? = null,
     val tteRegimeLabel: String? = null,
     val passedFilter: Boolean = true,
@@ -105,7 +105,9 @@ data class MarketUiModel(
     /** Blend-channel deviations (featureFair − mid) in pp from [ScoringEngine.Score]. */
     val featureDevs: Map<String, Double> = emptyMap(),
     /** Kalshi `open_time`. When null, 15m windows infer close − [MarketLifecycle.WINDOW_MS]. */
-    val openTimeEpochMs: Long? = null
+    val openTimeEpochMs: Long? = null,
+    /** Legacy test/display alias for [seriesLabel]. */
+    val series: String? = null
 )
 
 enum class SeriesKind(val ticker: String, val label: String) {

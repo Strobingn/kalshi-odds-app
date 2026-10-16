@@ -43,6 +43,18 @@ object SignalConstants {
     /** Allow paper book to go negative - this is just an experiment with fake money */
     const val PAPER_ALLOW_NEGATIVE = true
 
+    /** Paper risk controls. Trail distance is a percentage of filled entry price. */
+    const val DEFAULT_TRAILING_STOP_PCT = 2.0
+    const val MIN_TRAILING_STOP_PCT = 1.0
+    const val MAX_TRAILING_STOP_PCT = 4.0
+    const val DEFAULT_STOP_LOSS_PCT = 3.0
+    const val DEFAULT_TRAIL_ACTIVATION_PCT = 0.5
+    const val DEFAULT_STOP_LOSS_DELAY_MS = 30_000L
+    const val DEFAULT_MAX_PAPER_HOLD_MS = 12 * 60_000L
+    const val DEFAULT_SETTLEMENT_FALLBACK_MS = 30_000L
+    const val DEFAULT_MAX_EXIT_QUOTE_AGE_MS = 5_000L
+    const val MAX_PAPER_ENTRY_ASK = 0.50
+
     /**
      * Fraction of full Kelly actually risked. 0.25 = quarter-Kelly,
      * a common conservative default for noisy edges.

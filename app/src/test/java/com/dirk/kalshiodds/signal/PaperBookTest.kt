@@ -7,6 +7,7 @@ import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TicketPhase
 import com.dirk.kalshiodds.signal.trade.TicketSession
 import com.dirk.kalshiodds.signal.trade.TradeTicket
+import com.dirk.kalshiodds.signal.trade.KalshiFee
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -20,14 +21,14 @@ class PaperBookTest {
     @Test
     fun startsAtOneHundredAndPapersFiveDollarAiFill() {
         val book = PaperBook(idFactory = { "p1" }, nowMs = { 10L })
-        assertEquals(100.0, book.snapshot().cashUsd, 1e-9)
+        assertEquals(SignalConstants.PAPER_START_USD, book.snapshot().cashUsd, 1e-9)
         val fill = book.considerTicket(hunterTicket(), enabled = true)
         assertTrue(fill != null)
         assertEquals("YES", fill!!.side)
         assertEquals("AI hunter", fill.source)
         assertEquals(125, fill.contracts) // floor(5 / 0.04)
         assertEquals(5.0, fill.stakeUsd, 1e-9)
-        assertEquals(95.0, book.snapshot().cashUsd, 1e-9)
+        assertEquals(SignalConstants.PAPER_START_USD - fill.stakeUsd - fill.entryFeeUsd, book.snapshot().cashUsd, 1e-9)
         assertEquals(5.0, book.snapshot().openStakeUsd, 1e-9)
         assertFalse(fill.settled)
     }
@@ -94,13 +95,16 @@ class PaperBookTest {
         assertEquals(0, snap.openCount)
         val win = snap.fills.first { it.ticker == "WIN-1" }
         assertEquals(true, win.won)
-        assertEquals(120.0, win.pnlUsd!!, 1e-9) // 125 * 1 - 5
+        val winFee = win.entryFeeUsd
+        val lossFee = lossEntryFee(snap, "LOSS-1")
+        val voidFee = snap.fills.first { it.ticker == "VOID-1" }.entryFeeUsd
+        assertEquals(125.0 - 5.0 - winFee, win.pnlUsd!!, 1e-9)
         val loss = snap.fills.first { it.ticker == "LOSS-1" }
         assertEquals(false, loss.won)
-        assertEquals(-5.0, loss.pnlUsd!!, 1e-9)
-        assertEquals(115.0, snap.realizedPnlUsd, 1e-9)
-        // cash: 100 - 15 + 125 (win) + 0 (loss) + 5 (void refund) = 215
-        assertEquals(215.0, snap.cashUsd, 1e-9)
+        assertEquals(-5.0 - lossFee, loss.pnlUsd!!, 1e-9)
+        assertEquals((125.0 - 5.0 - winFee) + (-5.0 - lossFee) - voidFee, snap.realizedPnlUsd, 1e-9)
+        // Cash includes all entry fees and the void refund of stake minus its fee.
+        assertEquals(SignalConstants.PAPER_START_USD - 15.0 - winFee - lossFee - voidFee + 125.0 + 5.0, snap.cashUsd, 1e-9)
         book.reset()
         assertEquals(SignalConstants.PAPER_START_USD, book.snapshot().cashUsd, 1e-9)
         assertTrue(book.snapshot().fills.isEmpty())
@@ -153,9 +157,12 @@ class PaperBookTest {
         val fill = book.considerTicket(ticket, enabled = true)
         assertEquals(20, fill!!.contracts)
         assertEquals(8.0, fill.stakeUsd, 1e-9)
-        assertEquals(92.0, book.snapshot().cashUsd, 1e-9)
+        assertEquals(SignalConstants.PAPER_START_USD - fill.stakeUsd - fill.entryFeeUsd, book.snapshot().cashUsd, 1e-9)
         assertTrue(fill.note.contains("win-target"))
     }
+
+    private fun lossEntryFee(state: com.dirk.kalshiodds.signal.paper.PaperBookState, ticker: String): Double =
+        state.fills.first { it.ticker == ticker }.entryFeeUsd
 
     private fun hunterTicket(
         id: String = "t1",

@@ -37,7 +37,10 @@ object TicketBuilder {
         val idFactory: () -> String = { UUID.randomUUID().toString() },
         val nowMs: Long = System.currentTimeMillis(),
         val bankrollUsd: Double? = null,
-        val bankrollSource: String? = null
+        val bankrollSource: String? = null,
+        /** Applied only to paper proposals; live tickets never use paper learning. */
+        val adaptiveConfig: AdaptiveStrategy.AdaptiveConfig? = null,
+        val adaptiveTradingAllowed: Boolean = true
     ) {
         fun heldOpposite(ticker: String, buySide: String): Int {
             val opposite = if (buySide == "NO") "YES" else "NO"
@@ -105,10 +108,37 @@ object TicketBuilder {
         return when (ticket.kind) {
             TicketKind.HUNTER -> proposeHunter(market, ctx)
             TicketKind.HUNTER_VALUE -> proposeHunterValue(market, ctx)
+            TicketKind.WINNING_STRATEGY -> resizeWinningStrategy(ticket, market, ctx)
             TicketKind.MANUAL -> proposeManual(market, ticket.side, ctx)
             TicketKind.CONFIGURED -> propose(market, ctx)
             TicketKind.SELL -> ticket
         } ?: ticket
+    }
+
+    private fun resizeWinningStrategy(
+        ticket: TradeTicket,
+        market: MarketUiModel,
+        ctx: Context
+    ): TradeTicket {
+        if (!ctx.adaptiveTradingAllowed) return ticket.copy(blockedReason = "Adaptive paper strategy paused")
+        val close = market.closeTimeEpochMs
+        val ask = bestAsk(market, ticket.side, ctx)
+        val config = winningConfig(ctx)
+        val eligible = close != null && ask != null &&
+            ask <= config.maxAskFilter + 1e-9 &&
+            (close - ctx.nowMs) in config.minTimeToCloseMs..config.timeWindowMs
+        if (!eligible) return ticket.copy(blockedReason = "Winning strategy constraints no longer pass")
+        return buildTicket(
+            market = market,
+            side = ticket.side,
+            ctx = ctx,
+            stakeUsd = PayoutGate.clipStake(SignalConstants.HUNTER_STAKE_USD),
+            minPayoutUsd = SignalConstants.HUNTER_MIN_PAYOUT_USD,
+            kind = TicketKind.WINNING_STRATEGY,
+            requireGates = false
+        )?.copy(id = ticket.id, kind = TicketKind.WINNING_STRATEGY) ?: ticket.copy(
+            blockedReason = "Winning strategy could not be resized"
+        )
     }
 
     fun propose(market: MarketUiModel, ctx: Context): TradeTicket? {
@@ -431,6 +461,7 @@ object TicketBuilder {
                 TicketKind.MANUAL ->
                     "Manual buy · $5 all-in cap including fees · Approve still required"
                 TicketKind.CONFIGURED -> gateSummary(market, ctx)
+                TicketKind.WINNING_STRATEGY -> "Adaptive winning strategy · max ask and time window enforced"
                 TicketKind.SELL -> SELL_IOC_NOTE
             },
             createdAtMs = ctx.nowMs,
@@ -443,6 +474,7 @@ object TicketBuilder {
             profitIfWinUsd = live.profitIfWinUsd,
             feeUsd = live.feeUsd,
             allInUsd = live.allInUsd,
+            closeTimeMs = market.closeTimeEpochMs,
             belowMinProfit = belowMin,
             minProfitIfWinUsd = minProfit,
             winTargetUsd = minProfit,
@@ -692,15 +724,10 @@ object TicketBuilder {
     fun proposeWinningStrategy(market: MarketUiModel, ctx: Context): TradeTicket? {
         if (!ctx.settings.ticketsEnabled) return null
         if (!ctx.settings.winningStrategyEnabled) return null
+        if (!ctx.adaptiveTradingAllowed) return null
         if (!MarketLifecycle.isTradable(market, ctx.nowMs)) return null
-        
-        val config = WinningStrategy.Config(
-            enabled = true,
-            maxAskFilter = ctx.settings.winningStrategyMaxAsk,
-            timeWindowMs = ctx.settings.winningStrategyTimeWindowMs,
-            minTimeToCloseMs = ctx.settings.winningStrategyMinTimeMs,
-            minProfitIfWinUsd = ctx.settings.minProfitIfWinUsd
-        )
+
+        val config = winningConfig(ctx)
         
         val closeTime = market.closeTimeEpochMs ?: return null
         val timeLeft = closeTime - ctx.nowMs
@@ -709,8 +736,10 @@ object TicketBuilder {
         if (timeLeft !in config.minTimeToCloseMs..config.timeWindowMs) return null
         
         // Find the cheap side (if any)
-        val yesAsk = market.yesAsk ?: return null
-        val noAsk = market.noAsk ?: return null
+        // Eligibility must use the same executable side-aware ask used for
+        // sizing, not a potentially stale midpoint/REST field.
+        val yesAsk = bestAsk(market, "YES", ctx) ?: return null
+        val noAsk = bestAsk(market, "NO", ctx) ?: return null
         
         val cheapSide = when {
             yesAsk <= config.maxAskFilter && yesAsk <= noAsk -> "YES"
@@ -727,6 +756,21 @@ object TicketBuilder {
             minPayoutUsd = SignalConstants.HUNTER_MIN_PAYOUT_USD,
             kind = TicketKind.WINNING_STRATEGY,
             requireGates = false
+        )
+    }
+
+    private fun winningConfig(ctx: Context): WinningStrategy.Config {
+        val adaptive = ctx.adaptiveConfig
+        return WinningStrategy.Config(
+            enabled = true,
+            maxAskFilter = minOf(
+                ctx.settings.winningStrategyMaxAsk,
+                adaptive?.maxAskFilter ?: SignalConstants.MAX_PAPER_ENTRY_ASK,
+                SignalConstants.MAX_PAPER_ENTRY_ASK
+            ),
+            timeWindowMs = adaptive?.timeWindowMs ?: ctx.settings.winningStrategyTimeWindowMs,
+            minTimeToCloseMs = adaptive?.minTimeToCloseMs ?: ctx.settings.winningStrategyMinTimeMs,
+            minProfitIfWinUsd = ctx.settings.minProfitIfWinUsd
         )
     }
 

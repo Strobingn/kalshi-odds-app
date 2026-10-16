@@ -1,37 +1,50 @@
 package com.dirk.kalshiodds.signal.trade
 
+import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.paper.PaperBookState
 import com.dirk.kalshiodds.signal.paper.PaperFill
-import kotlin.math.abs
 import kotlin.math.max
-import kotlin.math.min
+
+/** A held-side executable bid plus the displayed size available at that bid. */
+data class PaperExitQuote(
+    val price: Double,
+    val availableContracts: Int? = null,
+    val observedAtMs: Long = 0L,
+    val source: String = "quote"
+)
 
 /**
- * Trailing stop and stop-loss management for paper trading.
- * 
- * Features:
- * - Trailing stop: locks in profits as the position moves favorably
- * - Stop loss: hard stop to limit losses
- * - Auto-sell when stop is hit
- * 
- * NEW: Trailing stop now uses absolute cents (default 3c) instead of percentage.
- * This means: if price goes to 90c and stays, trailing stop is at 87c.
- * When price drops to 87c, it sells automatically.
- * 
- * This is for paper trading experimentation only - no real money.
+ * Paper-only stop calculation. The trailing distance is a percentage of the
+ * actual filled buy-in price, not a percentage of the peak. The peak is
+ * persisted on [PaperFill] by the stop manager and is the held-side bid.
  */
 class TrailingStop(
     private val paperState: PaperBookState,
-    private val trailingStopCents: Double = 3.0,  // 3 cent trailing stop (0.03)
-    private val stopLossPct: Double = 3.0,       // 3% stop loss (more reasonable for prediction markets)
-    private val minProfitCents: Double = 0.0      // No minimum - trailing stop active from entry
+    /** Legacy fixed-cent override; null means use the percentage model. */
+    private val trailingStopCents: Double? = null,
+    private val stopLossPct: Double = SignalConstants.DEFAULT_STOP_LOSS_PCT,
+    @Suppress("UNUSED_PARAMETER") private val minProfitCents: Double = 0.0,
+    private val trailingStopPct: Double = SignalConstants.DEFAULT_TRAILING_STOP_PCT,
+    private val trailActivationPct: Double = SignalConstants.DEFAULT_TRAIL_ACTIVATION_PCT,
+    private val stopLossDelayMs: Long = SignalConstants.DEFAULT_STOP_LOSS_DELAY_MS,
+    private val maxHoldMs: Long = SignalConstants.DEFAULT_MAX_PAPER_HOLD_MS,
+    private val settlementFallbackMs: Long = SignalConstants.DEFAULT_SETTLEMENT_FALLBACK_MS,
+    private val maxQuoteAgeMs: Long = SignalConstants.DEFAULT_MAX_EXIT_QUOTE_AGE_MS,
+    private val enabledFlag: Boolean = true
 ) {
 
     data class StopConfig(
-        val trailingStopCents: Double = 3.0,
-        val stopLossPct: Double = 3.0,         // 3% stop loss default
-        val minProfitCents: Double = 0.0,
-        val enabled: Boolean = true
+        val trailingStopPct: Double = SignalConstants.DEFAULT_TRAILING_STOP_PCT,
+        val stopLossPct: Double = SignalConstants.DEFAULT_STOP_LOSS_PCT,
+        val trailActivationPct: Double = SignalConstants.DEFAULT_TRAIL_ACTIVATION_PCT,
+        val stopLossDelayMs: Long = SignalConstants.DEFAULT_STOP_LOSS_DELAY_MS,
+        val maxHoldMs: Long = SignalConstants.DEFAULT_MAX_PAPER_HOLD_MS,
+        val settlementFallbackMs: Long = SignalConstants.DEFAULT_SETTLEMENT_FALLBACK_MS,
+        val maxQuoteAgeMs: Long = SignalConstants.DEFAULT_MAX_EXIT_QUOTE_AGE_MS,
+        val enabled: Boolean = true,
+        /** Source compatibility for explicit legacy fixed-cent callers. */
+        val trailingStopCents: Double? = null,
+        val minProfitCents: Double = 0.0
     )
 
     data class StopOrder(
@@ -42,8 +55,11 @@ class TrailingStop(
         val stopPrice: Double,
         val isTrailing: Boolean,
         val isStopLoss: Boolean,
+        val isTimeFallback: Boolean = false,
+        val availableContracts: Int? = null,
         val triggerPrice: Double? = null,
-        val activatedAt: Long? = null
+        val activatedAt: Long? = null,
+        val reason: String = "stop"
     )
 
     data class PositionState(
@@ -57,121 +73,89 @@ class TrailingStop(
         val stopHit: Boolean,
         val stopType: String?,
         val peakPrice: Double?,
-        val trailingDistanceCents: Double?
+        val trailingDistanceCents: Double?,
+        val trailingDistancePct: Double,
+        val trailActivated: Boolean,
+        val timeFallback: Boolean
     )
 
-    /**
-     * Check all open positions and return stop order recommendations
-     */
-    fun checkPositions(currentPrices: Map<String, Double>): List<StopOrder> {
+    fun checkPositions(currentPrices: Map<String, Double>): List<StopOrder> =
+        checkPositions(
+            currentPrices.mapValues { PaperExitQuote(it.value, observedAtMs = System.currentTimeMillis()) },
+            System.currentTimeMillis()
+        )
+
+    fun checkPositions(quotes: Map<String, PaperExitQuote>, nowMs: Long): List<StopOrder> {
         if (!enabled()) return emptyList()
-        
         val stops = mutableListOf<StopOrder>()
-        val now = System.currentTimeMillis()
-        
-        paperState.fills
-            .filter { !it.settled }
-            .forEach { fill ->
-                val currentPrice = currentPrices[fill.ticker.uppercase()] ?: return@forEach
-                val positionState = calculatePositionState(fill, currentPrice)
-                
-                // Check if stop-loss is hit
-                positionState.stopLossPrice?.let { stopLossPrice ->
-                    val shouldStopLoss = shouldTriggerStopLoss(fill.side, currentPrice, stopLossPrice)
-                    if (shouldStopLoss) {
-                        stops.add(StopOrder(
-                            fillId = fill.id,
-                            ticker = fill.ticker,
-                            side = fill.side,
-                            entryPrice = positionState.entryPrice,
-                            stopPrice = stopLossPrice,
-                            isTrailing = false,
-                            isStopLoss = true,
-                            triggerPrice = currentPrice,
-                            activatedAt = now
-                        ))
-                    }
-                }
-                
-                // Check if trailing stop is hit
-                positionState.trailingStopPrice?.let { trailingStopPrice ->
-                    val shouldTrailing = shouldTriggerTrailing(fill.side, currentPrice, trailingStopPrice)
-                    if (shouldTrailing) {
-                        stops.add(StopOrder(
-                            fillId = fill.id,
-                            ticker = fill.ticker,
-                            side = fill.side,
-                            entryPrice = positionState.entryPrice,
-                            stopPrice = trailingStopPrice,
-                            isTrailing = true,
-                            isStopLoss = false,
-                            triggerPrice = currentPrice,
-                            activatedAt = now
-                        ))
-                    }
-                }
+        paperState.fills.filter { !it.settled }.forEach { fill ->
+            val quote = quotes[fill.ticker] ?: quotes[fill.ticker.uppercase()] ?: return@forEach
+            if (quote.observedAtMs > 0L && nowMs - quote.observedAtMs > maxQuoteAgeMs) return@forEach
+            val current = quote.price
+            if (!current.isFinite()) return@forEach
+            val state = calculatePositionState(fill, current, nowMs)
+            if (!state.stopHit) return@forEach
+            val timeFallback = state.timeFallback
+            val stopLoss = state.stopLossPrice != null && current <= state.stopLossPrice
+            val trailing = state.trailingStopPrice != null && current <= state.trailingStopPrice
+            val stopPrice = when {
+                timeFallback -> current
+                stopLoss -> state.stopLossPrice!!
+                trailing -> state.trailingStopPrice!!
+                else -> current
             }
-        
+            stops += StopOrder(
+                fillId = fill.id,
+                ticker = fill.ticker,
+                side = fill.side,
+                entryPrice = fill.limitPrice,
+                stopPrice = stopPrice,
+                isTrailing = trailing && !timeFallback,
+                isStopLoss = stopLoss && !timeFallback,
+                isTimeFallback = timeFallback,
+                availableContracts = quote.availableContracts,
+                triggerPrice = current,
+                activatedAt = nowMs,
+                reason = when {
+                    timeFallback -> "time fallback"
+                    stopLoss -> "stop loss"
+                    trailing -> "trailing stop"
+                    else -> "risk fallback"
+                }
+            )
+        }
         return stops
     }
 
-    /**
-     * Calculate position state with stop levels
-     * 
-     * For YES positions:
-     * - Trailing stop = highest price seen - trailingStopCents
-     * - If price drops to trailing stop, sell
-     * 
-     * For NO positions:
-     * - Trailing stop = lowest price seen + trailingStopCents
-     * - If price rises to trailing stop, sell
-     */
-    fun calculatePositionState(fill: PaperFill, currentPrice: Double): PositionState {
+    fun calculatePositionState(fill: PaperFill, currentPrice: Double): PositionState =
+        calculatePositionState(fill, currentPrice, System.currentTimeMillis())
+
+    fun calculatePositionState(fill: PaperFill, currentPrice: Double, nowMs: Long): PositionState {
         val entryPrice = fill.limitPrice
-        val side = fill.side.uppercase()
-        
-        // Calculate P&L
-        val pnl = if (side == "YES") {
-            (currentPrice - entryPrice) * fill.contracts
-        } else {
-            val yesEntry = 1.0 - entryPrice
-            (yesEntry - currentPrice) * fill.contracts
-        }
-        
-        val stake = fill.stakeUsd
-        val pnlPct = if (stake > 0) (pnl / stake) * 100 else 0.0
-        
-        // Calculate stop-loss price (always active)
-        val stopLossPrice = calculateStopLossPrice(side, entryPrice, fill.stakeUsd, stopLossPct)
-        
-        // For trailing stop: track the peak/low and subtract/add trailingStopCents
-        // The key insight: we want to sell when price moves AGAINST us by trailingStopCents
-        val (trailingStopPrice, peakPrice) = if (side == "YES") {
-            // For YES: we want to sell if price drops by trailingStopCents from the highest point
-            val peak = max(entryPrice, currentPrice)
-            val stop = (peak - trailingStopCents / 100.0).coerceIn(0.0, 1.0)
-            Pair(stop, peak)
-        } else {
-            // For NO: we want to sell if price rises by trailingStopCents from the lowest point
-            val yesEntry = 1.0 - entryPrice
-            val low = min(yesEntry, currentPrice)
-            val stop = (low + trailingStopCents / 100.0).coerceIn(0.0, 1.0)
-            Pair(stop, low)
-        }
-        
-        // Check if any stop is hit
-        val stopHit = stopLossPrice?.let { sl ->
-            shouldTriggerStopLoss(side, currentPrice, sl)
-        } ?: trailingStopPrice?.let { ts ->
-            shouldTriggerTrailing(side, currentPrice, ts)
-        } ?: false
-        
+        val pnl = (currentPrice - entryPrice) * fill.contracts
+        val pnlPct = if (fill.stakeUsd > 0.0) (pnl / fill.stakeUsd) * 100.0 else 0.0
+        val ageMs = (nowMs - fill.createdAtMs).coerceAtLeast(0L)
+        val closeFallback = fill.closeTimeMs?.let { it - nowMs <= settlementFallbackMs } == true
+        val timeFallback = ageMs >= maxHoldMs || closeFallback
+        val stopLossPrice = if (ageMs >= stopLossDelayMs || timeFallback) {
+            calculateStopLossPrice(entryPrice, stopLossPct)
+        } else null
+        val peak = max(entryPrice, max(fill.peakPrice ?: entryPrice, currentPrice))
+        val distance = effectiveDistance(entryPrice)
+        val activationPrice = entryPrice * (1.0 + trailActivationPct.coerceAtLeast(0.0) / 100.0)
+        val trailActivated = peak + 1e-9 >= activationPrice
+        val trailingStopPrice = if (trailActivated) {
+            (peak - distance).coerceIn(0.0, 1.0)
+        } else null
+        val stopLossHit = stopLossPrice != null && currentPrice <= stopLossPrice
+        val trailingHit = trailingStopPrice != null && currentPrice <= trailingStopPrice
+        val stopHit = timeFallback || stopLossHit || trailingHit
         val stopType = when {
-            stopLossPrice != null && shouldTriggerStopLoss(side, currentPrice, stopLossPrice) -> "STOP LOSS"
-            trailingStopPrice != null && shouldTriggerTrailing(side, currentPrice, trailingStopPrice) -> "TRAILING STOP"
+            timeFallback -> "TIME FALLBACK"
+            stopLossHit -> "STOP LOSS"
+            trailingHit -> "TRAILING STOP"
             else -> null
         }
-        
         return PositionState(
             fill = fill,
             currentPrice = currentPrice,
@@ -182,104 +166,83 @@ class TrailingStop(
             stopLossPrice = stopLossPrice,
             stopHit = stopHit,
             stopType = stopType,
-            peakPrice = peakPrice,
-            trailingDistanceCents = trailingStopCents
+            peakPrice = peak,
+            trailingDistanceCents = distance * 100.0,
+            trailingDistancePct = trailingStopPct,
+            trailActivated = trailActivated,
+            timeFallback = timeFallback
         )
     }
 
-    /**
-     * Calculate stop-loss price for a position
-     */
-    private fun calculateStopLossPrice(
-        side: String,
-        entryPrice: Double,
-        stake: Double,
-        stopLossPct: Double
-    ): Double {
-        return if (side == "YES") {
-            // For YES: stop loss is entryPrice minus stopLossPct
-            (entryPrice - (entryPrice * stopLossPct / 100)).coerceIn(0.0, 1.0)
+    private fun effectiveDistance(entryPrice: Double): Double =
+        if (trailingStopCents != null) {
+            trailingStopCents.coerceAtLeast(0.0) / 100.0
         } else {
-            // For NO: stop loss is entryPrice plus stopLossPct
-            val yesEntry = 1.0 - entryPrice
-            (yesEntry + (yesEntry * stopLossPct / 100)).coerceIn(0.0, 1.0)
+            entryPrice * trailingStopPct.coerceIn(
+                SignalConstants.MIN_TRAILING_STOP_PCT,
+                SignalConstants.MAX_TRAILING_STOP_PCT
+            ) / 100.0
         }
-    }
 
-    /**
-     * Check if stop-loss should trigger
-     */
-    private fun shouldTriggerStopLoss(side: String, currentPrice: Double, stopPrice: Double): Boolean {
-        return if (side == "YES") {
-            // For YES: trigger if currentPrice <= stopPrice
-            currentPrice <= stopPrice
-        } else {
-            // For NO: trigger if currentPrice >= stopPrice
-            currentPrice >= stopPrice
+    private fun calculateStopLossPrice(entryPrice: Double, pct: Double): Double =
+        (entryPrice * (1.0 - pct.coerceAtLeast(0.0) / 100.0)).coerceIn(0.0, 1.0)
+
+    fun getPositionsWithStops(currentPrices: Map<String, Double>): List<PositionState> =
+        paperState.fills.filter { !it.settled }.mapNotNull { fill ->
+            currentPrices[fill.ticker.uppercase()]?.let { calculatePositionState(fill, it) }
         }
-    }
 
-    /**
-     * Check if trailing stop should trigger
-     */
-    private fun shouldTriggerTrailing(side: String, currentPrice: Double, stopPrice: Double): Boolean {
-        return if (side == "YES") {
-            // For YES: trigger if currentPrice <= stopPrice
-            currentPrice <= stopPrice
-        } else {
-            // For NO: trigger if currentPrice >= stopPrice
-            currentPrice >= stopPrice
-        }
-    }
+    fun enabled(): Boolean = enabledFlag
 
-    /**
-     * Get all positions with their stop status
-     */
-    fun getPositionsWithStops(currentPrices: Map<String, Double>): List<PositionState> {
-        return paperState.fills
-            .filter { !it.settled }
-            .mapNotNull { fill ->
-                currentPrices[fill.ticker.uppercase()]?.let { price ->
-                    calculatePositionState(fill, price)
-                }
-            }
-    }
-
-    /**
-     * Check if trailing stops are enabled
-     */
-    fun enabled(): Boolean = true
-
-    /**
-     * Get stop configuration
-     */
     fun getConfig(): StopConfig = StopConfig(
-        trailingStopCents = trailingStopCents,
+        trailingStopPct = trailingStopPct,
         stopLossPct = stopLossPct,
-        minProfitCents = minProfitCents,
-        enabled = true
+        trailActivationPct = trailActivationPct,
+        stopLossDelayMs = stopLossDelayMs,
+        maxHoldMs = maxHoldMs,
+        settlementFallbackMs = settlementFallbackMs,
+        maxQuoteAgeMs = maxQuoteAgeMs,
+        enabled = enabledFlag,
+        trailingStopCents = trailingStopCents,
+        minProfitCents = minProfitCents
     )
 
-    /**
-     * Update stop configuration
-     */
-    fun updateConfig(config: StopConfig): TrailingStop {
-        return TrailingStop(
-            paperState,
-            config.trailingStopCents,
-            config.stopLossPct,
-            config.minProfitCents
-        )
-    }
+    fun updateConfig(config: StopConfig): TrailingStop = TrailingStop(
+        paperState = paperState,
+        trailingStopCents = config.trailingStopCents,
+        stopLossPct = config.stopLossPct,
+        minProfitCents = config.minProfitCents,
+        trailingStopPct = config.trailingStopPct,
+        trailActivationPct = config.trailActivationPct,
+        stopLossDelayMs = config.stopLossDelayMs,
+        maxHoldMs = config.maxHoldMs,
+        settlementFallbackMs = config.settlementFallbackMs,
+        maxQuoteAgeMs = config.maxQuoteAgeMs,
+        enabledFlag = config.enabled
+    )
 }
 
-/**
- * Extension functions for easy access
- */
 fun PaperBookState.getTrailingStopManager(
-    trailingStopCents: Double = 3.0,
-    stopLossPct: Double = 3.0,         // 3% stop loss (more reasonable for prediction markets)
-    minProfitCents: Double = 0.0
-): TrailingStop {
-    return TrailingStop(this, trailingStopCents, stopLossPct, minProfitCents)
-}
+    trailingStopCents: Double? = null,
+    stopLossPct: Double = SignalConstants.DEFAULT_STOP_LOSS_PCT,
+    minProfitCents: Double = 0.0,
+    trailingStopPct: Double = SignalConstants.DEFAULT_TRAILING_STOP_PCT,
+    trailActivationPct: Double = SignalConstants.DEFAULT_TRAIL_ACTIVATION_PCT,
+    stopLossDelayMs: Long = SignalConstants.DEFAULT_STOP_LOSS_DELAY_MS,
+    maxHoldMs: Long = SignalConstants.DEFAULT_MAX_PAPER_HOLD_MS,
+    settlementFallbackMs: Long = SignalConstants.DEFAULT_SETTLEMENT_FALLBACK_MS,
+    maxQuoteAgeMs: Long = SignalConstants.DEFAULT_MAX_EXIT_QUOTE_AGE_MS,
+    enabled: Boolean = true
+): TrailingStop = TrailingStop(
+    paperState = this,
+    trailingStopCents = trailingStopCents,
+    stopLossPct = stopLossPct,
+    minProfitCents = minProfitCents,
+    trailingStopPct = trailingStopPct,
+    trailActivationPct = trailActivationPct,
+    stopLossDelayMs = stopLossDelayMs,
+    maxHoldMs = maxHoldMs,
+    settlementFallbackMs = settlementFallbackMs,
+    maxQuoteAgeMs = maxQuoteAgeMs,
+    enabledFlag = enabled
+)
