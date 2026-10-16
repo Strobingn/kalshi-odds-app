@@ -6,7 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -15,7 +15,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.material3.Slider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -123,6 +126,7 @@ fun ScalpScreen(
                     color = colors.textSecondary
                 )
                 ScalpCharts(state.accounts)
+                state.tape?.let { LivePriceChart(it) }
                 OutlinedButton(onClick = onReset, modifier = Modifier.fillMaxWidth()) {
                     Text("Reset all 20 to \$20,000")
                 }
@@ -211,6 +215,47 @@ private fun SettingSlider(label: String, value: Double, min: Double, max: Double
                 activeTrackColor = colors.accentBlue
             )
         )
+    }
+}
+
+@Composable
+private fun LivePriceChart(tape: com.dirk.kalshiodds.signal.scalp.ScalpTape) {
+    val colors = DipTheme.colors
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(colors.surface, RoundedCornerShape(16.dp))
+            .border(1.dp, colors.border, RoundedCornerShape(16.dp))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text("Live Kalshi", style = MaterialTheme.typography.titleSmall, color = colors.textPrimary, fontWeight = FontWeight.Bold)
+        Text(
+            String.format(Locale.US, "YES %.0f¢ · NO %.0f¢ · %d min left", tape.yesBid * 100, tape.noBid * 100, tape.tteMs / 60_000),
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.textSecondary
+        )
+        Canvas(Modifier.fillMaxWidth().height(100.dp)) {
+            val yes = tape.yesBids.map { it.toFloat() }
+            val no = tape.noBids.map { it.toFloat() }
+            if (yes.size < 2) return@Canvas
+            val all = yes + no
+            val min = all.min()
+            val max = all.max()
+            val span = (max - min).coerceAtLeast(0.01f)
+            fun path(points: List<Float>): Path {
+                val p = Path()
+                val last = points.lastIndex
+                points.forEachIndexed { i, v ->
+                    val x = size.width * i / last
+                    val y = size.height * (1f - ((v - min) / span).coerceIn(0f, 1f))
+                    if (i == 0) p.moveTo(x, y) else p.lineTo(x, y)
+                }
+                return p
+            }
+            drawPath(path(yes), colors.up, style = Stroke(2.dp.toPx(), cap = StrokeCap.Round))
+            drawPath(path(no), colors.down, style = Stroke(2.dp.toPx(), cap = StrokeCap.Round))
+        }
     }
 }
 

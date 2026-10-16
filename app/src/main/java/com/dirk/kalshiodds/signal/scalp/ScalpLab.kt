@@ -64,7 +64,8 @@ data class ScalpAccount(
 
 @Serializable
 data class ScalpLabState(
-    val accounts: List<ScalpAccount> = ScalpCatalog.merge(emptyList())
+    val accounts: List<ScalpAccount> = ScalpCatalog.merge(emptyList()),
+    val tape: ScalpTape? = null
 )
 
 /**
@@ -118,7 +119,7 @@ class ScalpLab(
                 if (stepped != account) changed = true
                 next += stepped
             }
-            if (changed) publish(_state.value.copy(accounts = next))
+            if (changed) publish(_state.value.copy(accounts = next, tape = tape))
         }
     }
 
