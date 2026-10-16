@@ -156,6 +156,15 @@ than treating the requested limit as a guaranteed sale. A hard risk/time
 fallback may be needed, but its semantics must be explicitly paper-tested and
 approved before implementation.
 
+The pending policy boundary is equally important: do not automatically sell
+solely because the mark dipped below entry, and do not promise capital
+preservation. Compare the calibrated probability of a rebound before the
+deadline and its continuation value with deeper-loss risk, remaining time, and
+the executable exit. Breakeven is fee-adjusted, so it is not necessarily the
+entry price. Do not widen a stop arbitrarily after a loss, and do not force a
+hold to settlement when the time/risk test says to exit; the decision must have
+an explicit time budget and fallback.
+
 Evaluate candidate exits on identical entries and identical information:
 
 1. fixed stop plus executable taker exit;
