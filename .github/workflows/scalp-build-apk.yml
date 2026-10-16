@@ -35,7 +35,7 @@ jobs:
           python-version: "3.12"
       - name: ML trainer tests (no look-ahead, publish safety)
         run: |
-                    python3 ml/test_train_edge.py
+          python3 ml/test_train_edge.py
           python3 ml/test_publish_model.py
           python3 ml/test_train_edge_0337.py
           if [ -f ml/test_train_longshot.py ]; then python3 ml/test_train_longshot.py; fi
