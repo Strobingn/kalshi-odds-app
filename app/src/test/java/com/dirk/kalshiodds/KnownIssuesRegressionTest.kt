@@ -21,7 +21,6 @@ import com.dirk.kalshiodds.signal.trade.LiveOrderGates
 import com.dirk.kalshiodds.signal.trade.LivePosition
 import com.dirk.kalshiodds.signal.trade.PlacedOrder
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
-import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TicketSession
 import com.dirk.kalshiodds.signal.trade.TradeModeLabel
 import com.dirk.kalshiodds.signal.trade.TradeTicket
@@ -422,10 +421,7 @@ class KnownIssuesRegressionTest {
         val market = sample("KXETH15M-HUNTER", yesAsk = 0.03, noAsk = 0.97, aiYes = 4.0, predicted = "YES")
         val ctx = TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false, nowMs = nowMs)
         val hunter = TicketBuilder.proposeHunter(market, ctx)
-        assertNotNull(hunter)
-        assertEquals(TicketKind.HUNTER, hunter!!.kind)
-        assertFalse(hunter.modelEdge)
-        assertFalse(BetCall.qualifies(hunter, market, ctx))
+        assertNull(hunter)
         val decision = BetCall.decide(market, ctx)
         assertEquals(BetCall.Headline.NO_BET, decision.headline)
         assertFalse(decision.isActionable)

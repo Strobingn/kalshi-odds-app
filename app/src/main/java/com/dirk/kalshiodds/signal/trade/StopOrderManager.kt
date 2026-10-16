@@ -56,7 +56,11 @@ class StopOrderManager(
         if (!enabled() || !autoExecute || !config.autoExecute) return emptyList()
         paperBook.snapshot().fills.filter { !it.settled }.forEach { fill ->
             val quote = quotes[fill.ticker] ?: quotes[fill.ticker.uppercase()]
-            quote?.takeIf { isFresh(it, nowMs) }?.let { paperBook.updatePeak(fill.id, it.price, nowMs) }
+            quote?.takeIf { isFresh(it, nowMs) }?.let {
+                // Poll time is not quote time: rereading an unchanged source
+                // snapshot must not manufacture a new trend observation.
+                paperBook.updatePeak(fill.id, it.price, it.observedAtMs)
+            }
         }
         val current = paperBook.snapshot()
         val manager = current.getTrailingStopManager(

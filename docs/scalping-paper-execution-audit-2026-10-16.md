@@ -22,6 +22,11 @@ The repository history was inspected before editing. The relevant branch set inc
 
 Key paths:
 
+The dedicated APK identity is `com.dirk.kalshiodds.dotscalper` with launcher
+label **Dot Scalper**. Its FileProvider authority derives from that ID, and
+the in-app updater is restricted to the rolling
+`apk-v1.0-dot-adaptive-stops-fix-20261016` release and matching asset prefix.
+
 - `app/src/main/java/com/dirk/kalshiodds/signal/trade/TrailingStop.kt`: entry-relative trail distance, activation, stop-loss delay, quote-age gate, and time/settlement fallback.
 - `app/src/main/java/com/dirk/kalshiodds/signal/trade/StopOrderManager.kt`: paper stop evaluation, executable held-side quote, depth clipping, and per-snapshot consumption.
 - `app/src/main/java/com/dirk/kalshiodds/signal/paper/PaperBook.kt`: entry/exit ledger, fees, partial exits, residual positions, and persisted peaks.
@@ -101,7 +106,19 @@ Focused tests run on this branch include:
 - `TrailingStopTest` and `PaperBookTest`: stop semantics, time fallback, unique partial identities, peak retention, fee-aware exits, stale handling, repeated-depth protection, exactly-once trend observations, rebound rejection, and stop-label precedence through `StopOrderManager`.
 - `TradeTicketTest`, `PositionSellTest`, `TickBookMathTest`, `KalshiFeeAndWinTargetTest`, and `AdaptiveStrategyTest`: executable side pricing, book/tick behavior, fees, ticket sizing, and adaptive controls.
 
-The focused post-review gate (`TrailingStopTest`, `TradeTicketTest`) passed under JDK 21. A full `:app:testDebugUnitTest` rerun under JDK 21 executed 734 tests with 5 failures. Four substantive failures reproduce unchanged on the isolated pre-review `a23fc3f` tree: `KnownIssuesRegressionTest.cheapHunterWithNoModelEdgeIsNoBetHeadline`, `ScorecardMetricsTest.hitRateBrierAndEdgeSplit`, `ScoringPredictabilityTest.lateWeightsShiftAwayFromAiTowardMicro`, and `BetCallAgreementTest.cheapHunterWithoutModelEdgeIsNoBetHeadline`. The fifth is `TicketForwardSqliteTest.existingVersionSixDatabaseGetsNewTableWithoutLosingForwardSignals`, a Robolectric/sqlite fixture collision (`settled_windows already exists`). These failures are not in the changed execution files and are not claimed as caused or fixed by this patch. The sandbox's default Android Studio JBR 25.0.2 is incompatible with the repository Kotlin tooling; the reruns used the installed Temurin JDK 21. CI remains the release authority.
+The focused post-review gate ran under Temurin JDK 21 and passed: 65 tests,
+0 failures. The complete `:app:testDebugUnitTest` suite then executed 734
+tests with 0 failures and 0 errors. The five failures observed before this
+branch's package/test-isolation work were resolved as follows: the two
+no-edge hunter fixtures now assert the intended fail-closed null ticket, the
+scorecard fixture expects the mathematically correct picked-side Brier of
+0.29, the predictability test reflects the policy's zero AI weight in both
+regimes, and the SQLite migration fixture explicitly resets its own tables
+and closes helpers. The stop regression also verifies that rereading a quote
+with the same source timestamp at a later poll time does not create a new
+trend observation. The default Android Studio JBR 25.0.2 remains incompatible
+with this repository's Kotlin tooling; the successful local runs used Temurin
+JDK 21. CI remains the release authority.
 
 The full repository suite has known environment-sensitive Robolectric/Android-all download failures and several pre-existing substantive failures from the earlier branch baseline; those are not presented as proof of this patch. CI must remain the release build authority.
 

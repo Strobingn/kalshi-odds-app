@@ -64,13 +64,13 @@ Package: `com.dirk.kalshiodds` · version **0.3.15**
 | Header / labels / buttons | `MarketQuoteView.of` | `MarketQuoteViewTest` + `ChartWindowRestoreTest.labelsHeaderButtonsShareOneQuoteSource` |
 | Payout multiple | `KalshiQuoteDisplay.multiplier` + `KalshiFee.payoutMultiple` | `MarketQuoteViewTest.oneCentAtFiveDollarsIsHandComputed93_46x` |
 
-## `chat-GTP` separate install
+## Dot Scalper separate install
 
-This branch builds **DipHunter GTP** with the independent Android application
-ID `com.dirk.kalshiodds.chatgtp` and a separate launcher icon. It installs
+This branch builds **Dot Scalper** with the independent Android application
+ID `com.dirk.kalshiodds.dotscalper` and a separate launcher icon. It installs
 alongside the original app and has its own local data and API-key settings.
-Each push to `chat-GTP` triggers the APK workflow and publishes the rolling
-`gtp-v1.0-chat-GTP` prerelease. Install future APKs from that same branch
+Each push to `dot/adaptive-stops-fix-20261016` triggers the APK workflow and publishes the rolling
+`apk-v1.0-dot-adaptive-stops-fix-20261016` prerelease. Install future APKs from that same branch
 over this installation to keep its data: the signing certificate and package
 ID are stable and CI increases the version code for each new run. In **Settings
 → Check for app update**, the app checks that same branch release and downloads
@@ -79,7 +79,7 @@ confirm it to update in place without removing local data. Never switch APKs
 signed with another certificate or a different application ID.
 
 The branch-only model workflow publishes `edge-model-chat-GTP` when manually
-dispatched on `chat-GTP`. See [the audit](docs/ml-audit-chat-GTP-2026-09-27.md)
+dispatched on its model-release branch. See [the audit](docs/ml-audit-chat-GTP-2026-09-27.md)
 for the current evidence and unresolved trading risks.
 
 ## 0.3.8

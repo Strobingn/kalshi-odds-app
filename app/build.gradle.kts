@@ -11,9 +11,9 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        // Independent install from the original DipHunter app. Keep this ID
-        // and the committed debug signing key stable for future APK updates.
-        applicationId = "com.dirk.kalshiodds.chatgtp"
+        // Dedicated Dot Scalper install. Keep this ID and the committed debug
+        // signing key stable for future APK updates on this branch.
+        applicationId = "com.dirk.kalshiodds.dotscalper"
         minSdk = 26
         targetSdk = 35
         // GitHub Actions run numbers increase with each branch push, so a

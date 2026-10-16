@@ -15,11 +15,9 @@ class AppVersionTest {
     fun labelReadsBuildConfigValues() {
         assertEquals(BuildConfig.VERSION_NAME, AppVersion.versionName)
         assertEquals(BuildConfig.VERSION_CODE, AppVersion.versionCode)
-        assertEquals(
-            "DipHunter GTP v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
-            AppVersion.label
-        )
-        assertTrue(AppVersion.label.startsWith("DipHunter GTP v"))
+        assertEquals("Dot Scalper v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", AppVersion.label)
+        assertTrue(AppVersion.label.startsWith("Dot Scalper v"))
         assertTrue(AppVersion.label.endsWith("(${BuildConfig.VERSION_CODE})"))
+        assertEquals("com.dirk.kalshiodds.dotscalper", BuildConfig.APPLICATION_ID)
     }
 }
