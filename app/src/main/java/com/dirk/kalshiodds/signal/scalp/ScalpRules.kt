@@ -178,11 +178,10 @@ object ScalpCatalog {
                 if (aPx <= 0.50) ScalpIntent.Buy(side, ScalpSettings.fraction) else ScalpIntent.Hold
             } else {
                 val b = bid(t, pos.side)
-                val trail = a.learnedExit.coerceIn(0.02, 0.08)
                 when {
-                    pos.peakBid - b + 1e-9 >= trail -> ScalpIntent.Sell(force = true)
-                    b + 1e-9 <= pos.entry - ScalpSettings.stopLoss -> ScalpIntent.Sell(force = true)
-                    t.tteMs in 1..60_000L -> ScalpIntent.Sell(force = true)
+                    pos.peakBid - b + 1e-9 >= 0.02 -> ScalpIntent.Sell(force = true)
+                    b + 1e-9 <= pos.entry - 0.03 -> ScalpIntent.Sell(force = true)
+                    t.tteMs in 1..90_000L -> ScalpIntent.Sell(force = true)
                     else -> ScalpIntent.Hold
                 }
             }
