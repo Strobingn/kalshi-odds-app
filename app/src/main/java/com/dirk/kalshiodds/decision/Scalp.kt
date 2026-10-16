@@ -728,7 +728,7 @@ class ScalpBook(
                 val n = minOf(t.remaining, kotlin.math.floor((q.bidSize(t.side) ?: 0.0) + 1e-9).toInt())
                 val base = if (t.state == ScalpState.OPEN) t.copy(state = ScalpState.PENDING_EXIT, exitDecidedAtMs = q.nowMs, exitReason = reason) else t
                 if (n <= 0) return base
-                val next = base.copy(soldContracts = base.soldContracts + n, proceedsUsd = base.proceedsUsd + n * bid, exitFeeUsd = base.exitFeeUsd + ScalpRule.orderFee(n, bid))
+                val next = ScalpFills.sell(base, q.nowMs, n, n * bid, ScalpRule.orderFee(n, bid))
                 if (next.remaining <= 0) close(next, q.nowMs, reason) else next
             }
             else -> null
@@ -921,7 +921,7 @@ class ScalpBook(
             if (p.kind == ShockFav.Kind.FADE_MAKER && t.state == ScalpState.OPEN) {
                 val tgt = (t.entryPrice ?: 0.0) + p.tp
                 if (bid >= tgt + 0.01 - 1e-9) { // resting ask at target traded through: maker exit, fee 0
-                    changed += close(t.copy(soldContracts = t.contracts, proceedsUsd = t.proceedsUsd + t.remaining * tgt), q.nowMs, "maker target +${Math.round(p.tp * 100)}¢")
+                    changed += close(ScalpFills.sell(t, q.nowMs, t.remaining, t.remaining * tgt, 0.0), q.nowMs, "maker target +${Math.round(p.tp * 100)}¢")
                     continue
                 }
             }
@@ -936,7 +936,7 @@ class ScalpBook(
             val n = minOf(t.remaining, kotlin.math.floor((q.bidSize(t.side) ?: 0.0) + 1e-9).toInt())
             val base = if (t.state == ScalpState.OPEN) t.copy(state = ScalpState.PENDING_EXIT, exitDecidedAtMs = q.nowMs, exitReason = reason) else t
             if (n <= 0) { if (base !== t) changed += base; continue }
-            val next = base.copy(soldContracts = base.soldContracts + n, proceedsUsd = base.proceedsUsd + n * bid, exitFeeUsd = base.exitFeeUsd + ScalpRule.orderFee(n, bid))
+            val next = ScalpFills.sell(base, q.nowMs, n, n * bid, ScalpRule.orderFee(n, bid))
             changed += if (next.remaining <= 0) close(next, q.nowMs, reason) else next
         }
         // 0.3.59: Scalp tab is Bitcoin only — sf entries on BTC markets only (other coins' spot is signal input).
@@ -1122,7 +1122,7 @@ class ScalpBook(
         if (!filled) return next.takeIf { it != t }
         val n = t.remaining
         val fee = com.dirk.kalshiodds.signal.trade.KalshiFee.makerFee(n, limit, com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(t.ticker))
-        return close(next.copy(soldContracts = t.soldContracts + n, proceedsUsd = t.proceedsUsd + n * limit, exitFeeUsd = t.exitFeeUsd + fee, restingLimit = null),
+        return close(ScalpFills.sell(next, q.nowMs, n, n * limit, fee).copy(restingLimit = null),
             q.nowMs, "${t.exitReason} (maker exit)")
     }
 
@@ -1270,11 +1270,7 @@ class ScalpBook(
         val size = kotlin.math.floor((q.bidSize(t.side) ?: 0.0) + 1e-9).toInt()
         val n = minOf(size, t.remaining)
         if (n <= 0) return null
-        val next = t.copy(
-            soldContracts = t.soldContracts + n,
-            proceedsUsd = t.proceedsUsd + n * bid,
-            exitFeeUsd = t.exitFeeUsd + ScalpRule.orderFee(n, bid)
-        )
+        val next = ScalpFills.sell(t, q.nowMs, n, n * bid, ScalpRule.orderFee(n, bid))
         return if (next.remaining <= 0) close(next, q.nowMs, next.exitReason) else next
     }
 
@@ -1301,7 +1297,7 @@ class ScalpBook(
                     else -> 0.0
                 }
                 close(
-                    t.copy(soldContracts = t.contracts, proceedsUsd = t.proceedsUsd + t.remaining * pay),
+                    ScalpFills.sell(t, atMs, t.remaining, t.remaining * pay, 0.0, settlement = true),
                     atMs,
                     if (t.state == ScalpState.PENDING_EXIT) "${t.exitReason} → ${ScalpRule.ExitReason.SETTLED.label}" else ScalpRule.ExitReason.SETTLED.label
                 )
@@ -1395,6 +1391,7 @@ class ScalpBook(
     fun loadDaily(dayEt: String) = store.loadDaily(dayEt)
     fun pageTrades(scalperId: String, afterClosedAtMs: Long? = null, afterId: String? = null, limit: Int = 50) =
         store.pageTrades(scalperId, afterClosedAtMs, afterId, limit)
+    fun windowTrades(scalperId: String, ticker: String) = store.windowTrades(scalperId, ticker)
     fun unsyncedClosed(limit: Int) = store.unsyncedClosed(limit)
     fun markSynced(ids: List<String>) = store.markSynced(ids)
     fun migrateStatsChunk(limit: Int = 500): Int = store.migrateStatsChunk(limit).also { if (it > 0) _stats.value = store.loadStats() }
@@ -1564,11 +1561,11 @@ class ScalpBook(
                         var left = t.remaining; var usd = 0.0; var fee = 0.0; var n = 0
                         for ((px, sz) in q.bidLadder(t.side)) { if (left <= 0 || px <= 0.0) break; val k = minOf(left, kotlin.math.floor(sz + 1e-9).toInt()); if (k > 0) { usd += k * px; fee += ScalpRule.orderFee(k, px); n += k; left -= k } }
                         if (n <= 0) { if (base !== t) out += base; continue }
-                        base.copy(soldContracts = base.soldContracts + n, proceedsUsd = base.proceedsUsd + usd, exitFeeUsd = base.exitFeeUsd + fee)
+                        ScalpFills.sell(base, q.nowMs, n, usd, fee)
                     } else {
                         val n = minOf(t.remaining, kotlin.math.floor((q.bidSize(t.side) ?: 0.0) + 1e-9).toInt())
                         if (n <= 0) { if (base !== t) out += base; continue }
-                        base.copy(soldContracts = base.soldContracts + n, proceedsUsd = base.proceedsUsd + n * bid, exitFeeUsd = base.exitFeeUsd + ScalpRule.orderFee(n, bid))
+                        ScalpFills.sell(base, q.nowMs, n, n * bid, ScalpRule.orderFee(n, bid))
                     }
                     val filled = next.copy(note = ScalpV2.tag(next.note, "v2fillbook", q.bookAtMs.toString()))
                     out += if (filled.remaining <= 0) close(filled, q.nowMs, reason) else filled

@@ -1125,6 +1125,9 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
             arrayOf(scalperId, afterClosedAtMs.toString(), afterClosedAtMs.toString(), afterId ?: ""))
     }.getOrDefault(emptyList())
 
+    override fun windowTrades(scalperId: String, ticker: String): List<com.dirk.kalshiodds.decision.ScalpTrade> =
+        scalpRows("SELECT * FROM ${ST.TABLE} INDEXED BY idx_scalp_ticker WHERE ticker = ? AND scalper_id = ? ORDER BY signal_at_ms", arrayOf(ticker.uppercase(), scalperId))
+
     /** Uploader: unsynced closed primaries by index (synced, closed_at_ms), oldest first. */
     override fun unsyncedClosed(limit: Int): List<com.dirk.kalshiodds.decision.ScalpTrade> = runCatching {
         scalpRows("SELECT * FROM ${ST.TABLE} WHERE synced = 0 AND state = 'CLOSED' AND scalper_id IS NOT NULL AND scalper_id != '' ORDER BY closed_at_ms ASC LIMIT $limit", null)

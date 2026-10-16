@@ -87,6 +87,7 @@ internal fun SwarmScalpCurve(windows: List<ScalpModels.WindowRow>, v2: Boolean, 
         Row(Modifier.fillMaxWidth().clickable(onClick = onOpen)) {
             Column(Modifier.weight(1f)) {
                 Text(row.model.label + if (enabled) "" else " · entries paused", color = c.textPrimary, fontWeight = FontWeight.SemiBold)
+                Text("Live 15m chart · buy & sell markers →", color = c.up, style = MaterialTheme.typography.labelSmall)
                 Text("${row.wins} W · ${row.losses} L · ${row.roundTrips} trades · ${row.open} open", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
                 feedback?.let { Text("Learned: ${it.trades} trades · recent net ${String.format(Locale.US, "%+.2f¢/ct", it.recentNetPerContract * 100)}", color = c.textSecondary, style = MaterialTheme.typography.labelSmall) }
             }
@@ -94,9 +95,10 @@ internal fun SwarmScalpCurve(windows: List<ScalpModels.WindowRow>, v2: Boolean, 
         }
     }
 }
-@Composable internal fun SwarmOpenPosition(t: ScalpTrade, bid: Double?) {
+@Composable internal fun SwarmOpenPosition(t: ScalpTrade, bid: Double?, onOpen: () -> Unit = {}) {
     val c = DipTheme.colors
     SwarmCard {
+        TextButton(onClick = onOpen) { Text("${t.algoLabel} · live chart →", color = c.up) }
         Text(t.algoLabel, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
         Text("${if (t.side == "YES") "UP" else "DOWN"} · ${t.remaining} ct · ${t.ticker}", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
         Text("Entry ${ScalpTabCopy.cents(t.entryPrice)} → bid ${ScalpTabCopy.cents(bid)} · ${t.unrealizedUsd(bid)?.let { ScalpTabCopy.money(it) } ?: "—"} after exit fee", color = c.textPrimary)

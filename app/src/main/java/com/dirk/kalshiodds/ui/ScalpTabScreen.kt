@@ -220,7 +220,7 @@ fun ScalpTabContent(
             val positions = st.activeScalps.filter { com.dirk.kalshiodds.decision.ScalpV2.isV2(it.variantId) == v2Only }
             item(key = "open-title") { Text("Open positions · ${positions.size}", color = c.textPrimary, fontWeight = FontWeight.SemiBold) }
             if (positions.isEmpty()) item(key = "flat") { Text("No open positions in this group", color = c.textSecondary) }
-            items(positions, key = { "swarm-open-" + it.id }) { SwarmOpenPosition(it, st.scalpBids[it.id]) }
+            items(positions, key = { "swarm-open-" + it.id }) { SwarmOpenPosition(it, st.scalpBids[it.id]) { ScalpModels.modelOf(it)?.let(onOpenAlgo) } }
             item(key = "by-strategy") { Text("By strategy · net after fees", color = c.textPrimary, fontWeight = FontWeight.SemiBold) }
             items(rows.sortedByDescending { it.netUsd }, key = { "swarm-strategy-" + it.model.code }) { r -> SwarmStrategyRow(r, st.feedback[r.model.code], enabled = !v2Only || st.controls.permits(r.model.code)) { onOpenAlgo(r.model) } }
             if (rows.isEmpty()) item(key = "no-results") { Text("No completed trades yet. Strategies and settings are available above.", color = c.textSecondary) }

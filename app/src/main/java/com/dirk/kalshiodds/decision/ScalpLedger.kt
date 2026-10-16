@@ -88,6 +88,7 @@ interface ScalpPersistence {
     /** Newest [limitWindows] windows' per-scalper aggregates. */
     fun loadWindows(limitWindows: Int = 48): List<ScalpWindowAgg> = emptyList()
     fun pageTrades(scalperId: String, afterClosedAtMs: Long?, afterId: String?, limit: Int): List<ScalpTrade> = emptyList()
+    fun windowTrades(scalperId: String, ticker: String): List<ScalpTrade> = emptyList()
     fun unsyncedClosed(limit: Int): List<ScalpTrade> = emptyList()
     fun markSynced(ids: List<String>) {}
     fun migrateStatsChunk(limit: Int): Int = 0
@@ -143,6 +144,9 @@ class InMemoryScalpPersistence : ScalpPersistence {
                 .filter { afterClosedAtMs == null || (it.closedAtMs ?: 0L) < afterClosedAtMs || ((it.closedAtMs ?: 0L) == afterClosedAtMs && it.id < (afterId ?: "")) }
                 .take(limit).toList()
         }
+    override fun windowTrades(scalperId: String, ticker: String): List<ScalpTrade> = synchronized(rows) {
+        rows.values.filter { it.ticker.equals(ticker, true) && ScalpModels.scalperIdOf(it) == scalperId }.sortedBy { it.signalAtMs }
+    }
     override fun unsyncedClosed(limit: Int): List<ScalpTrade> = synchronized(rows) {
         rows.values.filter { it.state == ScalpState.CLOSED && it.isPrimary }.sortedBy { it.closedAtMs }.take(limit)
     }
