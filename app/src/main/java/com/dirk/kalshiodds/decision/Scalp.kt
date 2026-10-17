@@ -815,7 +815,7 @@ class ScalpBook(
     private fun o50PriceEntries(q: ScalpRule.Quote, key: String, ya: Double, yb: Double): List<ScalpTrade> {
         if (!ShockFav.o50InEntryWindow(q.tauS)) return emptyList()
         val openMid = o50OpenMid[key] ?: return emptyList()
-        val mine = _trades.value.filter { it.ticker == key && ShockFav.isO50(it.variantId) }
+        val mine = _all.value.filter { it.ticker == key && ShockFav.isO50(it.variantId) }
         val out = ArrayList<ScalpTrade>()
         for (p in ShockFav.VARIANTS) {
             if (p.kind != ShockFav.Kind.OPEN50 || p.o50 == ShockFav.O50.AI) continue
@@ -860,7 +860,7 @@ class ScalpBook(
         }
         if (o50OpenMid.size > 200) o50OpenMid.keys.filter { (ScalpTicker.closeMs(it) ?: Long.MAX_VALUE) < q.nowMs }.forEach { o50OpenMid.remove(it) }
         // Cancel obsolete opening orders before any spot/σ early return. A new live side can signal immediately.
-        _trades.value.filter { it.ticker == key && it.state == ScalpState.PENDING_ENTRY &&
+        _all.value.filter { it.ticker == key && it.state == ScalpState.PENDING_ENTRY &&
             ShockFav.byVariantId(it.variantId)?.o50 == ShockFav.O50.UPTICK
         }.forEach { t ->
             val status = openingEntryStatus(t, q)
@@ -889,7 +889,7 @@ class ScalpBook(
         if (sfBasis.size > 200) sfBasis.keys.filter { (ScalpTicker.closeMs(it) ?: Long.MAX_VALUE) < q.nowMs }.forEach { sfBasis.remove(it) }
         val fairYes = ShockFav.fairYes(sNow, strike, sig, q.tauS, basis)
         stepShadows(q, fairYes)
-        val mine = _trades.value.filter { it.ticker == key && ShockFav.isShockFav(it.variantId) }
+        val mine = _all.value.filter { it.ticker == key && ShockFav.isShockFav(it.variantId) }
         val giveUpMs = { t: ScalpTrade -> if (ShockFav.byVariantId(t.variantId)?.let { it.kind == ShockFav.Kind.FADE_MAKER || it.o50 == ShockFav.O50.MAKER } == true) Long.MAX_VALUE else ShockFav.ENTRY_GIVE_UP_MS }
         val changed = ArrayList<ScalpTrade>()
         val live = q.nowMs < q.closeMs && q.fresh()
@@ -1371,11 +1371,13 @@ class ScalpBook(
 
     private fun save(t0: ScalpTrade) {
         val prev = _all.value.firstOrNull { it.id == t0.id }
-        val t = if (liveExtras) withDetail(t0, prev) else t0
+        val t1 = if (liveExtras) withDetail(t0, prev) else t0
+        // 0.3.79: a retired model's new trade still seeds its kept v2 copy, then is stored as a hidden shadow row.
+        if (prev == null && liveExtras) spawnV2(t1)
+        val t = if (prev == null) ScalpModels.toShadowIfRetired(t1) else t1
         // 0.3.67: enqueue DB+stats off the quote lock; flushBatches drains on a worker.
         writeQ.merge(t.id, t to prev) { old, neu -> neu.first to (old.second ?: neu.second) }
         if (writeQ.size >= 80) flushWrites() // 0.3.67: never let the queue grow unboundedly (soak / burst quotes)
-        if (prev == null && liveExtras) spawnV2(t)
         val cur = _all.value
         val idx = cur.indexOfFirst { it.id == t.id }
         _all.value = when {
@@ -1494,7 +1496,7 @@ class ScalpBook(
             val unfinished = _all.value.asSequence().filter { isActive(it) && ScalpModels.modelOf(it) == model }
                 .map { it.windowKey }.toSet()
             val cfg = controls.state.value
-            if (model == null || !cfg.permits(model.code)) continue
+            if (model == null || ScalpModels.isRetired(model) || !cfg.permits(model.code)) continue
             val learned = ScalpV2.plan(seed.id, if (cfg.adaptive && !cfg.manual) v2Evidence else emptyList(), t.signalAtMs, model.code, unfinished)
             val feedback = controls.feedback(model.code)
             // Every completed trade updates this EWMA; completed-window evidence still controls promotion.

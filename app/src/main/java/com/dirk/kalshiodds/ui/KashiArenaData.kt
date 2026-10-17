@@ -7,7 +7,7 @@ internal object KashiArenaData {
     data class Point(val atMs: Long, val net: Double)
     enum class Sort(val label: String) { NET("Net"), WIN("Win rate"), TRADES("Trades") }
     fun rows(st: ScalpTabState, v2: Boolean, sort: Sort = Sort.NET): List<ScalpModels.Row> =
-        ScalpModels.ALL.filter { ScalpModels.isV2(it) == v2 }.map { model ->
+        ScalpModels.ACTIVE.filter { ScalpModels.isV2(it) == v2 }.map { model ->
             st.algoAllTime[model] ?: ScalpModels.rowFromStat(com.dirk.kalshiodds.decision.ScalpStat(model.code))
         }.sortedWith(compareByDescending<ScalpModels.Row> { it.roundTrips > 0 }.thenByDescending {
             when (sort) { Sort.NET -> it.netUsd; Sort.WIN -> it.winRate ?: -1.0; Sort.TRADES -> it.roundTrips.toDouble() }

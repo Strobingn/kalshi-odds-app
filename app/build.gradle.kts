@@ -14,8 +14,8 @@ android {
         applicationId = "com.dirk.kalshiodds.kashi"
         minSdk = 26
         targetSdk = 35
-        versionCode = 93
-        versionName = "0.3.78"
+        versionCode = 94
+        versionName = "0.3.79"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -80,6 +80,8 @@ android {
 
     testOptions {
         unitTests.isIncludeAndroidResources = true
+        // 0.3.79: older lane tests use now-retired scalpers as fixtures; ReleaseGate0379Test switches retirement on.
+        unitTests.all { it.systemProperty("kashi.retire.off", "true") }
     }
 }
 

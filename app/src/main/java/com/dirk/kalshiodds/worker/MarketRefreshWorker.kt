@@ -13,6 +13,10 @@ import com.dirk.kalshiodds.data.repo.MarketRepository
 import com.dirk.kalshiodds.signal.config.SecureExtraStore
 import com.dirk.kalshiodds.signal.config.SignalPreferences
 import com.dirk.kalshiodds.signal.service.LiveSignalsKeepAlive
+import com.dirk.kalshiodds.signal.service.LiveSignalsService
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.TimeUnit
 
 class MarketRefreshWorker(
@@ -20,8 +24,17 @@ class MarketRefreshWorker(
     params: WorkerParameters
 ) : CoroutineWorker(appContext, params) {
 
-    override suspend fun doWork(): Result {
-        LiveSignalsKeepAlive.ensureService(applicationContext)
+    /**
+     * 0.3.79 ANR fix: all work (prefs, keystore, network, disk) runs on IO with a hard time cap, never on the
+     * main thread. The live-signals service is only nudged (fire and forget, guarded against double starts);
+     * the worker never waits for it.
+     */
+    override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+        runCatching { if (!LiveSignalsService.isRunning) LiveSignalsKeepAlive.ensureService(applicationContext) }
+        withTimeoutOrNull(MAX_RUN_MS) { refresh() } ?: Result.retry()
+    }
+
+    private suspend fun refresh(): Result {
         return try {
             val extras = SecureExtraStore(applicationContext)
             val settings = SignalPreferences(applicationContext, extras = extras).hydrate()
@@ -41,6 +54,7 @@ class MarketRefreshWorker(
 
     companion object {
         const val UNIQUE_NAME = "kalshi_market_refresh_15m"
+        const val MAX_RUN_MS = 60_000L
     }
 }
 
