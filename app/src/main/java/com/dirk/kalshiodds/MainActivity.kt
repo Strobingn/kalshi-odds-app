@@ -57,6 +57,23 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        setContent {
+            KalshiOddsTheme {
+                Surface(modifier = Modifier.fillMaxSize()) {
+                    androidx.compose.foundation.layout.Box(modifier = Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                        androidx.compose.material3.CircularProgressIndicator()
+                    }
+                }
+            }
+        }
+        lifecycleScope.launch {
+            KalshiOddsApp.from(this@MainActivity).awaitContainer()
+            showReadyUi()
+        }
+    }
+
+    private fun showReadyUi() {
         SignalNotifier.ensureChannels(this)
         com.dirk.kalshiodds.signal.notify.OpportunityNotifier.ensureChannel(this)
         handleOpportunityIntent(intent)
@@ -312,12 +329,18 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         LiveSignalsKeepAlive.ensureServiceFromUi(this)
-        oddsViewModel.onForeground()
+        lifecycleScope.launch {
+            KalshiOddsApp.from(this@MainActivity).awaitContainer()
+            if (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) oddsViewModel.onForeground()
+        }
     }
 
     override fun onResume() {
         super.onResume()
-        oddsViewModel.onForeground()
+        lifecycleScope.launch {
+            KalshiOddsApp.from(this@MainActivity).awaitContainer()
+            if (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) oddsViewModel.onForeground()
+        }
     }
 
     override fun onStop() {
@@ -327,7 +350,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        handleOpportunityIntent(intent)
+        setIntent(intent)
+        lifecycleScope.launch {
+            KalshiOddsApp.from(this@MainActivity).awaitContainer()
+            handleOpportunityIntent(intent)
+        }
     }
 
     private fun handleOpportunityIntent(intent: Intent?) {

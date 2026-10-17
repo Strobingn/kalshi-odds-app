@@ -28,3 +28,5 @@ References used to verify platform/fee assumptions:
 - https://developer.android.com/reference/android/content/SharedPreferences.Editor
 
 This release integrates the current g14 copies, live-price/scorecard updates, and the 0.3.81 startup/worker ANR audit. The mirrored stop matrix includes every g14 copy.
+
+The startup screen and foreground/notification callbacks suspend for IO initialization before accessing any ViewModel or container-backed settings. The synchronous getter refuses early Main access instead of acquiring the initialization lock. The sync worker timeout is cooperative, not a guaranteed interrupt of an in-flight blocking HTTP call.
