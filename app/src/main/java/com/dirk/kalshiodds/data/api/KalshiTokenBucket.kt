@@ -39,7 +39,7 @@ data class KalshiTier(
 /**
  * Process-wide token bucket in Kalshi token units. Reads and writes do not share tokens.
  *
- * 0.3.45 budget: sustained = [TARGET_SHARE] (90 %) of the tier's read refill; burst = 90 % of the bucket capacity,
+ * 0.3.45 budget: sustained = [TARGET_SHARE] (95 % since 0.3.80) of the tier's read refill; burst = 90 % of the bucket capacity,
  * capped at one second of the tier's refill (Basic: 180 tokens/s ≈ 18 reads/s, burst 200 tokens = 20 reads).
  * Adaptive: a REAL Kalshi 429 drops the share to [DROP_SHARE] (70 %) for [DROP_MS], then ramps back to 90 % over
  * [RAMP_MS]. Writes are never queued.
@@ -185,7 +185,7 @@ class KalshiTokenBucket(
     companion object {
         const val JITTER_FRACTION = 0.20
         const val WRITE_DENIED = "Rate limited — wait and Approve again"
-        const val TARGET_SHARE = 0.90
+        const val TARGET_SHARE = 0.95 // 0.3.80: Dirk raised REST budget 90 % → 95 % (WebSocket stays primary)
         const val DROP_SHARE = 0.70
         const val DROP_MS = 60_000L
         const val RAMP_MS = 30_000L

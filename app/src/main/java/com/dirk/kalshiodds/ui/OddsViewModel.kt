@@ -159,20 +159,43 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val snap = _state.value.snapshot ?: return
         fun List<MarketUiModel>.live() = map { m -> if (m.ticker in tickers) m.withLiveQuote(hub.scoring.book.lastTick(m.ticker)) else m }
         val next = snap.copy(btc = snap.btc.live(), eth = snap.eth.live(), sol = snap.sol.live(), extra = snap.extra.live())
-        val nowMs = System.currentTimeMillis()
-        if (nowMs - lastHomeLiveMs >= HOME_LIVE_THROTTLE_MS) { // Home cards from the WS flow, ≤ 4 Hz recomposition
-            lastHomeLiveMs = nowMs
-            _state.update { it.copy(snapshot = next) }
-        }
+        // 0.3.80: Home prices are published by publishLiveQuotes on their own lane (not here on the paper lane).
         val s = _state.value.settings
         if (!s.paperTradingEnabled) return
         val changed = next.allMarkets.filter { it.ticker in tickers }
         if (changed.isNotEmpty()) runPaperAutopilotNow(changed)
     }
 
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private val quoteLane: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Default.limitedParallelism(1)
+    private val pendingQuotes: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+    private val quoteScheduled = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** 0.3.80: every WS ticker / book delta → Home prices within ~100 ms, newest quote always shown. */
+    private fun onLiveQuote(ticker: String) {
+        pendingQuotes.add(ticker)
+        if (!quoteScheduled.compareAndSet(false, true)) return
+        vmScope.launch(quoteLane) {
+            delay(com.dirk.kalshiodds.signal.engine.LiveQuotePacer.waitMs(lastHomeLiveMs, System.currentTimeMillis()))
+            quoteScheduled.set(false)
+            val tickers = HashSet<String>()
+            val it = pendingQuotes.iterator()
+            while (it.hasNext()) { tickers += it.next(); it.remove() }
+            if (tickers.isEmpty()) return@launch
+            lastHomeLiveMs = System.currentTimeMillis()
+            runCatching {
+                _state.update { s ->
+                    val snap = s.snapshot ?: return@update s
+                    fun List<MarketUiModel>.live() = map { m -> if (m.ticker in tickers) m.withLiveQuote(hub.scoring.book.lastTick(m.ticker)) else m }
+                    s.copy(snapshot = snap.copy(btc = snap.btc.live(), eth = snap.eth.live(), sol = snap.sol.live(), extra = snap.extra.live()))
+                }
+            }
+        }
+    }
+
     private fun startEventDriven() {
         ensureScalpMigration() // 0.3.67: background, chunked; UI never waits on it
-        hub.onMarketEvent = { t -> marketEvents.fire(t) }
+        hub.onMarketEvent = { t -> onLiveQuote(t); marketEvents.fire(t) }
         container.cfFeed.onTick = { indexId ->
             _state.value.snapshot?.allMarkets?.forEach { m ->
                 val series = com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(m.ticker)

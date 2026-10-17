@@ -139,6 +139,12 @@ internal fun ArenaStrategyRow(row: ScalpModels.Row, st: ScalpTabState, onOpen: (
             Column(Modifier.weight(1f)) {
                 Text(row.model.label, color = c.textPrimary, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text("${row.roundTrips} trades · ${ScalpTabCopy.pct(row.winRate)} won · ${row.open} open", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
+                com.dirk.kalshiodds.decision.G14Copies.sourceOf(row.model.code)?.let { src ->
+                    val live = st.leaderAllTime.firstOrNull { it.model.code == src }?.takeIf { it.roundTrips > 0 }
+                    val snap = com.dirk.kalshiodds.decision.G14Copies.SOURCES.getValue(src)
+                    Text("rebuilt 0.3.80 · original $src: " + (live?.let { "${it.roundTrips} trades · ${ScalpTabCopy.money(it.netUsd)}" }
+                        ?: "${snap.trades} trades · ${ScalpTabCopy.money(snap.netUsd)} (Oct 17)"), color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
+                }
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text(if (row.roundTrips > 0) ScalpTabCopy.money(row.netUsd) else "—", color = pnlColor(row.netUsd), style = ArenaUi.mono(MaterialTheme.typography.titleMedium), fontWeight = FontWeight.Bold)

@@ -203,7 +203,13 @@ fun ScorecardScreen(
                     )
                 }
             } else {
-                item { RecordCard(ScorecardCopy.COMBINED_TITLE, ledger.combined) }
+                item { RecordCard(ScorecardLedger.PAPER_FILLS_TITLE + " · " + ScorecardCopy.COMBINED_TITLE, ledger.combined) }
+                item {
+                    Column {
+                        RecordCard(ScorecardLedger.FORECASTS_TITLE, ledger.forecasts.copy(money = ScorecardLedger.Money()))
+                        Text(ScorecardLedger.FORECASTS_NOTE, style = MaterialTheme.typography.labelSmall, color = DipTheme.colors.textSecondary)
+                    }
+                }
                 view.hypotheticalLine?.let { line ->
                     item {
                         Text(
