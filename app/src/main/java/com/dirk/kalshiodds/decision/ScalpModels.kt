@@ -264,6 +264,7 @@ object ScalpModels {
         return "default 1% fill-price stop; global cap applies immediately; other strategy exits may close earlier"
     }
 
+    fun tag(m: Model): String? = (if (isV2(m)) "group: v2" else null) ?: ShockFav.TAGS[m.code] ?: ShockFav.byVariantId(m.code)?.group?.let { "group: $it" }
     /** Σ (actual − no-stop shadow) over closed trades whose note carries "nostop=±x.xx". Positive = the stop saved money. */
     fun stopSaved(trades: List<ScalpTrade>): Pair<Double, Int> {
         var s = 0.0; var n = 0

@@ -10,8 +10,8 @@ class ScalpAuditTest {
     private val close = ScalpTicker.closeMs(ticker)!!
     private val at = close - 300_000L
     private fun q(ms: Long, bid: Double, side: String = "YES", size: Double = 10.0) = ScalpRule.Quote(
-        ticker, ms, close, ms, if (side == "YES") bid else .49, size,
-        if (side == "YES") .51 else 1 - bid, size, null, null, null)
+        ticker, ms, close, ms, if (side == "YES") bid else 1 - (bid + .01), size,
+        if (side == "YES") bid + .01 else 1 - bid, size, null, null, null)
     private fun held(variant: String, side: String = "YES", id: String = "held") = ScalpTrade(
         id, ticker, side, ScalpState.OPEN, at - 2000, .50, .5, contracts = 3,
         entryPrice = .50, entryFeeUsd = .06, entryAtMs = at - 1000,

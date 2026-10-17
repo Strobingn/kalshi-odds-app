@@ -147,7 +147,7 @@ class KalshiOddsApp : Application() {
 
     fun stopLiveSignalsPreferenceAsync() {
         appScope.launch(Dispatchers.IO) {
-            runCatching { kotlinx.coroutines.withTimeoutOrNull(1_500L) { container.preferences.updateLiveSignals(false) } }
+            runCatching { container.preferences.updateLiveSignals(false) }
         }
     }
 

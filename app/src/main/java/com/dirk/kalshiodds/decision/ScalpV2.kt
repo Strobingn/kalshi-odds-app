@@ -7,7 +7,7 @@ package com.dirk.kalshiodds.decision
  *  - exits before the final minute unless fresh CF evidence supports a profitable hold,
  *  - new trades default to an immediate 3¢ bid-peak trail and independent 1% fill-price stop;
  *    legacy trades retain their saved net-profit arming and distance-based stop.
- * Deterministic, no LLM. Originals are untouched.
+ * Deterministic, no LLM. Original signals stay separate; the global risk cap protects every lane.
  */
 object ScalpV2 {
     const val PREFIX = "v2-"
@@ -83,11 +83,14 @@ object ScalpV2 {
     private val STOP_RX = Regex("v2stop=([0-9.]+)")
     fun savedStop(t: ScalpTrade): Double = if (peakRule(t)) (t.entryPrice ?: t.signalAsk) * stopPercent(t) / 100.0 else STOP_RX.find(t.note)?.groupValues?.get(1)?.toDoubleOrNull()
         ?.takeIf { it.isFinite() && it in 0.01..0.99 } ?: (spec(t.variantId).stop ?: stopFor(baseOf(t.variantId)))
+    private val numberPatterns = java.util.concurrent.ConcurrentHashMap<String, Regex>()
+    private val tagPatterns = java.util.concurrent.ConcurrentHashMap<String, Regex>()
     fun savedNumber(note: String, key: String, fallback: Double): Double =
-        Regex("(?:^|[ ;·])${Regex.escape(key)}=([0-9.]+)").find(note)?.groupValues?.get(1)?.toDoubleOrNull()
+        numberPatterns.getOrPut(key) { Regex("(?:^|[ ;·])${Regex.escape(key)}=([0-9.]+)") }
+            .find(note)?.groupValues?.get(1)?.toDoubleOrNull()
             ?.takeIf { it.isFinite() } ?: fallback
     fun tag(note: String, key: String, value: String): String {
-        val rx = Regex("${Regex.escape(key)}=[^ ;·]+")
+        val rx = tagPatterns.getOrPut(key) { Regex("${Regex.escape(key)}=[^ ;·]+") }
         return if (rx.containsMatchIn(note)) rx.replace(note, "$key=$value") else "$note · $key=$value"
     }
 

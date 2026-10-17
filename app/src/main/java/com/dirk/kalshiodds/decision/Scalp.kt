@@ -1516,16 +1516,26 @@ class ScalpBook(
         return if (note === t.note) t else t.copy(note = note)
     }
 
+    private val riskEvaluations = HashMap<String, Pair<ScalpRule.Quote, ScalpControls>>()
+
     /** Always evaluated before strategy/forecast/spot guards; pending exits survive pause and restart. */
     private fun applyProtectiveStops(q: ScalpRule.Quote): List<ScalpTrade> {
         if (!liveExtras || q.nowMs >= q.closeMs) return emptyList()
         val cfg = controls.state.value
+        val key = q.ticker.uppercase()
+        val last = riskEvaluations[key]
+        // Production passes the same quote to three strategy callbacks; evaluate shared risk only once.
+        if (last != null && last.first === q && last.second === cfg) return emptyList()
+        riskEvaluations[key] = q to cfg
+        if (riskEvaluations.size > ScalpMemory.MAX_TICKERS)
+            riskEvaluations.keys.filter { it != key && (ScalpTicker.closeMs(it) ?: 0L) < q.nowMs }.forEach { riskEvaluations.remove(it) }
         val changes = ArrayList<ScalpTrade>()
         for (t in _all.value) {
-            if (!t.ticker.equals(q.ticker, true) || t.state !in listOf(ScalpState.OPEN, ScalpState.PENDING_EXIT)) continue
+            if (!t.ticker.equals(q.ticker, true) || (t.state != ScalpState.OPEN && t.state != ScalpState.PENDING_EXIT)) continue
             val entry = t.entryPrice?.takeIf { it.isFinite() && it > 0.0 && it <= 1.0 } ?: continue
             val percent = ScalpRisk.percent(t, cfg)
-            var next = t.copy(note = ScalpV2.tag(t.note, "riskStopPct", percent.toString()))
+            var next = if (ScalpV2.savedNumber(t.note, "riskStopPct", Double.NaN) == percent) t
+                else t.copy(note = ScalpV2.tag(t.note, "riskStopPct", percent.toString()))
             val fresh = ScalpV2.fresh(q)
             val bid = q.bid(t.side)?.takeIf { it.isFinite() && it > 0.0 && it <= 1.0 }
             if (!ScalpRisk.managedExit(t) && fresh && q.bookAtMs > (t.entryAtMs ?: t.signalAtMs) && ScalpRisk.hit(entry, bid, percent)) {

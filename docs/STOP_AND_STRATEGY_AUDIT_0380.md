@@ -16,7 +16,7 @@ At a 55¢ fill the trigger is 54.45¢, not 54¢ or 1¢ below entry. A 54¢ best 
 ## Background responsiveness
 
 - Keepalive flag changes update an immediate memory mirror and a single coalesced IO writer. Service lifecycle callbacks no longer commit preference files synchronously or wait on DataStore with runBlocking.
-- Scalp persistence has a separate serialized writer. The quote lane and burst queue no longer wait for SQLite flushes while processing prices or holding the quote lock. Flush retries preserve newer rows and learning transitions.
+- Scalp persistence has a separate serialized writer. The quote lane and burst queue no longer wait for SQLite flushes while processing prices or holding the quote lock. Flush retries preserve newer rows and learning transitions. Shared risk is evaluated once per quote across the three callbacks, and risk-token regexes are cached instead of recompiled per trade.
 - Existing 0.3.79 retirement and service-start guards remain. These are fixes for confirmed blocking paths, not proof of the cause of a specific phone freeze; the app's Android exit/ANR report is still needed to distinguish a remaining ANR, OS kill or feed stall.
 
 ## Validation
