@@ -470,13 +470,12 @@ class TicketBuilderGateTest {
         assertNull(TicketBuilder.proposeHunterValue(m, ctx))
         assertNull(TicketBuilder.propose(m, ctx))
         val tickets = TicketBuilder.proposeAll(listOf(m), ctx)
-        // Unrestricted paper SCALP is intentionally independent of the
-        // automatic live-ticket value gates. The live-capable kinds remain
-        // absent when the modeled value does not clear costs.
+        // V6 scalp tracks are intentionally independent of the automatic
+        // live-ticket value gates, but their per-strategy time windows need a
+        // real close time. This fixture deliberately lacks one, so it must
+        // not manufacture an automatic paper entry.
         assertTrue(tickets.filterNot { it.kind == TicketKind.SCALP }.isEmpty())
-        // Four observable hypotheses remain. The other sixteen report no
-        // observation instead of copying this market's baseline side.
-        assertEquals(4, tickets.count { it.kind == TicketKind.SCALP && it.paperOnly })
+        assertEquals(0, tickets.count { it.kind == TicketKind.SCALP && it.paperOnly })
         assertTrue(TicketBuilder.proposeManual(m, "YES", ctx) != null)
     }
 
@@ -732,7 +731,10 @@ class TicketBuilderGateTest {
             alertsPaused = false
         )
         val tickets = TicketBuilder.proposeAll(listOf(market(true, false, 0.03)), ctx)
-        assertEquals(4, tickets.size)
+        // The helper market has no close time. V6 has no valid minute window
+        // to evaluate, so live tickets being disabled cannot create a scalp
+        // fill from incomplete timing data.
+        assertEquals(0, tickets.size)
         assertTrue(tickets.all { it.kind == com.dirk.kalshiodds.signal.trade.TicketKind.SCALP })
     }
 }
