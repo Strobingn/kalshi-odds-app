@@ -109,6 +109,8 @@ class TickBook(private val maxPoints: Int = 80) {
         if (tick.source == TickSource.WS_TICKER) {
             tick.exchangeTsMs?.let { tickerTsByTicker[tick.ticker] = maxOf(it, tickerTsByTicker[tick.ticker] ?: it) }
             wsQuoteAtNanos[tick.ticker] = tick.receiveElapsedNanos
+            com.dirk.kalshiodds.crash.BoundedKeys.trim(tickerTsByTicker)
+            com.dirk.kalshiodds.crash.BoundedKeys.trim(wsQuoteAtNanos)
         }
         // 0.3.43: the series / sparkline / chart use the MERGED quote for this ticker, never a raw trade
         // print (WS trade ticks carry yesBid = yesAsk = trade price) or a dropped stale quote.

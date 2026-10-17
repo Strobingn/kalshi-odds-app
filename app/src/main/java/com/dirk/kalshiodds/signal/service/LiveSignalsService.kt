@@ -100,7 +100,14 @@ class LiveSignalsService : Service() {
         // 0.3.81: build the container off main first; only then hop to main to create the Autopilot host.
         scope.launch {
             runCatching { KalshiOddsApp.from(this@LiveSignalsService).container }
-            android.os.Handler(mainLooper).post { runCatching { KalshiOddsApp.from(this@LiveSignalsService).ensureAutopilotHost() } }
+            // 0.3.84 ANR fix (job 5040): the headless Autopilot host (OddsViewModel, ~2k lines of init: paper book
+            // snapshot, ticket session, event wiring) was constructed on the main thread whenever a background
+            // worker started this service, starving JobScheduler's onStartJob. Build it here, off main; only if
+            // that throws, fall back to the old main-thread post.
+            val built = runCatching { KalshiOddsApp.from(this@LiveSignalsService).ensureAutopilotHost() }.isSuccess
+            if (!built) {
+                android.os.Handler(mainLooper).post { runCatching { KalshiOddsApp.from(this@LiveSignalsService).ensureAutopilotHost() } }
+            }
         }
         if (rolloverJob == null || rolloverJob?.isActive != true) {
             rolloverJob = scope.launch {
