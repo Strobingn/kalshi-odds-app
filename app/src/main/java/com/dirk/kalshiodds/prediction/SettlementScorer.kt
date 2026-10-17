@@ -43,6 +43,7 @@ class SettlementScorer(
         if (!SettlementPollPolicy.isPollableTicker(ticker) && !SettlementPollPolicy.isD3Ticker(ticker)) return
         if (closeTimeMs <= 0L) return
         closeTimes[ticker.uppercase()] = closeTimeMs
+        com.dirk.kalshiodds.crash.BoundedKeys.trim(closeTimes)
     }
 
     fun closeTime(ticker: String): Long? =

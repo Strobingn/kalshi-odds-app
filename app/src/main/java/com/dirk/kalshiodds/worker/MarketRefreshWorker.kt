@@ -31,17 +31,28 @@ class MarketRefreshWorker(
      */
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         runCatching { if (!LiveSignalsService.isRunning) LiveSignalsKeepAlive.ensureService(applicationContext) }
-        withTimeoutOrNull(MAX_RUN_MS) { refresh() } ?: Result.retry()
+        // 0.3.84: never run two refreshes at once (periodic + a re-delivered job after process death).
+        if (!running.compareAndSet(false, true)) return@withContext Result.success()
+        try {
+            withTimeoutOrNull(MAX_RUN_MS) { refresh() } ?: Result.retry()
+        } finally {
+            running.set(false)
+        }
     }
 
     private suspend fun refresh(): Result {
         return try {
-            val extras = SecureExtraStore(applicationContext)
-            val settings = SignalPreferences(applicationContext, extras = extras).hydrate()
-            val snapshot = MarketRepository(
-                applicationContext,
-                api = NetworkModule.publicApi(settings.kalshiDemoEnabled)
-            ).refresh()
+            // 0.3.84 memory: reuse the app's repository when it is already built (no second market cache,
+            // scorer and HTTP client per run); otherwise build a lightweight one here, on IO.
+            val shared = (applicationContext as? com.dirk.kalshiodds.KalshiOddsApp)?.containerOrNull?.repository
+            val snapshot = (shared ?: run {
+                val extras = SecureExtraStore(applicationContext)
+                val settings = SignalPreferences(applicationContext, extras = extras).hydrate()
+                MarketRepository(
+                    applicationContext,
+                    api = NetworkModule.publicApi(settings.kalshiDemoEnabled)
+                )
+            }).refresh()
             if (snapshot.errorMessage != null && !snapshot.fromCache && snapshot.allMarkets.isEmpty()) {
                 Result.retry()
             } else {
@@ -55,6 +66,9 @@ class MarketRefreshWorker(
     companion object {
         const val UNIQUE_NAME = "kalshi_market_refresh_15m"
         const val MAX_RUN_MS = 60_000L
+        internal val running = java.util.concurrent.atomic.AtomicBoolean(false)
+        /** 0.3.84: KEEP, so app start never replaces/re-runs an in-flight or scheduled refresh. */
+        val POLICY: ExistingPeriodicWorkPolicy = ExistingPeriodicWorkPolicy.KEEP
     }
 }
 
@@ -72,7 +86,7 @@ object MarketRefreshScheduler {
 
         WorkManager.getInstance(context.applicationContext).enqueueUniquePeriodicWork(
             MarketRefreshWorker.UNIQUE_NAME,
-            ExistingPeriodicWorkPolicy.UPDATE,
+            MarketRefreshWorker.POLICY,
             request
         )
     }

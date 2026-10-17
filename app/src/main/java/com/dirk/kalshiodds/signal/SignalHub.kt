@@ -307,6 +307,8 @@ class SignalHub(
         }
         lastOddsPersistMs[ticker] = now
         lastOddsMid[ticker] = mid01
+        com.dirk.kalshiodds.crash.BoundedKeys.trim(lastOddsPersistMs)
+        com.dirk.kalshiodds.crash.BoundedKeys.trim(lastOddsMid)
         runCatching {
             val last = scoring.book.lastTick(ticker)
             results?.enqueueOddsMid(
@@ -327,6 +329,7 @@ class SignalHub(
         val lastTs = lastChartPersistMs[tick.ticker] ?: 0L
         if (now - lastTs < SignalConstants.CHART_TICK_PERSIST_MIN_MS) return
         lastChartPersistMs[tick.ticker] = now
+        com.dirk.kalshiodds.crash.BoundedKeys.trim(lastChartPersistMs)
         runCatching {
             results?.enqueueChartTick(
                 ChartTickRow(

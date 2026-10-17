@@ -226,7 +226,7 @@ object LiveSignalsKeepAlive {
         ).setConstraints(constraints).build()
         wm.enqueueUniquePeriodicWork(
             LiveSignalsWatchdogWorker.PERIODIC_NAME,
-            ExistingPeriodicWorkPolicy.UPDATE,
+            ExistingPeriodicWorkPolicy.KEEP,
             periodic
         )
     }
@@ -241,7 +241,7 @@ object LiveSignalsKeepAlive {
             .build()
         WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
             LiveSignalsWatchdogWorker.SOON_NAME,
-            ExistingWorkPolicy.REPLACE,
+            ExistingWorkPolicy.KEEP,
             req
         )
     }

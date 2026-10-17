@@ -62,6 +62,7 @@ class DecisionRuntime(
     fun assess(input: DecisionPipeline.Input): DecisionPipeline.Assessment {
         val a = DecisionPipeline.assess(input, context())
         latest[input.ticker.uppercase()] = a
+        com.dirk.kalshiodds.crash.BoundedKeys.trim(latest)
         record(input, a)
         return a
     }
@@ -89,6 +90,7 @@ class DecisionRuntime(
         val s = sink ?: return
         if (!shouldWrite(input, a)) return
         lastWrite[input.ticker.uppercase()] = input.nowMs to "${a.verdict.decision}|${a.chosen?.side}"
+        com.dirk.kalshiodds.crash.BoundedKeys.trim(lastWrite)
         val row = DecisionPipeline.ledgerRow(input, a, RegimeCalibration.VERSION + "@" + calibrationRef.get().rows)
         val write = {
             runCatching { s.insertLedger(row) }

@@ -59,12 +59,18 @@ class KalshiOddsApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        runCatching { CrashBreadcrumb.install(this) }
-        runCatching { com.dirk.kalshiodds.crash.CrashLog.install(this, BuildConfig.VERSION_NAME) } // 0.3.47
         if (BuildConfig.DEBUG && !isRobolectric()) StartupStrictMode.enable() // 0.3.81: log disk/network on main
-        runCatching { SignalNotifier.ensureChannels(this) }
-        runCatching { com.dirk.kalshiodds.signal.notify.OpportunityNotifier.ensureChannel(this) }
-        runCatching { com.dirk.kalshiodds.signal.lastminute.LastMinuteNotifier.ensureChannel(this) }
+        // 0.3.84 ANR fix (job 5040 onStartJob 16 s): crash-log file I/O (mkdirs, breadcrumb append/rotate) and
+        // NotificationManager binder calls ran on the main thread in onCreate, ahead of WorkManager's
+        // onStartJob. Under memory pressure (swap, LMK) that disk/binder work stalls; now all of it is on IO.
+        val earlyInit: () -> Unit = {
+            runCatching { CrashBreadcrumb.install(this) }
+            runCatching { com.dirk.kalshiodds.crash.CrashLog.install(this, BuildConfig.VERSION_NAME) } // 0.3.47
+            runCatching { SignalNotifier.ensureChannels(this) }
+            runCatching { com.dirk.kalshiodds.signal.notify.OpportunityNotifier.ensureChannel(this) }
+            runCatching { com.dirk.kalshiodds.signal.lastminute.LastMinuteNotifier.ensureChannel(this) }
+        }
+        if (isRobolectric()) earlyInit() else appScope.launch(Dispatchers.IO) { earlyInit() }
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) {
                 LiveSignalsKeepAlive.ensureServiceFromUi(this@KalshiOddsApp)
