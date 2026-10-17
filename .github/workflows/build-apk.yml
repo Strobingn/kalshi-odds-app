@@ -2,7 +2,7 @@ name: Build Chat Bitcoin APK
 
 on:
   push:
-    branches: [Claude, main, chat-GTP]
+    branches: [Claude, main, chat-GTP, ai-paper-execution-audit]
   workflow_dispatch:
 
 permissions:
@@ -57,6 +57,8 @@ jobs:
             --tests 'com.dirk.kalshiodds.prediction.ModelActivationTest' \
             --tests 'com.dirk.kalshiodds.prediction.EdgeModelTest' \
             --tests 'com.dirk.kalshiodds.signal.PaperBookTest' \
+            --tests 'com.dirk.kalshiodds.signal.paper.PaperOpportunityTest' \
+            --tests 'com.dirk.kalshiodds.signal.feedback.ScorecardLedgerTest' \
             --tests 'com.dirk.kalshiodds.signal.v3.V3ShadowExperimentTest' \
             --tests 'com.dirk.kalshiodds.signal.paper.PaperBuyTest' \
             --tests 'com.dirk.kalshiodds.signal.feedback.ForwardTestTest' \
