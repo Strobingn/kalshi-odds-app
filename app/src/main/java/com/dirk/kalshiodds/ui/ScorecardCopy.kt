@@ -171,7 +171,7 @@ object ScorecardCopy {
         /** 0.3.40: where the current paper book starts (last bankroll reset), or null if never reset. */
         val resetMarker: String? = null
     ) {
-        val settledCount: Int get() = ledger.combined.settledCount
+        val settledCount: Int get() = ledger.combined.settledCount + ledger.forecasts.settledCount // 0.3.80: forecasts still count as settled data
         val showsEmptyState: Boolean get() = showsEmptyState(settledCount)
         fun emptyState(): String? = emptyState(settledCount)
 

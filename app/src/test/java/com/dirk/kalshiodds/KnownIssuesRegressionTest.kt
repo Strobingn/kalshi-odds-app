@@ -1447,8 +1447,8 @@ class KnownIssuesRegressionTest {
 
         val present = ScorecardCopy.of(entries, 12.40)
         assertEquals(18, present.settledCount)
-        assertEquals(12, present.summary.wins)
-        assertEquals(6, present.summary.losses)
+        assertEquals(12, present.ledger.forecasts.wins) // 0.3.80: Forecasts section
+        assertEquals(6, present.ledger.forecasts.losses)
         assertFalse(present.showsEmptyState)
         assertNull(present.emptyState())
         assertFalse(present.allLines().any { it.contains("No settled samples") })
