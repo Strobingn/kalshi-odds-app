@@ -33,7 +33,7 @@ class ScalpLiveDirectionTest {
             assertEquals(ScalpState.OPEN, held.state)
             assertEquals(.55, held.entryPrice!!, 1e-9)
             assertTrue(ScalpV2.peakRule(held))
-            assertEquals(1.0, ScalpV2.stopPercent(held), 0.0)
+            assertEquals(4.0, ScalpV2.stopPercent(held), 0.0)
             assertEquals(.03, ScalpV2.savedNumber(held.note, "v2trail", 0.0), 1e-9)
         }
     }

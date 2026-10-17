@@ -23,7 +23,7 @@ class ScalpStrategySettingsTest {
         assertEquals(.04, ScalpV2.savedStop(held), 1e-9)
         assertEquals(.05, ScalpV2.savedNumber(held.note, "v2trail", 0.0), 1e-9)
         controls.save(controls.state.value.copy(enabled = false, strategySettings = mapOf("v2-sf41" to ScalpStrategySettings(stopLossPercent = 80, trailCents = 20))))
-        book.onQuote(q(at + 3000, bid = .36), false)
+        book.onQuote(q(at + 3000, bid = .30), false)
         assertEquals(ScalpState.PENDING_EXIT, book.snapshot().first { it.id == held.id }.state)
         assertTrue(book.snapshot().first { it.id == held.id }.exitReason!!.contains("10%"))
     }

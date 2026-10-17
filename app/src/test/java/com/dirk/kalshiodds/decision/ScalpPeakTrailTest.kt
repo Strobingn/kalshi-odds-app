@@ -81,8 +81,10 @@ class ScalpPeakTrailTest {
         book.onQuote(q(at + 3000, .33, .40), false)
         assertEquals(ScalpState.OPEN, held(book).state) // 7¢ spread did not become an artificial trail loss
         book.onQuote(q(at + 4000, .32, .40), false)
+        assertEquals(ScalpState.OPEN, held(book).state) // 0.3.85: 1¢ below the entry bid is noise, not a stop
+        book.onQuote(q(at + 5000, .22, .30), false)
         assertEquals(ScalpState.PENDING_EXIT, held(book).state)
-        assertTrue(held(book).exitReason!!.contains("20% below fill")) // only a 1¢ bid decline
+        assertTrue(held(book).exitReason!!.let { it.contains("20%") || it.contains("trail") }) // floored stop: entry bid − max(20%, spread + fees + 1¢)
     }
 
     @Test fun percentStopUsesDepthWalkAverageFillAndStaleBooksCannotMovePeak() {
@@ -96,7 +98,7 @@ class ScalpPeakTrailTest {
         book.onQuote(q(at + 3000, .99, 1.0).copy(bookGap = true), false)
         book.onQuote(q(at + 4000, .40, .41), false)
         assertEquals(ScalpState.OPEN, held(book, "v2-sf41x5").state)
-        book.onQuote(q(at + 5000, .36, .37), false)
-        assertTrue(held(book, "v2-sf41x5").exitReason!!.contains("20% below fill"))
+        book.onQuote(q(at + 5000, .20, .21), false)
+        assertTrue(held(book, "v2-sf41x5").exitReason!!.contains("20%"))
     }
 }

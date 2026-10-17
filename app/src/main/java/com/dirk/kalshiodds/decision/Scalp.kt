@@ -608,6 +608,7 @@ class ScalpBook(
                 if (q.nowMs >= q.closeMs) continue
                 val lastClose = mine.mapNotNull { it.closedAtMs }.maxOrNull()
                 if (lastClose != null && q.nowMs - lastClose < ScalpRule.REENTRY_COOLDOWN_MS) continue
+                if (ScalpRisk.entryBlocked(_all.value, p.id, q.ticker, q.nowMs)) continue // 0.3.85 churn guard
                 val openSides = mine.filter { isActive(it) }.map { it.side }.toSet()
                 // 0.3.43 CF-reprice: one direction per market (no YES and NO at once).
                 val free = if (p.strategy == ScalpStrategy.CF_REPRICE && openSides.isNotEmpty()) emptyList()
@@ -707,6 +708,7 @@ class ScalpBook(
                 continue
             }
             if (!enabledNow || q.nowMs >= q.closeMs || !q.fresh()) continue
+            if (ScalpRisk.entryBlocked(_all.value, vid, key, q.nowMs)) continue // 0.3.85 churn guard (was no cooldown)
             val side = if (f > 0) "YES" else "NO"
             val ask = q.ask(side) ?: continue
             if (!ForecastScalp.wantsEntry(mid, ya - yb, ask, kotlin.math.abs(f), q.tauS, cfg.marginUsd)) continue
@@ -1109,6 +1111,7 @@ class ScalpBook(
     private fun sfEnter(q: ScalpRule.Quote, p: ShockFav.Params, vid: String, side: String, ask: Double, fair: Double,
                         openCost: Double, bankroll: Double, what: String): ScalpTrade? {
         // Fade makers choose their purchase bid after the delay; the post/fill paths enforce the ceiling.
+        if (ScalpRisk.entryBlocked(_all.value, vid, q.ticker, q.nowMs)) return null // 0.3.85 churn guard
         if (p.kind != ShockFav.Kind.FADE_MAKER && !ScalpRule.buyPriceOk(if (p.o50 == ShockFav.O50.MAKER) ShockFav.O50_MAKER_PX else ask)) return null
         val n = if (p.kind == ShockFav.Kind.FADE_MAKER) ShockFav.CLIP else minOf(ShockFav.CLIP, kotlin.math.floor((q.askSize(side) ?: 0.0) + 1e-9).toInt())
         if (n <= 0) return null
@@ -1453,6 +1456,7 @@ class ScalpBook(
             if (mine.any { isActive(it) }) continue
             val lastClose = mine.mapNotNull { it.closedAtMs }.maxOrNull()
             if (lastClose != null && q.nowMs - lastClose < ScalpRule.REENTRY_COOLDOWN_MS) continue
+            if (ScalpRisk.entryBlocked(_all.value, vid, key, q.nowMs)) continue // 0.3.85 churn guard
             save(ScalpTrade(id = idFactory(), ticker = key, side = sig.side, state = ScalpState.PENDING_ENTRY, signalAtMs = q.nowMs,
                 signalAsk = sig.ask, fairAtSignal = sig.fair,
                 note = String.format(Locale.US, "%s · %s · edge %.1f¢ after fees · from %s signal · %s", src, G14Copies.LABEL, sig.gapAfterFee * 100, orig.code, G14Copies.PARAMS_ID),
@@ -1553,6 +1557,11 @@ class ScalpBook(
                 t.copy(note = ScalpV2.tag(t.note, "riskStopPct", cfg.protectivePercent(ScalpModels.modelOf(t)?.code).toString())) else t
             note = ScalpV2.tag(note, "riskStopPct", ScalpRisk.percent(riskInput, cfg).toString())
         }
+        if (t.state == ScalpState.OPEN && prev?.state != ScalpState.OPEN && !note.contains("riskRefBid=")) {
+            val b = q?.bid(t.side)?.takeIf { it.isFinite() && it > 0.0 && it <= 1.0 }
+            val e = t.entryPrice
+            if (b != null && e != null) note = ScalpRisk.tagRef(note, minOf(b, e), ((q?.ask(t.side) ?: e) - b).coerceAtLeast(0.0))
+        }
         if (t.state == ScalpState.OPEN && prev?.state != ScalpState.OPEN && !note.contains("entryBook[")) {
             note += " · entryBook[" + bookStr(q, t.side) + "]"
             t.entryPrice?.let { peakBid[t.id] = if (ScalpV2.peakRule(t)) q?.bid(t.side)?.takeIf { b -> b.isFinite() && b > 0 } ?: 0.0 else q?.bid(t.side) ?: it }
@@ -1589,10 +1598,19 @@ class ScalpBook(
                 else t.copy(note = ScalpV2.tag(t.note, "riskStopPct", percent.toString()))
             val fresh = ScalpV2.fresh(q)
             val bid = q.bid(t.side)?.takeIf { it.isFinite() && it > 0.0 && it <= 1.0 }
-            if (!ScalpRisk.managedExit(t) && fresh && q.bookAtMs > (t.entryAtMs ?: t.signalAtMs) && ScalpRisk.hit(entry, bid, percent)) {
+            // 0.3.85: legacy/restored rows get their reference bid from the first fresh book (never stopped on it).
+            if (!ScalpRisk.managedExit(t) && !ScalpRisk.hasRef(next) && fresh && bid != null) {
+                val ask = q.ask(t.side)?.takeIf { it.isFinite() && it > bid } ?: entry
+                next = next.copy(note = ScalpRisk.tagRef(next.note, minOf(bid, entry), (ask - bid).coerceAtLeast(0.0)))
+                if (next != t) changes += next
+                continue
+            }
+            val refBid = ScalpRisk.refBid(next) ?: entry
+            if (!ScalpRisk.managedExit(t) && fresh && q.bookAtMs > (t.entryAtMs ?: t.signalAtMs) &&
+                ScalpRisk.flooredHit(refBid, bid, percent, ScalpRisk.refSpread(next), t.contracts)) {
                 next = next.copy(state = ScalpState.PENDING_EXIT,
                     exitDecidedAtMs = if (t.state == ScalpState.PENDING_EXIT && t.restingLimit == null) t.exitDecidedAtMs ?: q.nowMs else q.nowMs,
-                    exitReason = t.exitReason.takeIf { t.state == ScalpState.PENDING_EXIT } ?: "stop loss ${Math.round(percent)}% below fill", restingLimit = null, restingSinceMs = null,
+                    exitReason = t.exitReason.takeIf { t.state == ScalpState.PENDING_EXIT } ?: "stop loss ${Math.round(percent)}% (floored) below entry bid", restingLimit = null, restingSinceMs = null,
                     queueAhead = null, note = ScalpV2.tag(next.note, "riskExit", "1"))
             }
             if (ScalpRisk.managedExit(next)) {
@@ -1683,6 +1701,7 @@ class ScalpBook(
             if (lastCheck != null && t.signalAtMs - lastCheck < knobs.cadenceSeconds * 1000L) continue
             strategyEntryChecks[checkKey] = t.signalAtMs
             if (strategyEntryChecks.size > 2000) strategyEntryChecks.keys.filter { (ScalpTicker.closeMs(it.substringBefore('|')) ?: 0) < t.signalAtMs }.forEach { strategyEntryChecks.remove(it) }
+            if (ScalpRisk.entryBlocked(_all.value, seed.id, t.ticker, t.signalAtMs)) continue // 0.3.85 churn guard
             val plan = cfg.plan(informed, model.code)
             val sp = if (cfg.peakTrailEnabled) plan.spec.copy(trail = (knobs.trailCents ?: cfg.peakTrailCents) / 100.0)
                 else plan.spec.copy(trail = knobs.trailCents?.div(100.0) ?: plan.spec.trail)
@@ -1803,7 +1822,7 @@ class ScalpBook(
                     val target = ScalpV2.savedNumber(t.note, "v2tp", 0.0)
                     val timeExit = if (holdExpired) "V2 user max hold reached" else null
                     val priceExit = bid?.let {
-                        (if (ScalpV2.peakRule(t)) ScalpV2.peakExit(entry, ScalpV2.stopPercent(t), pk, it, trail)
+                        (if (ScalpV2.peakRule(t)) ScalpV2.peakExit(entry, ScalpV2.stopPercent(t), pk, it, trail, ScalpRisk.tradeStopPrice(t, ScalpV2.stopPercent(t)))
                         else ScalpV2.exit(entry, stop, pk, it, armed, t.contracts, trail, armThreshold = arm, netGain = ScalpV2.netPerContract(t, it)))
                             ?: if (target > 0 && ScalpV2.netPerContract(t, it) >= target - 1e-9) "V2 user net take-profit" else null
                     }
