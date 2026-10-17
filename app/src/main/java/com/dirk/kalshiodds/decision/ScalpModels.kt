@@ -149,6 +149,29 @@ object ScalpModels {
 
     const val V2_BLURB = "v2 paper: new trades default to a 3¢ bid-peak trail active from entry and independent 20% fill-price stop. Existing trades retain saved exits. Preserve positive/inconclusive entry settings; bounded adjustments for sustained losses. Every trade has a protective stop. Exit in the final minute unless fresh CF fair ≥ 97%, bid ≥ 90¢ and holding beats selling. Decisions are estimates, never guaranteed wins. Actual stop/trail and adaptation evidence are in the trade note."
     val ALL: List<Model> = Model.values().toList()
+    /**
+     * 0.3.79: scalpers retired from cards, leaderboard and new entries: at least 30 closed paper trades and the whole
+     * 95% interval on net P&L after fees below zero (Supabase kashi: rows, Oct 16 2026). Code stays so old ledger rows
+     * still map; a retired original keeps feeding signals to its kept v2 copy as hidden shadow rows only.
+     */
+    val RETIRED_CODES: Set<String> = setOf("cfr", "dip", "diph60", "dipnotp", "fair", "fcfade", "mkdip", "momo", "momoh60", "momonotp", "sf01", "sf02", "sf04", "sf05", "sf06", "sf07", "sf08", "sf09", "sf12", "sf15", "sf17", "sf20", "sf24", "sf27", "sf28", "sf30", "sf32", "sf41", "sf42", "sf43", "sf44", "sf51", "sf52", "sf53", "sf54", "sf55", "sf56", "sf57", "sf58", "sf59", "sf60", "v2-cfr", "v2-dip", "v2-diph60", "v2-dipnotp", "v2-fair", "v2-fairh60", "v2-mkdip", "v2-momo", "v2-momoh60", "v2-momonotp", "v2-sf30", "v2-sf32", "v2-sf41", "v2-sf41t1", "v2-sf41t2", "v2-sf41x10", "v2-sf41x5", "v2-sf42", "v2-sf42t1", "v2-sf42t2", "v2-sf42x10", "v2-sf42x5", "v2-sf43", "v2-sf43t1", "v2-sf43t2", "v2-sf43x10", "v2-sf43x5", "v2-sf44", "v2-sf44t1", "v2-sf44t2", "v2-sf44x10", "v2-sf44x5", "v2-sf56", "v2-sf57", "v2-sf58", "v2-sf59", "v2-sf60", "xrev")
+    /** Unit tests of older lanes set -Dkashi.retire.off=true so their fixtures (sf41, fair-gap…) still trade. */
+    @Volatile private var retired: Set<String> = if (System.getProperty("kashi.retire.off") == "true") emptySet() else RETIRED_CODES
+    internal fun retirementForTest(on: Boolean) { retired = if (on) RETIRED_CODES else emptySet() }
+    fun isRetired(m: Model): Boolean = m.code in retired
+    /** Models still shown and still opening paper trades. */
+    val ACTIVE: List<Model> get() = ALL.filterNot { isRetired(it) }
+    /** 0.3.79: a new primary row of a retired model becomes a hidden shadow row (off cards, leaderboard and stats). */
+    fun toShadowIfRetired(t: ScalpTrade): ScalpTrade {
+        if (!t.isPrimary) return t
+        val m = modelOf(t) ?: return t
+        if (!isRetired(m)) return t
+        val parts = t.ruleVersion.split('|').toMutableList()
+        while (parts.size < 3) parts += ""
+        if (parts[1].isEmpty()) parts[1] = t.variantId
+        parts[2] = "S"
+        return t.copy(ruleVersion = parts.joinToString("|"))
+    }
     /** 0.3.65: v2 copy of an original model (null when none, e.g. sf29 or a v2 itself). */
     fun v2Of(m: Model): Model? = V2_BY_ORIG[m]
     fun originalOf(v2: Model): Model? = ORIG_BY_CODE[ScalpV2.baseOf(v2.code)]?.takeIf { isV2(v2) }
@@ -177,12 +200,12 @@ object ScalpModels {
                              unrealBy: Map<String, Double> = emptyMap()): List<Row> {
         val byId = stats.associateBy { it.scalperId }
         val ex = exits.groupBy { it.scalperId }
-        return ALL.map { m ->
+        return ACTIVE.map { m ->
             val st = byId[m.code] ?: ScalpStat(m.code)
             rowFromStat(st, openN = openBy[m.code] ?: st.openN, exits = ex[m.code].orEmpty(), unrealizedUsd = unrealBy[m.code] ?: 0.0)
         }.sortedWith(compareByDescending<Row> { it.netUsd + it.unrealizedUsd }.thenByDescending { it.roundTrips })
     }
-    val V2_MODELS: List<Model> get() = ALL.filter { isV2(it) }
+    val V2_MODELS: List<Model> get() = ACTIVE.filter { isV2(it) }
     private val ORIG_BY_CODE: Map<String, Model> by lazy { ALL.filter { !isV2(it) }.associateBy { it.code } }
     private val V2_BY_ORIG: Map<Model, Model> by lazy { ALL.filter { isV2(it) && !ScalpV2.isExtra(it.code) }.mapNotNull { v -> ORIG_BY_CODE[v.code.removePrefix(ScalpV2.PREFIX)]?.let { it to v } }.toMap() }
     val COUNT: Int get() = ALL.size
@@ -192,10 +215,10 @@ object ScalpModels {
     fun noEdge2s(m: Model): Boolean = ShockFav.byVariantId(m.code)?.noEdge2s == true
     /** Card order: 2 s-delay survivors first, then legacy models, then no-edge sf variants (fixed order within groups). */
     val CARD_ORDER: List<Model> by lazy {
-        ALL.sortedBy { m -> val p = ShockFav.byVariantId(m.code); when { p == null -> 1; !p.noEdge2s -> 0; else -> 2 } }
+        ACTIVE.sortedBy { m -> val p = ShockFav.byVariantId(m.code); when { p == null -> 1; !p.noEdge2s -> 0; else -> 2 } }
     }
     /** One combined leaderboard: survivors first, then by net. */
-    fun combinedBoard(rows: Map<Model, Row>): List<Row> = ALL.mapNotNull { rows[it] }
+    fun combinedBoard(rows: Map<Model, Row>): List<Row> = ACTIVE.mapNotNull { rows[it] }
         .sortedWith(compareBy<Row> { if (noEdge2s(it.model)) 1 else 0 }.thenByDescending { it.netUsd + it.unrealizedUsd }.thenByDescending { it.roundTrips })
 
     /** Sixth model: the dip-hunter seed run maker-first (resting bid entry, resting ask exit). */
@@ -371,7 +394,7 @@ object ScalpModels {
             .filter { windowKey == null || it.windowKey == windowKey }
             .mapNotNull { t -> modelOf(t)?.let { it to t } }
             .groupBy({ it.first }, { it.second })
-        return ALL.map { m -> row(m, byModel[m].orEmpty(), bidFor, if (withCi) 400 else 0) }
+        return ACTIVE.map { m -> row(m, byModel[m].orEmpty(), bidFor, if (withCi) 400 else 0) }
             .sortedWith(compareByDescending<Row> { it.netUsd + it.unrealizedUsd }.thenByDescending { it.roundTrips })
     }
 
@@ -406,7 +429,7 @@ object ScalpModels {
     /** 0.3.68: one window's leaderboard from the per-window aggregate (net + trips only). */
     fun windowBoardFromAgg(aggs: List<ScalpWindowAgg>, windowKey: String): List<Row> {
         val mine = aggs.filter { it.windowKey == windowKey }.associateBy { it.scalperId }
-        return ALL.map { m -> val a = mine[m.code]; rowFromStat(ScalpStat(m.code, n = a?.n ?: 0, netUsd = a?.netUsd ?: 0.0), openN = 0) }
+        return ACTIVE.map { m -> val a = mine[m.code]; rowFromStat(ScalpStat(m.code, n = a?.n ?: 0, netUsd = a?.netUsd ?: 0.0), openN = 0) }
             .sortedWith(compareByDescending<Row> { it.netUsd }.thenByDescending { it.roundTrips })
     }
 

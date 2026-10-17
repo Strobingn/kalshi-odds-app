@@ -105,7 +105,7 @@ object ScalpTabCopy {
         val w = ScalpModels.perWindow(trades, limit = 24)
         if (w.isNotEmpty()) add("Per window (best model):")
         w.forEach { r ->
-            add("  ${r.windowKey}: ${r.best?.label ?: "—"} · " + ScalpModels.ALL.joinToString("  ") { m -> "${m.code} ${r.netByModel[m]?.let(::usd) ?: "·"}" })
+            add("  ${r.windowKey}: ${r.best?.label ?: "—"} · " + ScalpModels.ACTIVE.joinToString("  ") { m -> "${m.code} ${r.netByModel[m]?.let(::usd) ?: "·"}" })
         }
     }
 

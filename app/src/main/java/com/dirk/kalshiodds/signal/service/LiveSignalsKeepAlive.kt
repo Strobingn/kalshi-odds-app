@@ -100,8 +100,28 @@ object LiveSignalsKeepAlive {
      * Safe FGS start. Never throws — [android.app.ForegroundServiceStartNotAllowedException]
      * and OEM failures are caught so the UI process stays up.
      */
+    /**
+     * 0.3.79 ANR fix (kashi:crash:1792196781305): the service was started twice within a minute while a
+     * WorkManager job was waiting on the main thread. Skip a start when the service already runs or a
+     * start was issued in the last [START_DEBOUNCE_MS] and has not reached onCreate yet.
+     */
+    const val START_DEBOUNCE_MS = 60_000L
+    private val lastStartAtMs = java.util.concurrent.atomic.AtomicLong(0L)
+    internal fun shouldStart(isRunning: Boolean, lastStartMs: Long, nowMs: Long): Boolean =
+        !isRunning && (lastStartMs <= 0L || nowMs - lastStartMs !in 0 until START_DEBOUNCE_MS)
+    /** Atomically claims the single start slot. */
+    internal fun claimStart(nowMs: Long, isRunning: Boolean = LiveSignalsService.isRunning): Boolean {
+        while (true) {
+            val last = lastStartAtMs.get()
+            if (!shouldStart(isRunning, last, nowMs)) return false
+            if (lastStartAtMs.compareAndSet(last, nowMs)) return true
+        }
+    }
+    internal fun resetStartGuardForTest() = lastStartAtMs.set(0L)
+
     fun startService(context: Context, fromForegroundUi: Boolean = false): Boolean {
         val app = context.applicationContext
+        if (!claimStart(System.currentTimeMillis())) return true
         val intent = Intent(app, LiveSignalsService::class.java)
         // 0.3.42: while our Activity is visible, a plain startService() is allowed and carries no
         // "must call startForeground within N s" contract — the service still promotes itself to the
@@ -128,6 +148,7 @@ object LiveSignalsKeepAlive {
             // Android 12+: ForegroundServiceStartNotAllowedException from a background start.
             // Fall back to a WorkManager retry with backoff; never crash the process.
             Log.w(TAG, "startForegroundService failed: ${t.javaClass.simpleName}: ${t.message}")
+            lastStartAtMs.set(0L) // a refused start must not block the retry
             runCatching { enqueueSoon(app) }
             false
         }
