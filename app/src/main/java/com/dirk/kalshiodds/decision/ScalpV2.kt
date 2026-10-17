@@ -5,7 +5,7 @@ package com.dirk.kalshiodds.decision
  *  - buys only when the ask is ≤ 55¢ (2 s entry delay, displayed-size fill, 10-contract clip, taker fee),
  *  - keeps positive/inconclusive settings; tests bounded adjustments after sustained losses,
  *  - exits before the final minute unless fresh CF evidence supports a profitable hold,
- *  - new trades default to an immediate 3¢ bid-peak trail and independent 20% fill-price stop;
+ *  - new trades default to an immediate 3¢ bid-peak trail and independent 1% fill-price stop;
  *    legacy trades retain their saved net-profit arming and distance-based stop.
  * Deterministic, no LLM. Originals are untouched.
  */
@@ -62,7 +62,9 @@ object ScalpV2 {
 
     /** Explicit new-trade policy; absence keeps an existing trade on its original saved rules. */
     fun peakRule(t: ScalpTrade): Boolean = savedNumber(t.note, "v2peakrule", 0.0) == 1.0
-    fun stopPercent(t: ScalpTrade): Double = savedNumber(t.note, "v2stopPct", 20.0).coerceIn(1.0, 99.0)
+    fun stopPercent(t: ScalpTrade): Double = minOf(
+        savedNumber(t.note, "v2stopPct", ScalpRisk.DEFAULT_PERCENT.toDouble()),
+        savedNumber(t.note, "riskStopPct", 99.0)).coerceIn(1.0, 99.0)
     fun percentStopPrice(entry: Double, percent: Double): Double = entry * (1.0 - percent / 100.0)
     fun peakExit(entry: Double, percent: Double, peakBid: Double, bid: Double, trail: Double): String? = when {
         bid <= percentStopPrice(entry, percent) + 1e-9 -> "V2 stop loss ${Math.round(percent)}% below fill"

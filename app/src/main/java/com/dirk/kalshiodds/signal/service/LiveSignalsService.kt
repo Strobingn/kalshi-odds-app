@@ -23,8 +23,6 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Foreground service that owns the Kalshi ticker + orderbook WebSocket and the
@@ -125,13 +123,8 @@ class LiveSignalsService : Service() {
     private fun handleExplicitStop(): Int {
         explicitStop = true
         LiveSignalsKeepAlive.setEnabled(this, false)
-        runCatching {
-            runBlocking(Dispatchers.IO) {
-                withTimeoutOrNull(1_500L) {
-                    KalshiOddsApp.from(this@LiveSignalsService).container.preferences.updateLiveSignals(false)
-                }
-            }
-        }
+        // The app scope survives this service's teardown; never block the main thread waiting on DataStore.
+        runCatching { KalshiOddsApp.from(this).stopLiveSignalsPreferenceAsync() }
         tearDownPipeline()
         runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
         stopSelf()

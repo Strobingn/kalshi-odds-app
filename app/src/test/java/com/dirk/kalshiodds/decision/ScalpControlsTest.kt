@@ -14,7 +14,7 @@ class ScalpControlsTest {
     private val at = close - 300_000
     private fun q(now: Long, bid: Double = .39, ask: Double = .40) = ScalpRule.Quote(tk, now, close, now, bid, 100.0, ask, 100.0, 100_000.0, 100_000.0, 3e-5)
     private fun source(id: String = "source") = ScalpTrade(id, tk, "YES", ScalpState.PENDING_ENTRY, at, .4, .5, ruleVersion = "${ScalpRule.VERSION}|sf41|P")
-    private fun controls() = MemoryScalpControls(ScalpControls(peakTrailEnabled = false, manual = true, contracts = 3, stopCents = 6,
+    private fun controls() = MemoryScalpControls(ScalpControls(stopLossPercent = 20, peakTrailEnabled = false, manual = true, contracts = 3, stopCents = 6,
         armCents = 8, maxStakeUsd = 1.0, disabledStrategies = ScalpModels.V2_MODELS.map { it.code }.filter { it != "v2-sf41" }.toSet()))
     @Test fun unlimitedMeansNoHourlyOrWindowQuota() {
         val store = MemoryScalpControls()
@@ -143,5 +143,25 @@ class SavedScalpControlsTest {
         b.recordOutcome("v2-sf42", trade.copy(id = "second", netUsd = -.20))
         assertEquals(2, b.feedback("v2-sf42").trades)
         b.close()
+    }
+}
+
+@RunWith(AndroidJUnit4::class)
+@Config(sdk = [34])
+class SavedOnePercentMigrationTest {
+    @Test fun existingStoredTwentyPercentIsUpgradedAndLaterUserChoiceSurvivesRestart() {
+        val ctx = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = ctx.getSharedPreferences("kashi_v2_controls", Context.MODE_PRIVATE)
+        prefs.edit().clear().putString("settings", """{"stopLossPercent":20,"contracts":7,"strategySettings":{"v2-sf41":{"stopLossPercent":30,"trailCents":4}}}""").commit()
+        val first = SavedScalpControls(ctx)
+        assertEquals(1, first.state.value.stopLossPercent)
+        assertEquals(7, first.state.value.contracts)
+        assertNull(first.state.value.settings("v2-sf41").stopLossPercent)
+        assertEquals(4, first.state.value.settings("v2-sf41").trailCents)
+        first.save(first.state.value.copy(stopLossPercent = 5))
+        first.close()
+        val restarted = SavedScalpControls(ctx)
+        assertEquals(5, restarted.state.value.stopLossPercent)
+        restarted.close()
     }
 }

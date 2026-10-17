@@ -66,10 +66,9 @@ internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: Sc
             if (!controls.enabled || controls.killSwitch) Text("Global entries are paused. Existing protective exits keep running.", color = c.spot, style = MaterialTheme.typography.bodySmall)
             StrategyKnob("Until minute", settings.untilMinute, 1..14, "KNOB_UNTIL", { "minute $it" }) { onChange(settings.copy(untilMinute = it)) }
             StrategyKnob("Contracts an order", settings.contracts ?: if (controls.manual) controls.contracts else spec.clip, 1..1000, "KNOB_CONTRACTS") { onChange(settings.copy(contracts = it)) }
-            if (controls.peakTrailEnabled) {
-                StrategyKnob("Stop loss below fill", settings.stopLossPercent ?: controls.stopLossPercent, 1..99, "KNOB_STOP", { "$it%" }) { onChange(settings.copy(stopLossPercent = it)) }
-            } else {
-                StrategyKnob("Stop loss", settings.stopCents ?: if (controls.manual) controls.stopCents else ((spec.stop ?: ScalpV2.stopFor(spec.base)) * 100).roundToInt(), 1..99, "KNOB_STOP", { "$it¢" }) { onChange(settings.copy(stopCents = it)) }
+            StrategyKnob("Stop loss below fill", controls.protectivePercent(model.code), 1..controls.stopLossPercent, "KNOB_STOP", { "$it%" }) { onChange(settings.copy(stopLossPercent = it)) }
+            if (!controls.peakTrailEnabled) {
+                StrategyKnob("Additional stop distance", settings.stopCents ?: if (controls.manual) controls.stopCents else ((spec.stop ?: ScalpV2.stopFor(spec.base)) * 100).roundToInt(), 1..99, "KNOB_LEGACY_STOP", { "$it¢" }) { onChange(settings.copy(stopCents = it)) }
             }
             StrategyKnob("Trailing stop", settings.trailCents ?: if (controls.peakTrailEnabled) controls.peakTrailCents else if (controls.manual) controls.trailCents else (spec.trail * 100).roundToInt(), 1..20, "KNOB_TRAIL", { "$it¢" }) { onChange(settings.copy(trailCents = it)) }
             StrategyKnob("Open at once, per side", settings.maxOpenPerSide, 1..20, "KNOB_MAXOPEN") { onChange(settings.copy(maxOpenPerSide = it)) }
@@ -78,7 +77,7 @@ internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: Sc
             StrategyKnob("Entry checks every", settings.cadenceSeconds, 0..30, "KNOB_CADENCE", { if (it == 0) "Live" else "$it s" }) { onChange(settings.copy(cadenceSeconds = it)) }
             StrategyKnob("Take profit after fees", settings.takeProfitCents ?: if (controls.manual) controls.takeProfitCents else 0, 0..99, "KNOB_TARGET", { if (it == 0) "Off" else "$it¢ / ct" }) { onChange(settings.copy(takeProfitCents = it)) }
             StrategyKnob("Maximum hold", settings.maxHoldSeconds ?: controls.maxHoldSeconds, 0..3600, "KNOB_HOLD", { if (it == 0) "No timer" else "$it s" }) { onChange(settings.copy(maxHoldSeconds = it)) }
-            Text("Applies only to this V2 strategy. Overrides take priority over global and learned defaults; a chosen price floor also keeps the inherited ceiling from falling below it. Filled positions keep their saved stops. Entry checks never slow protective exits.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+            Text("Applies only to this V2 strategy. Overrides take priority over global and learned defaults; a chosen price floor also keeps the inherited ceiling from falling below it. The global percentage cap can tighten existing positions; raising it never loosens their saved stop. Entry checks never slow protective exits.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
             Text("55¢ buy ceiling · stop loss always active · total trade count stays unlimited unless you set a global limit. Until minute limits new entries; the final-minute exit policy still applies. Open-position limits do not create extra entry signals.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
             OutlinedButton(onClick = { onChange(ScalpStrategySettings()) }, modifier = Modifier.fillMaxWidth()) { Text("Back to its defaults") }
         } }

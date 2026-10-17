@@ -82,19 +82,22 @@ object LiveSignalsKeepAlive {
         uiInForeground.set(foreground)
     }
 
-    fun isEnabled(context: Context): Boolean =
-        prefs(context).getBoolean(LiveSignalsPolicy.PREFS_ENABLED_KEY, false)
-
-    fun setEnabled(context: Context, enabled: Boolean) {
-        prefs(context).edit().putBoolean(LiveSignalsPolicy.PREFS_ENABLED_KEY, enabled).commit()
+    private val flagWriter = java.util.concurrent.Executors.newSingleThreadExecutor { task ->
+        Thread(task, "kashi-keepalive-prefs").apply { isDaemon = true }
     }
-
-    fun isTimeoutPaused(context: Context): Boolean =
-        prefs(context).getBoolean(LiveSignalsPolicy.PREFS_TIMEOUT_PAUSED_KEY, false)
-
-    fun setTimeoutPaused(context: Context, paused: Boolean) {
-        prefs(context).edit().putBoolean(LiveSignalsPolicy.PREFS_TIMEOUT_PAUSED_KEY, paused).commit()
+    private val flagStores = java.util.concurrent.ConcurrentHashMap<android.content.SharedPreferences, AsyncBooleanFlags>()
+    private fun flags(context: Context): AsyncBooleanFlags = flagStores.computeIfAbsent(prefs(context)) { prefs ->
+        val keys = listOf(LiveSignalsPolicy.PREFS_ENABLED_KEY, LiveSignalsPolicy.PREFS_TIMEOUT_PAUSED_KEY)
+        AsyncBooleanFlags(keys.associateWith { prefs.getBoolean(it, false) }, persist = { batch ->
+            val editor = prefs.edit()
+            batch.forEach { (key, value) -> editor.putBoolean(key, value) }
+            editor.commit() // background executor only; never blocks Service lifecycle callbacks
+        }, execute = { work -> flagWriter.execute(work) })
     }
+    fun isEnabled(context: Context): Boolean = flags(context).get(LiveSignalsPolicy.PREFS_ENABLED_KEY)
+    fun setEnabled(context: Context, enabled: Boolean) = flags(context).set(LiveSignalsPolicy.PREFS_ENABLED_KEY, enabled)
+    fun isTimeoutPaused(context: Context): Boolean = flags(context).get(LiveSignalsPolicy.PREFS_TIMEOUT_PAUSED_KEY)
+    fun setTimeoutPaused(context: Context, paused: Boolean) = flags(context).set(LiveSignalsPolicy.PREFS_TIMEOUT_PAUSED_KEY, paused)
 
     /**
      * Safe FGS start. Never throws — [android.app.ForegroundServiceStartNotAllowedException]

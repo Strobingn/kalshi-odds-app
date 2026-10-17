@@ -15,7 +15,7 @@ class ScalpV2AdaptiveTest {
         note = note, ruleVersion = "${ScalpRule.VERSION}|$variant|P")
     private fun book(t: ScalpTrade): Pair<ScalpBook, InMemoryScalpPersistence> {
         val store = InMemoryScalpPersistence().also { it.seed(listOf(t)) }
-        return ScalpBook(store = store, variants = emptyList(), liveExtras = true) to store
+        return ScalpBook(store = store, variants = emptyList(), liveExtras = true, controls = MemoryScalpControls(ScalpControls(stopLossPercent = 20))) to store
     }
     private fun windows(net: Double, n: Int = 10, count: Int = 3) = (1..count).map {
         ScalpWindowAgg("w$it", "v2-sf41", n, net, now - it * 900_000L)
@@ -81,13 +81,13 @@ class ScalpV2AdaptiveTest {
         val (book, store) = book(open())
         book.onQuote(q(now, .60), false)
         book.flushWrites()
-        val restarted = ScalpBook(store = store, variants = emptyList(), liveExtras = true)
+        val restarted = ScalpBook(store = store, variants = emptyList(), liveExtras = true, controls = MemoryScalpControls(ScalpControls(stopLossPercent = 20)))
         restarted.onQuote(q(now + 1_000, .56), false)
         val pending = restarted.snapshot().first { it.id == "held" }
         assertEquals(ScalpState.PENDING_EXIT, pending.state)
         assertTrue(pending.exitReason!!.contains("trail"))
         restarted.flushWrites()
-        val again = ScalpBook(store = store, variants = emptyList(), liveExtras = true)
+        val again = ScalpBook(store = store, variants = emptyList(), liveExtras = true, controls = MemoryScalpControls(ScalpControls(stopLossPercent = 20)))
         again.onQuote(q(now + 2_000, .58), false) // price recovered; triggered exit stays latched
         assertEquals(ScalpState.CLOSED, again.snapshot().first { it.id == "held" }.state)
     }

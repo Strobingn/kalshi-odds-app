@@ -1744,8 +1744,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             // 0.3.57 sf57: twenty shock / late-favourite paper scalpers on the same conflated quote (paper lane).
             runCatching { container.scalp.onShockFavQuote(qq, enabled = s.paperTradingEnabled) }
         }
-        // 0.3.67: batch SQLite+stats writes off the quote path (same paperLane worker, not Main).
-        runCatching { container.scalp.flushWrites() }
+        // Disk persistence has its own serialized worker; a busy SQLite writer must not stall risk/quote processing.
+        runCatching { container.scalp.requestFlush() }
     }
 
     /**

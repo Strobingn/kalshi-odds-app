@@ -145,6 +145,12 @@ class KalshiOddsApp : Application() {
         )[com.dirk.kalshiodds.ui.OddsViewModel::class.java]
     }
 
+    fun stopLiveSignalsPreferenceAsync() {
+        appScope.launch(Dispatchers.IO) {
+            runCatching { kotlinx.coroutines.withTimeoutOrNull(1_500L) { container.preferences.updateLiveSignals(false) } }
+        }
+    }
+
     fun ensureAutopilotHost() {
         if (isRobolectric()) return
         oddsViewModel

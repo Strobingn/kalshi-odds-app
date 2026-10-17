@@ -59,7 +59,7 @@ class ReleaseGate0353Test {
         val ride = fc.filter { ScalpModels.modelOf(it) == ScalpModels.Model.FORECAST_RIDE }
         val fade = fc.filter { ScalpModels.modelOf(it) == ScalpModels.Model.FORECAST_FADE }
         // The opposite ask can exceed 50¢, so ride/fade no longer have to enter together.
-        assertTrue(fc.all { it.signalAsk <= .50 + 1e-9 })
+        assertTrue(fc.all { it.signalAsk <= ScalpRule.ENTRY_HI + 1e-9 })
         ride.forEach { r -> fade.filter { it.signalAtMs == r.signalAtMs }.forEach { f -> assertTrue(r.side != f.side) } }
         assertTrue(fc.all { it.state != ScalpState.CLOSED || it.entryFeeUsd > 0.0 }) // fees on every fill
         assertTrue(n == 200)
