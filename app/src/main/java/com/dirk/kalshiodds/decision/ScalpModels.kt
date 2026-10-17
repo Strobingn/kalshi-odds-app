@@ -163,7 +163,7 @@ object ScalpModels {
     }
     const val G14_BLURB = "0.3.80 copy: takes its original's signal only when the Fair-gap g14 gate passes, then g14 h60 exits (stop armed after 60 s, otherwise hold to settlement). Original keeps running unchanged. g14 is not proven (per-trade range ≈ -$0.48…+$0.72)."
 
-    const val V2_BLURB = "v2 paper: new trades default to a 3¢ bid-peak trail active from entry and independent 1% fill-price stop by default. The global percentage cap can tighten existing trades. Preserve positive/inconclusive entry settings; bounded adjustments for sustained losses. Every trade has a protective stop. Exit in the final minute unless fresh CF fair ≥ 97%, bid ≥ 90¢ and holding beats selling. Decisions are estimates, never guaranteed wins. Actual stop/trail and adaptation evidence are in the trade note."
+    const val V2_BLURB = "v2 paper: new trades default to a 3¢ bid-peak trail active from entry and independent 4% stop (floored at spread + round-trip fees + 1¢, min 3¢, from the entry bid) by default. The global percentage cap can tighten existing trades. Preserve positive/inconclusive entry settings; bounded adjustments for sustained losses. Every trade has a protective stop. Exit in the final minute unless fresh CF fair ≥ 97%, bid ≥ 90¢ and holding beats selling. Decisions are estimates, never guaranteed wins. Actual stop/trail and adaptation evidence are in the trade note."
     val ALL: List<Model> = Model.values().toList()
     /**
      * 0.3.79: scalpers retired from cards, leaderboard and new entries: at least 30 closed paper trades and the whole
@@ -277,8 +277,8 @@ object ScalpModels {
 
     /** 0.3.61: per-bet stop shown on each card / leaderboard row. */
     fun stopLabel(m: Model): String {
-        if (isV2(m)) return "stop 1% below fill by default + 3¢ peak trail; actual risk cap in trade note; 60s close check"
-        return "stop 1% below fill by default; global cap applies immediately; other strategy exits may close earlier"
+        if (isV2(m)) return "stop 4% (min 3¢) below entry bid by default + 3¢ peak trail; actual risk cap in trade note; 60s close check"
+        return "stop 4% (min 3¢) below entry bid by default; global cap applies immediately; other strategy exits may close earlier"
     }
 
     fun tag(m: Model): String? = (if (isV2(m)) "group: v2" else null) ?: ShockFav.TAGS[m.code] ?: ShockFav.byVariantId(m.code)?.group?.let { "group: $it" }

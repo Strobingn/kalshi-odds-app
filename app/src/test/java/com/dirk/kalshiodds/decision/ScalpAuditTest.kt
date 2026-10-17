@@ -50,12 +50,12 @@ class ScalpAuditTest {
             val b = ScalpBook(backing, variants = emptyList(), liveExtras = true)
             tick(b, q(at, .499, side))
             assertEquals("${model.code} $side above stop", ScalpState.OPEN, row(b).state)
-            tick(b, q(at + 1000, .495, side, 2.0))
+            tick(b, q(at + 1000, .43, side, 2.0)) // 0.3.85: beyond the floored stop (entry bid − max(4%, spread+fees+1¢, 3¢))
             assertEquals("${model.code} $side trigger", ScalpState.PENDING_EXIT, row(b).state)
             assertEquals(0, row(b).soldContracts)
-            tick(b, q(at + 2000, .494, side, 2.0))
+            tick(b, q(at + 2000, .43, side, 2.0))
             assertEquals("${model.code} $side partial", 2, row(b).soldContracts)
-            tick(b, q(at + 2100, .494, side, 2.0).copy(bookAtMs = at + 2000))
+            tick(b, q(at + 2100, .43, side, 2.0).copy(bookAtMs = at + 2000))
             assertEquals(2, row(b).soldContracts)
             b.flushWrites()
             val restart = ScalpBook(backing, variants = emptyList(), liveExtras = true,
@@ -67,17 +67,17 @@ class ScalpAuditTest {
             assertTrue(closed.note.contains("stopLevel="))
             assertTrue(closed.note.contains("fees="))
             assertEquals(3, closed.soldContracts)
-            assertEquals(1.588, closed.proceedsUsd, 1e-10)
+            assertEquals(1.46, closed.proceedsUsd, 1e-10)
             assertEquals(.06, closed.exitFeeUsd, 1e-10)
-            assertEquals(-.032, closed.netUsd!!, 1e-10)
+            assertEquals(-.16, closed.netUsd!!, 1e-10)
             assertEquals(2, ScalpFills.sales(closed).size)
         }
     }
 
     @Test fun restoredUntaggedRiskCannotBeLoosenedBeforeItsFirstQuote() {
         val t = held("sf51").copy(note = "legacy position")
-        assertEquals(1.0, ScalpRisk.percent(t, ScalpControls(stopLossPercent = 80)), 0.0)
-        assertEquals(.495, ScalpRisk.stopPrice(t.entryPrice!!, ScalpRisk.percent(t, ScalpControls(stopLossPercent = 80))), 1e-12)
+        assertEquals(4.0, ScalpRisk.percent(t, ScalpControls(stopLossPercent = 80)), 0.0)
+        assertEquals(.48, ScalpRisk.stopPrice(t.entryPrice!!, ScalpRisk.percent(t, ScalpControls(stopLossPercent = 80))), 1e-12)
     }
 
     @Test fun stopsWaitOnStaleOrGappedBooksAndDoNotSellOnTheEntrySnapshot() {
@@ -89,7 +89,7 @@ class ScalpAuditTest {
             assertEquals(ScalpState.OPEN, row(b).state)
             tick(b, q(at + 5000, .49).copy(bookAtMs = if (gap) at + 5000 else at, bookGap = gap))
             assertEquals(ScalpState.OPEN, row(b).state)
-            tick(b, q(at + 6000, .49))
+            tick(b, q(at + 6000, .42))
             assertEquals(ScalpState.PENDING_EXIT, row(b).state)
         }
     }
@@ -174,11 +174,11 @@ class ScalpAuditTest {
         val old = ScalpControls(stopLossPercent = 20, contracts = 7, disabledStrategies = setOf("v2-sf41"),
             strategySettings = mapOf("v2-sf42" to ScalpStrategySettings(stopLossPercent = 30, trailCents = 5)))
         val upgraded = old.migrateStopPolicy()
-        assertEquals(1, upgraded.stopLossPercent)
+        assertEquals(4, upgraded.stopLossPercent)
         assertEquals(7, upgraded.contracts)
         assertEquals(old.disabledStrategies, upgraded.disabledStrategies)
         assertEquals(30, upgraded.settings("v2-sf42").stopLossPercent)
-        assertEquals(1, upgraded.protectivePercent("v2-sf42"))
+        assertEquals(4, upgraded.protectivePercent("v2-sf42"))
         assertEquals(5, upgraded.settings("v2-sf42").trailCents)
         assertEquals(8, upgraded.copy(stopLossPercent = 8).migrateStopPolicy().stopLossPercent)
     }
