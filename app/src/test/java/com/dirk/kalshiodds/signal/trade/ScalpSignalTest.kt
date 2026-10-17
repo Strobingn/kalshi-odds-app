@@ -32,7 +32,7 @@ class ScalpSignalTest {
         assertEquals(660L, candidate.timeToCloseSec)
     }
 
-    @Test fun twentyIndependentTracksProduceConcurrentSidesWithoutEntryGates() {
+    @Test fun twentyTracksRemainVisibleWithVersionedV6Formulas() {
         val candidates = ScalpSignal.candidates(
             market(0.50, 0.004, 0.020).copy(predictedSide = "YES"),
             openedAt + 60_000L
@@ -61,9 +61,9 @@ class ScalpSignalTest {
             finalMinuteFairPp = 80.0,
             finalMinuteSamples = 30
         )
-        assertEquals(0.35, ScalpSignal.exitProbability("scalp-v5-imported-model", m, "YES")!!, 1e-9)
-        assertEquals(0.20, ScalpSignal.exitProbability("scalp-v4-fair-value-follower", m, "NO")!!, 1e-9)
-        org.junit.Assert.assertNull(ScalpSignal.exitProbability("scalp-v3-momentum-sniper", m, "YES"))
+        assertEquals(0.35, ScalpSignal.exitProbability("scalp-v6-imported-model", m, "YES")!!, 1e-9)
+        assertEquals(0.20, ScalpSignal.exitProbability("scalp-v6-fair-value-follower", m, "NO")!!, 1e-9)
+        org.junit.Assert.assertNull(ScalpSignal.exitProbability("scalp-v6-momentum-sniper", m, "YES"))
     }
 
     @Test fun modelAndMarketChannelsUseTheirOwnAvailableInputs() {
@@ -95,21 +95,19 @@ class ScalpSignalTest {
         assertEquals("NO", candidates.getValue(ScalpSignal.Track.SPOT_TARGET).side)
     }
 
-    @Test fun ticketCanOpenOutsideTheOldTimeAndSpotFilters() {
+    @Test fun retiredBaselineCannotOpenAnAutomaticPaperTicket() {
         val now = openedAt + 14 * 60_000L
         val ticket = TicketBuilder.proposeScalp(
             market(0.49, -0.9, 0.9).copy(aiYesPercent = 50.0, yesAskSize = 12.0),
             TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false, nowMs = now)
-        )!!
-        assertEquals(TicketKind.SCALP, ticket.kind)
-        assertEquals(12, ticket.contracts)
-        org.junit.Assert.assertFalse(ticket.modelEdge)
+        )
+        org.junit.Assert.assertNull(ticket)
     }
 
     @Test fun ticketIsForcedToPaperEvenWhenItQualifies() {
         val now = openedAt + 14 * 60_000L
         val ticket = TicketBuilder.proposeScalp(
-            market(0.62, -0.0002, -0.0008).copy(aiYesPercent = 5.0, aiNoPercent = 95.0, yesAskSize = 10.0),
+            market(0.62, -0.0002, -0.0008).copy(digitalFairPp = 82.0, yesAskSize = 10.0),
             TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false, nowMs = now)
         )!!
         assertEquals(TicketKind.SCALP, ticket.kind)
@@ -117,13 +115,25 @@ class ScalpSignalTest {
         org.junit.Assert.assertTrue(ticket.canPaper)
     }
 
-    @Test fun multipleTracksProduceIndependentPaperTicketsForOneMarket() {
+    @Test fun onlyEvidenceGatedTracksProduceIndependentPaperTicketsForOneMarket() {
         val tickets = TicketBuilder.proposeScalps(
-            market(0.50, -0.003, 0.010).copy(predictedSide = "YES", yesAskSize = 10.0),
-            TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false, nowMs = openedAt + 10_000L)
+            market(0.50, -0.003, 0.010).copy(predictedSide = "YES", digitalFairPp = 70.0, gbmPp = 70.0, yesAskSize = 10.0),
+            TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false, nowMs = openedAt + 2 * 60_000L)
         )
-        assertEquals(9, tickets.size)
+        assertEquals(4, tickets.size)
         assertEquals(tickets.size, tickets.mapNotNull { it.strategyVersion }.toSet().size)
         org.junit.Assert.assertTrue(tickets.all { it.paperOnly && it.canPaper && !it.canApprove })
+    }
+
+    @Test fun probabilityTracksStoreTheChosenSideProbabilityAndRequireTheirConfiguredEdge() {
+        val candidate = ScalpSignal.candidates(
+            market(0.50, 0.0, 0.0).copy(digitalFairPp = 30.0),
+            openedAt + 2 * 60_000L
+        ).first { it.track == ScalpSignal.Track.FAIR_VALUE_DISLOCATION }
+
+        assertEquals("NO", candidate.side)
+        assertEquals(0.70, candidate.entryProbability!!, 1e-9)
+        org.junit.Assert.assertTrue(ScalpSignal.allowsEntry(candidate, sideAsk = 0.65, allInPerContract = 0.66))
+        org.junit.Assert.assertFalse(ScalpSignal.allowsEntry(candidate, sideAsk = 0.68, allInPerContract = 0.67))
     }
 }

@@ -3,41 +3,67 @@ package com.dirk.kalshiodds.signal.trade
 import com.dirk.kalshiodds.domain.MarketUiModel
 
 /**
- * Twenty independent, paper-only scalp hypotheses. They have no timing, stake,
- * favorite-strength, or model-edge entry gate. A hypothesis may, however,
- * decline an observation when its own required input is absent: substituting
- * the baseline side made several supposedly independent tracks identical and
- * invalidated their comparison. [TicketBuilder] still requires an open market
- * and an executable displayed ask; that is quote integrity, not a financial cap.
+ * Twenty versioned paper-only scalp hypotheses. They are all evaluated for
+ * visibility, but only the active V6 tracks may open an automatic paper fill.
+ * Each active track has an independently recorded price band, time window,
+ * and (where a probability exists) after-fee edge threshold. A hypothesis may
+ * still decline an observation when its required input is absent.
  */
 object ScalpSignal {
-    const val FORMULA_VERSION = "scalp-v5-twenty-track"
+    const val FORMULA_VERSION = "scalp-v6-evidence-gated"
+    private const val RETIRED_RATIONALE = "Retired: after-fee whole-day review did not validate this V5 formula"
+
+    /**
+     * Per-track controls modelled after Claude's arena settings.  These are
+     * execution-quality settings, not bankroll limits: a qualifying paper
+     * order still uses all displayed touch liquidity.  A track that failed
+     * the after-fee review is retired by default instead of being silently
+     * re-tuned under its old formula name.
+     */
+    data class Settings(
+        val enabled: Boolean,
+        val entryMinCents: Int = 10,
+        val entryMaxCents: Int = 89,
+        val fromMinute: Int = 0,
+        val untilMinute: Int = 15,
+        val minEdgePp: Double = 0.0,
+        val rationale: String
+    ) {
+        init {
+            require(entryMinCents in 1..99)
+            require(entryMaxCents in entryMinCents..89)
+            require(fromMinute in 0..14)
+            require(untilMinute in (fromMinute + 1)..15)
+            require(minEdgePp >= 0.0)
+        }
+    }
 
     enum class Track(
         val formulaVersion: String,
         val label: String,
-        val family: String
+        val family: String,
+        val settings: Settings
     ) {
-        DIP_HUNTER("scalp-v3-dip-hunter", "Dip Hunter", "Baseline"),
-        MOMENTUM_SNIPER("scalp-v3-momentum-sniper", "Momentum Sniper", "Spot momentum"),
-        EXTREME_REVERSAL("scalp-v3-extreme-reversal", "5m Mean Reversion", "Spot reversal"),
-        ONE_MINUTE_REVERSAL("scalp-v4-one-minute-reversal", "1m Mean Reversion", "Spot reversal"),
-        FIVE_MINUTE_TREND("scalp-v4-five-minute-trend", "5m Trend Rider", "Spot momentum"),
-        FAIR_VALUE_FOLLOWER("scalp-v4-fair-value-follower", "Fair Value Follower", "Fair value"),
-        BOOK_PRESSURE("scalp-v4-book-pressure", "Best-Ask Contrarian", "Order book"),
-        MARKET_FAVORITE("scalp-v4-market-favorite", "Market Favorite", "Market baseline"),
-        DUAL_HORIZON_MOMENTUM("scalp-v5-dual-horizon-momentum", "Dual-Horizon Momentum", "Spot momentum"),
-        DUAL_HORIZON_REVERSAL("scalp-v5-dual-horizon-reversal", "Dual-Horizon Reversal", "Spot reversal"),
-        FAIR_VALUE_DISLOCATION("scalp-v5-fair-value-dislocation", "Fair-Value Dislocation", "Fair value"),
-        MODEL_DISLOCATION("scalp-v5-model-dislocation", "Model Dislocation", "Model comparison"),
-        IMPORTED_MODEL("scalp-v5-imported-model", "Imported Edge Model", "Model comparison"),
-        MLP_CHANNEL("scalp-v5-mlp-channel", "MLP Channel", "Model channel"),
-        CNN_CHANNEL("scalp-v5-cnn-channel", "CNN Channel", "Model channel"),
-        GBM_CHANNEL("scalp-v5-gbm-channel", "GBM Channel", "Model channel"),
-        SURVIVAL_CHANNEL("scalp-v5-survival-channel", "Survival Channel", "Path model"),
-        MM_SHADOW("scalp-v5-mm-shadow", "MM Shadow", "Microstructure"),
-        ODDS_TAPE("scalp-v5-odds-tape", "Odds Tape", "Market momentum"),
-        SPOT_TARGET("scalp-v5-spot-target", "Spot vs Target", "Settlement proxy")
+        DIP_HUNTER("scalp-v6-dip-hunter", "Dip Hunter", "Baseline", Settings(false, rationale = RETIRED_RATIONALE)),
+        MOMENTUM_SNIPER("scalp-v6-momentum-sniper", "Momentum Sniper", "Spot momentum", Settings(true, 10, 89, 1, 12, rationale = "Claude-style timed momentum candidate")),
+        EXTREME_REVERSAL("scalp-v6-extreme-reversal", "5m Mean Reversion", "Spot reversal", Settings(true, 10, 89, 1, 12, rationale = "Claude-style timed reversal candidate")),
+        ONE_MINUTE_REVERSAL("scalp-v6-one-minute-reversal", "1m Mean Reversion", "Spot reversal", Settings(false, rationale = RETIRED_RATIONALE)),
+        FIVE_MINUTE_TREND("scalp-v6-five-minute-trend", "5m Trend Rider", "Spot momentum", Settings(false, rationale = RETIRED_RATIONALE)),
+        FAIR_VALUE_FOLLOWER("scalp-v6-fair-value-follower", "Fair Value Follower", "Fair value", Settings(false, rationale = RETIRED_RATIONALE)),
+        BOOK_PRESSURE("scalp-v6-book-pressure", "Best-Ask Contrarian", "Order book", Settings(false, rationale = RETIRED_RATIONALE)),
+        MARKET_FAVORITE("scalp-v6-market-favorite", "Market Favorite", "Market baseline", Settings(false, rationale = RETIRED_RATIONALE)),
+        DUAL_HORIZON_MOMENTUM("scalp-v6-dual-horizon-momentum", "Dual-Horizon Momentum", "Spot momentum", Settings(false, rationale = RETIRED_RATIONALE)),
+        DUAL_HORIZON_REVERSAL("scalp-v6-dual-horizon-reversal", "Dual-Horizon Reversal", "Spot reversal", Settings(false, rationale = "Duplicate of the 5m reversal signal in the observed ledger")),
+        FAIR_VALUE_DISLOCATION("scalp-v6-fair-value-dislocation", "Fair-Value Dislocation", "Fair value", Settings(true, 10, 89, 0, 15, 4.0, "Claude-style fair-value dislocation; 4pp after-fee buffer")),
+        MODEL_DISLOCATION("scalp-v6-model-dislocation", "Model Dislocation", "Model comparison", Settings(false, rationale = RETIRED_RATIONALE)),
+        IMPORTED_MODEL("scalp-v6-imported-model", "Imported Edge Model", "Model comparison", Settings(false, rationale = RETIRED_RATIONALE)),
+        MLP_CHANNEL("scalp-v6-mlp-channel", "MLP Channel", "Model channel", Settings(false, rationale = RETIRED_RATIONALE)),
+        CNN_CHANNEL("scalp-v6-cnn-channel", "CNN Channel", "Model channel", Settings(false, rationale = RETIRED_RATIONALE)),
+        GBM_CHANNEL("scalp-v6-gbm-channel", "GBM Channel", "Model channel", Settings(true, 10, 89, 0, 15, 4.0, "Claude-style model channel; 4pp after-fee buffer")),
+        SURVIVAL_CHANNEL("scalp-v6-survival-channel", "Survival Channel", "Path model", Settings(false, rationale = RETIRED_RATIONALE)),
+        MM_SHADOW("scalp-v6-mm-shadow", "MM Shadow", "Microstructure", Settings(false, rationale = RETIRED_RATIONALE)),
+        ODDS_TAPE("scalp-v6-odds-tape", "Odds Tape", "Market momentum", Settings(false, rationale = RETIRED_RATIONALE)),
+        SPOT_TARGET("scalp-v6-spot-target", "Spot vs Target", "Settlement proxy", Settings(false, rationale = RETIRED_RATIONALE));
     }
 
     data class Candidate(
@@ -75,11 +101,11 @@ object ScalpSignal {
             if (side == null) {
                 "Paper-only ${track.label} · ${track.family} · $formulaVersion · no observation: $selectedFrom"
             } else {
-                "Paper-only ${track.label} · ${track.family} · $formulaVersion · unrestricted entry · side: $selectedFrom"
+                "Paper-only ${track.label} · ${track.family} · $formulaVersion · profile-gated entry · side: $selectedFrom"
             }
     }
 
-    /** All twenty hypotheses are evaluated every open market; none has a stake or timing gate. */
+    /** All twenty hypotheses are evaluated every open market; entry settings are enforced separately. */
     fun candidates(market: MarketUiModel, nowMs: Long): List<Candidate> = listOf(
         dipHunter(market, nowMs),
         spotDirection(Track.MOMENTUM_SNIPER, market.spotReturn1m, "YES", "NO", "1m public-spot momentum", market, nowMs),
@@ -102,6 +128,24 @@ object ScalpSignal {
         oddsTape(market, nowMs),
         spotTarget(market, nowMs)
     )
+
+    /**
+     * Final paper-entry check, performed against the displayed side ask and
+     * fee-inclusive all-in cost by [TicketBuilder]. This prevents a
+     * direction-only signal from turning into a high-price or fee-negative
+     * automatic fill.
+     */
+    fun allowsEntry(candidate: Candidate, sideAsk: Double, allInPerContract: Double): Boolean {
+        val settings = candidate.track.settings
+        if (!settings.enabled || !sideAsk.isFinite() || !allInPerContract.isFinite()) return false
+        val cents = sideAsk * 100.0
+        if (cents < settings.entryMinCents || cents > settings.entryMaxCents) return false
+        val tte = candidate.timeToCloseSec ?: return false
+        val elapsedMinute = ((15 * 60L - tte).coerceIn(0L, 15 * 60L) / 60L).toInt()
+        if (elapsedMinute !in settings.fromMinute until settings.untilMinute) return false
+        val probability = candidate.entryProbability ?: return settings.minEdgePp <= 0.0
+        return (probability - allInPerContract) * 100.0 >= settings.minEdgePp
+    }
 
     /** Compatibility selector for callers that request the original baseline. */
     fun candidate(market: MarketUiModel, nowMs: Long): Candidate = dipHunter(market, nowMs)
@@ -143,10 +187,13 @@ object ScalpSignal {
             "settlement-aware engine",
             market,
             nowMs,
-            percent(market.aiYesPercent)?.div(100.0)
+            sideProbability(engineSide, percent(market.aiYesPercent))
         )
         val aiYes = percent(market.aiYesPercent)
-        if (aiYes != null) return candidate(Track.DIP_HUNTER, side(aiYes), "AI fair value", market, nowMs, aiYes / 100.0)
+        if (aiYes != null) {
+            val selected = side(aiYes)
+            return candidate(Track.DIP_HUNTER, selected, "AI fair value", market, nowMs, sideProbability(selected, aiYes))
+        }
         val marketYes = percent(market.yesProbabilityPercent)
         return candidate(
             Track.DIP_HUNTER,
@@ -210,7 +257,7 @@ object ScalpSignal {
                 "CF 60s settlement average (${market.finalMinuteSamples} samples, ${formatPercent(lockedFair)})",
                 market,
                 nowMs,
-                lockedFair / 100.0
+                sideProbability(side(lockedFair), lockedFair)
             )
         }
         return unavailable(Track.FAIR_VALUE_FOLLOWER, "CF final-minute average unavailable", market, nowMs)
@@ -248,7 +295,8 @@ object ScalpSignal {
         val mid = percent(market.yesProbabilityPercent)
         if (fair != null && mid != null) {
             val gap = fair - mid
-            return candidate(track, if (gap >= 0.0) "YES" else "NO", "$source minus market ${formatPp(gap)}", market, nowMs, fair / 100.0)
+            val selected = if (gap >= 0.0) "YES" else "NO"
+            return candidate(track, selected, "$source minus market ${formatPp(gap)}", market, nowMs, sideProbability(selected, fair))
         }
         return unavailable(track, "$source or market midpoint unavailable", market, nowMs)
     }
@@ -261,7 +309,10 @@ object ScalpSignal {
         nowMs: Long
     ): Candidate {
         val yes = percent(yesPp)
-        if (yes != null) return candidate(track, side(yes), "$source (${formatPercent(yes)} YES)", market, nowMs, yes / 100.0)
+        if (yes != null) {
+            val selected = side(yes)
+            return candidate(track, selected, "$source (${formatPercent(yes)} YES)", market, nowMs, sideProbability(selected, yes))
+        }
         return unavailable(track, "$source unavailable", market, nowMs)
     }
 
@@ -302,6 +353,8 @@ object ScalpSignal {
     )
 
     private fun side(yesPp: Double): String = if (yesPp >= 50.0) "YES" else "NO"
+    private fun sideProbability(side: String, yesPp: Double?): Double? =
+        yesPp?.let { if (side.equals("NO", ignoreCase = true)) (100.0 - it) / 100.0 else it / 100.0 }
     private fun opposite(side: String): String = if (side == "YES") "NO" else "YES"
     private fun sameDirection(a: Double, b: Double): Boolean =
         (a >= 0.0 && b >= 0.0) || (a < 0.0 && b < 0.0)

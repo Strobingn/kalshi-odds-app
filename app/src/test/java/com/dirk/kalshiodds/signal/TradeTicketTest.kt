@@ -518,9 +518,9 @@ class TicketBuilderGateTest {
         assertEquals(0.02, TicketBuilder.modelProb(market, "NO")!!, 1e-9)
         val tickets = TicketBuilder.proposeAll(listOf(market), ctx)
         assertTrue(tickets.filterNot { it.kind == TicketKind.SCALP }.isEmpty())
-        // SCALP must follow the scorer's settlement-aware resolved side, not
-        // the stale imported residual that would buy the 0.1c DOWN leg.
-        assertEquals("YES", tickets.single { it.strategyVersion == "scalp-v3-dip-hunter" }.side)
+        // V6 also refuses the 99¢ YES leg: its high price leaves no usable
+        // paper scalp upside after fees, so no strategy gets to call this a buy.
+        assertTrue(tickets.none { it.kind == TicketKind.SCALP })
     }
 
     @Test

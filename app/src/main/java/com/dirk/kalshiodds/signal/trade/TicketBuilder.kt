@@ -115,7 +115,7 @@ object TicketBuilder {
         if (!MarketLifecycle.isTradable(market, ctx.nowMs)) return emptyList()
         return ScalpSignal.candidates(market, ctx.nowMs).mapNotNull { scalp ->
             val side = scalp.side ?: return@mapNotNull null
-            buildTicket(
+            val ticket = buildTicket(
                 market = market,
                 side = side,
                 ctx = ctx,
@@ -126,6 +126,13 @@ object TicketBuilder {
                 explicitGateNote = scalp.note(),
                 strategy = scalp
             )
+            ticket?.takeIf {
+                ScalpSignal.allowsEntry(
+                    candidate = scalp,
+                    sideAsk = it.estimatedAvgFill,
+                    allInPerContract = it.allInUsd?.div(it.contracts.toDouble()) ?: Double.NaN
+                )
+            }
         }
     }
 

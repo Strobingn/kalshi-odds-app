@@ -106,7 +106,7 @@ fun ScalpScreen(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        "Twenty concurrent paper-only hypotheses on each 15-minute contract.",
+                        "Twenty versioned paper hypotheses; only evidence-gated V6 tracks can auto-fill.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = colors.textSecondary
                     )
@@ -217,7 +217,7 @@ private fun ReviewProtocolCard(scorecards: List<ScalpTrackScore>, reviewReady: I
             color = colors.textPrimary
         )
         Text(
-            "A track needs ${ScalpReview.MIN_SETTLED_FILLS} non-void settled fills across ${ScalpReview.MIN_DISTINCT_DAYS} UTC days. The review uses after-fee P&L per contract and resamples whole days; it labels the next named variant but does not erase, disable, or silently retune a live track. The paper ledger is also synced after changes and on Android's inexact 30-minute network schedule for the independent review.",
+            "A track needs ${ScalpReview.MIN_SETTLED_FILLS} non-void settled fills across ${ScalpReview.MIN_DISTINCT_DAYS} UTC days. The review uses after-fee P&L per contract and resamples whole days. V6 visibly retires failed V5 tracks and starts new formula IDs, so its evidence cannot be mixed with the old run. The paper ledger is synced after changes and on Android's inexact 30-minute network schedule for independent review.",
             style = MaterialTheme.typography.bodySmall,
             color = colors.textSecondary
         )
@@ -350,6 +350,7 @@ private fun ScalpCandidateCard(ticket: TradeTicket) {
 private fun ScalpScorecard(scorecard: ScalpTrackScore) {
     val colors = DipTheme.colors
     val pnl = scorecard.realizedPnlUsd
+    val settings = scorecard.track.settings
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -376,6 +377,22 @@ private fun ScalpScorecard(scorecard: ScalpTrackScore) {
             } else {
                 "${scorecard.fills} fills · ${scorecard.open} open · ${scorecard.wins}/${scorecard.settled} wins (${String.format(Locale.US, "%.0f", scorecard.winRate * 100)}%) · ${afterFeePerContract(scorecard.review.meanPnlPerContractUsd)} / ct · realized ${signedMoney(pnl)}"
             },
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.textSecondary
+        )
+        Text(
+            buildString {
+                append(if (settings.enabled) "ACTIVE" else "RETIRED")
+                append(" · ").append(settings.entryMinCents).append('–').append(settings.entryMaxCents).append("¢")
+                append(" · min ").append(settings.fromMinute).append(" to ").append(settings.untilMinute).append(" min")
+                if (settings.minEdgePp > 0.0) append(" · ≥").append(String.format(Locale.US, "%.1f", settings.minEdgePp)).append("pp fair edge")
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = if (settings.enabled) colors.accentBlue else colors.textSecondary,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            settings.rationale,
             style = MaterialTheme.typography.bodySmall,
             color = colors.textSecondary
         )
