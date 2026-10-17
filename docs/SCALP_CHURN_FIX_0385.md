@@ -20,4 +20,5 @@
 - `ScalpRisk.entryBlocked` covers every entry path (originals, forecast, shock/sf, v2 spawn, g14 copies). It is per strategy
   and per market: 60 s cooldown after a stop exit, 15 s (the pre-0.3.83 value) after any other exit, and at most
   4 round trips per strategy per rolling 15 minutes.
+- 0.3.86: the round-trip cap is now a runaway-loop guard only: 20 per strategy per market per 15 min, logged (tag KashiScalpRisk) when it triggers. The main gate stays positive expected value after spread + fees.
 - Regression: `ScalpChurnGuardTest` covers noisy prices, the floor, measuring from the entry bid, the cooldown and the cap.

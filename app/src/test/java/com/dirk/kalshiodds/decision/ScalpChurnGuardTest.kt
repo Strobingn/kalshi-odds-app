@@ -58,12 +58,17 @@ class ScalpChurnGuardTest {
             }
             ms += 1000
         }
-        // 35 minutes: ≤ 4 per rolling 15 min → at most 12, versus 171 in the field report.
-        assertTrue("round trips $n", n in 1..12)
+        // 35 minutes of every-tick stop-outs: the 60 s stop cooldown alone limits this to ~33, versus 171 in the field report.
+        assertTrue("round trips $n", n in 1..36)
         for (w in trades.indices) {
             val from = trades[w].entryAtMs!!
             assertTrue(trades.count { it.entryAtMs!! in from until from + ScalpRisk.ROUND_TRIP_WINDOW_MS } <= ScalpRisk.MAX_ROUND_TRIPS_PER_WINDOW)
         }
+        // Runaway cap: 20 per strategy per market per 15 min (non-stop exits, 15 s cooldown), other markets unaffected.
+        val loop = (0 until 20).map { i -> trades[0].copy(id = "l$i", entryAtMs = start + i * 20_000L, closedAtMs = start + i * 20_000L + 1000, exitReason = "horizon reached") }
+        assertTrue(ScalpRisk.entryBlocked(loop, vid, ticker, start + 400_000L))
+        assertFalse(ScalpRisk.entryBlocked(loop.dropLast(1), vid, ticker, start + 400_000L))
+        assertFalse(ScalpRisk.entryBlocked(loop, vid, "KXBTC15M-26OCT122030-30", start + 400_000L))
         // Stop exit → 60 s cooldown on that market; other strategies and markets are unaffected.
         val one = listOf(trades.first())
         val exit = one[0].closedAtMs!!
