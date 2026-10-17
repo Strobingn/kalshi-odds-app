@@ -18,7 +18,7 @@ object ScalpRisk {
     fun percent(t: ScalpTrade, controls: ScalpControls): Double {
         val model = ScalpModels.modelOf(t)?.code
         val cap = controls.protectivePercent(model).toDouble()
-        val saved = ScalpV2.savedNumber(t.note, "riskStopPct", cap).coerceIn(1.0, 99.0)
+        val saved = ScalpV2.savedNumber(t.note, "riskStopPct", DEFAULT_PERCENT.toDouble()).coerceIn(1.0, 99.0)
         val v2 = if (ScalpV2.peakRule(t)) ScalpV2.stopPercent(t) else cap
         return minOf(cap, saved, v2)
     }

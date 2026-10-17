@@ -12,7 +12,7 @@ class ScalpV2AdaptiveTest {
     private fun open(id: String = "held", variant: String = "v2-sf41", note: String = "v2stop=0.15") = ScalpTrade(
         id, ticker, "YES", ScalpState.OPEN, now - 5_000, .40, .50,
         contracts = 10, entryPrice = .40, entryFeeUsd = ScalpRule.orderFee(10, .40), entryAtMs = now - 3_000,
-        note = note, ruleVersion = "${ScalpRule.VERSION}|$variant|P")
+        note = "$note · riskStopPct=20", ruleVersion = "${ScalpRule.VERSION}|$variant|P")
     private fun book(t: ScalpTrade): Pair<ScalpBook, InMemoryScalpPersistence> {
         val store = InMemoryScalpPersistence().also { it.seed(listOf(t)) }
         return ScalpBook(store = store, variants = emptyList(), liveExtras = true, controls = MemoryScalpControls(ScalpControls(stopLossPercent = 20))) to store

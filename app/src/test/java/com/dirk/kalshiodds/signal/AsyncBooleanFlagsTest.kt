@@ -42,4 +42,24 @@ class AsyncBooleanFlagsTest {
         assertEquals(listOf(mapOf("paused" to true), mapOf("paused" to false)), writes)
         assertFalse(flags.get("paused"))
     }
+    @Test fun newerToggleDuringFailedCommitGetsItsOwnRetryWithoutAnotherSet() {
+        val tasks = arrayListOf<() -> Unit>()
+        val disk = mutableMapOf<String, Boolean>()
+        var first = true
+        lateinit var flags: AsyncBooleanFlags
+        flags = AsyncBooleanFlags(mapOf("enabled" to false), persist = { batch ->
+            if (first) {
+                first = false
+                flags.set("enabled", false) // a newer request while the old writer owns its batch
+                false
+            } else { disk.putAll(batch); true }
+        }, execute = { tasks.add(it) })
+        flags.set("enabled", true)
+        tasks.removeAt(0)()
+        assertEquals(1, tasks.size)
+        tasks.removeAt(0)()
+        assertEquals(false, disk["enabled"])
+        assertTrue(tasks.isEmpty())
+    }
+
 }

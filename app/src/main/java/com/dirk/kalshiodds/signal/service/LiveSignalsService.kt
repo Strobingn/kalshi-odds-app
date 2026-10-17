@@ -438,14 +438,28 @@ class LiveSignalsService : Service() {
         val notifier = runCatching { KalshiOddsApp.from(this).container.notifier }
             .getOrElse { SignalNotifier(this) }
         val paused = runCatching { notifier.pausedNotification() }.getOrNull()
-        runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
         if (paused != null) {
             runCatching {
                 androidx.core.app.NotificationManagerCompat.from(this)
                     .notify(SignalNotifier.PAUSED_NOTIFICATION_ID, paused)
             }
         }
-        stopSelf()
+        // Allow a short IO persistence window, but always meet Android's few-seconds stop deadline.
+        val handler = android.os.Handler(mainLooper)
+        val finish = Runnable {
+            runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
+            stopSelf()
+        }
+        handler.postDelayed(finish, 1_500L)
+        scope.launch(Dispatchers.IO) {
+            kotlinx.coroutines.withTimeoutOrNull(1_200L) {
+                while (isActive && !LiveSignalsKeepAlive.flushFlagsOnIo(this@LiveSignalsService)) delay(100L)
+            }
+            kotlinx.coroutines.withContext(Dispatchers.Main) {
+                handler.removeCallbacks(finish)
+                finish.run()
+            }
+        }
     }
 
     override fun onDestroy() {

@@ -27,11 +27,14 @@ internal class AsyncBooleanFlags(
                 else pending.toMap().also { pending.clear() }
             } ?: return@synchronized true
             if (!runCatching { persist(batch) }.getOrDefault(false)) {
-                synchronized(lock) {
+                val retryNewer = synchronized(lock) {
+                    val newer = pending.isNotEmpty()
                     // Do not overwrite a newer toggle that arrived while a commit was blocked.
                     batch.forEach { (key, value) -> pending.putIfAbsent(key, value) }
-                    scheduled = false
+                    scheduled = newer
+                    newer
                 }
+                if (retryNewer) execute { flushBlocking() }
                 return@synchronized false // next set retries; never spin on a failed disk
             }
         }

@@ -493,6 +493,7 @@ class ScalpBook(
     @Volatile private var _lastPruneBucket = -1L
     private val flushLock = Any()
     private val flushScheduled = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val flushRequests = java.util.concurrent.atomic.AtomicLong(0L)
     private val quoteWriter by lazy { java.util.concurrent.Executors.newSingleThreadExecutor { task ->
         Thread(task, "kashi-scalp-writer").apply { isDaemon = true }
     } }
@@ -1405,7 +1406,7 @@ class ScalpBook(
         add.size
     }
 
-    private fun save(t0: ScalpTrade) {
+    private fun save(t0: ScalpTrade): ScalpTrade {
         val prev = _all.value.firstOrNull { it.id == t0.id }
         val t1 = if (liveExtras) withDetail(t0, prev) else t0
         // 0.3.79: a retired model's new trade still seeds its kept v2 copy, then is stored as a hidden shadow row.
@@ -1429,6 +1430,7 @@ class ScalpBook(
                 else -> listOf(t) + pc
             }
         }
+        return t
     }
 
     /** 0.3.80: an original's new signal → its "rebuilt like Fair-gap g14" copies, gated by the g14 entry on that side. */
@@ -1467,6 +1469,7 @@ class ScalpBook(
 
     /** Non-blocking quote-lane handoff: at most one disk writer, coalesced by trade id. */
     fun requestFlush() {
+        val request = flushRequests.incrementAndGet()
         if (writeQ.isEmpty() || !flushScheduled.compareAndSet(false, true)) return
         quoteWriter.execute {
             var written = 0
@@ -1474,7 +1477,7 @@ class ScalpBook(
             finally {
                 flushScheduled.set(false)
                 // Drain newer rows after successful progress; failed IO retries on the next caller request.
-                if (written > 0 && writeQ.isNotEmpty()) requestFlush()
+                if (writeQ.isNotEmpty() && (written > 0 || flushRequests.get() != request)) requestFlush()
             }
         }
     }
@@ -1544,8 +1547,12 @@ class ScalpBook(
     private fun withDetail(t: ScalpTrade, prev: ScalpTrade?): ScalpTrade {
         val q = _marks.value[t.ticker.uppercase()]
         var note = ScalpFills.orderNote(t, prev)
-        if (t.state in listOf(ScalpState.OPEN, ScalpState.PENDING_EXIT))
-            note = ScalpV2.tag(note, "riskStopPct", ScalpRisk.percent(t, controls.state.value).toString())
+        if (t.state in listOf(ScalpState.OPEN, ScalpState.PENDING_EXIT)) {
+            val cfg = controls.state.value
+            val riskInput = if (prev?.state == ScalpState.PENDING_ENTRY && !t.note.contains("riskStopPct="))
+                t.copy(note = ScalpV2.tag(t.note, "riskStopPct", cfg.protectivePercent(ScalpModels.modelOf(t)?.code).toString())) else t
+            note = ScalpV2.tag(note, "riskStopPct", ScalpRisk.percent(riskInput, cfg).toString())
+        }
         if (t.state == ScalpState.OPEN && prev?.state != ScalpState.OPEN && !note.contains("entryBook[")) {
             note += " · entryBook[" + bookStr(q, t.side) + "]"
             t.entryPrice?.let { peakBid[t.id] = if (ScalpV2.peakRule(t)) q?.bid(t.side)?.takeIf { b -> b.isFinite() && b > 0 } ?: 0.0 else q?.bid(t.side) ?: it }
@@ -1609,8 +1616,7 @@ class ScalpBook(
             }
             if (next != t) changes += next
         }
-        changes.forEach { save(it) }
-        return changes
+        return changes.map { save(it) }
     }
 
     /** Price/time exits still work when spot, strike or the volatility estimator is unavailable. */

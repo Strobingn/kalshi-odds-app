@@ -63,12 +63,21 @@ class ScalpAuditTest {
             tick(restart, q(at + 3000, .60, side, 2.0)) // latched stop survives rebound, pause, higher cap and restart
             val closed = row(restart)
             assertEquals("${model.code} $side closed", ScalpState.CLOSED, closed.state)
+            assertTrue(closed.note.contains("exitBook["))
+            assertTrue(closed.note.contains("stopLevel="))
+            assertTrue(closed.note.contains("fees="))
             assertEquals(3, closed.soldContracts)
             assertEquals(1.588, closed.proceedsUsd, 1e-10)
             assertEquals(.06, closed.exitFeeUsd, 1e-10)
             assertEquals(-.032, closed.netUsd!!, 1e-10)
             assertEquals(2, ScalpFills.sales(closed).size)
         }
+    }
+
+    @Test fun restoredUntaggedRiskCannotBeLoosenedBeforeItsFirstQuote() {
+        val t = held("sf51").copy(note = "legacy position")
+        assertEquals(1.0, ScalpRisk.percent(t, ScalpControls(stopLossPercent = 80)), 0.0)
+        assertEquals(.495, ScalpRisk.stopPrice(t.entryPrice!!, ScalpRisk.percent(t, ScalpControls(stopLossPercent = 80))), 1e-12)
     }
 
     @Test fun stopsWaitOnStaleOrGappedBooksAndDoNotSellOnTheEntrySnapshot() {
