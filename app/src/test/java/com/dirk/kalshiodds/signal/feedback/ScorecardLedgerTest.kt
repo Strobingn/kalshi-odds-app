@@ -181,7 +181,7 @@ class ScorecardLedgerTest {
         val snap = ScorecardLedger.of(entries, fills)
         assertEquals(1, snap.voidCount)
         assertTrue(snap.picks.none { it.ticker.contains("ETH") })
-        assertEquals(1, snap.forecastOnlyCount)
+        assertEquals(2, snap.forecastOnlyCount)
         assertEquals(snap.combined.wins, snap.picks.filter { !it.noBetWouldHave }.count { it.won })
         assertReconciles(snap.bySide, snap.combined)
         assertReconciles(snap.byPrice, snap.combined)

@@ -361,9 +361,6 @@ object TicketBuilder {
             if (ctx.alertsPaused) return null
         }
         val ask = bestAsk(market, side, ctx) ?: return null
-        if (kind != TicketKind.MANUAL && kind != TicketKind.SELL &&
-            !PaperEntryPolicy.allowsAutomaticEntry(ask)
-        ) return null
         if (kind == TicketKind.HUNTER) {
             val hunterMax = PayoutGate.maxLimitForPayout(
                 SignalConstants.HUNTER_STAKE_USD,
