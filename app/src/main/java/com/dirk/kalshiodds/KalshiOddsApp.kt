@@ -29,7 +29,12 @@ class KalshiOddsApp : Application() {
      * main thread is free for WorkManager's onStartJob. Any caller gets the same instance (synchronized lazy).
      */
     private val containerLazy = lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AppContainer(this) }
-    val container: AppContainer get() = containerLazy.value
+    val container: AppContainer get() {
+        check(isRobolectric() || android.os.Looper.myLooper() != android.os.Looper.getMainLooper() || containerReady) {
+            "Container is not ready; awaitContainer must finish before UI access"
+        }
+        return containerLazy.value
+    }
     val containerReady: Boolean get() = containerLazy.isInitialized()
 
     /**

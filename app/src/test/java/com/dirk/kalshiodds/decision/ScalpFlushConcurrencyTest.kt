@@ -61,3 +61,61 @@ class ScalpFlushConcurrencyTest {
         assertEquals(t.id, retryBacking.loadScalps().single().id)
     }
 }
+
+class ScalpQuoteWriterIsolationTest {
+    @Test fun requestDuringBlockedFailedWriteStillPersistsTheNewestTrade() {
+        val entered = CountDownLatch(1); val release = CountDownLatch(1); val done = CountDownLatch(1)
+        val attempts = AtomicInteger()
+        val backing = InMemoryScalpPersistence()
+        val store = object : ScalpPersistence by backing {
+            override fun upsertScalpAndStats(trade: ScalpTrade, prev: ScalpTrade?) {
+                if (attempts.incrementAndGet() == 1) {
+                    entered.countDown(); check(release.await(5, SECONDS))
+                    throw IllegalStateException("first disk write failed")
+                }
+                backing.upsertScalpAndStats(trade, prev)
+                done.countDown()
+            }
+        }
+        val tk = "KXBTC15M-26OCT122015-15"; val close = ScalpTicker.closeMs(tk)!!
+        val book = ScalpBook(store, variants = emptyList())
+        try {
+            book.importRestored(listOf(ScalpTrade("held", tk, "YES", ScalpState.PENDING_ENTRY,
+                close - 300_000, .4, .5, ruleVersion = "v|sf41|P")))
+            book.requestFlush()
+            assertTrue(entered.await(5, SECONDS))
+            book.settle(tk, "YES", close)
+            book.requestFlush()
+            release.countDown()
+            assertTrue(done.await(5, SECONDS))
+            assertEquals(ScalpState.NO_FILL, backing.loadScalps().single().state)
+            assertEquals(2, attempts.get())
+        } finally { release.countDown() }
+    }
+
+    @Test fun blockedDatabaseWriterDoesNotHoldQuoteLockOrWaitForFlushOnQuotes() {
+        val entered = CountDownLatch(1); val release = CountDownLatch(1)
+        val backing = InMemoryScalpPersistence()
+        val store = object : ScalpPersistence by backing {
+            override fun upsertScalpAndStats(trade: ScalpTrade, prev: ScalpTrade?) {
+                entered.countDown(); check(release.await(5, SECONDS))
+                backing.upsertScalpAndStats(trade, prev)
+            }
+        }
+        val tk = "KXBTC15M-26OCT122015-15"; val close = ScalpTicker.closeMs(tk)!!; val at = close - 300_000
+        val book = ScalpBook(store, variants = emptyList(), liveExtras = true,
+            controls = MemoryScalpControls(ScalpControls(enabled = false)))
+        val pool = Executors.newSingleThreadExecutor()
+        try {
+            val imported = pool.submit<Int> { book.importRestored((1..90).map { i ->
+                ScalpTrade("s$i", tk, "YES", ScalpState.PENDING_ENTRY, at, .4, .5, ruleVersion = "v|sf41|P") }) }
+            assertTrue(entered.await(5, SECONDS))
+            assertEquals(90, imported.get(1, SECONDS))
+            val quote = ScalpRule.Quote(tk, at + 1000, close, at + 1000, .39, 10.0, .40, 10.0, null, null, null)
+            pool.submit { book.onQuote(quote, false); book.requestFlush() }.get(1, SECONDS)
+            assertEquals(90, book.allTrades().size)
+        } finally { release.countDown(); pool.shutdownNow() }
+        book.flushWrites()
+        assertEquals(90, backing.loadScalps().size)
+    }
+}

@@ -23,7 +23,6 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Foreground service that owns the Kalshi ticker + orderbook WebSocket and the
@@ -44,6 +43,7 @@ class LiveSignalsService : Service() {
     )
     private var client: KalshiWsClient? = null
     private var pipelineJob: Job? = null
+    private var stopJob: Job? = null
     private var metadataJob: Job? = null
     private var rolloverJob: Job? = null
     @Volatile private var rolloverBound = false
@@ -78,6 +78,8 @@ class LiveSignalsService : Service() {
         if (intent?.action == LiveSignalsPolicy.ACTION_STOP) {
             return handleExplicitStop()
         }
+        stopJob?.cancel()
+        stopJob = null
         if (intent?.action == LiveSignalsPolicy.ACTION_RESUME) {
             LiveSignalsKeepAlive.setTimeoutPaused(this, false)
         }
@@ -128,16 +130,31 @@ class LiveSignalsService : Service() {
     private fun handleExplicitStop(): Int {
         explicitStop = true
         LiveSignalsKeepAlive.setEnabled(this, false)
-        // 0.3.82: never runBlocking on main — persist the toggle in the background and return immediately.
-        runCatching {
-            val app = KalshiOddsApp.from(this@LiveSignalsService)
-            app.launchBackground {
-                withTimeoutOrNull(5_000L) { app.awaitContainer().preferences.updateLiveSignals(false) }
+        tearDownPipeline()
+        stopJob?.cancel()
+        stopJob = scope.launch(Dispatchers.IO) {
+            while (isActive && explicitStop) {
+                try {
+                    KalshiOddsApp.from(this@LiveSignalsService).container.preferences.updateLiveSignals(false)
+                    LiveSignalsKeepAlive.setEnabled(this@LiveSignalsService, false)
+                    if (!LiveSignalsKeepAlive.flushFlagsOnIo(this@LiveSignalsService)) {
+                        delay(1_000L)
+                        continue
+                    }
+                    kotlinx.coroutines.withContext(Dispatchers.Main) {
+                        if (explicitStop) {
+                            runCatching { ServiceCompat.stopForeground(this@LiveSignalsService, ServiceCompat.STOP_FOREGROUND_REMOVE) }
+                            stopSelf()
+                        }
+                    }
+                    break
+                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (failure: Exception) {
+                    Log.w(TAG, "stop persistence failed; retrying without blocking Main", failure)
+                    delay(1_000L)
+                }
             }
         }
-        tearDownPipeline()
-        runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
-        stopSelf()
         return START_NOT_STICKY
     }
 
@@ -419,14 +436,28 @@ class LiveSignalsService : Service() {
         releaseWakeLock()
         val notifier = (runCatching { KalshiOddsApp.from(this).containerOrNull?.notifier }.getOrNull() ?: SignalNotifier(this))
         val paused = runCatching { notifier.pausedNotification() }.getOrNull()
-        runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
         if (paused != null) {
             runCatching {
                 androidx.core.app.NotificationManagerCompat.from(this)
                     .notify(SignalNotifier.PAUSED_NOTIFICATION_ID, paused)
             }
         }
-        stopSelf()
+        // Allow a short IO persistence window, but always meet Android's few-seconds stop deadline.
+        val handler = android.os.Handler(mainLooper)
+        val finish = Runnable {
+            runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
+            stopSelf()
+        }
+        handler.postDelayed(finish, 1_500L)
+        scope.launch(Dispatchers.IO) {
+            kotlinx.coroutines.withTimeoutOrNull(1_200L) {
+                while (isActive && !LiveSignalsKeepAlive.flushFlagsOnIo(this@LiveSignalsService)) delay(100L)
+            }
+            kotlinx.coroutines.withContext(Dispatchers.Main) {
+                handler.removeCallbacks(finish)
+                finish.run()
+            }
+        }
     }
 
     override fun onDestroy() {

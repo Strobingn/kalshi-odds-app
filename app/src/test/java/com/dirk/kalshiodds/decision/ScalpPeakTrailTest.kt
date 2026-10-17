@@ -7,7 +7,7 @@ class ScalpPeakTrailTest {
     private val ticker = "KXBTC15M-26OCT122015-15"
     private val close = ScalpTicker.closeMs(ticker)!!
     private val at = close - 300_000L
-    private fun controls(code: String = "v2-sf41") = MemoryScalpControls(ScalpControls(
+    private fun controls(code: String = "v2-sf41") = MemoryScalpControls(ScalpControls(stopLossPercent = 20,
         disabledStrategies = ScalpModels.V2_MODELS.map { it.code }.filter { it != code }.toSet()))
     private fun source(side: String = "YES") = ScalpTrade("source", ticker, side, ScalpState.PENDING_ENTRY,
         at, .40, .50, ruleVersion = "${ScalpRule.VERSION}|sf41|P")

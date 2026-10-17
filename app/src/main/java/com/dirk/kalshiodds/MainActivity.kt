@@ -57,17 +57,30 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        setContent {
+            KalshiOddsTheme {
+                Surface(modifier = Modifier.fillMaxSize()) {
+                    androidx.compose.foundation.layout.Box(modifier = Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                        androidx.compose.material3.CircularProgressIndicator()
+                    }
+                }
+            }
+        }
+        lifecycleScope.launch {
+            KalshiOddsApp.from(this@MainActivity).awaitContainer()
+            showReadyUi()
+        }
+    }
+
+    private fun showReadyUi() {
         SignalNotifier.ensureChannels(this)
         com.dirk.kalshiodds.signal.notify.OpportunityNotifier.ensureChannel(this)
         handleOpportunityIntent(intent)
         // 0.3.41: the Live signals FGS starts only after the first frame is drawn (off app startup).
         LiveSignalsKeepAlive.startAfterFirstFrame(this)
-        // 0.3.82: the main thread never waits on the container lock — await it on IO, then draw the app.
-        val app = KalshiOddsApp.from(this)
-        var containerReady by mutableStateOf(app.containerReady)
-        lifecycleScope.launch { app.awaitContainer(); containerReady = true }
         lifecycleScope.launch {
-            app.awaitContainer().preferences.settings
+            KalshiOddsApp.from(this@MainActivity).container.preferences.settings
                 .map { it.notificationsEnabled || it.liveSignalsEnabled }
                 .distinctUntilChanged()
                 .collect { wantsNotify ->
@@ -75,7 +88,7 @@ class MainActivity : ComponentActivity() {
                 }
         }
         lifecycleScope.launch {
-            app.awaitContainer().preferences.settings
+            KalshiOddsApp.from(this@MainActivity).container.preferences.settings
                 .map { it.opportunityAlertsEnabled }
                 .distinctUntilChanged()
                 .collect { wants ->
@@ -84,10 +97,6 @@ class MainActivity : ComponentActivity() {
         }
         enableEdgeToEdge()
         setContent {
-            if (!containerReady) {
-                Surface(modifier = Modifier.fillMaxSize()) {}
-                return@setContent
-            }
             val colorStyle by androidx.compose.runtime.remember {
                 KalshiOddsApp.from(this@MainActivity).container.preferences.settings.map { it.colorStyle }
             }.collectAsStateWithLifecycle(initialValue = com.dirk.kalshiodds.ui.theme.ColorStyles.CLASSIC)
@@ -320,12 +329,18 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         LiveSignalsKeepAlive.ensureServiceFromUi(this)
-        oddsViewModel.onForeground()
+        lifecycleScope.launch {
+            KalshiOddsApp.from(this@MainActivity).awaitContainer()
+            if (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) oddsViewModel.onForeground()
+        }
     }
 
     override fun onResume() {
         super.onResume()
-        oddsViewModel.onForeground()
+        lifecycleScope.launch {
+            KalshiOddsApp.from(this@MainActivity).awaitContainer()
+            if (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) oddsViewModel.onForeground()
+        }
     }
 
     override fun onStop() {
@@ -335,7 +350,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        handleOpportunityIntent(intent)
+        setIntent(intent)
+        lifecycleScope.launch {
+            KalshiOddsApp.from(this@MainActivity).awaitContainer()
+            handleOpportunityIntent(intent)
+        }
     }
 
     private fun handleOpportunityIntent(intent: Intent?) {

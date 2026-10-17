@@ -17,8 +17,9 @@ data class ScalpControls(
     val maxTradesPerHour: Int = 0, val maxDailyLossUsd: Double = 0.0, val maxOpen: Int = 0,
     val windowSeconds: Int = 30, val dipCents: Double = 0.0,
     val disabledStrategies: Set<String> = emptySet(),
-    val peakTrailEnabled: Boolean = true, val peakTrailCents: Int = 3, val stopLossPercent: Int = 20,
-    val strategySettings: Map<String, ScalpStrategySettings> = emptyMap()
+    val peakTrailEnabled: Boolean = true, val peakTrailCents: Int = 3, val stopLossPercent: Int = ScalpRisk.DEFAULT_PERCENT,
+    val strategySettings: Map<String, ScalpStrategySettings> = emptyMap(),
+    val stopPolicyVersion: Int = 0
 ) {
     fun settings(code: String): ScalpStrategySettings = strategySettings[code]?.normalized() ?: ScalpStrategySettings()
     fun normalized() = copy(strategySettings = strategySettings.filterKeys { it.startsWith("v2-") }.mapValues { it.value.normalized() }, peakTrailCents = peakTrailCents.coerceIn(1, 20), stopLossPercent = stopLossPercent.coerceIn(1, 99), maxAskCents = maxAskCents.coerceIn(1, 55), stopCents = stopCents.coerceIn(1, 99),
@@ -29,6 +30,11 @@ data class ScalpControls(
         maxDailyLossUsd = maxDailyLossUsd.takeIf { it.isFinite() }?.coerceIn(0.0, 100_000.0) ?: 0.0,
         maxOpen = maxOpen.coerceIn(0, 1000), windowSeconds = windowSeconds.coerceIn(10, 600),
         dipCents = dipCents.takeIf { it.isFinite() }?.coerceIn(0.0, 30.0) ?: 0.0)
+    fun protectivePercent(modelCode: String? = null): Int = minOf(stopLossPercent.coerceIn(1, 99),
+        modelCode?.let { settings(it).stopLossPercent } ?: stopLossPercent).coerceIn(1, 99)
+    /** One-time requested reset; later deliberate user changes are preserved. */
+    fun migrateStopPolicy(): ScalpControls = if (stopPolicyVersion >= ScalpRisk.POLICY_VERSION) this else
+        copy(stopLossPercent = ScalpRisk.DEFAULT_PERCENT, stopPolicyVersion = ScalpRisk.POLICY_VERSION)
     fun permits(modelCode: String) = enabled && !killSwitch && modelCode !in disabledStrategies
     fun plan(base: ScalpV2.Plan, modelCode: String? = null): ScalpV2.Plan {
         val chosen = if (!manual) base else base.copy(
@@ -123,7 +129,7 @@ class SavedScalpControls(context: Context, private val flushDelayMs: Long = 1_00
     private val prefs = context.applicationContext.getSharedPreferences("kashi_v2_controls", Context.MODE_PRIVATE)
     private val json = Json { ignoreUnknownKeys = true }
     override val state = MutableStateFlow(read())
-    private fun read() = runCatching { json.decodeFromString<ScalpControls>(prefs.getString("settings", "{}")!!).normalized() }.getOrDefault(ScalpControls())
+    private fun read() = runCatching { json.decodeFromString<ScalpControls>(prefs.getString("settings", "{}")!!).migrateStopPolicy().normalized() }.getOrDefault(ScalpControls())
     private val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key -> if (key == "settings") state.value = read() }
     private val lock = Any()
     private val writerLock = Any()
@@ -148,7 +154,7 @@ class SavedScalpControls(context: Context, private val flushDelayMs: Long = 1_00
     private var cachedCount = 0
     init { prefs.registerOnSharedPreferenceChangeListener(listener) }
     override fun save(value: ScalpControls) {
-        val clean = value.normalized()
+        val clean = value.copy(stopPolicyVersion = ScalpRisk.POLICY_VERSION).normalized()
         prefs.edit().putString("settings", json.encodeToString(clean)).apply()
         state.value = clean
     }

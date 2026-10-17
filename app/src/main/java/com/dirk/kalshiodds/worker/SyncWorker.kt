@@ -22,7 +22,7 @@ class SyncWorker(
     params: WorkerParameters
 ) : CoroutineWorker(context, params) {
 
-    /** 0.3.81 ANR fix: IO only, hard time cap; never touches the main thread or waits on a service. */
+    /** 0.3.81 ANR fix: IO only, cancellation budget; never touches the main thread or waits on a service. */
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         kotlinx.coroutines.withTimeoutOrNull(MAX_RUN_MS) { sync() } ?: Result.retry()
     }

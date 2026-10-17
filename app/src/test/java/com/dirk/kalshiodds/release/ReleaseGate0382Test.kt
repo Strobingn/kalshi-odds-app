@@ -35,7 +35,7 @@ class ReleaseGate0382Test {
         assertFalse(destroy, Regex("\\.container\\b(?!OrNull)").containsMatchIn(destroy))
         assertTrue(destroy.contains("containerOrNull"))
         val stop = s.substringAfter("private fun handleExplicitStop()").substringBefore("private fun promoteToForeground()")
-        assertTrue(stop.contains("launchBackground"))
+        assertTrue(stop.contains("scope.launch(Dispatchers.IO)"))
     }
 
     @Test fun appExposesNonBlockingContainerAccess() {
@@ -46,9 +46,9 @@ class ReleaseGate0382Test {
 
     @Test fun mainActivityAwaitsTheContainerOffMain() {
         val a = src("MainActivity.kt")
-        val onCreate = a.substringAfter("override fun onCreate(").substringBefore("setContent {")
+        val onCreate = a.substringAfter("override fun onCreate(").substringBefore("private fun showReadyUi()")
         assertFalse(onCreate, onCreate.contains(".container."))
-        assertTrue(onCreate.contains("app.awaitContainer()"))
-        assertTrue(a.contains("if (!containerReady)"))
+        assertTrue(onCreate.contains(".awaitContainer()"))
+        assertTrue(onCreate.indexOf(".awaitContainer()") < onCreate.indexOf("showReadyUi()"))
     }
 }

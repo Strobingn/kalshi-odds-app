@@ -311,12 +311,12 @@ object ShockFav {
      * Shock exit reason, or null to keep holding. Hold-to-close / combo legs ride to settlement once in the
      * favourite zone (τ ≤ 75 s and side fair ≥ 90 %).
      */
-    fun shockExit(p: Params, heldS: Double, tauS: Double, bid: Double, sideFair: Double, entry: Double? = null): String? {
+    fun shockExit(p: Params, heldS: Double, tauS: Double, bid: Double, sideFair: Double, entry: Double? = null, clip: Int = CLIP): String? {
         val holdOk = p.settle || p.favHold
         val favZone = holdOk && tauS <= 75.0 && sideFair >= 0.90
         if (favZone) return null
         // 0.3.65: the fair-value exit fires only when it nets > $0 after both fees.
-        val caught = !p.settle && bid >= sideFair - p.conv - 1e-9 && (entry == null || ScalpRule.netAfterFees(entry, bid, CLIP) > 1e-9)
+        val caught = !p.settle && bid >= sideFair - p.conv - 1e-9 && (entry == null || ScalpRule.netAfterFees(entry, bid, clip) > 1e-9)
         return when {
             caught -> "bid caught fair"
             tauS < 30.0 -> "τ < 30 s"

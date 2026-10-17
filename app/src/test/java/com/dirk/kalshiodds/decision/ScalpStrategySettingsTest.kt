@@ -11,7 +11,7 @@ class ScalpStrategySettingsTest {
     private val at = close - 300_000
     private fun source(id: String = "source", ms: Long = at) = ScalpTrade(id, tk, "YES", ScalpState.PENDING_ENTRY, ms, .4, .5, ruleVersion = "v|sf41|P")
     private fun q(ms: Long, bid: Double = .39, ask: Double = .4) = ScalpRule.Quote(tk, ms, close, ms, bid, 100.0, ask, 100.0, 100_000.0, 100_000.0, 3e-5)
-    private fun cfg(knobs: ScalpStrategySettings) = MemoryScalpControls(ScalpControls(strategySettings = mapOf("v2-sf41" to knobs),
+    private fun cfg(knobs: ScalpStrategySettings) = MemoryScalpControls(ScalpControls(stopLossPercent = 20, strategySettings = mapOf("v2-sf41" to knobs),
         disabledStrategies = ScalpModels.V2_MODELS.map { it.code }.filter { it != "v2-sf41" }.toSet()))
     @Test fun perStrategySizingAndRiskAreFrozenAndKeepExitsAfterDisable() {
         val controls = cfg(ScalpStrategySettings(contracts = 3, stopLossPercent = 10, trailCents = 5))

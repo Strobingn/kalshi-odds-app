@@ -163,7 +163,7 @@ object ScalpModels {
     }
     const val G14_BLURB = "0.3.80 copy: takes its original's signal only when the Fair-gap g14 gate passes, then g14 h60 exits (stop armed after 60 s, otherwise hold to settlement). Original keeps running unchanged. g14 is not proven (per-trade range ≈ -$0.48…+$0.72)."
 
-    const val V2_BLURB = "v2 paper: new trades default to a 3¢ bid-peak trail active from entry and independent 20% fill-price stop. Existing trades retain saved exits. Preserve positive/inconclusive entry settings; bounded adjustments for sustained losses. Every trade has a protective stop. Exit in the final minute unless fresh CF fair ≥ 97%, bid ≥ 90¢ and holding beats selling. Decisions are estimates, never guaranteed wins. Actual stop/trail and adaptation evidence are in the trade note."
+    const val V2_BLURB = "v2 paper: new trades default to a 3¢ bid-peak trail active from entry and independent 1% fill-price stop by default. The global percentage cap can tighten existing trades. Preserve positive/inconclusive entry settings; bounded adjustments for sustained losses. Every trade has a protective stop. Exit in the final minute unless fresh CF fair ≥ 97%, bid ≥ 90¢ and holding beats selling. Decisions are estimates, never guaranteed wins. Actual stop/trail and adaptation evidence are in the trade note."
     val ALL: List<Model> = Model.values().toList()
     /**
      * 0.3.79: scalpers retired from cards, leaderboard and new entries: at least 30 closed paper trades and the whole
@@ -277,21 +277,10 @@ object ScalpModels {
 
     /** 0.3.61: per-bet stop shown on each card / leaderboard row. */
     fun stopLabel(m: Model): String {
-        if (isV2(m)) return "stop per trade · default 20% fill stop + 3¢ peak trail; saved rules in trade note; 60s close check"
-        ShockFav.byVariantId(m.code)?.let { p -> return "stop ${ShockFav.stopC(p)}¢" + if (ShockFav.stopTrainChosen(p)) "" else " (default)" }
-        return when (m) {
-            Model.FORECAST_RIDE, Model.FORECAST_FADE -> "stop ${ForecastScalp.STOP_C}¢ (default)"
-            Model.DIP_HOLD -> "stop ${Math.round(ScalpParams.HOLD60_SIBLINGS[0].stop * 100)}¢ after 60s"
-            Model.MOMO_HOLD -> "stop ${Math.round(ScalpParams.HOLD60_SIBLINGS[1].stop * 100)}¢ after 60s"
-            Model.FAIR_GAP -> "stop per-coin tuned"
-            Model.FAIR_HOLD -> "stop ${Math.round(ScalpParams.QUEUED_COPIES[0].stop * 100)}¢ after 60s"
-            Model.DIP_NOTP -> "stop ${Math.round(ScalpParams.QUEUED_COPIES[1].stop * 100)}¢"
-            Model.MOMO_NOTP -> "stop ${Math.round(ScalpParams.QUEUED_COPIES[2].stop * 100)}¢"
-            else -> ScalpModels.legacyStop(m)
-        }
+        if (isV2(m)) return "stop 1% below fill by default + 3¢ peak trail; actual risk cap in trade note; 60s close check"
+        return "stop 1% below fill by default; global cap applies immediately; other strategy exits may close earlier"
     }
-    private fun legacyStop(m: Model): String = ScalpStrategy.values().firstOrNull { modelOf(it) == m }
-        ?.let { "stop ${Math.round(ScalpParams.STRATEGY_SEEDS.getValue(it).stop * 100)}¢" } ?: "stop ${Math.round(MAKER_DIP_PARAMS.stop * 100)}¢"
+
     fun tag(m: Model): String? = (if (isV2(m)) "group: v2" else null) ?: ShockFav.TAGS[m.code] ?: ShockFav.byVariantId(m.code)?.group?.let { "group: $it" }
     /** Σ (actual − no-stop shadow) over closed trades whose note carries "nostop=±x.xx". Positive = the stop saved money. */
     fun stopSaved(trades: List<ScalpTrade>): Pair<Double, Int> {
@@ -557,18 +546,22 @@ object ForecastScalp {
     fun isForecast(t: ScalpTrade): Boolean = t.variantId.startsWith(RIDE_PREFIX) || t.variantId.startsWith(FADE_PREFIX)
     fun variantId(ride: Boolean, horizonS: Int) = (if (ride) RIDE_PREFIX else FADE_PREFIX) + "-h" + (if (horizonS < 0) "close" else horizonS.toString())
 
-    /** Entry: band, spread, edge > spread + entry fee + exit fee (1-ct rounded) + 0.5¢. */
+    /** Entry: band, spread, edge > spread + entry fee + exit fee at the actual ten-contract clip + 0.5¢. */
     /** 0.3.54: predicted move must beat the full round trip (spread + entry fee + exit fee) by [marginUsd]. */
     fun wantsEntry(mid: Double, spread: Double, ask: Double, move: Double, tauS: Double, marginUsd: Double = SAFETY): Boolean =
-        ScalpRule.buyPriceOk(ask) && mid in BAND_LO..BAND_HI && spread <= MAX_SPREAD + 1e-9 && tauS >= MIN_TAU_ENTRY_S &&
-            move > spread + 2 * ScalpRule.orderFee(1, ask) + marginUsd
+        ScalpRule.buyPriceOk(ask) && mid in BAND_LO..BAND_HI && spread.isFinite() && spread >= 0.0 && spread <= MAX_SPREAD + 1e-9 && tauS.isFinite() && tauS >= MIN_TAU_ENTRY_S &&
+            marginUsd.isFinite() && marginUsd >= 0.0 &&
+            move.isFinite() && move > 0.0 &&
+            (ask - spread + move).coerceAtMost(1.0) - ask >
+                ScalpRule.feePerContract(ScalpRule.CONTRACTS, ask) +
+                ScalpRule.feePerContract(ScalpRule.CONTRACTS, (ask - spread + move).coerceIn(0.0, 1.0)) + marginUsd
 
     /** Exit when the forecast for the held side turns (below one exit fee), flips hard, TP, horizon reached, or close. */
     /** [sideForecast] NaN = no fresh forecast: forecast-based exits are skipped (hold until fresh data). */
-    fun wantsExit(sideForecast: Double, bid: Double, heldS: Double, horizonS: Int, tauS: Double): String? = when {
+    fun wantsExit(sideForecast: Double, bid: Double, heldS: Double, horizonS: Int, tauS: Double, clip: Int = ScalpRule.CONTRACTS): String? = when {
         bid >= TAKE_PROFIT - 1e-9 -> "take profit ≥ 90¢"
         !sideForecast.isNaN() && sideForecast < HARD_FLIP -> "forecast flipped hard"
-        !sideForecast.isNaN() && sideForecast < ScalpRule.orderFee(1, bid) -> "forecast turned (move < exit fee)"
+        !sideForecast.isNaN() && sideForecast < ScalpRule.feePerContract(clip, bid) -> "forecast turned (move < exit fee)"
         !sideForecast.isNaN() && horizonS > 0 && heldS >= horizonS -> "horizon reached"
         tauS < EXIT_BEFORE_CLOSE_S -> "exit before close"
         else -> null
