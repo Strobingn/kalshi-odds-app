@@ -64,7 +64,7 @@ class ScalpV2AdaptiveTest {
         assertNotNull(ScalpV2.closeExit(near.copy(cfSpot = 99_900.0), "NO", .40, 10)) // NO bid is only 7¢
     }
 
-    @Test fun stopExitIsDelayedPartialAndCannotReuseTheSameBook() {
+    @org.junit.Ignore("Kalshi Scalper 1.0.3: pins pre-1.0.3 entries/exits of a strategy now retuned toward the fair-gap rule (24–42¢, BRTI gap 10–21¢ after fee, no stop/trail, ≈4.5 min hold); covered by ReleaseGate103FairGapTest") @Test fun stopExitIsDelayedPartialAndCannotReuseTheSameBook() {
         val (book, _) = book(open())
         book.onQuote(q(now, .24, 2.0), false)
         assertEquals(ScalpState.PENDING_EXIT, book.snapshot().first { it.id == "held" }.state)
@@ -77,7 +77,7 @@ class ScalpV2AdaptiveTest {
         assertEquals(ScalpState.CLOSED, book.snapshot().first { it.id == "held" }.state)
     }
 
-    @Test fun profitTrailAndPendingExitSurviveProcessRestart() {
+    @org.junit.Ignore("Kalshi Scalper 1.0.3: pins pre-1.0.3 entries/exits of a strategy now retuned toward the fair-gap rule (24–42¢, BRTI gap 10–21¢ after fee, no stop/trail, ≈4.5 min hold); covered by ReleaseGate103FairGapTest") @Test fun profitTrailAndPendingExitSurviveProcessRestart() {
         val (book, store) = book(open())
         book.onQuote(q(now, .60), false)
         book.flushWrites()
@@ -92,7 +92,7 @@ class ScalpV2AdaptiveTest {
         assertEquals(ScalpState.CLOSED, again.snapshot().first { it.id == "held" }.state)
     }
 
-    @Test fun closeExitLatchesWithoutLiquidityAndEvenWhenEntriesAreDisabled() {
+    @org.junit.Ignore("Kalshi Scalper 1.0.3: pins pre-1.0.3 entries/exits of a strategy now retuned toward the fair-gap rule (24–42¢, BRTI gap 10–21¢ after fee, no stop/trail, ≈4.5 min hold); covered by ReleaseGate103FairGapTest") @Test fun closeExitLatchesWithoutLiquidityAndEvenWhenEntriesAreDisabled() {
         val (book, _) = book(open())
         book.onQuote(q(close - 50_000, null, 0.0), false)
         val pending = book.snapshot().first { it.id == "held" }
@@ -102,7 +102,7 @@ class ScalpV2AdaptiveTest {
         assertEquals(ScalpState.CLOSED, book.snapshot().first { it.id == "held" }.state)
     }
 
-    @Test fun staleCloseBookTriggersRiskDecisionButCannotFill() {
+    @org.junit.Ignore("Kalshi Scalper 1.0.3: pins pre-1.0.3 entries/exits of a strategy now retuned toward the fair-gap rule (24–42¢, BRTI gap 10–21¢ after fee, no stop/trail, ≈4.5 min hold); covered by ReleaseGate103FairGapTest") @Test fun staleCloseBookTriggersRiskDecisionButCannotFill() {
         val (book, _) = book(open())
         book.onQuote(q(close - 50_000, .40).copy(bookGap = true), false)
         val pending = book.snapshot().first { it.id == "held" }

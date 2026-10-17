@@ -10,7 +10,7 @@ import org.junit.Test
 
 class ReleaseGate0369Test {
     /** sf rows are exited only by their own lane (TP/stop/60 s), never by the generic profit-target / turn-down rules. */
-    @Test fun sfExitsComeFromTheirOwnTakeProfit() {
+    @org.junit.Ignore("Kalshi Scalper 1.0.3: pins pre-1.0.3 entries/exits of a strategy now retuned toward the fair-gap rule (24–42¢, BRTI gap 10–21¢ after fee, no stop/trail, ≈4.5 min hold); covered by ReleaseGate103FairGapTest") @Test fun sfExitsComeFromTheirOwnTakeProfit() {
         val closed = HashMap<String, ScalpTrade>()
         for (seed in 1..6) {
             val close = 1_791_850_500_000L + seed * 900_000L
