@@ -51,6 +51,15 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
                 IconButton(onClick = onSettings) { Icon(Icons.Outlined.Tune, "Scalping settings", tint = c.accentBlue) }
             }
         }
+        // 0.3.87: live Bitcoin 15-min price at the top (price line only; rolls to the next window automatically).
+        if (st.arenaChart.ticker.isNotEmpty()) item(key = "btc-live-chart") {
+            Column {
+                com.dirk.kalshiodds.domain.KalshiQuoteDisplay.targetNowLine(st.liveStrike, st.liveSpot)?.let {
+                    Text(it, color = c.textSecondary, style = MaterialTheme.typography.labelMedium)
+                }
+                ScalpWindowChart(ScalpAlgoDetail(chart = st.arenaChart.copy(trades = emptyList())), title = "Bitcoin 15-min · live price")
+            }
+        }
         item(key = "arena-tabs") { PillTabs(KashiArenaTab.values().toList(), tab, { it.label }, { "ARENA_TAB_${it.name}" }) { tabName = it.name } }
         item(key = "arena-group") {
             ChipRow(listOf(true, false), v2, { if (it) "V2 strategies" else "Originals" }, { "ARENA_GROUP_$it" }) { v2 = it }

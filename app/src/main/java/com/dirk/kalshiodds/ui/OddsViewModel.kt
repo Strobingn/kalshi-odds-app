@@ -353,7 +353,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         // One indexed ticker read, only while the foreground arena is visible. No history scan.
         val live = markets.firstOrNull { (it.closeMs ?: 0) in (now + 1)..(now + 900_000) }
         val liveTicker = live?.ticker.orEmpty()
-        if (next.arenaChart.ticker != liveTicker || now - arenaChartReadAtMs >= 3_000) {
+        if (next.arenaChart.ticker != liveTicker || now - arenaChartReadAtMs >= 1_000) {
             arenaChartReadAtMs = now
             val end = live?.closeMs ?: 0L
             val mine = if (liveTicker.isEmpty()) emptyList() else
@@ -365,6 +365,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                     hub.scoring.book.bidHistory(liveTicker)).filter { it.tMs in (end - 900_000)..now }, 360)
             next = next.copy(arenaChart = ScalpWindowChartData(liveTicker, end, now, marks[liveTicker]?.bookAtMs, points, mine))
         } else next = next.copy(arenaChart = next.arenaChart.copy(nowMs = now, bookAtMs = marks[liveTicker]?.bookAtMs))
+        next = next.copy(liveStrike = marks[liveTicker]?.strike, liveSpot = marks[liveTicker]?.let { it.cfSpot ?: it.spot })
         _scalpTab.value = next
     }
 
