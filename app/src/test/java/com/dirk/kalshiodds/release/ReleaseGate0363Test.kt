@@ -33,6 +33,6 @@ class ReleaseGate0363Test {
         assertEquals(c.size, c.map { it.id }.toSet().size)
         assertTrue(ShockFav.v("sf32").tpNet)
         assertTrue(!ShockFav.v("sf30").tpNet)
-        assertEquals(131, ScalpModels.ALL.size)
+        assertEquals(131 + 15, ScalpModels.ALL.size)
     }
 }

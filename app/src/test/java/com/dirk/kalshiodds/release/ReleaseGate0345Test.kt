@@ -28,13 +28,13 @@ class ReleaseGate0345Test {
     fun basicBudgetIsNinetyPercentOfTier() {
         val clock = longArrayOf(0L)
         val b = KalshiTokenBucket(nowMs = { clock[0] }, randomUnit = { 0.0 }, tier = KalshiTier.BASIC)
-        assertEquals(18.0, b.readsPerSec(), 1e-9)   // 0.9 × 200 tokens/s ÷ 10
+        assertEquals(19.0, b.readsPerSec(), 1e-9)   // 0.3.80: 0.95 × 200 tokens/s ÷ 10
         assertEquals(20.0, b.burstReads(), 1e-9)    // min(0.9 × 600, 200) tokens ÷ 10
         var burst = 0
         while (b.reserveRead() == 0L) burst++
         assertEquals(20, burst)
         val sustained = grantedOver(b, clock, 10_000L)
-        assertTrue("sustained $sustained", sustained in 175..185) // ≈ 18/s × 10 s
+        assertTrue("sustained $sustained", sustained in 185..195) // 0.3.80: ≈ 19/s × 10 s
     }
 
     @Test
@@ -47,7 +47,7 @@ class ReleaseGate0345Test {
         assertEquals("Advanced", tier!!.name); assertEquals("account/limits", tier.source)
         val b = KalshiTokenBucket(nowMs = { 0L }, tier = KalshiTier.BASIC)
         b.configure(tier)
-        assertEquals(27.0, b.readsPerSec(0L), 1e-9) // 90 % of 300 tokens/s
+        assertEquals(28.5, b.readsPerSec(0L), 1e-9) // 0.3.80: 95 % of 300 tokens/s
     }
 
     @Test
@@ -58,8 +58,8 @@ class ReleaseGate0345Test {
         assertEquals(0.70, b.share(), 1e-9)
         assertEquals(14.0, b.readsPerSec(), 1e-9)
         clock[0] = 59_000L; assertEquals(0.70, b.share(), 1e-9)
-        clock[0] = 75_000L; assertEquals(0.80, b.share(), 1e-9) // halfway up the 30 s ramp
-        clock[0] = 91_000L; assertEquals(0.90, b.share(), 1e-9)
+        clock[0] = 75_000L; assertEquals(0.825, b.share(), 1e-9) // 0.3.80: halfway 0.70→0.95 up the 30 s ramp
+        clock[0] = 91_000L; assertEquals(com.dirk.kalshiodds.data.api.KalshiTokenBucket.TARGET_SHARE, b.share(), 1e-9)
         assertEquals(1, b.real429s)
         // While dropped, sustained reads ≈ 14/s.
         val c2 = longArrayOf(0L)
@@ -110,7 +110,7 @@ class ReleaseGate0345Test {
     fun countersShowTierBudgetAndUse() {
         val lines = KalshiRest.budgetLines()
         assertTrue(lines[0], lines[0].startsWith("Tier: Basic"))
-        assertTrue(lines[1], lines[1].startsWith("Budget: 90% of tier = 18.0 reads/s, burst 20 reads"))
+        assertTrue(lines[1], lines[1].startsWith("Budget: 95% of tier = 19.0 reads/s, burst 20 reads"))
         assertTrue(lines[2], lines[2].startsWith("Used last 60 s:"))
     }
 }

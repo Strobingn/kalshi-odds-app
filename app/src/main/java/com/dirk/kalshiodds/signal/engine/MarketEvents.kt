@@ -77,11 +77,25 @@ object WsReconnectSchedule {
 }
 
 /** 0.3.49 Home status line copy. */
+/**
+ * 0.3.80 price-lag fix: live WS quotes reach Home on their own light lane, at most every [INTERVAL_MS], and the newest
+ * quote of a burst is always published (trailing edge). Before, Home prices rode the busy paper/scalper lane and a
+ * leading-only 250 ms throttle dropped the last tick of each burst, so tickets waited for the next tick or REST poll.
+ */
+object LiveQuotePacer {
+    const val INTERVAL_MS = 100L
+    /** Wait before publishing a pending quote, given the last publish time. Never negative, never above the interval. */
+    fun waitMs(lastPublishMs: Long, nowMs: Long): Long =
+        if (lastPublishMs <= 0L) 0L else (INTERVAL_MS - (nowMs - lastPublishMs)).coerceIn(0L, INTERVAL_MS)
+}
+
 object FeedStatus {
+    /** 0.3.80: small Live vs Polling price indicator shown on Home. */
+    fun priceSource(wsConnected: Boolean): String = if (wsConnected) "● Live prices" else "○ Polling prices"
     fun line(wsConnected: Boolean, lastTickAge: String, evalMs: Double?, restDelayMs: Long, real429LastHour: Int): String =
         String.format(
-            java.util.Locale.US, "WS %s · last tick %s · AI eval %s · REST %s · 429s/1h %d",
-            if (wsConnected) "connected" else "down", lastTickAge,
+            java.util.Locale.US, "%s · WS %s · last tick %s · AI eval %s · REST %s · 429s/1h %d",
+            priceSource(wsConnected), if (wsConnected) "connected" else "down", lastTickAge,
             evalMs?.let { String.format(java.util.Locale.US, "%.0f ms", it) } ?: "—",
             if (restDelayMs >= 1_000L) String.format(java.util.Locale.US, "%.1fs", restDelayMs / 1000.0) else "${restDelayMs}ms",
             real429LastHour

@@ -22,12 +22,17 @@ class SyncWorker(
     params: WorkerParameters
 ) : CoroutineWorker(context, params) {
 
+    /** 0.3.81 ANR fix: IO only, hard time cap; never touches the main thread or waits on a service. */
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+        kotlinx.coroutines.withTimeoutOrNull(MAX_RUN_MS) { sync() } ?: Result.retry()
+    }
+
+    private suspend fun sync(): Result {
         val container = runCatching { KalshiOddsApp.from(applicationContext).container }
-            .getOrElse { return@withContext Result.failure() }
+            .getOrElse { return Result.failure() }
         val hub = container.dataPrefs.hydrate()
         if (!hub.syncEnabled || !hub.supabaseConfigured) {
-            return@withContext Result.success()
+            return Result.success()
         }
         val settingsJson = mutableListOf<String>()
         val status = runCatching {
@@ -99,11 +104,12 @@ class SyncWorker(
             val atMs = if (status.ok || status.advanced) status.atMs else hub.lastSyncAtMs
             container.dataPrefs.updateSyncStatus(status.message, atMs)
         }
-        if (status.ok) Result.success() else Result.retry()
+        return if (status.ok) Result.success() else Result.retry()
     }
 
     companion object {
         const val UNIQUE = "diphunter_cloud_sync"
+        const val MAX_RUN_MS = 9 * 60_000L
         const val SCALP_PREFS = "scalp_sync"
         const val KEY_SCALP_ACK = "ack_closed_ms"
         const val KEY_SCALP_UNSYNCED = "unsynced"

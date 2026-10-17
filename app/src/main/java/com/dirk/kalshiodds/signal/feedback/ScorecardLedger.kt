@@ -107,6 +107,8 @@ object ScorecardLedger {
         val source: String,
         val noBetWouldHave: Boolean = false,
         val entryNotRecorded: Boolean = false,
+        /** 0.3.80: settled forecast with no paper fill — directional accuracy only, never in the paper W-L / P&L. */
+        val forecastOnly: Boolean = false,
         val pickSource: String? = null,
         val aiConfidence: Double? = null,
         val confidenceLegacy: Boolean = false,
@@ -132,7 +134,10 @@ object ScorecardLedger {
         val voidCount: Int,
         /** Sum of per-contract hypotheticals for log rows with no fill. Not Paper P&L. */
         val hypotheticalPerContractUsd: Double = 0.0,
-        val hypotheticalPicks: Int = 0
+        val hypotheticalPicks: Int = 0,
+        /** 0.3.80 "Forecasts" section: settled prediction rows with no matching fill (hit rate only, no P&L). */
+        val forecasts: Record = Record(),
+        val forecastPicks: List<PickRow> = emptyList()
     )
 
     data class StoredEntry(
@@ -150,7 +155,10 @@ object ScorecardLedger {
     const val UNKNOWN_CONF_NOTE = "logged before the app saved confidence"
     const val UNKNOWN_SIDE_LABEL = "Unknown side"
     const val SOURCE_TITLE = "By source"
-    const val ENTRY_NOT_RECORDED = "entry not recorded"
+    const val ENTRY_NOT_RECORDED = "forecast only"
+    const val FORECASTS_TITLE = "Forecasts"
+    const val FORECASTS_NOTE = "directional accuracy only · forecast only, no fill, no P&L"
+    const val PAPER_FILLS_TITLE = "Paper fills"
 
     /**
      * Same $10 all-in clip as [com.dirk.kalshiodds.ui.HomeCopy.TILE_STAKE_USD]
@@ -230,7 +238,9 @@ object ScorecardLedger {
             )
         }
 
-        val aiPicks = (aiRows + leftoverAiRows).sortedByDescending { it.settledAtMs }
+        // 0.3.80: unmatched forecasts leave the paper record entirely (own Forecasts section).
+        val forecastRows = aiRows.filter { it.forecastOnly }.sortedByDescending { it.settledAtMs }
+        val aiPicks = (aiRows.filter { !it.forecastOnly } + leftoverAiRows).sortedByDescending { it.settledAtMs }
         val allMoneyRows = aiPicks + manualRows
         val displayPicks = (allMoneyRows + noBetRows).sortedByDescending { it.settledAtMs }
 
@@ -259,7 +269,9 @@ object ScorecardLedger {
             openCount = btcEntries.count { it.outcome == null },
             voidCount = btcEntries.count { it.outcome.equals("void", true) },
             hypotheticalPerContractUsd = hypUsd,
-            hypotheticalPicks = hypN
+            hypotheticalPicks = hypN,
+            forecasts = record(forecastRows),
+            forecastPicks = forecastRows
         )
     }
 
@@ -492,7 +504,8 @@ object ScorecardLedger {
             finalUsd = null,
             source = fill?.pickSource ?: fill?.source ?: if (noBetWouldHave) "NO BET would-have" else "AI pick",
             noBetWouldHave = noBetWouldHave,
-            entryNotRecorded = sized.entryNotRecorded,
+            entryNotRecorded = sized.entryNotRecorded || (fill == null && !noBetWouldHave),
+            forecastOnly = fill == null && !noBetWouldHave,
             pickSource = fill?.pickSource ?: fill?.let { PaperPickSource.of(it)?.label }
                 ?: if (noBetWouldHave) null else PaperPickSource.TICKET.label,
             aiConfidence = fill?.aiConfidence ?: entry.confidence,

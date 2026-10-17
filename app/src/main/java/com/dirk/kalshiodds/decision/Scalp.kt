@@ -579,7 +579,7 @@ class ScalpBook(
         changed += stepV2(q)
         mineAll.filter { isActive(it) && !ForecastScalp.isForecast(it) && !ScalpV2.isV2(it.variantId) }.forEach { t ->
             if (ScalpRisk.managedExit(t)) return@forEach
-            val p = ScalpParams.byId(t.variantId) ?: primary
+            val p = if (G14Copies.isCopyVariant(t.variantId)) G14Copies.params else ScalpParams.byId(t.variantId) ?: primary
             // Opening originals also pass through this generic execution lane.
             if (t.state == ScalpState.PENDING_ENTRY) {
                 val opening = openingEntryStatus(t, q)
@@ -1410,6 +1410,7 @@ class ScalpBook(
         val t1 = if (liveExtras) withDetail(t0, prev) else t0
         // 0.3.79: a retired model's new trade still seeds its kept v2 copy, then is stored as a hidden shadow row.
         if (prev == null && liveExtras) spawnV2(t1)
+        if (prev == null && liveExtras) spawnG14(t1)
         val t = if (prev == null) ScalpModels.toShadowIfRetired(t1) else t1
         // 0.3.67: enqueue DB+stats off the quote lock; flushBatches drains on a worker.
         writeQ.merge(t.id, t to prev) { old, neu -> neu.first to (old.second ?: neu.second) }
@@ -1427,6 +1428,33 @@ class ScalpBook(
                 pi >= 0 -> pc.toMutableList().also { it[pi] = t }
                 else -> listOf(t) + pc
             }
+        }
+    }
+
+    /** 0.3.80: an original's new signal → its "rebuilt like Fair-gap g14" copies, gated by the g14 entry on that side. */
+    private fun spawnG14(t: ScalpTrade) {
+        if (!t.isPrimary || G14Copies.isCopyVariant(t.variantId) || ScalpV2.isV2(t.variantId)) return
+        if (t.state != ScalpState.PENDING_ENTRY && t.state != ScalpState.OPEN) return
+        val orig = ScalpModels.modelOf(t) ?: return
+        val copies = G14Copies.copiesTriggeredBy(orig.code)
+        if (copies.isEmpty()) return
+        val key = t.ticker.uppercase()
+        val q = _marks.value[key] ?: return
+        if (q.nowMs >= q.closeMs) return
+        val recent = history[key]?.filter { it.atMs < q.nowMs }.orEmpty()
+        val (sig, _) = ScalpRule.strategySignal(q, G14Copies.params, listOf(t.side), recent)
+        if (sig == null || !ScalpRule.buyPriceOk(sig.ask)) return
+        for (src in copies) {
+            val vid = G14Copies.variantId(src)
+            if (ScalpV2.isV2(src) && sig.ask > G14Copies.V2_MAX_ASK + 1e-9) continue
+            val mine = _all.value.filter { it.ticker == key && it.variantId == vid }
+            if (mine.any { isActive(it) }) continue
+            val lastClose = mine.mapNotNull { it.closedAtMs }.maxOrNull()
+            if (lastClose != null && q.nowMs - lastClose < ScalpRule.REENTRY_COOLDOWN_MS) continue
+            save(ScalpTrade(id = idFactory(), ticker = key, side = sig.side, state = ScalpState.PENDING_ENTRY, signalAtMs = q.nowMs,
+                signalAsk = sig.ask, fairAtSignal = sig.fair,
+                note = String.format(Locale.US, "%s · %s · edge %.1f¢ after fees · from %s signal · %s", src, G14Copies.LABEL, sig.gapAfterFee * 100, orig.code, G14Copies.PARAMS_ID),
+                ruleVersion = "${ScalpRule.VERSION}|$vid|P"))
         }
     }
 
@@ -1593,6 +1621,14 @@ class ScalpBook(
             val entry = t.entryPrice ?: continue
             val bid = q.bid(t.side)?.takeIf { it.isFinite() && it > 0.0 } ?: continue
             val held = (q.nowMs - (t.entryAtMs ?: q.nowMs)) / 1000.0
+            if (p.kind == ShockFav.Kind.FADE_MAKER && t.state == ScalpState.OPEN && bid >= entry + p.tp + .01 - 1e-9) {
+                val n = minOf(t.remaining, kotlin.math.floor((q.bidSize(t.side) ?: 0.0).coerceAtLeast(0.0)).toInt())
+                if (n > 0) {
+                    val next = ScalpFills.sell(t, q.nowMs, n, n * (entry + p.tp), 0.0, bookAtMs = q.bookAtMs)
+                    changes += if (next.remaining == 0) close(next, q.nowMs, "maker target +${Math.round(p.tp * 100)}¢") else next
+                }
+                continue
+            }
             val peak = maxOf(o50Peak[t.id] ?: bid, bid).also { o50Peak[t.id] = it }
             val legacyStop = bid <= entry - ShockFav.stopC(p) / 100.0 + 1e-9
             val reason = t.exitReason.takeIf { t.state == ScalpState.PENDING_EXIT }

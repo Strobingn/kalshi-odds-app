@@ -1,4 +1,4 @@
-# Kashi 0.3.80 — 1% stops, strategy audit and background blocking fixes
+# Kashi 0.3.82 — 1% stops, strategy audit and background blocking fixes
 
 The default global price stop is 1% below each trade's actual fill/VWAP. The application sets the global cap to the requested 1% once, retaining per-model overrides beneath that cap and all other settings; later intentional global changes persist. A shared guard covers every original and V2 strategy, including retired-model positions still being unwound. It runs without spot, strike, volatility, forecasts or entry permission. Lowering the global cap tightens current positions; raising it cannot loosen a position's saved cap. Additional original exits and V2's default 3¢ peak trail remain active.
 
@@ -26,3 +26,5 @@ All model IDs map to their actual execution variants in a mirrored UP/DOWN regre
 References used to verify platform/fee assumptions:
 - https://kalshi.com/docs/kalshi-fee-schedule.pdf
 - https://developer.android.com/reference/android/content/SharedPreferences.Editor
+
+This release integrates the current g14 copies, live-price/scorecard updates, and the 0.3.81 startup/worker ANR audit. The mirrored stop matrix includes every g14 copy.

@@ -35,6 +35,7 @@ class ScalpAuditTest {
     @Test fun everyModelStopsBothSidesWithMissingSpotAndDoesNotReuseDepthOrCancelOnRebound() {
         for (model in ScalpModels.ALL) for (side in listOf("YES", "NO")) {
             fun variantOf(m: ScalpModels.Model): String {
+                if (G14Copies.isCopyCode(m.code)) return G14Copies.variantId(G14Copies.sourceOf(m.code)!!)
                 if (ScalpModels.isV2(m)) return if (ScalpV2.isExtra(m.code)) m.code else "v2-" + variantOf(ScalpModels.originalOf(m)!!)
                 if (ShockFav.isShockFav(m.code)) return m.code
                 if (m == ScalpModels.Model.FORECAST_RIDE) return ForecastScalp.variantId(true, 600)
