@@ -16,5 +16,5 @@ object PaperEntryPolicy {
         price.isFinite() && price > 0.0 && price < MAX_AUTOMATIC_ENTRY_PRICE_EXCLUSIVE
 
     fun skipMessage(price: Double): String =
-        "Auto-paper skip ${String.format(java.util.Locale.US, \"%.1f\", price * 100.0)}¢ — 90¢+ leaves under 10¢ gross upside before fees"
+        "Auto-paper skip ${String.format(java.util.Locale.US, "%.1f", price * 100.0)}¢ — 90¢+ leaves under 10¢ gross upside before fees"
 }
