@@ -208,6 +208,23 @@ class PaperBookTest {
     }
 
     @Test
+    fun unlimitedAutopilotRejectsNinetyCentEntriesEvenWhenCalledDirectly() {
+        val book = PaperBook(idFactory = { "high" }, nowMs = { 12L })
+        val ticket = hunterTicket(ticker = "KXBTC15M-HIGH").copy(
+            kind = TicketKind.SCALP,
+            paperOnly = true,
+            limitPrice = 0.90,
+            estimatedAvgFill = 0.90,
+            visibleContracts = 1_000,
+            strategyVersion = "high-price-test"
+        )
+
+        assertNull(book.considerUnboundedTicket(ticket, enabled = true))
+        assertEquals(0, book.snapshot().openCount)
+        assertTrue(book.snapshot().lastMessage.orEmpty().contains("90¢+"))
+    }
+
+    @Test
     fun paperScalpTracksCanHoldTheSameTickerConcurrentlyAndExitIndependently() {
         val book = PaperBook(idFactory = { "multi-${bookIds++}" }, nowMs = { 12L })
         val base = hunterTicket(ticker = "KXBTC15M-MULTI").copy(

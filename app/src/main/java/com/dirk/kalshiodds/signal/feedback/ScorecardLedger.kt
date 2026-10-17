@@ -110,6 +110,8 @@ object ScorecardLedger {
         val byConfidence: List<Bucket>,
         val picks: List<PickRow>,
         val cumulativePnl: List<Pair<Long, Double>>,
+        /** Settled forecasts with no corresponding paper fill; never a trade. */
+        val forecastOnlyCount: Int,
         val openCount: Int,
         val voidCount: Int
     )
@@ -178,9 +180,11 @@ object ScorecardLedger {
         val windowByTicker = windows.associateBy { it.ticker.uppercase(Locale.US) }
 
         val unusedAiFills = aiFills.toMutableList()
-        val aiRows = scored.map { entry ->
+        val aiRows = scored.mapNotNull { entry ->
             val match = takeMatchingFill(unusedAiFills, entry)
-            pickFromEntry(entry, match, windowByTicker[entry.ticker.uppercase(Locale.US)], zoneId, Kind.AI)
+            match?.let {
+                pickFromEntry(entry, it, windowByTicker[entry.ticker.uppercase(Locale.US)], zoneId, Kind.AI)
+            }
         }
         val leftoverAiRows = unusedAiFills.map { fill ->
             pickFromFill(fill, scored, windowByTicker[fill.ticker.uppercase(Locale.US)], zoneId, Kind.AI)
@@ -227,6 +231,7 @@ object ScorecardLedger {
             byConfidence = confidenceBuckets(allMoneyRows),
             picks = displayPicks,
             cumulativePnl = cumulative(allMoneyRows),
+            forecastOnlyCount = (scored.size - aiRows.size).coerceAtLeast(0),
             openCount = btcEntries.count { it.outcome == null },
             voidCount = btcEntries.count { it.outcome.equals("void", true) }
         )

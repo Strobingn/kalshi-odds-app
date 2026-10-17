@@ -131,7 +131,7 @@ class ScorecardLedgerTest {
     }
 
     @Test
-    fun sourceSplitNeverFabricatesPnl() {
+    fun forecastOnlyRowsNeverBecomePaperTrades() {
         assertTrue(ScorecardLedger.isAiSource("AI hunter"))
         assertTrue(ScorecardLedger.isAiSource("AI ticket"))
         assertTrue(ScorecardLedger.isAiSource("AI signal"))
@@ -141,11 +141,11 @@ class ScorecardLedgerTest {
             entries = listOf(pick("KXBTC15M-X", "YES", won = true, at = 1L, yes = 0.66)),
             fills = emptyList()
         )
-        assertEquals(1, orphan.ai.wins)
+        assertEquals(0, orphan.ai.wins)
+        assertEquals(0, orphan.ai.settledCount)
         assertEquals(0.0, orphan.ai.money.pnlUsd, 1e-9)
-        assertEquals(0.0, orphan.picks.single().pnlUsd!!, 1e-9)
-        assertNull(orphan.picks.single().feeUsd)
-        assertTrue(orphan.picks.single().entryNotRecorded)
+        assertEquals(1, orphan.forecastOnlyCount)
+        assertTrue(orphan.picks.isEmpty())
     }
 
     @Test
@@ -181,8 +181,7 @@ class ScorecardLedgerTest {
         val snap = ScorecardLedger.of(entries, fills)
         assertEquals(1, snap.voidCount)
         assertTrue(snap.picks.none { it.ticker.contains("ETH") })
-        assertTrue(snap.picks.any { it.entryNotRecorded && it.ticker.contains("LEGACY") })
-        assertEquals(0.0, snap.picks.first { it.entryNotRecorded }.pnlUsd!!, 1e-9)
+        assertEquals(1, snap.forecastOnlyCount)
         assertEquals(snap.combined.wins, snap.picks.filter { !it.noBetWouldHave }.count { it.won })
         assertReconciles(snap.bySide, snap.combined)
         assertReconciles(snap.byPrice, snap.combined)
@@ -190,7 +189,7 @@ class ScorecardLedgerTest {
         assertReconciles(snap.byConfidence, snap.combined)
         val unknownPrice = snap.byPrice.first { it.key == ScorecardLedger.UNKNOWN_KEY }
         assertEquals("Unknown price", unknownPrice.label)
-        assertEquals(1, unknownPrice.settledCount)
+        assertEquals(0, unknownPrice.settledCount)
         assertEquals(0.0, unknownPrice.pnlUsd, 1e-9)
         assertEquals(snap.combined.money.pnlUsd, snap.bySide.sumOf { it.pnlUsd }, 1e-9)
     }
@@ -221,18 +220,14 @@ class ScorecardLedgerTest {
     }
 
     @Test
-    fun derivesPaperStakeWhenAskStoredButSizeMissing() {
+    fun storedForecastEntryIsNotSynthesizedIntoPaperMoney() {
         val ask = 0.34
-        val clip = com.dirk.kalshiodds.signal.trade.LiveOrderSizer.size(ask, ScorecardLedger.PAPER_STAKE_USD)
         val entry = pick("KXBTC15M-DERIVE", "YES", won = true, at = 1_000L, yes = 0.70, ask = ask)
         val snap = ScorecardLedger.of(listOf(entry), emptyList())
-        val row = snap.picks.single()
-        assertFalse(row.entryNotRecorded)
-        assertEquals(clip.count, row.contracts)
-        assertEquals(clip.allInUsd, row.stakeUsd!!, 1e-9)
-        assertEquals(clip.feeUsd, row.feeUsd!!, 1e-9)
-        assertEquals(clip.profitIfWinUsd, row.pnlUsd!!, 1e-9)
-        assertEquals(clip.profitIfWinUsd, snap.combined.money.pnlUsd, 1e-9)
+        assertEquals(1, snap.forecastOnlyCount)
+        assertEquals(0, snap.combined.settledCount)
+        assertTrue(snap.picks.isEmpty())
+        assertEquals(0.0, snap.combined.money.pnlUsd, 1e-9)
         assertReconciles(snap.byPrice, snap.combined)
     }
 
@@ -267,8 +262,7 @@ class ScorecardLedgerTest {
         val fills = HomeFixtures.sampleSettledFills()
         val snap = ScorecardLedger.of(entries, fills)
         assertTrue(snap.picks.none { it.ticker.contains("ETH") || it.ticker.contains("SOL") })
-        assertTrue(snap.picks.any { it.entryNotRecorded })
-        assertEquals(1, snap.picks.count { it.entryNotRecorded })
+        assertTrue(snap.forecastOnlyCount >= 1)
         val scored = snap.picks.filter { !it.noBetWouldHave }
         scored.filter { !it.entryNotRecorded }.forEach { row ->
             assertTrue(row.ticker, row.entryAsk != null && row.contracts != null && row.stakeUsd != null && row.feeUsd != null && row.pnlUsd != null)

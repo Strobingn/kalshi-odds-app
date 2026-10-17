@@ -5,6 +5,7 @@ import com.dirk.kalshiodds.signal.config.SignalSettings
 import com.dirk.kalshiodds.signal.engine.BookLevelSnapshot
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -46,5 +47,37 @@ class PaperOpportunityTest {
         assertEquals("YES", candidate.side)
         assertEquals(125, candidate.visibleContracts)
         assertTrue(candidate.expectedNetPerContractUsd > 0.0)
+    }
+
+    @Test
+    fun automaticModelCandidateRejectsNinetyCentAndHigherEntries() {
+        val market = MarketUiModel(
+            ticker = "KXBTC15M-HIGH",
+            title = "BTC",
+            subtitle = null,
+            floorStrike = 100_000.0,
+            yesBid = 0.89,
+            yesAsk = 0.90,
+            noBid = 0.09,
+            noAsk = 0.10,
+            lastPrice = 0.90,
+            yesProbabilityPercent = 90.0,
+            noProbabilityPercent = 10.0,
+            aiYesPercent = 99.0,
+            aiNoPercent = 1.0,
+            volume = 1_000.0,
+            volume24h = 1_000.0,
+            closeTimeLocal = null,
+            closeTimeEpochMs = System.currentTimeMillis() + 600_000L,
+            status = "active",
+            seriesLabel = "Bitcoin"
+        )
+        val ctx = TicketBuilder.Context(
+            settings = SignalSettings(),
+            alertsPaused = false,
+            books = mapOf(market.ticker to BookLevelSnapshot(yes = listOf(0.89 to 125.0), no = listOf(0.10 to 125.0)))
+        )
+
+        assertNull(PaperOpportunity.best(market, ctx))
     }
 }

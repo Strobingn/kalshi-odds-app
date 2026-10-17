@@ -834,12 +834,13 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             // Paper research is intentionally independent of the live $5
             // ticket cap and live minimum-profit UI rule. It remains a
             // simulated taker fill at currently visible touch liquidity.
-            val scalpTickers = tickets.filter { it.kind == com.dirk.kalshiodds.signal.trade.TicketKind.SCALP }
-                .onEach { paperBook.considerUnboundedTicket(it, enabled = true) }
-                .map { it.ticker }
-                .toSet()
+            tickets.filter { it.kind == com.dirk.kalshiodds.signal.trade.TicketKind.SCALP }
+                .forEach { paperBook.considerUnboundedTicket(it, enabled = true) }
+            // The normal 15-minute model is its own paper track. Do not
+            // suppress it just because a separate scalp strategy is active
+            // on the same contract window; PaperBook dedupes each track.
             com.dirk.kalshiodds.signal.paper.PaperOpportunity.all(
-                live.filterNot { it.ticker in scalpTickers }, paperCtx
+                live, paperCtx
             ).forEach {
                 paperBook.considerUnboundedOpportunity(it, enabled = true)
             }

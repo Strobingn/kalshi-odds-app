@@ -13,13 +13,12 @@ import java.util.Locale
 
 /**
  * Full-scorecard presentation. Counts, empty state, and every section
- * line come from [ScorecardLedger] (settled prediction-log rows +
- * settled paper fills). Empty-state copy is shown only when that
- * combined settled list is empty.
+ * line come from [ScorecardLedger]'s settled paper fills. Settled forecasts
+ * without a fill are explicitly excluded from money and win/loss records.
  */
 object ScorecardCopy {
     const val TITLE = "Scorecard"
-    const val SUBTITLE = "Post-settlement paper record from stored settled KXBTC15M rows. Voids are excluded from W-L. Missing entry ask counts in W-L at $0 (Unknown price)."
+    const val SUBTITLE = "Executed paper fills only. Forecast-only outcomes are separate and never count as bets, wins, losses, or $0 P&L. Voids are excluded."
     const val NO_SETTLED = HomeScorecardSummary.NO_SETTLED
     const val TIME_TITLE = "By time of day"
     const val SIDE_TITLE = "By side"

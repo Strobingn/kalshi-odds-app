@@ -3,6 +3,7 @@ package com.dirk.kalshiodds.signal.paper
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.domain.KalshiPrice
 import com.dirk.kalshiodds.signal.trade.LiveOrderSizer
+import com.dirk.kalshiodds.signal.trade.PaperEntryPolicy
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
 
 /**
@@ -42,6 +43,7 @@ object PaperOpportunity {
         context: TicketBuilder.Context
     ): Candidate? {
         val ask = KalshiPrice.usable(TicketBuilder.bestAsk(market, side, context)) ?: return null
+        if (!PaperEntryPolicy.allowsAutomaticEntry(ask)) return null
         val visible = TicketBuilder.quotedSize(market, side, context.books[market.ticker])
             ?.toInt()?.takeIf { it > 0 } ?: return null
         val fee = LiveOrderSizer.feeUsd(1, ask, context.settings.feeRate)
@@ -54,7 +56,7 @@ object PaperOpportunity {
             visibleContracts = visible,
             feePerContractUsd = fee,
             expectedNetPerContractUsd = expected,
-            source = "scalping research"
+            source = "15-minute AI model"
         )
     }
 }

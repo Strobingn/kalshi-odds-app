@@ -121,6 +121,19 @@ fun ScorecardScreen(
             ui.modelNote?.let {
                 item { Text(it, color = colors.accentBlue, style = MaterialTheme.typography.bodyMedium) }
             }
+            if (ledger.forecastOnlyCount > 0) {
+                item {
+                    Text(
+                        "${ledger.forecastOnlyCount} settled forecast-only windows were not paper fills; they are excluded from this scorecard.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.textSecondary,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(colors.surface, RoundedCornerShape(12.dp))
+                            .padding(12.dp)
+                    )
+                }
+            }
             item { ForwardTestCard(ui.forwardTest, onExportForward) }
             item { TicketForwardCard(ui.ticketForward, onExportTicketForward) }
             if (ui.sitOut) {

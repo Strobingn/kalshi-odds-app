@@ -6,6 +6,7 @@ import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.model.SignalStance
 import com.dirk.kalshiodds.signal.trade.TicketKind
+import com.dirk.kalshiodds.signal.trade.PaperEntryPolicy
 import com.dirk.kalshiodds.signal.trade.TradeTicket
 import kotlin.math.floor
 import kotlin.math.max
@@ -205,6 +206,10 @@ class PaperBook(
         enabled: Boolean
     ): PaperFill? {
         if (!enabled) return null
+        if (!PaperEntryPolicy.allowsAutomaticEntry(opportunity.ask)) {
+            rememberMessage(PaperEntryPolicy.skipMessage(opportunity.ask))
+            return null
+        }
         return unboundedFill(
             ticker = opportunity.ticker,
             side = opportunity.side,
@@ -709,6 +714,10 @@ class PaperBook(
         if (CryptoMarkets.isRetiredTicker(ticker)) return null
         val want = if (side.equals("NO", true)) "NO" else "YES"
         val px = KalshiPrice.usable(limitPrice) ?: return null
+        if (!PaperEntryPolicy.allowsAutomaticEntry(px)) {
+            rememberMessage(PaperEntryPolicy.skipMessage(px))
+            return null
+        }
         val quantity = contracts.coerceAtLeast(0)
         if (quantity < 1) return null
         synchronized(lock) {
