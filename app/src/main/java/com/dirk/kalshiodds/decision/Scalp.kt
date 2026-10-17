@@ -1523,6 +1523,19 @@ class ScalpBook(
     fun loadExits() = store.loadExits()
     fun loadWindows(limitWindows: Int = 48) = store.loadWindows(limitWindows)
     fun loadDaily(dayEt: String) = store.loadDaily(dayEt)
+
+    /**
+     * 0.3.86 "Reset scalp paper money" (paper only): every scalper's P&L/stats start from zero against the configured
+     * paper bankroll. Prior closed trades are archived as a previous run (tagged, not deleted); open positions keep
+     * running and count toward the new run. Never touches Kalshi, real money or remote rows.
+     */
+    fun resetPaperRun(atMs: Long = System.currentTimeMillis()): String = synchronized(lock) {
+        flushWrites()
+        val runId = "run-" + atMs
+        store.archiveScalpRun(runId, atMs)
+        _stats.value = store.loadStats()
+        runId
+    }
     fun pageTrades(scalperId: String, afterClosedAtMs: Long? = null, afterId: String? = null, limit: Int = 50) =
         store.pageTrades(scalperId, afterClosedAtMs, afterId, limit)
     fun windowTrades(scalperId: String, ticker: String) = store.windowTrades(scalperId, ticker)

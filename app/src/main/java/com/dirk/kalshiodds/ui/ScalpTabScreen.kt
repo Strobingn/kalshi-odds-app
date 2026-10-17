@@ -135,8 +135,17 @@ fun ScalpTabScreen(viewModel: OddsViewModel, onOpenScalpData: () -> Unit, onOpen
     val st by viewModel.scalpTab.collectAsStateWithLifecycle()
     var settings by remember { mutableStateOf(false) }
     if (settings) SwarmScalpSettingsDialog { settings = false }
+    var confirmReset by remember { mutableStateOf(false) }
+    if (confirmReset) AlertDialog(
+        onDismissRequest = { confirmReset = false },
+        confirmButton = { TextButton(onClick = { confirmReset = false; viewModel.resetScalpPaperMoney() }) { Text(ScalpResetCopy.CONFIRM) } },
+        dismissButton = { TextButton(onClick = { confirmReset = false }) { Text("Cancel") } },
+        title = { Text(ScalpResetCopy.TITLE) },
+        text = { Text(ScalpResetCopy.BODY) }
+    )
     ScalpTabContent(
         onOpenSettings = { settings = true },
+        onResetPaper = { confirmReset = true },
         st = st,
         onOpenScalpData = onOpenScalpData,
         onOpenScalpRules = onOpenScalpRules,
@@ -148,6 +157,15 @@ fun ScalpTabScreen(viewModel: OddsViewModel, onOpenScalpData: () -> Unit, onOpen
         onSellOwnedAt = viewModel::sellOwnedAt,
         onOpenAlgo = onOpenAlgo
     )
+}
+
+object ScalpResetCopy {
+    const val BUTTON = "Reset scalp paper money"
+    const val TITLE = "Reset scalp paper money?"
+    const val BODY = "Every scalper's paper P&L and stats start again from the configured paper bankroll. " +
+        "Previous trades are archived as a previous run, not deleted. Open paper positions keep running. " +
+        "Paper only: no Kalshi orders, no real money, no other apps' data."
+    const val CONFIRM = "Reset"
 }
 
 /** Stateless content (Paparazzi-tested at 1080×2340). */
@@ -165,7 +183,9 @@ fun ScalpTabContent(
     onOpenAlgo: (ScalpModels.Model) -> Unit = {},
     /** Previews only: hide the coin cards to render the ladder card in view. */
     showCoinCards: Boolean = true,
-    onOpenSettings: () -> Unit = {}
+    onOpenSettings: () -> Unit = {},
+    /** 0.3.86: null (previews) hides the reset button. */
+    onResetPaper: (() -> Unit)? = null
 ) {
     if (showCoinCards) {
         var ladder by rememberSaveable { mutableStateOf(false) }
@@ -174,10 +194,10 @@ fun ScalpTabContent(
                 TextButton(onClick = { ladder = false }) { Text("← Back to scalping arena") }
                 Box(Modifier.weight(1f)) {
                     ScalpTabContent(st, onOpenScalpData, onOpenScalpRules, onSelectMarket, onSelectSide,
-                        onPlace, onCancel, onReprice, onSellOwnedAt, onOpenAlgo, showCoinCards = false, onOpenSettings = onOpenSettings)
+                        onPlace, onCancel, onReprice, onSellOwnedAt, onOpenAlgo, showCoinCards = false, onOpenSettings = onOpenSettings, onResetPaper = onResetPaper)
                 }
             }
-        } else KashiArenaContent(st, onOpenAlgo, onOpenSettings, onOpenScalpData, { ladder = true })
+        } else KashiArenaContent(st, onOpenAlgo, onOpenSettings, onOpenScalpData, { ladder = true }, onResetPaper = onResetPaper)
         return
     }
     var qty by remember { mutableIntStateOf(PriceLadder.PRESET_SIZES[1]) }

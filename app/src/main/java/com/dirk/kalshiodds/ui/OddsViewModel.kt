@@ -267,6 +267,15 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** 0.3.86: paper-only reset of every scalper's P&L/stats; prior trades archived as a previous run. */
+    fun resetScalpPaperMoney() {
+        vmScope.launch(Dispatchers.IO) {
+            runCatching { container.scalp.resetPaperRun() }
+            scalpTabBoardsAtMs = 0L
+            arenaChartReadAtMs = 0L
+        }
+    }
+
     fun selectScalpCoin(coin: String?) { _scalpTab.update { it.copy(coin = coin) }; scalpTabBoardsAtMs = 0L }
     fun selectScalpMarket(ticker: String) { _scalpTab.update { it.copy(selectedTicker = ticker) } }
     fun selectScalpSide(side: String) { _scalpTab.update { it.copy(side = if (side.equals("NO", true)) "NO" else "YES") } }

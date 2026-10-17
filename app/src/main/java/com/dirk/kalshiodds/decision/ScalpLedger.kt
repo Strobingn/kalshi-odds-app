@@ -95,6 +95,13 @@ interface ScalpPersistence {
     fun migrateStatsChunk(limit: Int): Int = 0
     fun tradeCount(): Int = 0
     fun statsMigrated(): Boolean = true
+    /**
+     * 0.3.86 "Reset scalp paper money": archive the current run's aggregates (stats/daily/exits) under [runId] and
+     * start them fresh. Trade rows are never deleted: closed rows are tagged `prevRun=<runId>` and stay viewable/syncable.
+     * Window aggregates (v2 learning evidence) are kept. Local paper data only. Returns closed rows tagged.
+     */
+    fun archiveScalpRun(runId: String, atMs: Long): Int = 0
+    fun archivedRuns(): List<String> = emptyList()
 }
 
 class InMemoryScalpPersistence : ScalpPersistence {
@@ -131,6 +138,20 @@ class InMemoryScalpPersistence : ScalpPersistence {
         stats[sid] = s
     }
     override fun loadStats(): List<ScalpStat> = stats.values.toList()
+    private val archive = LinkedHashMap<String, List<ScalpStat>>()
+    override fun archiveScalpRun(runId: String, atMs: Long): Int {
+        synchronized(archive) { archive[runId] = stats.values.map { it.copy(openN = 0) } }
+        val open = stats.mapValues { it.value.openN }
+        stats.clear(); daily.clear(); exits.clear()
+        open.filterValues { it > 0 }.forEach { (sid, n) -> stats[sid] = ScalpStat(sid, openN = n) } // still-open trades carry over
+        return synchronized(rows) {
+            val closed = rows.values.filter { (it.state == ScalpState.CLOSED || it.state == ScalpState.NO_FILL) && !it.note.contains("prevRun=") }
+            closed.forEach { rows[it.id] = it.copy(note = "${it.note} · prevRun=$runId") }
+            closed.size
+        }
+    }
+    override fun archivedRuns(): List<String> = synchronized(archive) { archive.keys.toList() }
+    fun archivedStats(runId: String): List<ScalpStat> = synchronized(archive) { archive[runId].orEmpty() }
     override fun loadDaily(dayEt: String): List<ScalpDaily> = daily.values.filter { it.dayEt == dayEt }
     override fun loadExits(): List<ScalpExitAgg> = exits.values.toList()
     override fun loadWindows(limitWindows: Int): List<ScalpWindowAgg> {

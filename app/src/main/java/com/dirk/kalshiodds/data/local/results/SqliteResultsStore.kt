@@ -1052,6 +1052,36 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
         w.execSQL("UPDATE ${ST.WINDOWS} SET n = n + 1, net_usd = net_usd + ? WHERE window_key = ? AND scalper_id = ?", arrayOf<Any>(d.net, d.windowKey, sid))
     }
 
+    override fun archiveScalpRun(runId: String, atMs: Long): Int {
+        val w = db.writableDatabase
+        var tagged = 0
+        w.beginTransaction()
+        try {
+            for (t in listOf(ST.STATS, ST.DAILY, ST.EXITS)) {
+                w.execSQL("CREATE TABLE IF NOT EXISTS ${t}_archive AS SELECT '' AS run_id, 0 AS archived_at_ms, * FROM $t WHERE 0")
+                w.execSQL("INSERT INTO ${t}_archive SELECT ?, ?, * FROM $t", arrayOf<Any>(runId, atMs))
+            }
+            w.execSQL("DELETE FROM ${ST.DAILY}")
+            w.execSQL("DELETE FROM ${ST.EXITS}")
+            // Still-open trades carry over (their close lands in the new run); everything else starts at zero.
+            w.execSQL("DELETE FROM ${ST.STATS} WHERE open_n <= 0")
+            w.execSQL("UPDATE ${ST.STATS} SET n = 0, wins = 0, net_usd = 0, fees_usd = 0, best_usd = NULL, worst_usd = NULL, sum_sq = 0, " +
+                "last_closed_at_ms = NULL, sum_win = 0, sum_loss = 0, n_loss = 0, neg_sum = 0, neg_n = 0, cost_sum = 0, " +
+                "stop_saved_sum = 0, stop_saved_n = 0, no_fills = 0")
+            w.compileStatement("UPDATE ${ST.TABLE} SET note = COALESCE(note, '') || ' · prevRun=' || ? WHERE state IN ('CLOSED','NO_FILL') AND note NOT LIKE '%prevRun=%'").use {
+                it.bindString(1, runId); tagged = it.executeUpdateDelete()
+            }
+            w.setTransactionSuccessful()
+        } finally { w.endTransaction() }
+        return tagged
+    }
+
+    override fun archivedRuns(): List<String> = runCatching {
+        db.readableDatabase.rawQuery("SELECT DISTINCT run_id FROM ${ST.STATS}_archive ORDER BY archived_at_ms", null).use { c ->
+            buildList { while (c.moveToNext()) add(c.getString(0)) }
+        }
+    }.getOrDefault(emptyList())
+
     override fun loadStats(): List<com.dirk.kalshiodds.decision.ScalpStat> {
         val out = ArrayList<com.dirk.kalshiodds.decision.ScalpStat>()
         runCatching {

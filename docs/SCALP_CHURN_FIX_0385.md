@@ -20,4 +20,14 @@
 - `ScalpRisk.entryBlocked` covers every entry path (originals, forecast, shock/sf, v2 spawn, g14 copies). It is per strategy
   and per market: 60 s cooldown after a stop exit, 15 s (the pre-0.3.83 value) after any other exit, and at most
   4 round trips per strategy per rolling 15 minutes.
+- 0.3.86: the round-trip cap is now a runaway-loop guard only: 20 per strategy per market per 15 min, logged (tag KashiScalpRisk) when it triggers. The main gate stays positive expected value after spread + fees.
 - Regression: `ScalpChurnGuardTest` covers noisy prices, the floor, measuring from the entry bid, the cooldown and the cap.
+
+## 0.3.86 — Reset scalp paper money
+- A "Reset scalp paper money" button sits in the Scalp tab arena header and asks for confirmation first.
+  `ScalpBook.resetPaperRun` archives the local scalp_stats/scalp_daily/scalp_exits rows into `*_archive` tables
+  under a run id, then starts every scalper at $0 P&L. Scalpers run on the paper bankroll with no cash cap
+  (`bankrollUsd = ∞` since 0.3.59), so a reset means P&L and stats start from zero.
+- Trade rows are never deleted. Closed rows are tagged `prevRun=<runId>` and stay viewable and syncable. Open positions keep
+  running and count toward the new run. Window aggregates (v2 learning evidence) are kept.
+- Paper only: no Kalshi calls, no real money, no remote/Supabase writes.

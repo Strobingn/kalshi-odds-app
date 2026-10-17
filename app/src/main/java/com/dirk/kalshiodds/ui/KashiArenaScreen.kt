@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.ui
 
+import androidx.compose.ui.platform.testTag
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -25,7 +26,8 @@ internal enum class KashiArenaTab(val label: String) { OVERVIEW("Overview"), STR
 /** Claude's Arena layout, backed by Kashi's existing primary strategy ledger. */
 @Composable
 internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) -> Unit = {}, onSettings: () -> Unit = {},
-    onHistory: () -> Unit = {}, onLadder: () -> Unit = {}, initialTab: KashiArenaTab = KashiArenaTab.OVERVIEW) {
+    onHistory: () -> Unit = {}, onLadder: () -> Unit = {}, initialTab: KashiArenaTab = KashiArenaTab.OVERVIEW,
+    onResetPaper: (() -> Unit)? = null) {
     val c = DipTheme.colors
     var tabName by rememberSaveable { mutableStateOf(initialTab.name) }
     val tab = KashiArenaTab.valueOf(tabName)
@@ -44,6 +46,8 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
                     Text("Scalping arena", color = c.textPrimary, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                     Text("BITCOIN · PAPER", color = c.spot, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                 }
+                if (onResetPaper != null) androidx.compose.material3.TextButton(onClick = onResetPaper,
+                    modifier = Modifier.testTag("SCALP_RESET_PAPER")) { Text(ScalpResetCopy.BUTTON, maxLines = 2) }
                 IconButton(onClick = onSettings) { Icon(Icons.Outlined.Tune, "Scalping settings", tint = c.accentBlue) }
             }
         }

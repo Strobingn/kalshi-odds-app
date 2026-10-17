@@ -13,9 +13,13 @@ object ScalpRisk {
     /** 0.3.85: re-entry cooldowns per strategy per market (pre-0.3.83 generic cooldown was 15 s). */
     const val REENTRY_COOLDOWN_MS = 15_000L
     const val STOP_REENTRY_COOLDOWN_MS = 60_000L
-    /** 0.3.85: at most this many round trips per strategy (variant) per rolling 15-minute window. */
+    /**
+     * 0.3.86: runaway-loop guard only: at most this many round trips per strategy per market per rolling 15 minutes
+     * (logged when it triggers). The real entry gate stays each strategy's positive expected value after spread + fees.
+     */
     const val ROUND_TRIP_WINDOW_MS = 15 * 60_000L
-    const val MAX_ROUND_TRIPS_PER_WINDOW = 4
+    const val MAX_ROUND_TRIPS_PER_WINDOW = 20
+    private val runawayLogged = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private const val EPS = 1e-9
 
     fun stopPrice(fill: Double, percent: Double): Double {
@@ -75,7 +79,7 @@ object ScalpRisk {
     /**
      * 0.3.85 churn guard for every scalper lane (originals, forecast, shock, v2, g14 copies): blocks a new entry for
      * [variantId] while it is cooling down on [ticker] after an exit (60 s after a stop, 15 s otherwise) or once it has
-     * [maxPerWindow] round trips in the last 15 minutes (filled trades only; open ones count too).
+     * [maxPerWindow] round trips on [ticker] in the last 15 minutes (filled trades only; open ones count too).
      */
     fun entryBlocked(all: List<ScalpTrade>, variantId: String, ticker: String, nowMs: Long,
                      maxPerWindow: Int = MAX_ROUND_TRIPS_PER_WINDOW): Boolean {
@@ -87,7 +91,16 @@ object ScalpRisk {
             if (nowMs - lastExit.closedAtMs!! < cool) return true
         }
         val since = nowMs - ROUND_TRIP_WINDOW_MS
-        val trips = mine.count { (it.entryAtMs ?: 0L) >= since || (it.closedAtMs ?: Long.MIN_VALUE) >= since || it.state != ScalpState.CLOSED }
-        return trips >= maxPerWindow
+        val trips = mine.count { it.ticker.equals(ticker, true) &&
+            ((it.entryAtMs ?: 0L) >= since || (it.closedAtMs ?: Long.MIN_VALUE) >= since || it.state != ScalpState.CLOSED) }
+        if (trips < maxPerWindow) return false
+        val key = "$variantId|${ticker.uppercase()}"
+        val last = runawayLogged[key]
+        if (last == null || nowMs - last >= ROUND_TRIP_WINDOW_MS) {
+            runawayLogged[key] = nowMs
+            if (runawayLogged.size > 500) runawayLogged.keys.take(250).forEach { runawayLogged.remove(it) }
+            runCatching { android.util.Log.w("KashiScalpRisk", "runaway cap: $variantId on $ticker hit $trips round trips in 15 min; entries paused") }
+        }
+        return true
     }
 }
