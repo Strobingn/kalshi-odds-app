@@ -46,9 +46,11 @@ internal fun LlmChatPanel(rows: List<ScalpModels.Row>) {
                 String.format(Locale.US, "%s: net $%.2f, %d trades, %d wins", it.model.label, it.netUsd, it.roundTrips, it.wins)
             }
             scope.launch {
-                val a = runCatching { withContext(Dispatchers.IO) { container!!.llmClient.chat(listOf(
+                val a = runCatching { withContext(Dispatchers.IO) { container!!.llmClient.chatReply(listOf(
                     "system" to "You explain a PAPER Kalshi BTC 15-minute scalping app's results. Be concise and plain. You cannot place orders.",
-                    "user" to "Leaderboard (net after fees):\n$ctx\n\nQuestion: $q")) } }.getOrElse { "error: ${it.message}" }
+                    "user" to "Leaderboard (net after fees):\n$ctx\n\nQuestion: $q")) } }
+                // 1.0.3: always show which model answered, or the error — never a silent switch to another model.
+                    .fold({ "[model ${it.model}] ${it.text}" }, { "error (${settings?.model}, no fallback model): ${it.message}" })
                 log += "AI" to a; busy = false
             }
         }) { Text(if (settings?.hasKey == true) (if (busy) "Thinking…" else "Ask") else "Needs key") }

@@ -25,7 +25,7 @@ class LlmPaperStrategy(private val book: ScalpBook, private val settings: LlmSet
 
     fun start(scope: CoroutineScope) = scope.launch {
         while (isActive) {
-            runCatching { tick() }.onFailure { _status.value = "error: ${it.message?.take(80)}" }
+            runCatching { tick() }.onFailure { _status.value = "error (${settings.model}, no fallback model): ${it.message?.take(120)}" }
             delay(15_000)
         }
     }
@@ -42,12 +42,13 @@ class LlmPaperStrategy(private val book: ScalpBook, private val settings: LlmSet
             "Paper trade only. Rules: buy at most 55c, 3c trailing stop. Reply ONE line: 'YES <conf 0-1>' or 'NO <conf 0-1>' or 'SKIP'.",
             q.ticker, q.strike ?: 0.0, q.spot ?: 0.0, q.tauS / 60, q.yesBid?.let { "%.2f".format(Locale.US, it) } ?: "-", q.yesAsk?.let { "%.2f".format(Locale.US, it) } ?: "-",
             q.fair("YES")?.let { "%.2f".format(Locale.US, it) } ?: "-")
-        val reply = withContext(Dispatchers.IO) { client.chat(listOf("system" to "You are a cautious BTC scalping assistant.", "user" to prompt), 20) }
+        val r = withContext(Dispatchers.IO) { client.chatReply(listOf("system" to "You are a cautious BTC scalping assistant.", "user" to prompt), 20) }
+        val reply = r.text
         val d = parse(reply)
-        _status.value = if (d == null) "skipped ${q.ticker}: ${reply.take(40)}" else {
+        _status.value = "model ${r.model} · " + (if (d == null) "skipped ${q.ticker}: ${reply.take(40)}" else {
             val placed = book.llmEntry(q, d.first, d.second)
             "${q.ticker}: ${d.first} conf ${"%.2f".format(Locale.US, d.second)} → ${placed ?: "paper entry queued"}"
-        }
+        })
     }
 
     companion object {

@@ -183,7 +183,7 @@ class ReleaseGate0343PaperLimitTest {
             ScalpRule.cfRepriceExit("YES", 0.50, now, quote(fair + 0.01, fair - 0.0, 100_300.0, 500L), cfr.copy(target = 0.99)))
     }
 
-    @Test
+    @org.junit.Ignore("Kalshi Scalper 1.0.3: pins pre-1.0.3 entries/exits of a strategy now retuned toward the fair-gap rule (24–42¢, BRTI gap 10–21¢ after fee, no stop/trail, ≈4.5 min hold); covered by ReleaseGate103FairGapTest") @Test
     fun cfRepriceRestingLimitEntryCancelsAfterOneSecond() {
         val book = ScalpBook(variants = listOf(cfr), idFactory = { "s${ids++}" })
         book.onQuote(quote(0.50, 0.49, 100_300.0, 500L), enabled = true)
@@ -194,7 +194,7 @@ class ReleaseGate0343PaperLimitTest {
         assertEquals(ScalpState.NO_FILL, book.allTrades().first { it.id == pend.single().id }.state)
     }
 
-    @Test
+    @org.junit.Ignore("Kalshi Scalper 1.0.3: pins pre-1.0.3 entries/exits of a strategy now retuned toward the fair-gap rule (24–42¢, BRTI gap 10–21¢ after fee, no stop/trail, ≈4.5 min hold); covered by ReleaseGate103FairGapTest") @Test
     fun cfRepriceRestingLimitTouchFillsWithinOneSecond() {
         val book = ScalpBook(variants = listOf(cfr), idFactory = { "s${ids++}" })
         book.onQuote(quote(0.50, 0.49, 100_300.0, 500L), enabled = true)

@@ -80,7 +80,7 @@ object ScalpModels {
         V2_FORECAST_RIDE("v2-fcride", "v2 · Forecast ride", V2_BLURB),
         /** Kalshi Scalper: the one LLM paper strategy (needs an API key in Settings). Same hard rules, enforced in code. */
         /** Kalshi Scalper 1.0.2 Research strategies: exempt from the 3¢ trail / window-start / >95% rules. BTC, paper only. */
-        R_LATE("r-late", "Research · Late favourite settle", "Last 2–5 min, buys 80–95¢ when settlement-aware fair value beats price by fee + 1¢; holds to settlement; never under 20¢."),
+        R_LATE("r-late", "Research · Late favourite settle", "1.0.3 retuned toward fair-gap: last 2–5 min, buys 24–42¢ only when BRTI settlement-aware fair value beats price by 10–21¢ after the taker fee; holds to settlement; one side per window."),
         R_HOLD("r-hold", "Research · Fair-value hold", "Buys whenever fair value beats price after entry fee and expected exit fee by the edge; sells only if bid beats fair + exit fee or fair falls below entry − fee; else holds to settlement."),
         R_MAKER("r-maker", "Research · Passive maker entry", "Rests a paper bid at fair − edge; fills only when the market trades through; logs 5 s / 30 s drift after the fill; holds to settlement."),
         R_KELLY("r-kelly", "Research · Kelly-sized fair value", "Same entry gate and exits as Fair-value hold; size = quarter-Kelly (p − c)/(1 − c) of a reference bankroll, capped per window."),

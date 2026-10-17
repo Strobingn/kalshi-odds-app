@@ -88,7 +88,7 @@ object Research {
     }
 
     /** Default per-strategy edge gate (¢) when the slider is untouched. */
-    fun defaultEdge(id: String): Int = if (id == LATE) 1 else 2
+    fun defaultEdge(id: String): Int = if (id == LATE) 10 else 2 // 1.0.3: late favourite → fair-gap 10¢ minimum gap
 
     /**
      * "AI learns" (all strategies): every 3 closed paper trades, nudge ONE slider by 1¢ from the strategy's own net.
