@@ -23,8 +23,14 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 class KalshiOddsApp : Application() {
-    lateinit var container: AppContainer
-        private set
+    /**
+     * 0.3.81 ANR fix (kashi:crash:1792244141642): the container (SQLite open/upgrade, ledger + paper book load,
+     * EncryptedSharedPreferences/keystore) is built on a background thread right after onCreate returns, so the
+     * main thread is free for WorkManager's onStartJob. Any caller gets the same instance (synchronized lazy).
+     */
+    private val containerLazy = lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AppContainer(this) }
+    val container: AppContainer get() = containerLazy.value
+    val containerReady: Boolean get() = containerLazy.isInitialized()
 
     private val appScope = CoroutineScope(
         SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, t ->
@@ -36,9 +42,28 @@ class KalshiOddsApp : Application() {
         super.onCreate()
         runCatching { CrashBreadcrumb.install(this) }
         runCatching { com.dirk.kalshiodds.crash.CrashLog.install(this, BuildConfig.VERSION_NAME) } // 0.3.47
+        if (BuildConfig.DEBUG && !isRobolectric()) StartupStrictMode.enable() // 0.3.81: log disk/network on main
+        runCatching { SignalNotifier.ensureChannels(this) }
+        runCatching { com.dirk.kalshiodds.signal.notify.OpportunityNotifier.ensureChannel(this) }
+        runCatching { com.dirk.kalshiodds.signal.lastminute.LastMinuteNotifier.ensureChannel(this) }
+        ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
+            override fun onStart(owner: LifecycleOwner) {
+                LiveSignalsKeepAlive.ensureServiceFromUi(this@KalshiOddsApp)
+            }
+
+            override fun onStop(owner: LifecycleOwner) {
+                LiveSignalsKeepAlive.markUiInForeground(false)
+                appScope.launch(Dispatchers.IO) { runCatching { container.endSession() } }
+            }
+        })
+        if (isRobolectric()) startContainer() else appScope.launch(Dispatchers.IO) { startContainer() }
+    }
+
+    /** 0.3.81: everything that needs the container, run off the main thread. */
+    private fun startContainer() {
         // 0.3.40 (owner): Autopilot/Scalp are paper-only — delete any persisted live arming (idempotent).
         runCatching { com.dirk.kalshiodds.signal.paper.LiveOffMigration.deleteLegacyArming(this) }
-        container = AppContainer(this)
+        container // build it here (background), never on the main thread
         appScope.launch { runCatching { container.preferences.migrateAutopilotModePaperOnly() } }
         runCatching { container.lastOrderError.clearStaleLifecycleNotice() }
         HeavyMlGuard.persistHook = { reason ->
@@ -60,9 +85,6 @@ class KalshiOddsApp : Application() {
             }
         }
         runCatching { HeavyMlGuard.applyCrashHintIfNeeded() }
-        runCatching { SignalNotifier.ensureChannels(this) }
-        runCatching { com.dirk.kalshiodds.signal.notify.OpportunityNotifier.ensureChannel(this) }
-        runCatching { com.dirk.kalshiodds.signal.lastminute.LastMinuteNotifier.ensureChannel(this) }
         // 0.3.41: WorkManager init/enqueues off the main thread.
         appScope.launch(Dispatchers.IO) { runCatching { com.dirk.kalshiodds.worker.SyncWorker.enqueuePeriodic(this@KalshiOddsApp) } }
         // Do NOT start the FGS here. Application.onCreate is often still treated
@@ -78,16 +100,6 @@ class KalshiOddsApp : Application() {
             runCatching { container.archive.repairInterruptedSessions(container.sessionId, System.currentTimeMillis()) }
             runCatching { com.dirk.kalshiodds.crash.ProcessExitLog.capture(this@KalshiOddsApp) }
         }
-        ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
-            override fun onStart(owner: LifecycleOwner) {
-                LiveSignalsKeepAlive.ensureServiceFromUi(this@KalshiOddsApp)
-            }
-
-            override fun onStop(owner: LifecycleOwner) {
-                LiveSignalsKeepAlive.markUiInForeground(false)
-                appScope.launch(Dispatchers.IO) { runCatching { container.endSession() } }
-            }
-        })
         appScope.launch {
             runCatching { checkKashiUpdateIfDue() }
         }
@@ -150,7 +162,7 @@ class KalshiOddsApp : Application() {
         oddsViewModel
     }
 
-    private fun isRobolectric(): Boolean =
+    internal fun isRobolectric(): Boolean =
         android.os.Build.FINGERPRINT.equals("robolectric", ignoreCase = true)
 
     private fun refreshPublishedEdgeModel() {

@@ -56,7 +56,8 @@ class ReleaseGate0341Test {
     @Test
     fun applicationOnCreateNeverStartsTheService() {
         assertFalse(LiveSignalsPolicy.shouldPromoteFromApplicationOnCreate())
-        val app = body(kt("KalshiOddsApp.kt"), "override fun onCreate()")
+        // 0.3.81: onCreate hands everything to startContainer() on IO; check both bodies.
+        val app = body(kt("KalshiOddsApp.kt"), "override fun onCreate()") + body(kt("KalshiOddsApp.kt"), "private fun startContainer()")
         assertFalse(app.contains("startForegroundService"))
         assertFalse(app.contains("LiveSignalsKeepAlive.startService"))
         // WorkManager enqueues moved off the main thread.
@@ -79,7 +80,7 @@ class ReleaseGate0341Test {
         assertFalse("no container access before startForeground", promote.contains("container"))
         assertFalse(promote.contains("ensureAutopilotHost"))
         // Autopilot host (OddsViewModel) is posted, never inline in onStartCommand.
-        assertTrue(svc.contains("Handler(mainLooper).post { runCatching { KalshiOddsApp.from(this).ensureAutopilotHost() } }"))
+        assertTrue(svc.contains("Handler(mainLooper).post { runCatching { KalshiOddsApp.from(this@LiveSignalsService).ensureAutopilotHost() } }")) // 0.3.81: after container is built off main
         val onStart = body(svc, "override fun onStartCommand(")
         assertTrue(onStart.indexOf("promoteToForeground()") < onStart.indexOf("ensureAutopilotHost"))
     }
