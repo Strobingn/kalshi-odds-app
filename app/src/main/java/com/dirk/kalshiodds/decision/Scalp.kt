@@ -213,6 +213,17 @@ object ScalpRule {
     data class Entry(val side: String, val ask: Double, val fair: Double, val gapAfterFee: Double)
 
     /** Entry signal at this quote, or a skip reason. Uses only this quote (no look-ahead). */
+    /**
+     * 0.3.87 side-neutral pick: the best-scoring side, but an exact YES/NO tie waits instead of defaulting to the
+     * first-listed side (that default was a built-in UP bias, since callers list "YES" first).
+     */
+    fun <T> neutralBest(cands: List<T>, score: (T) -> Double): T? {
+        if (cands.isEmpty()) return null
+        val sorted = cands.sortedByDescending(score)
+        if (sorted.size > 1 && kotlin.math.abs(score(sorted[0]) - score(sorted[1])) <= 1e-9) return null
+        return sorted[0]
+    }
+
     fun entrySignal(q: Quote, p: ScalpParams = ScalpParams.CLASSIC, sides: Collection<String> = listOf("YES", "NO")): Pair<Entry?, String> {
         if (!q.fresh()) return null to "stale book"
         val tau = q.tauS
@@ -226,7 +237,7 @@ object ScalpRule {
             val fair = q.fair(side) ?: return@mapNotNull null
             if (ask < ENTRY_LO - 1e-9 || !buyPriceOk(if (p.maker) q.bid(side) else ask)) return@mapNotNull null
             Entry(side, ask, fair, fair - ask - feePerContract(CONTRACTS, ask))
-        }.maxByOrNull { it.gapAfterFee } ?: return null to "no spot fair value"
+        }.let { neutralBest(it) { e -> e.gapAfterFee } } ?: return null to "no spot fair value"
         if (best.gapAfterFee + 1e-9 < p.minGap) {
             return null to String.format(Locale.US, "gap %.1f¢ under %.0f¢", best.gapAfterFee * 100, p.minGap * 100)
         }
@@ -302,7 +313,7 @@ object ScalpRule {
             val cost = spread + feePerContract(CONTRACTS, ask) + feePerContract(CONTRACTS, (ask + move).coerceIn(0.01, 0.99))
             Cand(Entry(side, ask, fair, move - cost), move, cost)
         }
-        val best = cands.maxByOrNull { it.e.gapAfterFee } ?: return null to "no ${p.strategy.label} trigger"
+        val best = neutralBest(cands) { it.e.gapAfterFee } ?: return null to "no ${p.strategy.label} trigger"
         if (best.move <= best.cost + 1e-9) {
             return null to String.format(Locale.US, "expected move %.1f¢ ≤ spread + both fees %.1f¢", best.move * 100, best.cost * 100)
         }
@@ -331,7 +342,7 @@ object ScalpRule {
             val fair = q.cfFair(side) ?: return@mapNotNull null
             val entryFee = feePerContract(CONTRACTS, ask)
             Entry(side, ask, fair, fair - ask - entryFee)
-        }.maxByOrNull { it.gapAfterFee } ?: return null to "no CF fair value"
+        }.let { neutralBest(it) { e -> e.gapAfterFee } } ?: return null to "no CF fair value"
         if (best.gapAfterFee + 1e-9 < p.minGap) {
             return null to String.format(Locale.US, "CF gap %.1f¢ under %.0f¢", best.gapAfterFee * 100, p.minGap * 100)
         }
@@ -1045,7 +1056,7 @@ class ScalpBook(
                             val x = o50Features(sd, q, sec, sNow, strike, basis, sig, openMid) ?: return@mapNotNull null
                             val net = Open50Model.predict(x) - (a - b) - (ScalpRule.orderFee(ShockFav.CLIP, a) + ScalpRule.orderFee(ShockFav.CLIP, b)) / ShockFav.CLIP
                             if (net > Open50Model.THRESHOLD) sd to net else null
-                        }.maxByOrNull { it.second }?.let { listOf(it.first) } ?: emptyList()
+                        }.let { ScalpRule.neutralBest(it) { c -> c.second } }?.let { listOf(it.first) } ?: emptyList()
                         null -> emptyList()
                     }
                     if (p.o50 != ShockFav.O50.BOTH && p.o50 != ShockFav.O50.MAKER && mine.any { it.variantId.take(4) == p.code }) continue

@@ -75,9 +75,15 @@ object LeadForecaster {
 
     fun predict(coin: String, h: Int, x: DoubleArray): Double? {
         val w = weights(coin, h) ?: return null
-        var s = 0.0; for (i in x.indices) s += w[i] * x[i]
+        fun raw(v: DoubleArray): Double { var s = 0.0; for (i in v.indices) s += w[i] * v[i]; return s }
+        // 0.3.87 side-neutral: antisymmetrise over the UP/DOWN mirror so the intercept (and any asymmetric weight)
+        // cannot add a built-in UP or DOWN bias. A mirrored market gets exactly the negated forecast.
+        val s = (raw(x) - raw(mirror(x))) / 2.0
         return s.takeIf { it.isFinite() }
     }
+
+    /** UP/DOWN mirror of a feature vector: every directional feature negated; intercept and time left unchanged. */
+    fun mirror(x: DoubleArray): DoubleArray = DoubleArray(x.size) { i -> if (i == 0 || i == 6) x[i] else -x[i] }
 
     fun note(): String = ScalpParams.COINS.joinToString(" · ") { c ->
         val k = configFor(c); "$c " + ShortHorizonForecaster.horizonLabel(k.horizonS) + " +" + Math.round(k.marginUsd * 100) + "¢"

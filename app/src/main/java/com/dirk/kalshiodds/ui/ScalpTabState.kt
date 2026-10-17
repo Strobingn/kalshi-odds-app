@@ -7,6 +7,8 @@ import com.dirk.kalshiodds.decision.ScalpModels
 data class ScalpTabState(
     val coin: String? = null,
     val arenaChart: ScalpWindowChartData = ScalpWindowChartData(),
+    /** 0.3.87 live BTC 15-min header chart: strike (target) and latest spot from the push-fed quote. */
+    val liveStrike: Double? = null, val liveSpot: Double? = null,
     val controls: com.dirk.kalshiodds.decision.ScalpControls = com.dirk.kalshiodds.decision.ScalpControls(),
     val activeScalps: List<com.dirk.kalshiodds.decision.ScalpTrade> = emptyList(),
     val scalpBids: Map<String, Double> = emptyMap(),
