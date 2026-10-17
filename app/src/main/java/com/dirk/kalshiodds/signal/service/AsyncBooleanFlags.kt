@@ -10,28 +10,32 @@ internal class AsyncBooleanFlags(
     private val values = initial.toMutableMap()
     private val pending = linkedMapOf<String, Boolean>()
     private var scheduled = false
+    private val writerLock = Any()
     fun get(key: String): Boolean = synchronized(lock) { values[key] ?: false }
     fun set(key: String, value: Boolean) {
         val launch = synchronized(lock) {
             if (values[key] != value) { values[key] = value; pending[key] = value }
             if (scheduled || pending.isEmpty()) false else { scheduled = true; true }
         }
-        if (launch) execute { drain() }
+        if (launch) execute { flushBlocking() }
     }
-    private fun drain() {
+    /** IO callers can await persistence before ending the last foreground component. */
+    fun flushBlocking(): Boolean = synchronized(writerLock) {
         while (true) {
             val batch = synchronized(lock) {
                 if (pending.isEmpty()) { scheduled = false; null }
                 else pending.toMap().also { pending.clear() }
-            } ?: return
+            } ?: return@synchronized true
             if (!runCatching { persist(batch) }.getOrDefault(false)) {
                 synchronized(lock) {
                     // Do not overwrite a newer toggle that arrived while a commit was blocked.
                     batch.forEach { (key, value) -> pending.putIfAbsent(key, value) }
                     scheduled = false
                 }
-                return // next set retries; never spin on a failed disk
+                return@synchronized false // next set retries; never spin on a failed disk
             }
         }
+        @Suppress("UNREACHABLE_CODE")
+        false
     }
 }

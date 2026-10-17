@@ -39,7 +39,7 @@ class ScalpAuditTest {
                 if (ShockFav.isShockFav(m.code)) return m.code
                 if (m == ScalpModels.Model.FORECAST_RIDE) return ForecastScalp.variantId(true, 600)
                 if (m == ScalpModels.Model.FORECAST_FADE) return ForecastScalp.variantId(false, 600)
-                val params = ScalpParams.STRATEGY_SEEDS.values + ScalpParams.HOLD60_SIBLINGS +
+                val params = ScalpParams.SEEDS.values + ScalpParams.STRATEGY_SEEDS.values + ScalpParams.HOLD60_SIBLINGS +
                     ScalpParams.QUEUED_COPIES + ScalpModels.MAKER_DIP_PARAMS
                 return params.first { ScalpModels.modelOf(it) == m }.id
             }
@@ -84,6 +84,21 @@ class ScalpAuditTest {
         }
     }
 
+    @Test fun oneSidedShockBookStillExecutesMaxHoldExitAtAvailableHeldSideBid() {
+        for (side in listOf("YES", "NO")) {
+            val store = InMemoryScalpPersistence().also { it.seed(listOf(held("sf51", side).copy(entryAtMs = at - 190_000))) }
+            val b = ScalpBook(store, variants = emptyList(), liveExtras = true)
+            val oneSided = q(at, .60, side, 2.0).let { if (side == "YES") it.copy(yesAsk = null) else it.copy(yesBid = null) }
+            tick(b, oneSided)
+            assertEquals(2, row(b).soldContracts)
+            assertEquals(ScalpState.PENDING_EXIT, row(b).state)
+            tick(b, oneSided)
+            assertEquals(2, row(b).soldContracts)
+            tick(b, oneSided.copy(nowMs = at + 1000, bookAtMs = at + 1000))
+            assertEquals(ScalpState.CLOSED, row(b).state)
+        }
+    }
+
     @Test fun shockOrdersCannotBeFilledByTheGenericStrategyEngine() {
         val pending = held("sf28").copy(state = ScalpState.PENDING_ENTRY, contracts = 0, entryPrice = null,
             entryAtMs = null, signalAtMs = at, signalAsk = .50, restingLimit = .49)
@@ -107,6 +122,14 @@ class ScalpAuditTest {
         assertEquals(ScalpState.PENDING_ENTRY, row(b).state)
         b.onForecastQuote(q(at + 1500, .49).copy(yesAsk = .50), 10.0, 10.0, false)
         assertEquals(ScalpState.OPEN, row(b).state)
+    }
+
+    @Test fun priceOnlyDipCanSignalWithoutSpotStrikeOrVolatility() {
+        val b = ScalpBook(variants = emptyList(), liveExtras = true,
+            controls = MemoryScalpControls(ScalpControls(enabled = false)))
+        for (sec in 0..24) b.onShockFavQuote(q(at - 250_000 + sec * 10_000L, .49), true)
+        b.onShockFavQuote(q(at, .39).copy(yesAsk = .40), true)
+        assertTrue(b.allTrades().any { it.variantId == "sf41" && it.side == "YES" && it.state == ScalpState.PENDING_ENTRY })
     }
 
     @Test fun feeRoundingMatchesIndependentDecimalCalculationAndIsSymmetric() {
@@ -144,7 +167,8 @@ class ScalpAuditTest {
         assertEquals(1, upgraded.stopLossPercent)
         assertEquals(7, upgraded.contracts)
         assertEquals(old.disabledStrategies, upgraded.disabledStrategies)
-        assertNull(upgraded.settings("v2-sf42").stopLossPercent)
+        assertEquals(30, upgraded.settings("v2-sf42").stopLossPercent)
+        assertEquals(1, upgraded.protectivePercent("v2-sf42"))
         assertEquals(5, upgraded.settings("v2-sf42").trailCents)
         assertEquals(8, upgraded.copy(stopLossPercent = 8).migrateStopPolicy().stopLossPercent)
     }

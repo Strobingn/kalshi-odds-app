@@ -260,8 +260,8 @@ object ScalpModels {
 
     /** 0.3.61: per-bet stop shown on each card / leaderboard row. */
     fun stopLabel(m: Model): String {
-        if (isV2(m)) return "default 1% fill stop + 3¢ peak trail; actual risk cap in trade note; 60s close check"
-        return "default 1% fill-price stop; global cap applies immediately; other strategy exits may close earlier"
+        if (isV2(m)) return "stop 1% below fill by default + 3¢ peak trail; actual risk cap in trade note; 60s close check"
+        return "stop 1% below fill by default; global cap applies immediately; other strategy exits may close earlier"
     }
 
     fun tag(m: Model): String? = (if (isV2(m)) "group: v2" else null) ?: ShockFav.TAGS[m.code] ?: ShockFav.byVariantId(m.code)?.group?.let { "group: $it" }
@@ -532,7 +532,8 @@ object ForecastScalp {
     /** Entry: band, spread, edge > spread + entry fee + exit fee at the actual ten-contract clip + 0.5¢. */
     /** 0.3.54: predicted move must beat the full round trip (spread + entry fee + exit fee) by [marginUsd]. */
     fun wantsEntry(mid: Double, spread: Double, ask: Double, move: Double, tauS: Double, marginUsd: Double = SAFETY): Boolean =
-        ScalpRule.buyPriceOk(ask) && mid in BAND_LO..BAND_HI && spread <= MAX_SPREAD + 1e-9 && tauS >= MIN_TAU_ENTRY_S &&
+        ScalpRule.buyPriceOk(ask) && mid in BAND_LO..BAND_HI && spread.isFinite() && spread >= 0.0 && spread <= MAX_SPREAD + 1e-9 && tauS.isFinite() && tauS >= MIN_TAU_ENTRY_S &&
+            marginUsd.isFinite() && marginUsd >= 0.0 &&
             move.isFinite() && move > 0.0 &&
             (ask - spread + move).coerceAtMost(1.0) - ask >
                 ScalpRule.feePerContract(ScalpRule.CONTRACTS, ask) +

@@ -34,8 +34,7 @@ data class ScalpControls(
         modelCode?.let { settings(it).stopLossPercent } ?: stopLossPercent).coerceIn(1, 99)
     /** One-time requested reset; later deliberate user changes are preserved. */
     fun migrateStopPolicy(): ScalpControls = if (stopPolicyVersion >= ScalpRisk.POLICY_VERSION) this else
-        copy(stopLossPercent = ScalpRisk.DEFAULT_PERCENT, stopPolicyVersion = ScalpRisk.POLICY_VERSION,
-            strategySettings = strategySettings.mapValues { it.value.copy(stopLossPercent = null) })
+        copy(stopLossPercent = ScalpRisk.DEFAULT_PERCENT, stopPolicyVersion = ScalpRisk.POLICY_VERSION)
     fun permits(modelCode: String) = enabled && !killSwitch && modelCode !in disabledStrategies
     fun plan(base: ScalpV2.Plan, modelCode: String? = null): ScalpV2.Plan {
         val chosen = if (!manual) base else base.copy(

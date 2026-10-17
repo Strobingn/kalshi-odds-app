@@ -9,7 +9,7 @@ import org.junit.Test
 
 class AsyncBooleanFlagsTest {
     @Test fun blockedDiskDoesNotBlockReadsOrMainThreadTogglesAndNewestValueWins() {
-        val pool = Executors.newSingleThreadExecutor()
+        val pool = Executors.newFixedThreadPool(2)
         val entered = CountDownLatch(1); val release = CountDownLatch(1); val finished = CountDownLatch(1)
         val disk = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
         val flags = AsyncBooleanFlags(mapOf("enabled" to false), persist = { batch ->
@@ -23,7 +23,12 @@ class AsyncBooleanFlagsTest {
             repeat(20_000) { flags.set("enabled", true) }
             flags.set("enabled", false)
             assertFalse(flags.get("enabled")) // no wait for the blocked disk writer
+            val barrierStarted = CountDownLatch(1)
+            val durable = pool.submit<Boolean> { barrierStarted.countDown(); flags.flushBlocking() }
+            assertTrue(barrierStarted.await(5, SECONDS))
+            assertFalse(durable.isDone) // the service must not terminate before persistence finishes
             release.countDown()
+            assertTrue(durable.get(5, SECONDS))
             assertTrue(finished.await(5, SECONDS))
             assertEquals(false, disk["enabled"])
         } finally { release.countDown(); pool.shutdownNow() }

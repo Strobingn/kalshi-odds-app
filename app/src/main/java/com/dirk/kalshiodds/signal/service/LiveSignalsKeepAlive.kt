@@ -94,6 +94,7 @@ object LiveSignalsKeepAlive {
             editor.commit() // background executor only; never blocks Service lifecycle callbacks
         }, execute = { work -> flagWriter.execute(work) })
     }
+    internal fun flushFlagsOnIo(context: Context): Boolean = flags(context).flushBlocking()
     fun isEnabled(context: Context): Boolean = flags(context).get(LiveSignalsPolicy.PREFS_ENABLED_KEY)
     fun setEnabled(context: Context, enabled: Boolean) = flags(context).set(LiveSignalsPolicy.PREFS_ENABLED_KEY, enabled)
     fun isTimeoutPaused(context: Context): Boolean = flags(context).get(LiveSignalsPolicy.PREFS_TIMEOUT_PAUSED_KEY)

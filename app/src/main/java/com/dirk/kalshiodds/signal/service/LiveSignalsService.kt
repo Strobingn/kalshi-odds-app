@@ -43,6 +43,7 @@ class LiveSignalsService : Service() {
     )
     private var client: KalshiWsClient? = null
     private var pipelineJob: Job? = null
+    private var stopJob: Job? = null
     private var metadataJob: Job? = null
     private var rolloverJob: Job? = null
     @Volatile private var rolloverBound = false
@@ -77,6 +78,8 @@ class LiveSignalsService : Service() {
         if (intent?.action == LiveSignalsPolicy.ACTION_STOP) {
             return handleExplicitStop()
         }
+        stopJob?.cancel()
+        stopJob = null
         if (intent?.action == LiveSignalsPolicy.ACTION_RESUME) {
             LiveSignalsKeepAlive.setTimeoutPaused(this, false)
         }
@@ -123,11 +126,31 @@ class LiveSignalsService : Service() {
     private fun handleExplicitStop(): Int {
         explicitStop = true
         LiveSignalsKeepAlive.setEnabled(this, false)
-        // The app scope survives this service's teardown; never block the main thread waiting on DataStore.
-        runCatching { KalshiOddsApp.from(this).stopLiveSignalsPreferenceAsync() }
         tearDownPipeline()
-        runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
-        stopSelf()
+        stopJob?.cancel()
+        stopJob = scope.launch(Dispatchers.IO) {
+            while (isActive && explicitStop) {
+                try {
+                    KalshiOddsApp.from(this@LiveSignalsService).container.preferences.updateLiveSignals(false)
+                    LiveSignalsKeepAlive.setEnabled(this@LiveSignalsService, false)
+                    if (!LiveSignalsKeepAlive.flushFlagsOnIo(this@LiveSignalsService)) {
+                        delay(1_000L)
+                        continue
+                    }
+                    kotlinx.coroutines.withContext(Dispatchers.Main) {
+                        if (explicitStop) {
+                            runCatching { ServiceCompat.stopForeground(this@LiveSignalsService, ServiceCompat.STOP_FOREGROUND_REMOVE) }
+                            stopSelf()
+                        }
+                    }
+                    break
+                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (failure: Exception) {
+                    Log.w(TAG, "stop persistence failed; retrying without blocking Main", failure)
+                    delay(1_000L)
+                }
+            }
+        }
         return START_NOT_STICKY
     }
 

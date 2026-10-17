@@ -859,10 +859,13 @@ class ScalpBook(
 
     fun onShockFavQuote(q: ScalpRule.Quote, enabled: Boolean): List<ScalpTrade> = synchronized(lock) {
         val riskChanges = applyProtectiveStops(q)
-        val yb = q.yesBid ?: return@synchronized riskChanges
-        val ya = q.yesAsk ?: return@synchronized riskChanges
-        if (ya <= yb) return@synchronized riskChanges
         val key = q.ticker.uppercase()
+        if (q.yesBid == null || q.yesAsk == null || q.yesAsk <= q.yesBid) {
+            val held = _all.value.filter { it.ticker == key && ShockFav.isShockFav(it.variantId) }
+            return@synchronized finishSfWithoutFair(q, held, ArrayList(riskChanges), emptyList())
+        }
+        val yb = q.yesBid
+        val ya = q.yesAsk
         val coin = ScalpParams.coinOf(q.ticker)
         val sec = q.nowMs / 1000L
         if (!o50OpenMid.containsKey(key)) {
@@ -948,6 +951,18 @@ class ScalpBook(
             changed += t.copy(state = ScalpState.OPEN, contracts = n, entryPrice = ask, entryFeeUsd = ScalpRule.orderFee(n, ask), entryAtMs = q.nowMs,
                 note = String.format(Locale.US, "%s; filled %d @ %.0f¢ after %.1fs", t.note, n, ask * 100, age / 1000.0))
         }
+        if (enabled && live && coin == ShockFav.TRADE_COIN) {
+            var cost = openCostUsd() + changed.filter { it.state == ScalpState.PENDING_ENTRY }.sumOf { it.signalAsk * ShockFav.CLIP }
+            for (p in ShockFav.VARIANTS.filter { it.kind == ShockFav.Kind.SIMPLE_DIP }) {
+                if (mine.any { it.variantId == p.shockId && isActive(it) }) continue
+                val side = simpleDipSide(key, p, q) ?: continue
+                val ask = q.ask(side) ?: continue
+                sfEnter(q, p, p.shockId, side, ask, q.fair(side) ?: Double.NaN, cost, bankrollUsd(), "price-only simple dip")?.let {
+                    changed += it
+                    cost += it.signalAsk * ShockFav.CLIP + ScalpRule.orderFee(ShockFav.CLIP, it.signalAsk)
+                }
+            }
+        }
         val ring = sfSpot.getOrPut(coin) { ShockFav.SpotRing() }
         q.spot?.takeIf { it > 0.0 && it.isFinite() }?.let { ring.put(sec, it) }
         // 0.3.58: same fair as bt58 — 900 s 1 s-return σ from the ring, open basis to strike, raw τ.
@@ -1013,6 +1028,7 @@ class ScalpBook(
             val bankroll = bankrollUsd()
             var brtiFair: Double? = null
             for (p in ShockFav.VARIANTS) {
+                if (p.kind == ShockFav.Kind.SIMPLE_DIP) continue // evaluated before optional spot/volatility inputs
                 if (p.kind == ShockFav.Kind.OPEN50) {
                     if (p.o50 != ShockFav.O50.AI) continue // 0.3.65: handled in o50PriceEntries
                     // Open 50: one filled trade per market per side; observe from the first fresh opening quote.
