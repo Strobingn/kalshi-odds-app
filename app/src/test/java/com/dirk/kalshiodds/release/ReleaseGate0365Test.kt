@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.release
 
+import com.dirk.kalshiodds.decision.G14Copies
 import com.dirk.kalshiodds.data.supabase.SupabaseSync
 import com.dirk.kalshiodds.data.supabase.SyncMerge
 import com.dirk.kalshiodds.decision.ScalpModels
@@ -14,7 +15,7 @@ import org.junit.Test
 
 class ReleaseGate0365Test {
     @Test fun v2CopyForEveryOriginalExceptSf29() {
-        val originals = ScalpModels.ALL.filter { !ScalpModels.isV2(it) }
+        val originals = ScalpModels.ALL.filter { !ScalpModels.isV2(it) && !G14Copies.isCopyCode(it.code) } // 0.3.80: g14 copies are not originals
         assertEquals(58, originals.size)
         assertEquals(57 + 16, ScalpModels.V2_MODELS.size) // 0.3.68: +16 tweak/size copies of v2 sf41–44
         assertNull(ScalpModels.v2Of(ScalpModels.Model.SF29))

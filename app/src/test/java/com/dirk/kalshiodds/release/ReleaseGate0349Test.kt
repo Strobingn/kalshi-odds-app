@@ -40,7 +40,7 @@ class ReleaseGate0349Test {
         val hub = src("signal/SignalHub.kt")
         assertEquals(3, Regex("marketEvent\\((tick\\.)?ticker\\)").findAll(hub).count())
         val vm = src("ui/OddsViewModel.kt")
-        assertTrue(vm.contains("hub.onMarketEvent = { t -> marketEvents.fire(t) }"))
+        assertTrue(vm.contains("hub.onMarketEvent = { t -> onLiveQuote(t); marketEvents.fire(t) }"))
         assertTrue(vm.contains("container.cfFeed.onTick"))
         assertFalse(vm.contains("BACKGROUND_POLL_MS)"))
         assertTrue(src("signal/service/LiveSignalsService.kt").contains("cfFeed.acceptAndNotify"))
@@ -79,7 +79,7 @@ class ReleaseGate0349Test {
 
     @Test fun statusLine() {
         val l = FeedStatus.line(true, "0.4s", 162.0, 3_000L, 0)
-        assertEquals("WS connected · last tick 0.4s · AI eval 162 ms · REST 3.0s · 429s/1h 0", l)
+        assertEquals("● Live prices · WS connected · last tick 0.4s · AI eval 162 ms · REST 3.0s · 429s/1h 0", l)
         assertTrue(src("ui/HomeScreen.kt").contains("state.feedStatus"))
     }
 }

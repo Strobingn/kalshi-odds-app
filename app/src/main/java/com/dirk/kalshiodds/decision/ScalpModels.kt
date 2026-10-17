@@ -144,8 +144,24 @@ object ScalpModels {
         V2_SF44T1("v2-sf44t1", "v2 · sf44 tweak 1 · " + ScalpV2.spec("v2-sf44t1").let { s -> if (s.walk) "${s.clip} contracts, book-walk fills" else "ask ≤ ${Math.round(s.maxAsk * 100)}¢" }, V2_BLURB),
         V2_SF44T2("v2-sf44t2", "v2 · sf44 tweak 2 · " + ScalpV2.spec("v2-sf44t2").let { s -> if (s.walk) "${s.clip} contracts, book-walk fills" else "ask ≤ ${Math.round(s.maxAsk * 100)}¢" }, V2_BLURB),
         V2_SF44X5("v2-sf44x5", "v2 · sf44 5 contracts · " + ScalpV2.spec("v2-sf44x5").let { s -> if (s.walk) "${s.clip} contracts, book-walk fills" else "ask ≤ ${Math.round(s.maxAsk * 100)}¢" }, V2_BLURB),
-        V2_SF44X10("v2-sf44x10", "v2 · sf44 10 contracts · " + ScalpV2.spec("v2-sf44x10").let { s -> if (s.walk) "${s.clip} contracts, book-walk fills" else "ask ≤ ${Math.round(s.maxAsk * 100)}¢" }, V2_BLURB)
+        V2_SF44X10("v2-sf44x10", "v2 · sf44 10 contracts · " + ScalpV2.spec("v2-sf44x10").let { s -> if (s.walk) "${s.clip} contracts, book-walk fills" else "ask ≤ ${Math.round(s.maxAsk * 100)}¢" }, V2_BLURB),
+        G14_FCRIDE("fcride-g14", "fcride · rebuilt like Fair-gap g14", G14_BLURB),
+        G14_V2_FCFADE("v2-fcfade-g14", "v2-fcfade · rebuilt like Fair-gap g14", G14_BLURB),
+        G14_V2_FCRIDE("v2-fcride-g14", "v2-fcride · rebuilt like Fair-gap g14", G14_BLURB),
+        G14_V2_SF28("v2-sf28-g14", "v2-sf28 · rebuilt like Fair-gap g14", G14_BLURB),
+        G14_V2_SF51("v2-sf51-g14", "v2-sf51 · rebuilt like Fair-gap g14", G14_BLURB),
+        G14_V2_SF27("v2-sf27-g14", "v2-sf27 · rebuilt like Fair-gap g14", G14_BLURB),
+        G14_SF03("sf03-g14", "sf03 · rebuilt like Fair-gap g14", G14_BLURB),
+        G14_SF29("sf29-g14", "sf29 · rebuilt like Fair-gap g14", G14_BLURB),
+        G14_SF13("sf13-g14", "sf13 · rebuilt like Fair-gap g14", G14_BLURB),
+        G14_V2_SF02("v2-sf02-g14", "v2-sf02 · rebuilt like Fair-gap g14", G14_BLURB),
+        G14_SF32("sf32-g14", "sf32 · rebuilt like Fair-gap g14", G14_BLURB),
+        G14_SF30("sf30-g14", "sf30 · rebuilt like Fair-gap g14", G14_BLURB),
+        G14_SF41("sf41-g14", "sf41 · rebuilt like Fair-gap g14", G14_BLURB),
+        G14_SF42("sf42-g14", "sf42 · rebuilt like Fair-gap g14", G14_BLURB),
+        G14_V2_SF30("v2-sf30-g14", "v2-sf30 · rebuilt like Fair-gap g14", G14_BLURB)
     }
+    const val G14_BLURB = "0.3.80 copy: takes its original's signal only when the Fair-gap g14 gate passes, then g14 h60 exits (stop armed after 60 s, otherwise hold to settlement). Original keeps running unchanged. g14 is not proven (per-trade range ≈ -$0.48…+$0.72)."
 
     const val V2_BLURB = "v2 paper: new trades default to a 3¢ bid-peak trail active from entry and independent 20% fill-price stop. Existing trades retain saved exits. Preserve positive/inconclusive entry settings; bounded adjustments for sustained losses. Every trade has a protective stop. Exit in the final minute unless fresh CF fair ≥ 97%, bid ≥ 90¢ and holding beats selling. Decisions are estimates, never guaranteed wins. Actual stop/trail and adaptation evidence are in the trade note."
     val ALL: List<Model> = Model.values().toList()
@@ -175,7 +191,7 @@ object ScalpModels {
     /** 0.3.65: v2 copy of an original model (null when none, e.g. sf29 or a v2 itself). */
     fun v2Of(m: Model): Model? = V2_BY_ORIG[m]
     fun originalOf(v2: Model): Model? = ORIG_BY_CODE[ScalpV2.baseOf(v2.code)]?.takeIf { isV2(v2) }
-    fun isV2(m: Model): Boolean = m.code.startsWith(ScalpV2.PREFIX)
+    fun isV2(m: Model): Boolean = m.code.startsWith(ScalpV2.PREFIX) && !G14Copies.isCopyCode(m.code)
     /** Stable id for the incremental stats table (model code, or variantId when unknown). */
     fun scalperIdOf(t: ScalpTrade): String? = if (!t.isPrimary) null else (modelOf(t)?.code ?: t.variantId)
     fun dayEt(atMs: Long): String = java.time.Instant.ofEpochMilli(atMs).atZone(java.time.ZoneId.of("America/New_York")).toLocalDate().toString()
@@ -209,8 +225,8 @@ object ScalpModels {
     private val ORIG_BY_CODE: Map<String, Model> by lazy { ALL.filter { !isV2(it) }.associateBy { it.code } }
     private val V2_BY_ORIG: Map<Model, Model> by lazy { ALL.filter { isV2(it) && !ScalpV2.isExtra(it.code) }.mapNotNull { v -> ORIG_BY_CODE[v.code.removePrefix(ScalpV2.PREFIX)]?.let { it to v } }.toMap() }
     val COUNT: Int get() = ALL.size
-    private val SF_BY_CODE: Map<String, Model> by lazy { ALL.filter { it.code.startsWith(ShockFav.PREFIX) }.associateBy { it.code } }
-    val SF_MODELS: List<Model> get() = ALL.filter { it.code.startsWith(ShockFav.PREFIX) }
+    private val SF_BY_CODE: Map<String, Model> by lazy { ALL.filter { it.code.startsWith(ShockFav.PREFIX) && !G14Copies.isCopyCode(it.code) }.associateBy { it.code } }
+    val SF_MODELS: List<Model> get() = ALL.filter { it.code.startsWith(ShockFav.PREFIX) && !G14Copies.isCopyCode(it.code) }
     /** 0.3.59: true for sf variants with no positive BTC 2 s-delay test CI. */
     fun noEdge2s(m: Model): Boolean = ShockFav.byVariantId(m.code)?.noEdge2s == true
     /** Card order: 2 s-delay survivors first, then legacy models, then no-edge sf variants (fixed order within groups). */
@@ -249,6 +265,7 @@ object ScalpModels {
     private val NONE = Any()
     private val MODEL_BY_VARIANT = java.util.concurrent.ConcurrentHashMap<String, Any>()
     private fun modelOfVariant(vid: String): Model? {
+        if (G14Copies.isCopyVariant(vid)) return BY_CODE[G14Copies.copyCode(vid.removePrefix(G14Copies.VARIANT_PREFIX))]
         if (ScalpV2.isExtra(vid)) return ALL.firstOrNull { it.code == vid }
         if (ScalpV2.isV2(vid)) return modelOfVariant(vid.removePrefix(ScalpV2.PREFIX))?.let { v2Of(it) }
         if (vid.startsWith(ForecastScalp.RIDE_PREFIX)) return Model.FORECAST_RIDE
