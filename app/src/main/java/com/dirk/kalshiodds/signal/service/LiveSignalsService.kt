@@ -23,7 +23,6 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
@@ -113,7 +112,7 @@ class LiveSignalsService : Service() {
 
     private fun bindRollover() {
         if (rolloverBound) return
-        val container = runCatching { KalshiOddsApp.from(this).container }.getOrNull() ?: return
+        val container = runCatching { KalshiOddsApp.from(this).container }.getOrNull() ?: return // runs on scope (Default), not main
         rolloverBound = true
         container.rollover.addListener { event ->
             container.hub.setWatchTickers(event.activeTickers)
@@ -129,11 +128,11 @@ class LiveSignalsService : Service() {
     private fun handleExplicitStop(): Int {
         explicitStop = true
         LiveSignalsKeepAlive.setEnabled(this, false)
+        // 0.3.82: never runBlocking on main — persist the toggle in the background and return immediately.
         runCatching {
-            runBlocking(Dispatchers.IO) {
-                withTimeoutOrNull(1_500L) {
-                    KalshiOddsApp.from(this@LiveSignalsService).container.preferences.updateLiveSignals(false)
-                }
+            val app = KalshiOddsApp.from(this@LiveSignalsService)
+            app.launchBackground {
+                withTimeoutOrNull(5_000L) { app.awaitContainer().preferences.updateLiveSignals(false) }
             }
         }
         tearDownPipeline()
@@ -354,8 +353,7 @@ class LiveSignalsService : Service() {
         reconnecting: Boolean = false,
         needsKey: Boolean = false
     ) {
-        val notifier = runCatching { KalshiOddsApp.from(this).container.notifier }
-            .getOrElse { SignalNotifier(this) }
+        val notifier = (runCatching { KalshiOddsApp.from(this).containerOrNull?.notifier }.getOrNull() ?: SignalNotifier(this))
         val text = LiveSignalsPolicy.foregroundText(connected, reconnecting, needsKey, lastTickerCount)
         val notification = runCatching { notifier.foregroundNotification(text) }.getOrNull() ?: return
         val type = if (foregroundTypeInUse != 0) {
@@ -419,8 +417,7 @@ class LiveSignalsService : Service() {
         runCatching { LiveSignalsKeepAlive.setTimeoutPaused(this, true) }
         tearDownPipeline()
         releaseWakeLock()
-        val notifier = runCatching { KalshiOddsApp.from(this).container.notifier }
-            .getOrElse { SignalNotifier(this) }
+        val notifier = (runCatching { KalshiOddsApp.from(this).containerOrNull?.notifier }.getOrNull() ?: SignalNotifier(this))
         val paused = runCatching { notifier.pausedNotification() }.getOrNull()
         runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
         if (paused != null) {
@@ -441,7 +438,7 @@ class LiveSignalsService : Service() {
         )
         tearDownPipeline()
         releaseWakeLock()
-        runCatching { KalshiOddsApp.from(this).container.hub.wsLive = false }
+        runCatching { KalshiOddsApp.from(this).containerOrNull?.hub?.wsLive = false }
         scope.cancel()
         super.onDestroy()
         isRunning = false
@@ -462,7 +459,7 @@ class LiveSignalsService : Service() {
         metadataJob = null
         rolloverJob?.cancel()
         rolloverJob = null
-        runCatching { KalshiOddsApp.from(this).container.rollover.stop() }
+        runCatching { KalshiOddsApp.from(this).containerOrNull?.rollover?.stop() }
     }
 
     private fun acquireWakeLock() {
