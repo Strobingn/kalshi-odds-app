@@ -114,7 +114,7 @@ class LiveSignalsService : Service() {
 
     private fun bindRollover() {
         if (rolloverBound) return
-        val container = runCatching { KalshiOddsApp.from(this).container }.getOrNull() ?: return
+        val container = runCatching { KalshiOddsApp.from(this).container }.getOrNull() ?: return // runs on scope (Default), not main
         rolloverBound = true
         container.rollover.addListener { event ->
             container.hub.setWatchTickers(event.activeTickers)
@@ -370,8 +370,7 @@ class LiveSignalsService : Service() {
         reconnecting: Boolean = false,
         needsKey: Boolean = false
     ) {
-        val notifier = runCatching { KalshiOddsApp.from(this).container.notifier }
-            .getOrElse { SignalNotifier(this) }
+        val notifier = (runCatching { KalshiOddsApp.from(this).containerOrNull?.notifier }.getOrNull() ?: SignalNotifier(this))
         val text = LiveSignalsPolicy.foregroundText(connected, reconnecting, needsKey, lastTickerCount)
         val notification = runCatching { notifier.foregroundNotification(text) }.getOrNull() ?: return
         val type = if (foregroundTypeInUse != 0) {
@@ -435,8 +434,7 @@ class LiveSignalsService : Service() {
         runCatching { LiveSignalsKeepAlive.setTimeoutPaused(this, true) }
         tearDownPipeline()
         releaseWakeLock()
-        val notifier = runCatching { KalshiOddsApp.from(this).container.notifier }
-            .getOrElse { SignalNotifier(this) }
+        val notifier = (runCatching { KalshiOddsApp.from(this).containerOrNull?.notifier }.getOrNull() ?: SignalNotifier(this))
         val paused = runCatching { notifier.pausedNotification() }.getOrNull()
         if (paused != null) {
             runCatching {
@@ -471,7 +469,7 @@ class LiveSignalsService : Service() {
         )
         tearDownPipeline()
         releaseWakeLock()
-        runCatching { KalshiOddsApp.from(this).container.hub.wsLive = false }
+        runCatching { KalshiOddsApp.from(this).containerOrNull?.hub?.wsLive = false }
         scope.cancel()
         super.onDestroy()
         isRunning = false
@@ -492,7 +490,7 @@ class LiveSignalsService : Service() {
         metadataJob = null
         rolloverJob?.cancel()
         rolloverJob = null
-        runCatching { KalshiOddsApp.from(this).container.rollover.stop() }
+        runCatching { KalshiOddsApp.from(this).containerOrNull?.rollover?.stop() }
     }
 
     private fun acquireWakeLock() {

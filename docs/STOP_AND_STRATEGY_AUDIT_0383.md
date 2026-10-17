@@ -1,4 +1,4 @@
-# Kashi 0.3.82 — 1% stops, strategy audit and background blocking fixes
+# Kashi 0.3.83 — 1% stops, strategy audit and background blocking fixes
 
 The default global price stop is 1% below each trade's actual fill/VWAP. The application sets the global cap to the requested 1% once, retaining per-model overrides beneath that cap and all other settings; later intentional global changes persist. A shared guard covers every original and V2 strategy, including retired-model positions still being unwound. It runs without spot, strike, volatility, forecasts or entry permission. Lowering the global cap tightens current positions; raising it cannot loosen a position's saved cap. Additional original exits and V2's default 3¢ peak trail remain active.
 
@@ -32,3 +32,5 @@ This release integrates the current g14 copies, live-price/scorecard updates, an
 The startup screen and foreground/notification callbacks suspend for IO initialization before accessing any ViewModel or container-backed settings. The synchronous getter refuses early Main access instead of acquiring the initialization lock. The sync worker timeout is cooperative, not a guaranteed interrupt of an in-flight blocking HTTP call.
 
 Final review regressions cover a newer preference toggle or database flush request arriving during a failed write; both receive a follow-up attempt without another user action. Untagged restored positions start at the 1% policy even if settings rise before their first quote. Shared exits return the persisted, decorated row so a subsequent callback cannot erase exit-book/fee audit details. Android quota timeout allows a bounded background persistence attempt (1.5-second stop deadline) instead of terminating immediately after queueing its pause flag; permanently blocked disk IO cannot guarantee durability before Android requires termination.
+
+Integrated the published 0.3.82 non-blocking service teardown/container-peek changes. Activity startup, resume and notification entry still await initialization off Main; explicit-stop durability and bounded quota-timeout persistence remain.

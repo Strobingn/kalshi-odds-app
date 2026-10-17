@@ -35,8 +35,21 @@ class KalshiOddsApp : Application() {
         }
         return containerLazy.value
     }
-    suspend fun awaitContainer(): AppContainer = kotlinx.coroutines.withContext(Dispatchers.IO) { container }
     val containerReady: Boolean get() = containerLazy.isInitialized()
+
+    /**
+     * 0.3.82 ANR fix (kashi:crash:1792246321109): non-blocking peek. Returns null while the container is still
+     * being built instead of waiting on the lazy lock — use from main-thread stop/teardown paths.
+     */
+    val containerOrNull: AppContainer? get() = if (containerLazy.isInitialized()) containerLazy.value else null
+
+    /** 0.3.82: suspend until the container is ready, building/waiting on IO (never parks the main thread). */
+    suspend fun awaitContainer(): AppContainer =
+        if (containerLazy.isInitialized()) containerLazy.value
+        else kotlinx.coroutines.withContext(Dispatchers.IO) { containerLazy.value }
+
+    /** 0.3.82: fire-and-forget background work for main-thread callbacks that must return immediately. */
+    fun launchBackground(block: suspend CoroutineScope.() -> Unit) { appScope.launch(Dispatchers.IO, block = block) }
 
     private val appScope = CoroutineScope(
         SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, t ->
