@@ -96,7 +96,11 @@ class LiveSignalsService : Service() {
         }
         // 0.3.39: host the process-scoped Autopilot (OddsViewModel) even with no Activity.
         // 0.3.41: posted after this call returns, so it never delays startForeground.
-        android.os.Handler(mainLooper).post { runCatching { KalshiOddsApp.from(this).ensureAutopilotHost() } }
+        // 0.3.81: build the container off main first; only then hop to main to create the Autopilot host.
+        scope.launch {
+            runCatching { KalshiOddsApp.from(this@LiveSignalsService).container }
+            android.os.Handler(mainLooper).post { runCatching { KalshiOddsApp.from(this@LiveSignalsService).ensureAutopilotHost() } }
+        }
         if (rolloverJob == null || rolloverJob?.isActive != true) {
             rolloverJob = scope.launch {
                 runCatching {

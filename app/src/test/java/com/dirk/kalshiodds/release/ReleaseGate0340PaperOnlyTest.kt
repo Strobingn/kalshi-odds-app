@@ -88,7 +88,7 @@ class ReleaseGate0340PaperOnlyTest {
         assertNull(LiveOffMigration.rewriteMode("PAPER"))
         assertNull(LiveOffMigration.rewriteMode("SHADOW"))
         val app = src("KalshiOddsApp.kt")
-        assertTrue(app.indexOf("LiveOffMigration.deleteLegacyArming") in 1 until app.indexOf("container = AppContainer(this)"))
+        assertTrue(app.indexOf("LiveOffMigration.deleteLegacyArming") in 1 until app.indexOf("container // build it here")) // 0.3.81: container built off main
         assertTrue(app.contains("migrateAutopilotModePaperOnly"))
     }
 }

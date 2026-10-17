@@ -257,7 +257,9 @@ class LiveSignalsWatchdogWorker(
     override suspend fun doWork(): Result {
         // WorkManager is a background start — KeepAlive swallows FGS-not-allowed (Android 12+).
         // 0.3.41: a refused start retries with exponential backoff (bounded), instead of giving up.
-        val ok = runCatching { LiveSignalsKeepAlive.ensureService(applicationContext) }.getOrDefault(false)
+        val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { // 0.3.81: prefs read off main
+            runCatching { LiveSignalsKeepAlive.ensureService(applicationContext) }.getOrDefault(false)
+        }
         return if (ok || runAttemptCount >= MAX_RETRIES) Result.success() else Result.retry()
     }
 

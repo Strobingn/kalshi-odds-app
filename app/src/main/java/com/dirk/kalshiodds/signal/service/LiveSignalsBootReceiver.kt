@@ -16,6 +16,11 @@ class LiveSignalsBootReceiver : BroadcastReceiver() {
             action == Intent.ACTION_LOCKED_BOOT_COMPLETED ||
             action == "android.intent.action.QUICKBOOT_POWERON"
         if (!relevant) return
-        LiveSignalsKeepAlive.ensureService(context)
+        // 0.3.81: onReceive runs on main — read prefs / start the service on a background thread.
+        val pending = goAsync()
+        val app = context.applicationContext
+        Thread {
+            try { runCatching { LiveSignalsKeepAlive.ensureService(app) } } finally { pending.finish() }
+        }.start()
     }
 }
