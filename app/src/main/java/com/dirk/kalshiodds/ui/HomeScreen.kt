@@ -58,6 +58,8 @@ import com.dirk.kalshiodds.ui.theme.DipTheme
 @Composable
 fun HomeScreen(
     state: OddsUiState,
+    /** 1.0.4: AI direction banner shown at the top of the Bitcoin home tab. */
+    aiBanner: @Composable () -> Unit = {},
     onOpenSettings: () -> Unit,
     onOpenApiKeySettings: () -> Unit = onOpenSettings,
     onOpenScorecard: () -> Unit,
@@ -148,6 +150,7 @@ fun HomeScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
+            aiBanner()
             if (ApiKeyUi.showNoKeyBanner(hasKey)) {
                 Text(
                     ApiKeyUi.BANNER,

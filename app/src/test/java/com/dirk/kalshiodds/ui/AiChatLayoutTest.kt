@@ -29,6 +29,14 @@ class AiChatLayoutTest {
         KalshiOddsTheme(darkTheme = false, colorStyle = ColorStyles.CLASSIC) { AiChatContent(emptyList(), busy = false, strategyStatus = "needs key", hasKey = false) }
     }
 
+    @Test fun predictionBanners() = paparazzi.snapshot("ai_prediction_banners") {
+        KalshiOddsTheme(darkTheme = true, colorStyle = ColorStyles.CLASSIC) { androidx.compose.foundation.layout.Column {
+            AiPredictionBanner(com.dirk.kalshiodds.decision.AiDirection.Forecast(com.dirk.kalshiodds.decision.AiDirection.Call.UP, .68, 512, "KXBTC15M"))
+            AiPredictionBanner(com.dirk.kalshiodds.decision.AiDirection.Forecast(com.dirk.kalshiodds.decision.AiDirection.Call.DOWN, .74, 95, "KXBTC15M"))
+            AiPredictionBanner(com.dirk.kalshiodds.decision.AiDirection.Forecast(com.dirk.kalshiodds.decision.AiDirection.Call.NONE, .52, 300, "KXBTC15M"))
+        } }
+    }
+
     @Test fun aiIsABottomTab() {
         assertTrue(AppRoutes.AI in AppRoutes.TABS)
         assertEquals("AI", DipNav.tabLabel[AppRoutes.AI])
