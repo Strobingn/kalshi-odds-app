@@ -114,7 +114,7 @@ fun AiChatContent(
             if (busy) item(key = "busy") {
                 Row(Modifier.padding(8.dp).testTag("AI_LOADING"), verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = c.accentBlue)
-                    Spacer(Modifier.width(8.dp)); Text("Thinking…", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.width(8.dp)); Text("Thinking… (grok-4 can take up to 2 min)", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
                 }
             }
         }

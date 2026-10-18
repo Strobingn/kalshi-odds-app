@@ -16,12 +16,20 @@ interface KalshiApi {
     @GET("markets")
     suspend fun getMarkets(
         @Query("series_ticker") seriesTicker: String,
-        @Query("status") status: String = "open",
+        @Query("status") status: String? = "open",
         @Query("limit") limit: Int? = null,
         @Query("cursor") cursor: String? = null,
         @Query("ticker") ticker: String? = null,
         @Query("event_ticker") eventTicker: String? = null
     ): MarketsResponse
+
+    /** 1.0.5: open events of a series (Kalshi still answers status=open here). */
+    @GET("events")
+    suspend fun getEvents(
+        @Query("series_ticker") seriesTicker: String,
+        @Query("status") status: String? = "open",
+        @Query("limit") limit: Int? = null
+    ): com.dirk.kalshiodds.data.dto.EventsResponse
 
     @GET("series/{series_ticker}")
     suspend fun getSeries(
