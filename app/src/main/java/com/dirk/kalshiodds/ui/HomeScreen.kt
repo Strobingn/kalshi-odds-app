@@ -19,8 +19,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -94,6 +96,21 @@ fun HomeScreen(
     onCancelPaperOrder: (String) -> Unit = {}
 ) {
     val colors = DipTheme.colors
+    var confirmPaperReset by androidx.compose.runtime.mutableStateOf(false)
+    if (confirmPaperReset) {
+        AlertDialog(
+            onDismissRequest = { confirmPaperReset = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmPaperReset = false
+                    onResetPaper()
+                }) { Text(HomePaperCash.CONFIRM) }
+            },
+            dismissButton = { TextButton(onClick = { confirmPaperReset = false }) { Text("Cancel") } },
+            title = { Text(HomePaperCash.DIALOG_TITLE) },
+            text = { Text(HomePaperCash.BODY) }
+        )
+    }
     val mode = TradeModeLabel.forApprove(state.settings)
     val hasKey = state.settings.tradingCredentialsConfigured()
     val ctx = TicketBuilder.Context(settings = state.settings, alertsPaused = state.alertsPaused, nowMs = nowMs)
@@ -323,6 +340,13 @@ fun HomeScreen(
                                 rows = HomeOpenBets.rows(state.positions, state.restingOrders, state.paper.fills),
                                 onClose = onSellPosition,
                                 onCancel = onCancelResting
+                            )
+                        }
+                        item(key = "paper-cash") {
+                            HomePaperCashCard(
+                                cashUsd = state.paper.cashUsd,
+                                pnlUsd = state.paper.realizedPnlUsd,
+                                onReset = { confirmPaperReset = true }
                             )
                         }
                         item {

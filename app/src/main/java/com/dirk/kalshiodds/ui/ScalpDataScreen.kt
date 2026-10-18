@@ -15,6 +15,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.decision.ScalpBreakdown
@@ -254,7 +256,7 @@ fun ScalpDataContent(
                 v.summaryLines.forEachIndexed { i, line ->
                     Text(
                         line, style = MaterialTheme.typography.bodySmall,
-                        color = if (i == 0) (if (s.netUsd >= 0) colors.up else colors.down) else colors.textPrimary
+                        color = colors.textPrimary
                     )
                 }
             }
@@ -265,9 +267,9 @@ fun ScalpDataContent(
                 if (curve.size < 2) {
                     Text("No closed round trips yet.", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
                 } else {
-                    val line = if (curve.last() >= 0) colors.up else colors.down
+                    val line = colors.textPrimary
                     val zero = colors.textSecondary
-                    Canvas(Modifier.fillMaxWidth().height(160.dp)) {
+                    Canvas(Modifier.fillMaxWidth().height(180.dp).semantics { contentDescription = "Equity curve, ${curve.size - 1} closed round trips, now ${String.format(Locale.US, "%+.2f", curve.last())}" }) {
                         val lo = minOf(0.0, curve.min()); val hi = maxOf(0.0, curve.max())
                         val span = (hi - lo).takeIf { it > 1e-9 } ?: 1.0
                         fun y(v: Double) = (size.height * (1.0 - (v - lo) / span)).toFloat()
@@ -275,6 +277,13 @@ fun ScalpDataContent(
                         drawLine(zero, Offset(0f, y(0.0)), Offset(size.width, y(0.0)), strokeWidth = 1f)
                         val path = Path()
                         curve.forEachIndexed { i, v -> if (i == 0) path.moveTo(0f, y(v)) else path.lineTo(i * dx, y(v)) }
+                        val fill = Path().apply {
+                            moveTo(0f, y(0.0))
+                            curve.forEachIndexed { i, v -> lineTo(i * dx, y(v)) }
+                            lineTo((curve.size - 1) * dx, y(0.0))
+                            close()
+                        }
+                        drawPath(fill, colors.spot.copy(alpha = 0.18f))
                         drawPath(path, line, style = Stroke(width = 3f))
                     }
                     Text(String.format(Locale.US, "Low %+.2f · high %+.2f · now %+.2f USD", curve.min(), curve.max(), curve.last()),
@@ -298,8 +307,7 @@ fun ScalpDataContent(
         item { Text("Every round trip (${rows.size}, newest first)", fontWeight = FontWeight.SemiBold, color = colors.textPrimary) }
         items(rows.take(shown), key = { it.key }) { keyed ->
             val row = keyed.value
-            Text(row.text, style = MaterialTheme.typography.labelMedium,
-                color = when (row.positive) { true -> colors.up; false -> colors.down; null -> colors.textSecondary })
+            Text(row.text, style = MaterialTheme.typography.labelMedium, color = colors.textPrimary)
         }
         if (rows.size > shown) {
             item(key = "more") {

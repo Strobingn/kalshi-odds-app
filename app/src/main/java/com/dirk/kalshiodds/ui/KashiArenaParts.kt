@@ -209,4 +209,9 @@ internal fun <T> ChipRow(options: List<T>, selected: T, label: (T) -> String, ta
     }
 }
 
-@Composable internal fun pnlColor(v: Double): Color = when { v > 0 -> DipTheme.colors.up; v < 0 -> DipTheme.colors.down; else -> DipTheme.colors.textSecondary }
+@Composable internal fun pnlColor(v: Double): Color {
+    val colors = DipTheme.colors
+    val fieldOps = colors == com.dirk.kalshiodds.ui.theme.FieldOpsDarkPalette || colors == com.dirk.kalshiodds.ui.theme.FieldOpsLightPalette
+    if (fieldOps) return colors.textPrimary
+    return when { v > 0 -> colors.up; v < 0 -> colors.down; else -> colors.textSecondary }
+}

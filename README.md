@@ -17,6 +17,14 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 - **Alerts:** local `NotificationCompat` HIGH channel via a foreground WS service
 - **Offline:** last successful crypto snapshot cached in DataStore
 
+Kalshi Trader stays on package `com.dirk.kalshiodds.kashi`. Scalpers stay on the paper book.
+
+Home shows **Paper cash** with a confirm-before-reset. Reset archives the previous paper fills on the device and restores cash to the configured start. It does not delete history, place a Kalshi order, or write remote rows.
+
+Bitcoin forecast rides (`KXBTC15M`) enter only when the forecast move is still positive after the spread and both taker fees (`ceil` of `0.07 × C × P × (1−P)` to the cent). A 2¢ stop is measured from the entry bid when that bid was recorded, so one tick of noise through the spread does not exit; a real 2¢ drop does. This path is paper only and not proven. Proven losers stay in `ScalpModels.RETIRED_CODES` (at least 30 closed trades and a confidence interval below zero) and do not open new leaderboard entries.
+
+`KXBTC15M` settles YES when the 60-second simple average of CF Benchmarks' BRTI before the close is at least the average before the open (a tie is YES). Fee schedule: quadratic, multiplier 1. See [Kalshi crypto markets](https://help.kalshi.com/en/articles/13823838-crypto-markets), [contract terms](https://assets.kalshi.com/contract_terms/CRYPTO.pdf), and [fee rounding](https://docs.kalshi.com/getting_started/fee_rounding).
+
 Package: `com.dirk.kalshiodds` · version **0.3.24**
 
 ## 0.3.24
