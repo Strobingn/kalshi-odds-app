@@ -11,11 +11,11 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.dirk.kalshiodds.kashi"
+        applicationId = "com.dirk.kalshiodds.bitscalpcursor"
         minSdk = 26
         targetSdk = 35
-        versionCode = 104
-        versionName = "0.3.89"
+        versionCode = 107
+        versionName = "0.3.92"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

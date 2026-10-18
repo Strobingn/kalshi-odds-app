@@ -21,6 +21,7 @@ object DipNav {
     val tabLabel: Map<String, String> = mapOf(
         AppRoutes.HOME to "Home",
         AppRoutes.SCALP_TAB to "Scalp",
+        AppRoutes.CHAT to "Chat",
         AppRoutes.SCORECARD to "Scorecard",
         AppRoutes.LIVE to "Live",
         AppRoutes.REAL_MONEY to "Real Money",
@@ -133,6 +134,7 @@ object DipNav {
     fun howToReach(route: String): String = when (route) {
         AppRoutes.HOME -> "Home tab"
         AppRoutes.SCALP_TAB -> "Scalp tab"
+        AppRoutes.CHAT -> "Chat tab"
         AppRoutes.SCALP_ALGO -> "Scalp tab → an algorithm"
         AppRoutes.SCORECARD -> "Scorecard tab"
         AppRoutes.LIVE -> "Live tab"

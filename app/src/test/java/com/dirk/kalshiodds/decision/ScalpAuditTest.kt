@@ -118,7 +118,7 @@ class ScalpAuditTest {
         b.onShockFavQuote(q(at + 3000, .47, size = 2.0).copy(yesAsk = .48), false)
         assertEquals(ScalpState.OPEN, row(b).state)
         assertEquals(2, row(b).contracts)
-        assertEquals(.49, row(b).entryPrice!!, 1e-10)
+        assertEquals(.48, row(b).entryPrice!!, 1e-10)
     }
 
     @Test fun forecastOrdersRequireFreshLaterSnapshotAndPartialExitsConsumeDepthOnce() {

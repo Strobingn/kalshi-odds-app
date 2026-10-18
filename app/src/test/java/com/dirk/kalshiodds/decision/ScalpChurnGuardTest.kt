@@ -33,13 +33,25 @@ class ScalpChurnGuardTest {
         val b = ScalpBook(InMemoryScalpPersistence().also { it.seed(listOf(t)) }, variants = emptyList(), liveExtras = true)
         val rnd = java.util.Random(7)
         for (i in 0 until 200) {
-            val bid = .30 + (rnd.nextInt(3) - 1) * .01 // 29–31¢ noise: 1% of 31¢ is a third of a tick
+            val bid = .30 + rnd.nextInt(2) * .01 // 30–31¢: one tick around the 31¢ fill. 29¢ is the 2¢ stop.
             val ms = at + i * 1000L
             b.onForecastQuote(ScalpRule.Quote(ticker, ms, close, ms, bid, 50.0, bid + .01, 50.0, null, null, null), 10.0, 10.0, false)
         }
         val row = b.allTrades().single { it.id == "fc" }
         assertFalse("stopped on noise: ${row.exitReason}", (row.exitReason ?: "").contains("stop"))
         assertFalse(ScalpRisk.managedExit(row))
+    }
+
+    @Test fun bitcoinTwoCentDropStopsTheForecastRide() {
+        val at = close - 600_000L
+        val t = ScalpTrade("fc", ticker, "YES", ScalpState.OPEN, at - 2000, .31, .5, contracts = 10,
+            entryPrice = .31, entryFeeUsd = .16, entryAtMs = at - 1000,
+            note = "riskRefBid=.30 · riskSpread=.01", ruleVersion = "v|${ForecastScalp.variantId(true, 600)}|P")
+        val b = ScalpBook(InMemoryScalpPersistence().also { it.seed(listOf(t)) }, variants = emptyList(), liveExtras = true)
+        b.onForecastQuote(ScalpRule.Quote(ticker, at, close, at, .29, 50.0, .30, 50.0, null, null, null), 10.0, 10.0, false)
+        val row = b.allTrades().single { it.id == "fc" }
+        assertTrue("exit ${row.exitReason} state ${row.state}", (row.exitReason ?: "").contains("stop −2¢"))
+        assertEquals(ScalpState.CLOSED, row.state)
     }
 
     @Test fun cooldownAndWindowCapLimitRoundTripsUnderNoise() {

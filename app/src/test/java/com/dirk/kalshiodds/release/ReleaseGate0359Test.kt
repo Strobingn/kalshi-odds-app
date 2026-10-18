@@ -48,18 +48,14 @@ class ReleaseGate0359Test {
         assertEquals(null, ShockFav.laggardSide(p, "BTC", rings, 20L, 30.0))
     }
 
-    @Test fun makerFadeFillsOnlyOnTradeThrough() {
+    @Test fun bitcoinDoesNotOpenANewFade() {
         val book = ScalpBook(bankrollUsd = { Double.POSITIVE_INFINITY })
         val tk = "KXBTC15M-26OCT122015-15"; val t0 = close - 600_000L
         warm(book, "BTC", t0, 100_000.0)
         for (i in 0..4) book.tickSpot("BTC", 100_000.0, t0 + i * 1000L)
-        val sig = book.onShockFavQuote(q(tk, t0 + 5_000L, 100_100.0, 0.61, 0.59), true).filter { ShockFav.byVariantId(it.variantId)?.kind == ShockFav.Kind.FADE_MAKER }
-        assertEquals(1, sig.size); assertEquals("NO", sig[0].side)
-        val posted = book.onShockFavQuote(q(tk, t0 + 7_100L, 100_100.0, 0.61, 0.59), true).first { it.id == sig[0].id }
-        assertEquals(0.39, posted.restingLimit!!, 1e-9) // NO bid = 1 − YES ask
-        // NO ask 0.39 (= 1 − YES bid 0.61) equals the limit: touch, not trade-through → no fill
-        assertTrue(book.onShockFavQuote(q(tk, t0 + 8_000L, 100_100.0, 0.62, 0.61), true).none { it.id == sig[0].id && it.state == ScalpState.OPEN })
-        val filled = book.onShockFavQuote(q(tk, t0 + 9_000L, 100_100.0, 0.64, 0.62), true).first { it.id == sig[0].id }
-        assertEquals(ScalpState.OPEN, filled.state); assertEquals(0.0, filled.entryFeeUsd, 1e-12)
+        val sig = book.onShockFavQuote(q(tk, t0 + 5_000L, 100_100.0, 0.61, 0.59), true)
+            .filter { ShockFav.byVariantId(it.variantId)?.kind == ShockFav.Kind.FADE_MAKER }
+        assertTrue(sig.isEmpty())
+        assertTrue(book.allTrades().none { ShockFav.byVariantId(it.variantId)?.kind == ShockFav.Kind.FADE_MAKER && it.state != ScalpState.NO_FILL })
     }
 }

@@ -291,7 +291,7 @@ class WiringAuditTest {
         assertNotNull(com.dirk.kalshiodds.signal.config.CredentialWriteGuard::rejectReason)
         assertNotNull(com.dirk.kalshiodds.domain.KalshiPrice::parseDollars)
         val idItems = com.dirk.kalshiodds.AppIdentity.wiringAuditItems()
-        assertTrue(idItems.any { it.contains("com.dirk.kalshiodds.kashi") })
+        assertTrue(idItems.any { it.contains("com.dirk.kalshiodds.bitscalpcursor") })
         assertTrue(idItems.any { it.contains("FileProvider") })
         assertTrue(idItems.any { it.contains("PendingIntent") })
         assertTrue(idItems.any { it.contains("diphunter_results.db") })

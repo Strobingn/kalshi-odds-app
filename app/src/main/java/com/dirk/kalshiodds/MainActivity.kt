@@ -207,6 +207,9 @@ class MainActivity : ComponentActivity() {
                             AppRoutes.CRASH_LOG to {
                                 com.dirk.kalshiodds.ui.CrashLogScreen(onBack = { navigator.back() })
                             },
+                            AppRoutes.CHAT to {
+                                com.dirk.kalshiodds.ui.ScalpChatScreen()
+                            },
                             AppRoutes.SCALP_DATA to {
                                 com.dirk.kalshiodds.ui.ScalpDataScreen(
                                     decisionViewModel,
