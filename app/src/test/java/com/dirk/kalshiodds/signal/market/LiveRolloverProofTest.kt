@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.signal.market
 
+import com.dirk.kalshiodds.data.api.openMarkets
 import com.dirk.kalshiodds.data.api.KalshiApi
 import com.dirk.kalshiodds.data.api.NetworkModule
 import com.dirk.kalshiodds.data.dto.MarketDto
@@ -26,7 +27,7 @@ class LiveRolloverProofTest {
         val log = StringBuilder()
         val first = linkedMapOf<String, MarketDto?>()
         for (s in series) {
-            val m = runCatching { api.getMarkets(seriesTicker = s, status = "open") }
+            val m = runCatching { api.openMarkets(s) }
                 .getOrElse { e ->
                     log.appendLine("$s fetch failed: ${e.message}")
                     null
@@ -51,7 +52,7 @@ class LiveRolloverProofTest {
         val rollover = MarketRollover(
             clock = clock,
             listOpen = { s ->
-                val resp = api.getMarkets(seriesTicker = s, status = "open")
+                val resp = api.openMarkets(s)
                 resp.markets.map { it.toUiModel(kindOf(s)) }
             },
             sleeper = { delay(it.coerceAtMost(3_000L)) }

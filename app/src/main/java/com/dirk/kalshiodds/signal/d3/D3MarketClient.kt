@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.signal.d3
 
+import com.dirk.kalshiodds.data.api.openMarkets
 import com.dirk.kalshiodds.data.api.KalshiApi
 import com.dirk.kalshiodds.data.dto.MarketDto
 import com.dirk.kalshiodds.domain.KalshiPrice
@@ -32,12 +33,7 @@ class D3MarketClient(
         var cursor: String? = null
         var pages = 0
         do {
-            val resp = api.getMarkets(
-                seriesTicker = seriesTicker,
-                status = "open",
-                limit = 200,
-                cursor = cursor
-            )
+            val resp = api.openMarkets(seriesTicker, 200, cursor)
             pages += 1
             for (m in resp.markets) {
                 val q = m.toD3Quote() ?: continue
