@@ -28,12 +28,16 @@ import kotlinx.coroutines.delay
 fun AiPredictionBannerLive(modifier: Modifier = Modifier) {
     val container = (LocalContext.current.applicationContext as? KalshiOddsApp)?.let { runCatching { it.container }.getOrNull() }
     val book = container?.scalp
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(Unit) { while (true) { delay(1000); now = System.currentTimeMillis() } }
-    val marks = book?.marks?.collectAsState()?.value ?: emptyMap()
-    val f = remember(marks, now) {
-        val q = AiDirection.current(marks, now)
-        AiDirection.forecast(q, now) { GbmModel.pSide(it, "YES", book?.dm60(it.ticker.uppercase(), it.nowMs) ?: 0.0) }
+    var f by remember { mutableStateOf(AiDirection.Forecast(AiDirection.Call.NONE, null, null, null)) }
+    LaunchedEffect(book) {
+        while (true) { // off Main; dm60 read under the book lock
+            f = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                val now = System.currentTimeMillis()
+                val q = AiDirection.current(book?.marks?.value ?: emptyMap(), now)
+                AiDirection.forecast(q, now) { GbmModel.pSide(it, "YES", book?.dm60Snapshot(it.ticker.uppercase(), it.nowMs) ?: 0.0) }
+            }
+            delay(1000)
+        }
     }
     AiPredictionBanner(f, modifier)
 }

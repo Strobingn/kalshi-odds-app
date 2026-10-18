@@ -21,8 +21,11 @@ object AiDirection {
     fun current(marks: Map<String, ScalpRule.Quote>, nowMs: Long): ScalpRule.Quote? {
         val open = marks.values.filter { it.ticker.uppercase().contains("BTC") && it.closeMs > nowMs }
         val close = open.minOfOrNull { it.closeMs } ?: return null
-        return open.filter { it.closeMs == close }.sortedBy { it.ticker }
-            .minByOrNull { q -> val s = q.spot; val k = q.strike; if (s != null && k != null) kotlin.math.abs(s - k) else Double.MAX_VALUE }
+        val window = open.filter { it.closeMs == close }
+        val fresh = window.filter { nowMs - it.bookAtMs <= MAX_BOOK_AGE_MS }.ifEmpty { return window.maxByOrNull { it.bookAtMs } } // stale → forecast() says no call
+        // One spot for every strike: the freshest quote's, so an old per-quote spot cannot make a stale strike look ATM.
+        val spot = fresh.filter { it.spot != null }.maxByOrNull { it.bookAtMs }?.spot
+        return fresh.sortedBy { it.ticker }.minByOrNull { q -> val k = q.strike; if (spot != null && k != null) kotlin.math.abs(spot - k) else Double.MAX_VALUE }
     }
 
     fun forecast(q: ScalpRule.Quote?, nowMs: Long, pYes: (ScalpRule.Quote) -> Double?): Forecast {

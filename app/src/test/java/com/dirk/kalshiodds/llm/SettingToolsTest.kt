@@ -14,6 +14,8 @@ class SettingToolsTest {
 
     @Test fun allowlistCoversPaperSettings() {
         assertNull(SettingTools.specFor("trailCents")) // hard 3¢ trail
+        assertNull(SettingTools.specFor("armCents")) // peak rule forced, arm unused
+        assertTrue(SettingTools.propose(c, "stopCents", "6") is SettingTools.Result.Rejected) // no-op
         assertNull(SettingTools.specFor("strategy.v2-llm.contracts")) // LLM strategy freezes its own params
         for (k in listOf("stopCents", "maxDailyLossUsd", "maxTradesPerHour", "research.kellyBankrollUsd", "bankroll",
                 "strategy.$code.cadenceSeconds", "strategy.$code.stopCents", "strategy.$code.enabled"))

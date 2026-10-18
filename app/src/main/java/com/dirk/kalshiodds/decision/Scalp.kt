@@ -1083,6 +1083,9 @@ class ScalpBook(
     /** Per-strategy window-start entry limit for original sf strategies: 2–5 minutes after the open (distinct by code). */
     fun sfOpenMin(code: String): Double = ScalpV2.sfOpenMin(code)
 
+    /** 1.0.4: [dm60] under the book lock, for readers outside the quote path (home AI banner). */
+    fun dm60Snapshot(key: String, nowMs: Long): Double = synchronized(lock) { dm60(key, nowMs) }
+
     /** Change in YES mid over the last ~60 s from this market's recorded book history (0 when unknown). */
     fun dm60(key: String, nowMs: Long): Double {
         val h = history[key] ?: return 0.0

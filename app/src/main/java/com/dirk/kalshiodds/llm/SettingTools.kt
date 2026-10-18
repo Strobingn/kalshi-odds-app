@@ -39,7 +39,7 @@ object SettingTools {
     val GLOBAL: Map<String, Spec> = linkedMapOf(
         "enabled" to b, "killSwitch" to b, "adaptive" to b, "manual" to b,
         "maxAskCents" to i(1, 55), "stopCents" to i(1, 99), "takeProfitCents" to i(0, 99), // trailCents omitted: spawnV2 hard-codes the 3¢ trail
-        "armCents" to i(1, 99, "paper trail arm threshold"), "contracts" to i(1, 1000), "greenContracts" to i(1, 500),
+        "contracts" to i(1, 1000), "greenContracts" to i(1, 500),
         "maxStakeUsd" to d(0.0, 100_000.0), "maxHoldSeconds" to i(0, 3600), "maxTradesPerHour" to i(0, 10_000),
         "maxDailyLossUsd" to d(0.0, 100_000.0), "maxOpen" to i(0, 1000), "windowSeconds" to i(10, 600),
         "dipCents" to d(0.0, 30.0), "stopLossPercent" to i(1, 99), // peak-trail knobs omitted: execution hard-codes the 3¢ trail
@@ -115,7 +115,9 @@ object SettingTools {
         val got = snapshot(norm(next), code)
         val drift = want.keys.filter { want[it] != got[it] }
         if (drift.isNotEmpty()) return Result.Rejected(key, "conflicts with related settings: " + drift.joinToString { "$it would become ${got[it]}" })
-        return Result.Proposal(key, get(c, key), newValue)
+        val old = get(c, key)
+        if (old == newValue) return Result.Rejected(key, "already $old (no change)")
+        return Result.Proposal(key, old, newValue)
     }
 
     /** Applies a proposal confirmed by Dirk. Re-validated against the current controls first. */
