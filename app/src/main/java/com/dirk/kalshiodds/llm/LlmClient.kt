@@ -39,10 +39,17 @@ class LlmClient(private val settings: LlmSettings) {
     }
 
     companion object {
-        /** Same model or a dated snapshot of it (grok-4 → grok-4-0709). grok-4 → grok-4-fast / grok-3 is a mismatch. */
+        /**
+         * 1.0.7: same model, or a version/snapshot the alias resolves to: requested + "." or "-" followed by a digit
+         * (grok-4 → grok-4.3, grok-4-0709, grok-4.3-20260101). A different family/variant is a mismatch
+         * (grok-4 → grok-4-fast, grok-4-mini, grok-3, grok-40).
+         */
         fun sameModel(requested: String, used: String): Boolean {
             val a = requested.trim().lowercase(); val b = used.trim().lowercase()
-            return a == b || Regex("^" + Regex.escape(a) + "-\\d{4}(-\\d{2}-\\d{2})?$").matches(b) || Regex("^" + Regex.escape(a) + "-\\d{8}$").matches(b)
+            if (a.isEmpty() || a == b) return a == b
+            if (!b.startsWith(a)) return false
+            val rest = b.substring(a.length)
+            return Regex("^[.-]\\d[0-9.-]*$").matches(rest)
         }
     }
 }
