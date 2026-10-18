@@ -85,7 +85,7 @@ class ReleaseGate0352Test {
 
     @Test fun leanFetchesAndSafetyMargin() {
         val repo = src("java/com/dirk/kalshiodds/data/repo/MarketRepository.kt")
-        assertEquals(4, Regex("limit = OPEN_15M_LIMIT").findAll(repo).count())
+        assertEquals(4, Regex("""OpenMarketListing\.fetch\([^\n]*OPEN_15M_LIMIT""").findAll(repo).count())
         val net = src("java/com/dirk/kalshiodds/data/api/NetworkModule.kt")
         assertTrue(net.contains("StreamJsonConverterFactory"))
         assertTrue(!net.contains("asConverterFactory("))
