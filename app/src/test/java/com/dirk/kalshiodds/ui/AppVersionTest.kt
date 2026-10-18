@@ -18,10 +18,10 @@ class AppVersionTest {
         assertEquals(BuildConfig.VERSION_NAME, AppVersion.versionName)
         assertEquals(BuildConfig.VERSION_CODE, AppVersion.versionCode)
         assertEquals(
-            "Kalshi Trader v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+            "bit-scalp-cursor v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
             AppVersion.label
         )
-        assertTrue(AppVersion.label.startsWith("Kalshi Trader v"))
+        assertTrue(AppVersion.label.startsWith("bit-scalp-cursor v"))
         assertTrue(AppVersion.label.endsWith("(${BuildConfig.VERSION_CODE})"))
     }
 
@@ -30,7 +30,7 @@ class AppVersionTest {
         val ua = NetworkModule.USER_AGENT
         assertEquals(BuildConfig.VERSION_NAME, AppVersion.versionName)
         assertTrue(ua.startsWith("DipHunter/${AppVersion.versionName}"))
-        assertTrue(ua.contains("Kalshi Trader"))
+        assertTrue(ua.contains("bit-scalp-cursor"))
         assertFalse(ua.contains("DipHunter/0.3.11"))
     }
 }

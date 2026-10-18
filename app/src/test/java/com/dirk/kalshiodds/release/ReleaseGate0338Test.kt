@@ -44,7 +44,7 @@ class ReleaseGate0338Test {
         val json = """
             [
               {"tag_name":"v0.3.38-debug","target_commitish":"kashi","draft":false,
-                "body":"app-id: com.dirk.kalshiodds.kashi\n\nKalshi Trader 0.3.38",
+                "body":"app-id: com.dirk.kalshiodds.bitscalpcursor\n\nbit-scalp-cursor 0.3.38",
                 "assets":[{"name":"DipHunter-debug.apk","browser_download_url":"https://github.com/Strobingn/kalshi-odds-app/releases/download/v0.3.38-debug/DipHunter-debug.apk"}]},
               {"tag_name":"v0.3.39-debug","target_commitish":"main","draft":false,
                 "body":"app-id: com.dirk.kalshiodds",

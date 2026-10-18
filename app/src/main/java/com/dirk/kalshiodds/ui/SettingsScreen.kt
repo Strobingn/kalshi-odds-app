@@ -410,7 +410,7 @@ fun SettingsContent(
                 fontWeight = FontWeight.SemiBold
             )
             Text(
-                "Some phones (Samsung, Xiaomi, Oppo, …) still kill background apps. Optional: set Kalshi Trader battery usage to Unrestricted. This never auto-trades.",
+                "Some phones (Samsung, Xiaomi, Oppo, …) still kill background apps. Optional: set bit-scalp-cursor battery usage to Unrestricted. This never auto-trades.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )

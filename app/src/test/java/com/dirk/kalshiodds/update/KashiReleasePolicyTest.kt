@@ -24,7 +24,7 @@ class KashiReleasePolicyTest {
         val json = """
             [
               {"tag_name":"v0.3.22-debug","target_commitish":"kashi","draft":false,
-                "body":"app-id: com.dirk.kalshiodds.kashi",
+                "body":"app-id: com.dirk.kalshiodds.bitscalpcursor",
                 "assets":[{"name":"DipHunter-debug.apk","browser_download_url":"https://github.com/Strobingn/kalshi-odds-app/releases/download/v0.3.22-debug/DipHunter-debug.apk"}]},
               {"tag_name":"v0.3.22-debug","target_commitish":"chat-GTP","draft":false,
                 "assets":[{"name":"DipHunter-debug.apk","browser_download_url":"https://github.com/Strobingn/kalshi-odds-app/releases/download/chat/DipHunter-debug.apk"}]},
@@ -52,10 +52,10 @@ class KashiReleasePolicyTest {
         val json = """
             [
               {"tag_name":"v0.3.25-debug","target_commitish":"d72b4442e221b9356368bfd60b371f4a2cfa88da","draft":false,
-                "body":"app-id: com.dirk.kalshiodds.kashi",
+                "body":"app-id: com.dirk.kalshiodds.bitscalpcursor",
                 "assets":[{"name":"DipHunter-debug.apk","browser_download_url":"https://example.invalid/nope.apk"}]},
               {"tag_name":"v0.3.24-debug","target_commitish":"9da31fc9728900272f2ff195a63fc83341e501dc","draft":false,
-                "body":"app-id: com.dirk.kalshiodds.kashi",
+                "body":"app-id: com.dirk.kalshiodds.bitscalpcursor",
                 "assets":[{"name":"DipHunter-debug.apk","browser_download_url":"https://github.com/Strobingn/kalshi-odds-app/releases/download/v0.3.24-debug/DipHunter-debug.apk"}]},
               {"tag_name":"v1.2-Claude","target_commitish":"e028133b","draft":false,
                 "assets":[{"name":"DipHunter-v1.2-Claude-55.apk","browser_download_url":"https://github.com/Strobingn/kalshi-odds-app/releases/download/v1.2-Claude/DipHunter-v1.2-Claude-55.apk"}]},
@@ -104,7 +104,7 @@ class KashiReleasePolicyTest {
         val cert = selfSigned()
         val digest = ApkArchiveInspector.certSha256(cert.encoded)
         val apk = zip(
-            "AndroidManifest.xml" to """<manifest package="com.dirk.kalshiodds.kashi"/>""".toByteArray(),
+            "AndroidManifest.xml" to """<manifest package="com.dirk.kalshiodds.bitscalpcursor"/>""".toByteArray(),
             "META-INF/CERT.RSA" to cert.encoded
         )
         val facts = ApkArchiveInspector.inspect(apk)
@@ -125,8 +125,8 @@ class KashiReleasePolicyTest {
             "android.permission.INTERNET",
             "com.dirk.kalshiodds.KalshiOddsApp",
             "com.dirk.kalshiodds.MainActivity",
-            "com.dirk.kalshiodds.kashi",
-            "com.dirk.kalshiodds.kashi.fileprovider"
+            "com.dirk.kalshiodds.bitscalpcursor",
+            "com.dirk.kalshiodds.bitscalpcursor.fileprovider"
         )
         assertEquals(KashiReleasePolicy.PACKAGE_ID, ApkArchiveInspector.packageName(manifest))
         assertEquals(
@@ -135,7 +135,7 @@ class KashiReleasePolicyTest {
                 listOf(
                     "com.dirk.kalshiodds.KalshiOddsApp",
                     "com.dirk.kalshiodds.MainActivity",
-                    "com.dirk.kalshiodds.kashi"
+                    "com.dirk.kalshiodds.bitscalpcursor"
                 )
             )
         )
@@ -169,15 +169,14 @@ class KashiReleasePolicyTest {
     }
 
     @Test
-    fun realV03030ManifestAndDebugCertPassTheInstallGate() {
+    fun realV03030KashiApkIsRefusedByThisPackage() {
         val manifest = resource("update/v0.3.30-AndroidManifest.xml")
         val cert = resource("update/v0.3.30-debug-cert.der")
-        assertEquals(KashiReleasePolicy.PACKAGE_ID, ApkArchiveInspector.packageName(manifest))
-        val apk = zipWithApkSignature("AndroidManifest.xml" to manifest, cert)
-        val facts = ApkArchiveInspector.inspect(apk)
-        assertEquals(KashiReleasePolicy.PACKAGE_ID, facts.packageName)
-        assertEquals(KashiReleasePolicy.CERT_SHA256, facts.certSha256)
-        assertTrue(ApkInstallGate.decide(facts.packageName, facts.certSha256) is ApkInstallDecision.Allow)
+        assertNull(ApkArchiveInspector.packageName(manifest))
+        assertEquals(KashiReleasePolicy.CERT_SHA256, ApkArchiveInspector.certSha256(cert))
+        val decision = ApkInstallGate.decide("com.dirk.kalshiodds.kashi", KashiReleasePolicy.CERT_SHA256)
+        assertTrue(decision is ApkInstallDecision.Reject)
+        assertTrue((decision as ApkInstallDecision.Reject).reason.contains(KashiReleasePolicy.PACKAGE_ID))
     }
 
     @Test
@@ -252,7 +251,7 @@ class KashiReleasePolicyTest {
             [
               {"tag_name":"v1.2.0-debug","draft":false,"body":"other branch",
                 "assets":[{"name":"DipHunter-debug.apk","browser_download_url":"https://github.com/Strobingn/kalshi-odds-app/releases/download/v1.2.0-debug/DipHunter-debug.apk"}]},
-              {"tag_name":"v0.3.28-debug","draft":false,"body":"app-id: com.dirk.kalshiodds.kashi",
+              {"tag_name":"v0.3.28-debug","draft":false,"body":"app-id: com.dirk.kalshiodds.bitscalpcursor",
                 "assets":[{"name":"DipHunter-debug.apk","browser_download_url":"https://github.com/Strobingn/kalshi-odds-app/releases/download/v0.3.28-debug/DipHunter-debug.apk"}]}
             ]
         """.trimIndent()
@@ -285,7 +284,7 @@ class KashiReleasePolicyTest {
             installed
         )
         assertTrue(wrongPkg is ApkInstallDecision.Reject)
-        assertTrue((wrongPkg as ApkInstallDecision.Reject).reason.contains("com.dirk.kalshiodds.kashi"))
+        assertTrue((wrongPkg as ApkInstallDecision.Reject).reason.contains("com.dirk.kalshiodds.bitscalpcursor"))
         val wrongCert = InstalledApkCheck.decide(
             KashiReleasePolicy.PACKAGE_ID,
             "ab".repeat(32),

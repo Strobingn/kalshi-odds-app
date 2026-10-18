@@ -21,9 +21,9 @@ object KashiReleasePolicy {
     const val REPO = "kalshi-odds-app"
     const val BRANCH = "kashi"
     const val ASSET_NAME = "DipHunter-debug.apk"
-    const val PACKAGE_ID = "com.dirk.kalshiodds.kashi"
+    const val PACKAGE_ID = "com.dirk.kalshiodds.bitscalpcursor"
     const val CERT_SHA256 = "64e2a43a6897c4556a36b82ea31dc89550c65e56b053658e1438bdf3c4cc4608"
-    const val APP_ID_MARKER = "app-id: com.dirk.kalshiodds.kashi"
+    const val APP_ID_MARKER = "app-id: com.dirk.kalshiodds.bitscalpcursor"
     /** 0.3.48: 100 per page, up to [MAX_PAGES] pages, so other branches' releases can't push ours out of view. */
     const val PER_PAGE = 100
     const val MAX_PAGES = 3
@@ -146,7 +146,7 @@ sealed class ApkInstallDecision {
  */
 object InstalledApkCheck {
     const val REFUSE_PACKAGE =
-        "Refusing install — this APK is not Kalshi Trader (com.dirk.kalshiodds.kashi)."
+        "Refusing install — this APK is not bit-scalp-cursor (com.dirk.kalshiodds.bitscalpcursor)."
     const val REFUSE_CERT =
         "Refusing install — the APK is not signed with this app's certificate."
     const val REFUSE_UNREADABLE =

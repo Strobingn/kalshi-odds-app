@@ -11,7 +11,7 @@ class LatestModelClientTest {
 
     private fun manifest(
         sha: String = ModelDigest.sha256Hex(model),
-        pkg: String = "com.dirk.kalshiodds.kashi",
+        pkg: String = "com.dirk.kalshiodds.bitscalpcursor",
         beat: Boolean = true,
         tag: String = "model-20261005",
         modelBrier: Double = 0.16,
@@ -75,7 +75,7 @@ class LatestModelClientTest {
         val ready = out as LatestModelClient.Outcome.Ready
         assertEquals("model-20261005", ready.fetch.manifest.tag)
         assertTrue(ready.fetch.decision.activate)
-        assertEquals("com.dirk.kalshiodds.kashi", ready.fetch.manifest.packageId)
+        assertEquals("com.dirk.kalshiodds.bitscalpcursor", ready.fetch.manifest.packageId)
     }
 
     @Test
@@ -125,7 +125,7 @@ class LatestModelClientTest {
         val index = """
             {
               "tag": "model-20261005",
-              "package": "com.dirk.kalshiodds.kashi",
+              "package": "com.dirk.kalshiodds.bitscalpcursor",
               "beat_market": true,
               "sha256": "${ModelDigest.sha256Hex(model)}",
               "model_url": "$modelUrl",
@@ -146,7 +146,7 @@ class LatestModelClientTest {
     @Test
     fun indexThatLosesIsNotUsed() {
         val index = """
-            {"tag":"model-20261005","package":"com.dirk.kalshiodds.kashi","beat_market":false,"sha256":"abc"}
+            {"tag":"model-20261005","package":"com.dirk.kalshiodds.bitscalpcursor","beat_market":false,"sha256":"abc"}
         """.trimIndent()
         val routes = mapOf(
             releasesUrl() to (200 to "[]"),

@@ -23,7 +23,7 @@ object GrokChat {
     const val URL = "https://api.x.ai/v1/chat/completions"
 
     const val SYSTEM = """
-        You tune paper Bitcoin 15-minute scalps in Kalshi Trader. You do not place Kalshi orders.
+        You tune paper Bitcoin 15-minute scalps in bit-scalp-cursor. You do not place Kalshi orders.
         The model predicts the YES contract mid, not a dollar price. Positive means UP (buy YES). Negative means DOWN (buy NO). There is no side bias. A missing forecast is NO CALL.
         Bitcoin entries are only when that side is offered under 50¢ and at least 90 seconds remain. Sell when the forecast for the held side turns down, when the bid is 2¢ under the fill, or when under 60 seconds remain. Do not hold to the end of the 15-minute window.
         You may only tighten settings: lower maxAskCents, fewer contracts, a smaller stopLossPercent, a smaller trailCents, or disable v2- strategy codes that are losing.
