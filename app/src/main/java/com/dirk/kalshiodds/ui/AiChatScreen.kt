@@ -70,8 +70,8 @@ fun AiChatScreen(viewModel: OddsViewModel) {
     }
     // 1.0.9: "Ask the AI why" — a tapped trade's prefilled question is sent once.
     val pendingAsk by com.dirk.kalshiodds.decision.insights.AskAiWhy.pending.collectAsStateWithLifecycle()
-    androidx.compose.runtime.LaunchedEffect(pendingAsk, chat) {
-        if (pendingAsk != null && chat != null) com.dirk.kalshiodds.decision.insights.AskAiWhy.take()?.let(onSend)
+    androidx.compose.runtime.LaunchedEffect(pendingAsk, chat, busy) {
+        if (pendingAsk != null && chat != null && !busy) com.dirk.kalshiodds.decision.insights.AskAiWhy.take()?.let(onSend)
     }
     AiChatContent(
         messages = messages, busy = busy, strategyStatus = status, hasKey = hasKey,

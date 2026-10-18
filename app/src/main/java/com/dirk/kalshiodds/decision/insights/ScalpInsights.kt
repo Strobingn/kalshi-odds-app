@@ -42,11 +42,16 @@ class ScalpInsights(
 
     /** Loads the last N real settled trades per scalper (off the main thread). */
     fun seed() {
+        seededWindow = controls.state.value.benchWindow
         val n = keep(controls.state.value)
         for (m in ScalpModels.ALL) {
             val rows = runCatching { store?.pageTrades(m.code, null, null, n).orEmpty() }.getOrDefault(emptyList())
             if (rows.isEmpty()) continue
-            synchronized(lock) { val q = real.getOrPut(m.code) { ArrayDeque() }; if (q.isEmpty()) rows.sortedBy { it.closedAtMs ?: 0L }.forEach { q.addLast(it) } }
+            synchronized(lock) {
+                val q = real.getOrPut(m.code) { ArrayDeque() }
+                val merged = (q + rows).distinctBy { it.id }.sortedBy { it.closedAtMs ?: 0L }.takeLast(n)
+                q.clear(); q.addAll(merged)
+            }
         }
         recompute()
     }
@@ -75,8 +80,10 @@ class ScalpInsights(
         alerts.onAiCall(callId, direction, confidence, AlertToggles(strongAi = c.alertStrongAi))?.let { runCatching { post(it) } }
     }
 
+    @Volatile private var seededWindow = -1
     fun recompute() {
         val c = controls.state.value
+        if (seededWindow != -1 && c.benchWindow > seededWindow) { seededWindow = c.benchWindow; seed(); return } // window grew: reload history
         val next = synchronized(lock) {
             (real.keys + shadow.keys + c.benchOverrides.keys).associateWith { code ->
                 val ov = when (c.benchOverrides[code]) { "ACTIVE" -> BenchOverride.FORCE_ACTIVE; "BENCHED" -> BenchOverride.FORCE_BENCHED; else -> BenchOverride.AUTO }
