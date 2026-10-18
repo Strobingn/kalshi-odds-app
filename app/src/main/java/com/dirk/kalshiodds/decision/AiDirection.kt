@@ -11,13 +11,24 @@ object AiDirection {
     enum class Call { UP, DOWN, NONE }
     data class Forecast(val call: Call, val confidence: Double?, val secondsLeft: Long?, val ticker: String?)
 
-    /** Current (soonest-closing, still-open) BTC window from the scalper's live marks. */
-    fun current(marks: Map<String, ScalpRule.Quote>, nowMs: Long): ScalpRule.Quote? =
-        marks.values.filter { it.ticker.uppercase().contains("BTC") && it.closeMs > nowMs }.minByOrNull { it.closeMs }
+    /** A quote whose book is older than this is stale: no call. */
+    const val MAX_BOOK_AGE_MS = 30_000L
+
+    /**
+     * Current BTC window from the scalper's live marks: the soonest-closing open window, and within it the strike
+     * nearest spot (the at-the-money contract = "will BTC go up from here"). Ties broken by ticker, so it is stable.
+     */
+    fun current(marks: Map<String, ScalpRule.Quote>, nowMs: Long): ScalpRule.Quote? {
+        val open = marks.values.filter { it.ticker.uppercase().contains("BTC") && it.closeMs > nowMs }
+        val close = open.minOfOrNull { it.closeMs } ?: return null
+        return open.filter { it.closeMs == close }.sortedBy { it.ticker }
+            .minByOrNull { q -> val s = q.spot; val k = q.strike; if (s != null && k != null) kotlin.math.abs(s - k) else Double.MAX_VALUE }
+    }
 
     fun forecast(q: ScalpRule.Quote?, nowMs: Long, pYes: (ScalpRule.Quote) -> Double?): Forecast {
         if (q == null) return Forecast(Call.NONE, null, null, null)
         val left = ((q.closeMs - nowMs) / 1000).coerceAtLeast(0)
+        if (nowMs - q.bookAtMs > MAX_BOOK_AGE_MS) return Forecast(Call.NONE, null, left, q.ticker) // frozen feed
         val p = runCatching { pYes(q) }.getOrNull()?.takeIf { it.isFinite() } ?: return Forecast(Call.NONE, null, left, q.ticker)
         val conf = maxOf(p, 1 - p)
         val call = when { conf - 0.5 < NEUTRAL_BAND -> Call.NONE; p > 0.5 -> Call.UP; else -> Call.DOWN }

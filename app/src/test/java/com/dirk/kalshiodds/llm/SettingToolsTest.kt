@@ -8,12 +8,14 @@ import org.junit.Test
 /** 1.0.4: AI set_setting tool — allowlist, real-money hard block, range validation. */
 class SettingToolsTest {
     private val c = ScalpControls()
-    private val code = ScalpModels.ALL.first { ScalpModels.isV2(it) }.code
+    private val code = ScalpModels.ALL.first { ScalpModels.isV2(it) && it != ScalpModels.Model.V2_LLM }.code
     private val original = ScalpModels.ALL.first { !ScalpModels.isV2(it) && !ScalpModels.isResearch(it) }.code
     private val research = ScalpModels.ALL.first { ScalpModels.isResearch(it) }.code
 
     @Test fun allowlistCoversPaperSettings() {
-        for (k in listOf("stopCents", "trailCents", "maxDailyLossUsd", "maxTradesPerHour", "research.kellyBankrollUsd", "bankroll",
+        assertNull(SettingTools.specFor("trailCents")) // hard 3¢ trail
+        assertNull(SettingTools.specFor("strategy.v2-llm.contracts")) // LLM strategy freezes its own params
+        for (k in listOf("stopCents", "maxDailyLossUsd", "maxTradesPerHour", "research.kellyBankrollUsd", "bankroll",
                 "strategy.$code.cadenceSeconds", "strategy.$code.stopCents", "strategy.$code.enabled"))
             assertNotNull(k, SettingTools.specFor(k))
         assertNull(SettingTools.specFor("strategy.not_a_code.stopCents"))

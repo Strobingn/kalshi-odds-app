@@ -47,7 +47,7 @@ class AiChatController(
             ChatMessage(nextId++, role, text, now(), key, old, new, status).also { _messages.value = _messages.value + it; store.saveAll(_messages.value) }
         }
 
-    private fun replace(m: ChatMessage) = synchronized(lock) { ensureLoadedLocked(); _messages.value = _messages.value.map { if (it.id == m.id) m else it }; store.saveAll(_messages.value) }
+    private fun replace(m: ChatMessage, gen: Long = generation) = synchronized(lock) { ensureLoadedLocked(); if (gen != generation) return@synchronized; _messages.value = _messages.value.map { if (it.id == m.id) m else it }; store.saveAll(_messages.value) }
 
     /** OpenAI-compatible APIs want user/assistant alternation: errors and change logs become assistant turns, runs are merged. */
     internal fun llmHistory(msgs: List<ChatMessage>): List<Pair<String, String>> {
@@ -97,26 +97,30 @@ class AiChatController(
         is SettingTools.Result.Rejected -> add(ChatMessage.CHANGE, (if (r.realMoneyBlocked) "BLOCKED " else "Rejected ") + "set_setting ${r.key} = $value: ${r.reason}", r.key, null, value, "rejected", gen)
     }
 
-    fun applyProposal(id: Long) = scope.launch { resolve(id, apply = true) }
-    fun cancelProposal(id: Long) = scope.launch { resolve(id, apply = false) }
+    fun applyProposal(id: Long) { val g = generation; scope.launch { resolve(id, apply = true, gen = g) } }
+    fun cancelProposal(id: Long) { val g = generation; scope.launch { resolve(id, apply = false, gen = g) } }
 
-    fun resolve(id: Long, apply: Boolean) {
+    fun resolve(id: Long, apply: Boolean, gen: Long = generation) {
         // Atomically claim the card (pending → applying) so double taps / Apply+Cancel resolve it exactly once.
         val m = synchronized(lock) {
             ensureLoadedLocked()
+            if (gen != generation) return // history was cleared after the tap
             val p = _messages.value.firstOrNull { it.id == id && it.role == ChatMessage.PROPOSAL && it.status == ChatMessage.PENDING } ?: return
             _messages.value = _messages.value.map { if (it.id == id) it.copy(status = "applying") else it }
             p
         }
         val key = m.key ?: return; val new = m.newValue ?: return
-        if (!apply) { replace(m.copy(status = ChatMessage.CANCELLED)); add(ChatMessage.CHANGE, "Cancelled: $key stays ${m.oldValue}", key, m.oldValue, new, ChatMessage.CANCELLED); return }
+        if (!apply) {
+            val nowValue = runCatching { SettingTools.get(controls.state.value, key) }.getOrDefault(m.oldValue.orEmpty())
+            replace(m.copy(status = ChatMessage.CANCELLED), gen); add(ChatMessage.CHANGE, "Cancelled: $key stays $nowValue", key, nowValue, new, ChatMessage.CANCELLED, gen); return
+        }
         var before = m.oldValue.orEmpty()
         runCatching { controls.update { cur -> before = SettingTools.get(cur, key); SettingTools.apply(cur, SettingTools.Result.Proposal(key, before, new)) } }
             .onSuccess { saved ->
-                replace(m.copy(status = ChatMessage.APPLIED))
-                add(ChatMessage.CHANGE, "Applied: $key $before → ${SettingTools.get(saved, key)}", key, before, new, ChatMessage.APPLIED)
+                replace(m.copy(status = ChatMessage.APPLIED), gen)
+                add(ChatMessage.CHANGE, "Applied: $key $before → ${SettingTools.get(saved, key)}", key, before, new, ChatMessage.APPLIED, gen)
             }
-            .onFailure { replace(m.copy(status = "rejected")); add(ChatMessage.ERROR, "Could not apply $key = $new: ${it.message}") }
+            .onFailure { replace(m.copy(status = "rejected"), gen); add(ChatMessage.ERROR, "Could not apply $key = $new: ${it.message}", gen = gen) }
     }
 
     fun clear() {
