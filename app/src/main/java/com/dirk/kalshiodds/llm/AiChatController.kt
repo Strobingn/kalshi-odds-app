@@ -56,7 +56,7 @@ class AiChatController(
         for (m in msgs) {
             val turn = when (m.role) {
                 ChatMessage.USER -> "user" to m.text
-                ChatMessage.AI -> "assistant" to m.text
+                ChatMessage.AI -> "assistant" to m.text.replace(Regex("^\\[model [^\\]]*\\]\\s*"), "")
                 ChatMessage.ERROR -> "assistant" to "(request failed: ${m.text})"
                 ChatMessage.CHANGE -> "assistant" to "(settings log: ${m.text})"
                 ChatMessage.PROPOSAL -> "assistant" to "(proposed ${m.key}: ${m.oldValue} → ${m.newValue}, ${m.status})"
@@ -81,9 +81,8 @@ class AiChatController(
                 // History before this question, alternating roles; the question itself goes last as the user turn.
                 val history = llmHistory(_messages.value.dropLast(1).takeLast(24)).let { h -> if (h.lastOrNull()?.first == "user") h.dropLast(1) else h }.takeLast(16)
                     .let { h -> h.dropWhile { it.first != "user" } }
-                val sys = "You are the AI tab of a PAPER Kalshi BTC 15-minute scalping app. Explain results concisely and plainly. " +
-                    "You cannot place orders and can never touch real money.\n" + SettingTools.describe(controls.state.value) + "\nApp state:\n" + context
-                val (model, text) = runCatching { ask(listOf("system" to sys) + history + ("user" to q)) }
+                val msgs = ChatPrompt.build(q, history, SettingTools.describe(controls.state.value), context)
+                val (model, text) = runCatching { ask(msgs) }
                     .getOrElse { e -> if (e is kotlinx.coroutines.CancellationException) throw e
                         add(ChatMessage.ERROR, "Error (${modelName()}, no fallback model): ${e.message ?: e.javaClass.simpleName}", gen = gen); return@launch }
                 if (text.isBlank()) { add(ChatMessage.ERROR, "Error ($model): the model returned an empty answer — try again or ask a shorter question.", gen = gen); return@launch }
@@ -142,4 +141,24 @@ internal fun rootCauseMessage(e: Throwable): String {
     while (seen.add(t)) { t = t.cause ?: break }
     val name = t.javaClass.simpleName
     return t.message?.takeIf { it.isNotBlank() }?.let { "$name: $it" } ?: name
+}
+
+/**
+ * 1.0.8: the AI tab's conversational prompt. User chat messages ALWAYS go through this (a general assistant that
+ * answers any question), never through [LlmPaperStrategy]'s one-line YES/NO/SKIP trade prompt.
+ */
+object ChatPrompt {
+    const val MARKER = "You are a helpful general-purpose assistant"
+    fun system(settingsDesc: String, context: String): String =
+        "$MARKER inside Dirk's Kalshi Scalper app. Answer EVERY question directly in plain language, on any topic " +
+        "(general knowledge, math, coding, markets, small talk) — never refuse for being off-topic. If a message is unclear (e.g. 'Huh'), " +
+        "briefly say what you meant last or ask what they'd like to know. Use the trading context below only when relevant. " +
+        "For BTC price questions at a strike/time with no matching 15-minute market, give your best estimate from the current BTC price, " +
+        "the on-phone model forecast and time remaining, and say clearly that it is an estimate. " +
+        "Never reply with a trade decision line like YES/NO/SKIP or 'No prediction'; the paper strategy runs separately and its status is not your answer. " +
+        "You cannot place orders and can never touch real money; settings changes are paper-only and need the user's Apply tap.\n" +
+        settingsDesc + "\nTrading context (live, may be partial):\n" + context
+
+    fun build(question: String, history: List<Pair<String, String>>, settingsDesc: String, context: String): List<Pair<String, String>> =
+        listOf("system" to system(settingsDesc, context)) + history + ("user" to question)
 }
