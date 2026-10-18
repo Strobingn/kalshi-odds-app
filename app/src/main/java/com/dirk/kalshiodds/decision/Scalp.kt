@@ -722,7 +722,13 @@ class ScalpBook(
             if (ScalpRisk.entryBlocked(_all.value, vid, key, q.nowMs)) continue // 0.3.85 churn guard (was no cooldown)
             val side = if (f > 0) "YES" else "NO"
             val ask = q.ask(side) ?: continue
-            if (!ForecastScalp.wantsEntry(mid, ya - yb, ask, kotlin.math.abs(f), q.tauS, cfg.marginUsd)) continue
+            val bitcoin = BtcDirection.isBitcoin(key)
+            if (bitcoin && !ride) continue
+            if (bitcoin) {
+                val call = BtcDirection.rideSide(pred) ?: continue
+                if (call != side) continue
+                if (!BtcAiScalp.wantsEntry(ask, kotlin.math.abs(pred), q.tauS)) continue
+            } else if (!ForecastScalp.wantsEntry(mid, ya - yb, ask, kotlin.math.abs(f), q.tauS, cfg.marginUsd)) continue
             val model = if (ride) ScalpModels.Model.FORECAST_RIDE else ScalpModels.Model.FORECAST_FADE
             val cost = ask * ScalpRule.CONTRACTS + ScalpRule.orderFee(ScalpRule.CONTRACTS, ask)
             if (openCostUsd() + cost > bankrollUsd() + 1e-9) continue
@@ -755,11 +761,18 @@ class ScalpBook(
                 if (q.nowMs >= q.closeMs || !ScalpV2.fresh(q) || !ScalpFills.canSell(t, q.bookAtMs)) return null
                 val bid = q.bid(t.side)?.takeIf { it > 0.0 } ?: return null
                 val fcEntry = t.entryPrice ?: 0.0
-                val stopHit = t.state == ScalpState.OPEN && bid <= fcEntry - ForecastScalp.STOP_C / 100.0 + 1e-9
+                val bitcoin = BtcDirection.isBitcoin(t.ticker)
+                val stopHit = t.state == ScalpState.OPEN && if (bitcoin) {
+                    BtcAiScalp.stopHit(fcEntry, bid)
+                } else {
+                    bid <= fcEntry - ForecastScalp.STOP_C / 100.0 + 1e-9
+                }
                 if (stopHit && t.isPrimary) addShadow(t, sf = false) { qq, _, b, _ -> b >= ForecastScalp.TAKE_PROFIT - 1e-9 || qq.tauS < ForecastScalp.EXIT_BEFORE_CLOSE_S }
                 val reason = t.exitReason.takeIf { t.state == ScalpState.PENDING_EXIT }
-                    ?: (if (stopHit) "stop −${ForecastScalp.STOP_C}¢" else null)
-                    ?: ForecastScalp.wantsExit(sideF, bid, (q.nowMs - (t.entryAtMs ?: q.nowMs)) / 1000.0, horizon, q.tauS, t.remaining.coerceAtLeast(1)) ?: return null
+                    ?: (if (bitcoin) BtcAiScalp.exitReason(sideF, bid, fcEntry, q.tauS) else null)
+                    ?: (if (!bitcoin && stopHit) "stop −${ForecastScalp.STOP_C}¢" else null)
+                    ?: (if (bitcoin) null else ForecastScalp.wantsExit(sideF, bid, (q.nowMs - (t.entryAtMs ?: q.nowMs)) / 1000.0, horizon, q.tauS, t.remaining.coerceAtLeast(1)))
+                    ?: return null
                 val n = minOf(t.remaining, kotlin.math.floor((q.bidSize(t.side) ?: 0.0) + 1e-9).toInt())
                 val base = if (t.state == ScalpState.OPEN) t.copy(state = ScalpState.PENDING_EXIT, exitDecidedAtMs = q.nowMs, exitReason = reason) else t
                 if (n <= 0) return base

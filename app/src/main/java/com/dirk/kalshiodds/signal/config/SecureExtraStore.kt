@@ -58,11 +58,19 @@ class SecureExtraStore(context: Context) {
         prefs.edit().remove(KEY_GITHUB).commit()
     }
 
+    /** xAI key for the Chat tab. Never logged. */
+    var xaiApiKey: String
+        get() = prefs.getString(KEY_XAI, "").orEmpty()
+        set(value) {
+            prefs.edit().putString(KEY_XAI, value.trim()).commit()
+        }
+
     companion object {
         private const val TAG = "DipHunterExtra"
         private const val PREFS_NAME = "diphunter_extra_secrets"
         private const val FALLBACK_NAME = "diphunter_extra_secrets_fallback"
         private const val KEY_GITHUB = "github_token"
+        private const val KEY_XAI = "xai_api_key"
         private const val KEY_DEMO_ID = "kalshi_demo_key_id"
         private const val KEY_DEMO_PEM = "kalshi_demo_private_key_pem"
 
@@ -129,6 +137,12 @@ class SecureExtraStore(context: Context) {
             if (destTok.isBlank() && srcTok.isNotBlank()) {
                 to.edit().putString(KEY_GITHUB, srcTok).commit()
                 from.edit().remove(KEY_GITHUB).commit()
+            }
+            val destXai = to.getString(KEY_XAI, "").orEmpty()
+            val srcXai = from.getString(KEY_XAI, "").orEmpty()
+            if (destXai.isBlank() && srcXai.isNotBlank()) {
+                to.edit().putString(KEY_XAI, srcXai).commit()
+                from.edit().remove(KEY_XAI).commit()
             }
         }
     }
