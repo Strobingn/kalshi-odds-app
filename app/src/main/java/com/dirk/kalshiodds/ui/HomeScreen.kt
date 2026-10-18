@@ -93,7 +93,10 @@ fun HomeScreen(
     paperOrders: List<com.dirk.kalshiodds.signal.paper.PaperOrder> = emptyList(),
     onSubmitPaperOrder: (String, String, String, Double?, Int, Boolean) -> Unit = { _, _, _, _, _, _ -> },
     onEditPaperOrder: (String, Double?, Int?) -> Unit = { _, _, _ -> },
-    onCancelPaperOrder: (String) -> Unit = {}
+    onCancelPaperOrder: (String) -> Unit = {},
+    /** Paper best-scalper and daily summary. Off unless the caller opts in, so existing screenshots stay put. */
+    showHomeSummary: Boolean = false,
+    homeSummary: @Composable () -> Unit = {}
 ) {
     val colors = DipTheme.colors
     val mode = TradeModeLabel.forApprove(state.settings)
@@ -183,6 +186,11 @@ fun HomeScreen(
                         contentPadding = PaddingValues(16.dp),
                         verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
+                        if (showHomeSummary) {
+                            item(key = "home-summary") {
+                                homeSummary()
+                            }
+                        }
                         if (state.feedStatus.isNotBlank()) {
                             item(key = "feed-status") {
                                 androidx.compose.material3.Text(
