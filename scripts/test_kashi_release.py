@@ -7,7 +7,7 @@ import tempfile
 import unittest
 
 SCRIPT = Path(__file__).with_name('kashi-release.sh').resolve()
-MARKER = 'app-id: com.dirk.kalshiodds.kashi'
+MARKER = 'app-id: com.dirk.kalshiodds.bitscalpcursor'
 MOCK = r'''#!/usr/bin/env python3
 import json,os,sys
 from pathlib import Path

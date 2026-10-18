@@ -13,7 +13,7 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       TAG: ${{ github.event.release.tag_name }}
-      MARKER: "app-id: com.dirk.kalshiodds.kashi"
+      MARKER: "app-id: com.dirk.kalshiodds.bitscalpcursor"
     steps:
       - name: Require app-id first line
         run: |

@@ -3,7 +3,7 @@
 # and the script fails if the published release body does not start with it.
 # usage: scripts/kashi-release.sh <tag vX.Y.Z-debug> <apk> <target-sha> <title> <notes>
 set -euo pipefail
-MARKER="app-id: com.dirk.kalshiodds.kashi"
+MARKER="app-id: com.dirk.kalshiodds.bitscalpcursor"
 TAG="$1"; APK="$2"; TARGET="$3"; TITLE="$4"; NOTES="${5:-}"
 [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-debug$ ]] || { echo "bad tag $TAG" >&2; exit 1; }
 [[ "$(basename "$APK")" == "DipHunter-debug.apk" ]] || { echo "asset must be named DipHunter-debug.apk" >&2; exit 1; }

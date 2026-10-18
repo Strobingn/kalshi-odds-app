@@ -3,6 +3,7 @@ package com.dirk.kalshiodds.data.repo
 import android.content.Context
 import com.dirk.kalshiodds.data.api.KalshiApi
 import com.dirk.kalshiodds.data.api.NetworkModule
+import com.dirk.kalshiodds.data.api.OpenMarketListing
 import com.dirk.kalshiodds.data.dto.MarketDto
 import com.dirk.kalshiodds.data.local.CachedMarketsPayload
 import com.dirk.kalshiodds.data.local.MarketCache
@@ -121,7 +122,7 @@ class MarketRepository(
     }
 
     suspend fun listOpen(series: String): List<MarketUiModel> {
-        val resp = resolveApi().getMarkets(seriesTicker = series, status = "open", limit = OPEN_15M_LIMIT)
+        val resp = OpenMarketListing.fetch(resolveApi(), series, OPEN_15M_LIMIT)
         val kind = when (series.uppercase()) {
             KalshiApi.SERIES_ETH -> SeriesKind.ETH
             KalshiApi.SERIES_SOL -> SeriesKind.SOL
@@ -198,13 +199,13 @@ class MarketRepository(
             val client = resolveApi()
             // A stored watch_btc=false must not blank Bitcoin.
             val btcDeferred = async {
-                client.getMarkets(KalshiApi.SERIES_BTC, status = "open", limit = OPEN_15M_LIMIT)
+                OpenMarketListing.fetch(client, KalshiApi.SERIES_BTC, OPEN_15M_LIMIT)
             }
             val ethDeferred = async {
-                if (watchEth) client.getMarkets(KalshiApi.SERIES_ETH, status = "open", limit = OPEN_15M_LIMIT) else null
+                if (watchEth) OpenMarketListing.fetch(client, KalshiApi.SERIES_ETH, OPEN_15M_LIMIT) else null
             }
             val solDeferred = async {
-                if (watchSol) client.getMarkets(KalshiApi.SERIES_SOL, status = "open", limit = OPEN_15M_LIMIT) else null
+                if (watchSol) OpenMarketListing.fetch(client, KalshiApi.SERIES_SOL, OPEN_15M_LIMIT) else null
             }
             val extrasDeferred = CryptoMarkets.liveTickers(extraTickers).map { ticker ->
                 async { fetchExtra(ticker) }

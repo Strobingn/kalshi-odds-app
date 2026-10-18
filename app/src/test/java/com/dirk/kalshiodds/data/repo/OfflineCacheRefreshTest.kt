@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.dirk.kalshiodds.data.api.KalshiApi
 import com.dirk.kalshiodds.data.api.KalshiRequestStatus
+import com.dirk.kalshiodds.data.dto.EventsResponse
 import com.dirk.kalshiodds.data.dto.MarketDto
 import com.dirk.kalshiodds.data.dto.MarketsResponse
 import com.dirk.kalshiodds.data.dto.SeriesResponse
@@ -107,6 +108,19 @@ class OfflineCacheRefreshTest {
         ): MarketsResponse = throw IOException("offline")
 
         override suspend fun getSeries(seriesTicker: String): SeriesResponse = SeriesResponse()
+
+        override suspend fun getMarketsForEvent(
+            seriesTicker: String,
+            eventTicker: String,
+            limit: Int?
+        ): MarketsResponse = throw IOException("offline")
+
+        override suspend fun getEvents(
+            seriesTicker: String,
+            status: String,
+            limit: Int?,
+            cursor: String?
+        ): EventsResponse = throw IOException("offline")
 
         override suspend fun getTrades(
             ticker: String,

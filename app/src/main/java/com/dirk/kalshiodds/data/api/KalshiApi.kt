@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.data.api
 
+import com.dirk.kalshiodds.data.dto.EventsResponse
 import com.dirk.kalshiodds.data.dto.MarketsResponse
 import com.dirk.kalshiodds.data.dto.SeriesResponse
 import com.dirk.kalshiodds.data.dto.TradesResponse
@@ -22,6 +23,26 @@ interface KalshiApi {
         @Query("ticker") ticker: String? = null,
         @Query("event_ticker") eventTicker: String? = null
     ): MarketsResponse
+
+    /**
+     * Same list without a status filter. `status=open` currently returns an
+     * empty page for the 15-minute crypto series while the live contract is
+     * `active`. Callers pass the event ticker from [getEvents].
+     */
+    @GET("markets")
+    suspend fun getMarketsForEvent(
+        @Query("series_ticker") seriesTicker: String,
+        @Query("event_ticker") eventTicker: String,
+        @Query("limit") limit: Int? = null
+    ): MarketsResponse
+
+    @GET("events")
+    suspend fun getEvents(
+        @Query("series_ticker") seriesTicker: String,
+        @Query("status") status: String = "open",
+        @Query("limit") limit: Int? = null,
+        @Query("cursor") cursor: String? = null
+    ): EventsResponse
 
     @GET("series/{series_ticker}")
     suspend fun getSeries(
