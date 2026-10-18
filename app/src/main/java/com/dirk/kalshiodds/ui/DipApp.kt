@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.safeDrawing
@@ -22,6 +23,9 @@ import com.dirk.kalshiodds.ui.components.DipBottomBar
  * system navigation-bar inset (the tab bar already clears it).
  */
 val LocalDipTabBar = staticCompositionLocalOf { false }
+
+/** 1.0.4: opens the AI bottom tab (used by the old Scalping arena "AI chat" entry point). */
+val LocalOpenAiTab = staticCompositionLocalOf<() -> Unit> { {} }
 
 @Composable
 fun dipContentInsets(): WindowInsets {
@@ -43,6 +47,7 @@ fun dipContentInsets(): WindowInsets {
  * A root tab with no sheet: neither callback is enabled, so Android 14+
  * gesture Back finishes the activity (predictive back-to-home).
  */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun DipApp(
     navigator: AppNavigator,
@@ -68,7 +73,10 @@ fun DipApp(
         onCancelSheet()
     }
     val showBar = navigator.current in AppRoutes.TABS
-    CompositionLocalProvider(LocalDipTabBar provides showBar) {
+    // 1.0.4: on the AI tab the keyboard replaces the tab bar so the chat input sits directly on top of the IME.
+    val imeUp = WindowInsets.isImeVisible
+    val hideBarForIme = navigator.current == AppRoutes.AI && imeUp
+    CompositionLocalProvider(LocalDipTabBar provides (showBar && !hideBarForIme), LocalOpenAiTab provides { navigator.selectTab(AppRoutes.AI) }) {
         if (!showBar) {
             RouteBody(navigator, home, settings, scorecard, data, history, signalHistory, chart, live, more, realMoney, extra)
         } else {
@@ -80,7 +88,7 @@ fun DipApp(
                 Box(Modifier.weight(1f)) {
                     RouteBody(navigator, home, settings, scorecard, data, history, signalHistory, chart, live, more, realMoney, extra)
                 }
-                DipBottomBar(
+                if (!hideBarForIme) DipBottomBar(
                     current = navigator.current,
                     onSelect = navigator::selectTab,
                     modifier = Modifier.navigationBarsPadding()

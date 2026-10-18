@@ -184,6 +184,9 @@ class MainActivity : ComponentActivity() {
                                     onOpenAlgo = { m -> oddsViewModel.openScalpAlgo(m); navigator.open(AppRoutes.SCALP_ALGO) }
                                 )
                             },
+                            AppRoutes.AI to {
+                                com.dirk.kalshiodds.ui.AiChatScreen(oddsViewModel)
+                            },
                             AppRoutes.SCALP_ALGO to {
                                 com.dirk.kalshiodds.ui.ScalpAlgoScreen(oddsViewModel, onBack = { navigator.back() })
                             },

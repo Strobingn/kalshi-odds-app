@@ -27,6 +27,7 @@ internal enum class KashiArenaTab(val label: String) { OVERVIEW("Overview"), STR
 internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) -> Unit = {}, onSettings: () -> Unit = {},
     onHistory: () -> Unit = {}, onLadder: () -> Unit = {}, initialTab: KashiArenaTab = KashiArenaTab.OVERVIEW) {
     val c = DipTheme.colors
+    val openAi = LocalOpenAiTab.current
     var tabName by rememberSaveable { mutableStateOf(initialTab.name) }
     val tab = KashiArenaTab.valueOf(tabName)
     var v2 by rememberSaveable { mutableStateOf(true) }
@@ -47,7 +48,7 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
                 IconButton(onClick = onSettings) { Icon(Icons.Outlined.Tune, "Scalping settings", tint = c.accentBlue) }
             }
         }
-        item(key = "arena-tabs") { PillTabs(KashiArenaTab.values().toList(), tab, { it.label }, { "ARENA_TAB_${it.name}" }) { tabName = it.name } }
+        item(key = "arena-tabs") { PillTabs(KashiArenaTab.values().toList(), tab, { it.label }, { "ARENA_TAB_${it.name}" }) { if (it == KashiArenaTab.CHAT) openAi() else tabName = it.name } }
         item(key = "arena-group") {
             ChipRow(listOf(true, false), v2, { if (it) "V2 strategies" else "Originals" }, { "ARENA_GROUP_$it" }) { v2 = it }
         }

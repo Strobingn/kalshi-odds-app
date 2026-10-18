@@ -11,6 +11,7 @@ class DipNavTest {
             listOf(
                 AppRoutes.HOME,
                 AppRoutes.SCALP_TAB,
+                AppRoutes.AI,
                 AppRoutes.SCORECARD,
                 AppRoutes.LIVE,
                 AppRoutes.REAL_MONEY,
@@ -20,7 +21,7 @@ class DipNavTest {
             DipNav.tabs
         )
         assertEquals(
-            listOf("Home", "Scalp", "Scorecard", "Live", "Real Money", "Data", "More"),
+            listOf("Home", "Scalp", "AI", "Scorecard", "Live", "Real Money", "Data", "More"),
             DipNav.tabs.map { DipNav.tabLabel.getValue(it) }
         )
     }

@@ -29,13 +29,15 @@ object AppRoutes {
     const val SCALP_TAB = "scalp-tab"
     /** 0.3.52 one scalp algorithm's own page. */
     const val SCALP_ALGO = "scalp-algo"
+    /** 1.0.4 AI tab: persistent chat + confirm-gated paper settings tool. */
+    const val AI = "ai"
 
     /** FieldOps bottom bar, left to right. */
-    val TABS: List<String> = listOf(HOME, SCALP_TAB, SCORECARD, LIVE, REAL_MONEY, DATA, MORE)
+    val TABS: List<String> = listOf(HOME, SCALP_TAB, AI, SCORECARD, LIVE, REAL_MONEY, DATA, MORE)
 
     val ALL: List<String> = listOf(
         HOME, SETTINGS, SCORECARD, DATA, HISTORY, SIGNAL_HISTORY, CHART, LIVE, REAL_MONEY, MORE,
-        CALIBRATION, LADDER, SCALP, SCALP_DATA, CRASH_LOG, SCALP_TAB, SCALP_ALGO
+        CALIBRATION, LADDER, SCALP, SCALP_DATA, CRASH_LOG, SCALP_TAB, SCALP_ALGO, AI
     )
 }
 

@@ -21,6 +21,7 @@ object DipNav {
     val tabLabel: Map<String, String> = mapOf(
         AppRoutes.HOME to "Home",
         AppRoutes.SCALP_TAB to "Scalp",
+        AppRoutes.AI to "AI",
         AppRoutes.SCORECARD to "Scorecard",
         AppRoutes.LIVE to "Live",
         AppRoutes.REAL_MONEY to "Real Money",
@@ -134,6 +135,7 @@ object DipNav {
         AppRoutes.HOME -> "Home tab"
         AppRoutes.SCALP_TAB -> "Scalp tab"
         AppRoutes.SCALP_ALGO -> "Scalp tab → an algorithm"
+        AppRoutes.AI -> "AI tab"
         AppRoutes.SCORECARD -> "Scorecard tab"
         AppRoutes.LIVE -> "Live tab"
         AppRoutes.REAL_MONEY -> "Real Money tab"
