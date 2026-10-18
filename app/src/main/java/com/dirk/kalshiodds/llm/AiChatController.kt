@@ -92,7 +92,7 @@ class AiChatController(
                 SettingTools.parseCalls(text).take(5).forEach { (k, v) -> propose(k, v, gen) }
             } catch (e: kotlinx.coroutines.CancellationException) { throw e
             } catch (e: Throwable) { // never a silent failure: anything unexpected becomes an error bubble
-                add(ChatMessage.ERROR, "Error: ${e.message ?: e.javaClass.simpleName}", gen = gen)
+                add(ChatMessage.ERROR, "Error: ${rootCauseMessage(e)}", gen = gen)
             } finally { if (gen == generation) _busy.value = false }
         }
     }
@@ -133,4 +133,13 @@ class AiChatController(
         synchronized(lock) { loaded = true; generation++; job?.cancel(); job = null; _messages.value = emptyList(); _busy.value = false }
         scope.launch { synchronized(lock) { if (_messages.value.isEmpty()) store.clear() else store.saveAll(_messages.value) } }
     }
+}
+
+/** 1.0.6: unwrap ExceptionInInitializerError / wrapper exceptions so the chat bubble shows the real cause. */
+internal fun rootCauseMessage(e: Throwable): String {
+    var t: Throwable = e
+    val seen = HashSet<Throwable>()
+    while (seen.add(t)) { t = t.cause ?: break }
+    val name = t.javaClass.simpleName
+    return t.message?.takeIf { it.isNotBlank() }?.let { "$name: $it" } ?: name
 }

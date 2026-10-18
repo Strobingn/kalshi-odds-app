@@ -198,8 +198,10 @@ object SettingTools {
         }
     }
 
+    // 1.0.6: never start a character class with "[:" — Android's ICU regex parses it as a POSIX set ([:alpha:])
+    // and throws PatternSyntaxException at class init (ExceptionInInitializerError); the JVM accepts it.
     /** Tool calls in the model's reply: one per line, `SET_SETTING <key> = <value>` (or JSON-ish key/value). */
-    private val CALL = Regex("""SET_SETTING\s*[:(]?\s*["']?([A-Za-z0-9_.\-]+)["']?\s*[=,:]\s*["']?([^"')\n]+?)["']?\s*\)?\s*$""", setOf(RegexOption.MULTILINE, RegexOption.IGNORE_CASE))
+    private val CALL = Regex("""SET_SETTING\s*[(:]?\s*["']?([A-Za-z0-9_.\-]+)["']?\s*[=,:]\s*["']?([^"')\n]+?)["']?\s*\)?\s*$""", setOf(RegexOption.MULTILINE, RegexOption.IGNORE_CASE))
 
     fun parseCalls(reply: String): List<Pair<String, String>> = CALL.findAll(reply).map { it.groupValues[1] to it.groupValues[2].trim() }.toList()
 
