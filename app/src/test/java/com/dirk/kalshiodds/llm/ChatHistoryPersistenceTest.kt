@@ -59,7 +59,7 @@ class ChatHistoryPersistenceTest {
         assertFalse(c1.busy.value)
 
         val p = c1.propose("stopCents", "8")
-        assertEquals(ChatMessage.PENDING, p.status)
+        assertEquals(ChatMessage.PENDING, p!!.status)
         assertEquals(6, controls.state.value.stopCents) // nothing changes before Apply
         c1.resolve(p.id, apply = true)
         assertEquals(8, controls.state.value.stopCents)
@@ -97,5 +97,30 @@ class ChatHistoryPersistenceTest {
         c.resolve(card.id, apply = false)
         assertEquals(6, controls.state.value.stopCents)
         assertTrue(c.messages.value.last().text.startsWith("Cancelled"))
+    }
+
+    @Test fun llmHistoryAlternatesRoles() {
+        val c = AiChatController(ChatHistoryStore(file()), MemoryScalpControls(), ask = { "m" to "x" }, hasKey = { true }, modelName = { "m" }, scope = TestScope())
+        val h = c.llmHistory(listOf(
+            ChatMessage(1, ChatMessage.USER, "q1", 1), ChatMessage(2, ChatMessage.ERROR, "HTTP 500", 2),
+            ChatMessage(3, ChatMessage.USER, "q2", 3), ChatMessage(4, ChatMessage.AI, "a2", 4),
+            ChatMessage(5, ChatMessage.PROPOSAL, "Change stopCents?", 5, "stopCents", "6", "8", ChatMessage.APPLIED),
+            ChatMessage(6, ChatMessage.CHANGE, "Applied: stopCents 6 → 8", 6, status = ChatMessage.APPLIED)))
+        assertEquals(listOf("user", "assistant", "user", "assistant"), h.map { it.first })
+        h.zipWithNext().forEach { (a, b) -> assertNotEquals(a.first, b.first) }
+    }
+
+    @Test fun clearDropsAnInFlightReply() = runTest {
+        val scope = TestScope(StandardTestDispatcher(testScheduler))
+        val gate = java.util.concurrent.CountDownLatch(1)
+        lateinit var c: AiChatController
+        c = AiChatController(ChatHistoryStore(file()), MemoryScalpControls(), ask = { c.clear(); "grok-4" to "late reply\nSET_SETTING stopCents = 8" },
+            hasKey = { true }, modelName = { "grok-4" }, scope = scope)
+        scope.advanceUntilIdle()
+        c.send("q", ""); scope.advanceUntilIdle()
+        assertTrue(c.messages.value.isEmpty())
+        assertFalse(c.busy.value)
+        assertTrue(ChatHistoryStore(file()).load().isEmpty())
+        gate.countDown()
     }
 }

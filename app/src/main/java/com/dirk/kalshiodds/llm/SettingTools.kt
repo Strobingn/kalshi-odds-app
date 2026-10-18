@@ -59,11 +59,33 @@ object SettingTools {
 
     private val codes: Set<String> by lazy { ScalpModels.ALL.map { it.code }.toSet() }
 
+    /**
+     * Per-family fields actually consumed by the scalper (Scalp.kt), so an applied card always changes behaviour:
+     * originals — price range / until-minute entry filter + stop % / take profit / max hold exits (no enable switch:
+     * original entries never consult disabledStrategies); V2 — permits(), plan(), cadence, side cap, exits;
+     * research — permits(), entry range, clip, edge. trailCents is never exposed (3¢ trail is a hard rule).
+     */
+    private val ORIGINAL_FIELDS = setOf("aiLearns", "minEntryCents", "maxEntryCents", "untilMinute", "stopLossPercent", "takeProfitCents", "maxHoldSeconds")
+    private val V2_FIELDS = setOf("enabled", "aiLearns", "contracts", "minEntryCents", "maxEntryCents", "stopCents", "stopLossPercent",
+        "takeProfitCents", "maxHoldSeconds", "untilMinute", "cadenceSeconds", "maxOpenPerSide")
+    private val RESEARCH_FIELDS = setOf("enabled", "aiLearns", "contracts", "minEntryCents", "maxEntryCents", "edgeCents")
+
+    fun fieldsFor(code: String): Set<String> {
+        val m = ScalpModels.ALL.firstOrNull { it.code == code } ?: return emptySet()
+        return when { ScalpModels.isResearch(m) -> RESEARCH_FIELDS; ScalpModels.isV2(m) -> V2_FIELDS; else -> ORIGINAL_FIELDS }
+    }
+
+    /** Fully normalized view, including research params (ScalpControls.normalized() leaves those raw). */
+    private fun norm(c: ScalpControls) = c.normalized().let { it.copy(research = it.research.normalized()) }
+
+    private fun snapshot(c: ScalpControls, code: String?): Map<String, String> =
+        GLOBAL.keys.associateWith { get(c, it) } + (code?.let { cd -> fieldsFor(cd).associate { f -> "strategy.$cd.$f" to get(c, "strategy.$cd.$f") } } ?: emptyMap())
+
     fun specFor(key: String): Spec? {
         val k = ALIASES[key] ?: key
         GLOBAL[k]?.let { return it }
         val parts = k.split('.')
-        if (parts.size == 3 && parts[0] == "strategy" && parts[1] in codes) return STRATEGY[parts[2]]
+        if (parts.size == 3 && parts[0] == "strategy" && parts[1] in codes && parts[2] in fieldsFor(parts[1])) return STRATEGY[parts[2]]
         return null
     }
 
@@ -85,8 +107,13 @@ object SettingTools {
         }
         val newValue = parsed.toString()
         val next = runCatching { set(c, key, newValue) }.getOrElse { return Result.Rejected(key, it.message ?: "invalid") }
-        // Cross-field rules (e.g. lateMaxS ≥ lateMinS) are enforced by normalized(); refuse rather than silently change.
-        if (get(next.normalized(), key) != newValue) return Result.Rejected(key, "conflicts with related settings (would become ${get(next.normalized(), key)})")
+        // Cross-field rules (lateMaxS ≥ lateMinS, maxEntry ≥ minEntry, …) are enforced by normalization at trade time.
+        // Refuse if normalizing would change the requested value OR any other setting, so the card is exactly what runs.
+        val code = key.split('.').takeIf { it.size == 3 }?.get(1)
+        val want = snapshot(norm(c), code) + (key to newValue)
+        val got = snapshot(norm(next), code)
+        val drift = want.keys.filter { want[it] != got[it] }
+        if (drift.isNotEmpty()) return Result.Rejected(key, "conflicts with related settings: " + drift.joinToString { "$it would become ${got[it]}" })
         return Result.Proposal(key, get(c, key), newValue)
     }
 
@@ -94,7 +121,7 @@ object SettingTools {
     fun apply(c: ScalpControls, p: Result.Proposal): ScalpControls {
         val again = propose(c, p.key, p.newValue)
         require(again is Result.Proposal) { (again as Result.Rejected).reason }
-        val next = set(c, p.key, p.newValue)
+        val next = set(c, p.key, p.newValue).let { it.copy(research = it.research.normalized()) }
         if (!p.key.startsWith("strategy.") || p.key.endsWith(".enabled") || p.key.endsWith(".aiLearns")) return next.normalized()
         val code = p.key.split('.')[1]
         return next.copy(strategySettings = next.strategySettings + (code to next.settings(code).manual())).normalized()
@@ -181,6 +208,7 @@ object SettingTools {
         appendLine("Global keys (current value, range):")
         GLOBAL.forEach { (k, s) -> appendLine("$k=${get(c, k)} ${range(s)}") }
         appendLine("Per-strategy keys strategy.<code>.<field> with field in: " + STRATEGY.entries.joinToString { (k, s) -> "$k ${range(s)}" })
+        appendLine("Fields by family — original strategies: ${ORIGINAL_FIELDS.joinToString()}; v2 strategies: ${V2_FIELDS.joinToString()}; research strategies: ${RESEARCH_FIELDS.joinToString()}.")
         appendLine("cadenceSeconds is the strategy's cooldown between entries. 'bankroll' is research.kellyBankrollUsd.")
     }
 

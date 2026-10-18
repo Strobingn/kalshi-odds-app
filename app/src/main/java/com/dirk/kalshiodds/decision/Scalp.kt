@@ -1614,7 +1614,9 @@ class ScalpBook(
         if (!s.aiLearns) return
         val defMax = when { Research.isResearch(code) -> 99; ScalpV2.isV2(code) -> Math.round(ScalpV2.spec(code).maxAsk * 100).toInt(); else -> Math.round(ScalpRule.ENTRY_HI * 100).toInt() }
         val nx = Research.learn(code, s, t.netUsd ?: 0.0, defMax)
-        if (nx != s) controls.save(cur.copy(strategySettings = cur.strategySettings + (code to nx)))
+        // 1.0.4: atomic with the AI tab's settings cards (same learning step, re-read under the repository lock).
+        if (nx != s) controls.update { c2 -> val s2 = c2.settings(code); val n2 = if (s2 == s) nx else Research.learn(code, s2, t.netUsd ?: 0.0, defMax)
+            if (n2 == s2) c2 else c2.copy(strategySettings = c2.strategySettings + (code to n2)) }
     }
 
     /** Original strategies: Dirk's price range / until-minute sliders gate new entries (v2, research and LLM have their own). */

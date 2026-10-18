@@ -94,6 +94,8 @@ data class ScalpTradeFeedback(val trades: Int = 0, val wins: Int = 0, val meanNe
 interface ScalpControlsRepository {
     val state: StateFlow<ScalpControls>
     fun save(value: ScalpControls)
+    /** 1.0.4: atomic read-modify-write (AI settings card vs. "AI learns"); returns the saved value. */
+    fun update(f: (ScalpControls) -> ScalpControls): ScalpControls = synchronized(this) { f(state.value).also { save(it) }.let { state.value } }
     fun entries(now: Long): Int
     fun recordEntry(at: Long)
     fun feedback(code: String): ScalpTradeFeedback

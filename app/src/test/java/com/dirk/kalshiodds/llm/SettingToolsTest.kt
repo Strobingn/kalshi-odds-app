@@ -8,7 +8,9 @@ import org.junit.Test
 /** 1.0.4: AI set_setting tool — allowlist, real-money hard block, range validation. */
 class SettingToolsTest {
     private val c = ScalpControls()
-    private val code = ScalpModels.ALL.first().code
+    private val code = ScalpModels.ALL.first { ScalpModels.isV2(it) }.code
+    private val original = ScalpModels.ALL.first { !ScalpModels.isV2(it) && !ScalpModels.isResearch(it) }.code
+    private val research = ScalpModels.ALL.first { ScalpModels.isResearch(it) }.code
 
     @Test fun allowlistCoversPaperSettings() {
         for (k in listOf("stopCents", "trailCents", "maxDailyLossUsd", "maxTradesPerHour", "research.kellyBankrollUsd", "bankroll",
@@ -60,6 +62,23 @@ class SettingToolsTest {
         assertEquals(20, cd.settings(code).cadenceSeconds)
         val off = SettingTools.apply(c, SettingTools.propose(c, "strategy.$code.enabled", "false") as SettingTools.Result.Proposal)
         assertTrue(code in off.disabledStrategies)
+    }
+
+    @Test fun perFamilyAllowlistOnlyExposesConsumedKnobs() {
+        assertNull(SettingTools.specFor("strategy.$original.enabled")) // original entries never consult disabledStrategies
+        assertNull(SettingTools.specFor("strategy.$original.cadenceSeconds"))
+        assertNotNull(SettingTools.specFor("strategy.$original.maxEntryCents"))
+        assertNotNull(SettingTools.specFor("strategy.$research.edgeCents"))
+        assertNull(SettingTools.specFor("strategy.$research.stopCents"))
+        assertNull(SettingTools.specFor("strategy.$code.trailCents")) // 3¢ trail is a hard rule
+    }
+
+    @Test fun crossFieldConflictsAreRejectedNotSilentlyClamped() {
+        assertTrue(SettingTools.propose(c, "research.lateMaxS", "60") is SettingTools.Result.Rejected) // default lateMinS 120
+        assertTrue(SettingTools.propose(c, "research.lateHiCents", "70") is SettingTools.Result.Rejected) // default lateLo 80
+        val withMin = SettingTools.apply(c, SettingTools.propose(c, "strategy.$code.minEntryCents", "30") as SettingTools.Result.Proposal)
+        assertTrue(SettingTools.propose(withMin, "strategy.$code.maxEntryCents", "20") is SettingTools.Result.Rejected)
+        assertTrue(SettingTools.propose(withMin, "strategy.$code.maxEntryCents", "40") is SettingTools.Result.Proposal)
     }
 
     @Test fun parsesToolCallLines() {
