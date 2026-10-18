@@ -22,6 +22,8 @@ class LlmPaperStrategy(private val book: ScalpBook, private val settings: LlmSet
     private val _status = MutableStateFlow("needs key")
     val status: StateFlow<String> = _status
     private var lastWindow: String? = null
+    /** 1.0.9 strong-AI-call alert hook: (callId, "UP"/"DOWN", confidence 0–1). Notification only. */
+    @Volatile var onCall: ((String, String, Double) -> Unit)? = null
 
     fun start(scope: CoroutineScope) = scope.launch {
         while (isActive) {
@@ -43,6 +45,7 @@ class LlmPaperStrategy(private val book: ScalpBook, private val settings: LlmSet
         val r = withContext(Dispatchers.IO) { client.chatReply(listOf("system" to "You are a cautious BTC scalping assistant.", "user" to prompt), 20) }
         val reply = r.text
         val d = parse(reply)
+        d?.let { (side, conf) -> runCatching { onCall?.invoke(q.ticker, if (side.equals("YES", true)) "UP" else "DOWN", conf) } }
         _status.value = "model ${r.model} · " + (if (d == null) "skipped ${q.ticker}: ${reply.take(40)}" else {
             val placed = book.llmEntry(q, d.first, d.second)
             "${q.ticker}: ${d.first} conf ${"%.2f".format(Locale.US, d.second)} → ${placed ?: "paper entry queued"}"

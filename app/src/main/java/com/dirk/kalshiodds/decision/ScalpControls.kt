@@ -22,7 +22,19 @@ data class ScalpControls(
     /** Kalshi Scalper: contracts a net-positive scalper buys, filled by walking real book depth. */
     val greenContracts: Int = 25,
     /** Research strategies: shared parameters (window exposure cap, Kelly, maker edge, late window). */
-    val research: Research.Params = Research.Params()
+    val research: Research.Params = Research.Params(),
+    /** 1.0.9 auto-bench: settled trades judged per scalper (net after fees < 0 → benched; shadow > 0 → back). */
+    val benchWindow: Int = 30,
+    val autoBench: Boolean = true,
+    /** 1.0.9 manual bench override per scalper code: "ACTIVE" or "BENCHED" (absent = auto). */
+    val benchOverrides: Map<String, String> = emptyMap(),
+    /** 1.0.9 estimated slippage, cents per contract per taker leg (reality-check line on scalper cards). */
+    val slipCents: Double = 1.0,
+    /** 1.0.9 alerts (Android notifications, once per event). */
+    val alertHotStreak: Boolean = true,
+    val alertBigLoss: Boolean = true,
+    val bigLossUsd: Double = 5.0,
+    val alertStrongAi: Boolean = true
 ) {
     fun settings(code: String): ScalpStrategySettings = strategySettings[code]?.normalized() ?: ScalpStrategySettings()
     fun normalized() = copy(strategySettings = strategySettings.mapValues { it.value.normalized() }, peakTrailCents = peakTrailCents.coerceIn(1, 20), stopLossPercent = stopLossPercent.coerceIn(1, 99), maxAskCents = maxAskCents.coerceIn(1, 55), greenContracts = greenContracts.coerceIn(1, 500), stopCents = stopCents.coerceIn(1, 99),
@@ -32,7 +44,9 @@ data class ScalpControls(
         maxHoldSeconds = maxHoldSeconds.coerceIn(0, 3600), maxTradesPerHour = maxTradesPerHour.coerceIn(0, 10000),
         maxDailyLossUsd = maxDailyLossUsd.takeIf { it.isFinite() }?.coerceIn(0.0, 100_000.0) ?: 0.0,
         maxOpen = maxOpen.coerceIn(0, 1000), windowSeconds = windowSeconds.coerceIn(10, 600),
-        dipCents = dipCents.takeIf { it.isFinite() }?.coerceIn(0.0, 30.0) ?: 0.0)
+        dipCents = dipCents.takeIf { it.isFinite() }?.coerceIn(0.0, 30.0) ?: 0.0,
+        benchWindow = benchWindow.coerceIn(5, 500), slipCents = slipCents.takeIf { it.isFinite() }?.coerceIn(0.0, 10.0) ?: 1.0,
+        bigLossUsd = bigLossUsd.takeIf { it.isFinite() }?.coerceIn(0.5, 10_000.0) ?: 5.0)
     fun permits(modelCode: String) = enabled && !killSwitch && modelCode !in disabledStrategies
     fun plan(base: ScalpV2.Plan, modelCode: String? = null): ScalpV2.Plan {
         val chosen = if (!manual) base else base.copy(

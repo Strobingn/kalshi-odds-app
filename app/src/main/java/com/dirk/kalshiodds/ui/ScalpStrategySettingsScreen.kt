@@ -39,7 +39,7 @@ internal fun StrategyKnob(label: String, value: Int, range: IntRange, tag: Strin
 
 @Composable
 internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: ScalpControls, onBack: () -> Unit = {},
-    onChange: (ScalpStrategySettings) -> Unit = {}, onEnabled: (Boolean) -> Unit = {}) {
+    onChange: (ScalpStrategySettings) -> Unit = {}, onEnabled: (Boolean) -> Unit = {}, onBenchOverride: (String?) -> Unit = {}) {
     val c = DipTheme.colors
     val settings = controls.settings(model.code)
     fun set(next: ScalpStrategySettings) = onChange(next.manual())
@@ -65,6 +65,15 @@ internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: Sc
                 Switch(checked = enabled, onCheckedChange = onEnabled, modifier = Modifier.testTag("STRATEGY_ENABLED"))
             }
             if (!controls.enabled || controls.killSwitch) Text("Global entries are paused. Existing protective exits keep running.", color = c.spot, style = MaterialTheme.typography.bodySmall)
+            // 1.0.9 manual bench override (Auto · Force trade · Force bench).
+            val ov = controls.benchOverrides[model.code]
+            val benchedNow = model.code in com.dirk.kalshiodds.decision.insights.BenchRegistry.benched.value
+            Text("Bench · " + when (ov) { "ACTIVE" -> "forced trading"; "BENCHED" -> "forced benched"; else -> if (benchedNow) "auto · BENCHED (shadow only)" else "auto" }, color = if (benchedNow || ov == "BENCHED") c.spot else c.textPrimary, fontWeight = FontWeight.SemiBold)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(null to "Auto", "ACTIVE" to "Force trade", "BENCHED" to "Force bench").forEach { (v, label) ->
+                    FilterChip(selected = ov == v, onClick = { onBenchOverride(v) }, label = { Text(label) })
+                }
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("AI learns", color = c.textPrimary, fontWeight = FontWeight.SemiBold)
