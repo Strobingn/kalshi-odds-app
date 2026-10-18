@@ -23,7 +23,7 @@ object HomePaperCash {
     const val DIALOG_TITLE = "Reset paper cash?"
     const val CONFIRM = "Reset"
     const val BODY =
-        "Sets paper cash back to the configured start and archives this run's fills. " +
+        "Sets paper cash back to the configured start. The previous run is archived. " +
             "Nothing is deleted. No Kalshi order and no remote rows."
 
     fun cash(v: Double): String = if (!v.isFinite()) "—" else String.format(Locale.US, "$%.2f", v)
