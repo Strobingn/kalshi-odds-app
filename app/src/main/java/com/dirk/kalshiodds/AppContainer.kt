@@ -76,6 +76,17 @@ class AppContainer(context: Context) {
     val llmSettings by lazy { com.dirk.kalshiodds.llm.LlmSettings(app) }
     val llmClient by lazy { com.dirk.kalshiodds.llm.LlmClient(llmSettings) }
     val llmStrategy by lazy { com.dirk.kalshiodds.llm.LlmPaperStrategy(scalp, llmSettings, llmClient) }
+    /** 1.0.4 AI tab: persistent chat + confirm-gated PAPER settings tool. No path to real-money orders. */
+    val aiChat by lazy {
+        com.dirk.kalshiodds.llm.AiChatController(
+            store = com.dirk.kalshiodds.llm.ChatHistoryStore(File(app.filesDir, com.dirk.kalshiodds.llm.ChatHistoryStore.FILE_NAME)),
+            controls = scalpControls,
+            ask = { msgs -> llmClient.chatReply(msgs, 800).let { it.model to it.text } },
+            hasKey = { llmSettings.hasKey },
+            modelName = { llmSettings.model },
+            scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO + com.dirk.kalshiodds.crash.SafeScopes.handler("ai-chat"))
+        )
+    }
     val scalp = com.dirk.kalshiodds.decision.ScalpBook(
         (resultsImpl as? com.dirk.kalshiodds.decision.ScalpPersistence)
             ?: com.dirk.kalshiodds.decision.InMemoryScalpPersistence(),

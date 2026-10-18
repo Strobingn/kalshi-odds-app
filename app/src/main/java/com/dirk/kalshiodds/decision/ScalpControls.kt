@@ -94,6 +94,8 @@ data class ScalpTradeFeedback(val trades: Int = 0, val wins: Int = 0, val meanNe
 interface ScalpControlsRepository {
     val state: StateFlow<ScalpControls>
     fun save(value: ScalpControls)
+    /** 1.0.4: atomic read-modify-write (AI settings card vs. "AI learns"); returns the saved value. */
+    fun update(f: (ScalpControls) -> ScalpControls): ScalpControls = synchronized(this) { f(state.value).also { save(it) }.let { state.value } }
     fun entries(now: Long): Int
     fun recordEntry(at: Long)
     fun feedback(code: String): ScalpTradeFeedback
@@ -109,7 +111,7 @@ class MemoryScalpControls(initial: ScalpControls = ScalpControls()) : ScalpContr
         if (learned.add(trade.id)) lessons[code] = feedback(code).observe(trade)
         if (learned.size > 20000) learned.remove(learned.first())
     }
-    override fun save(value: ScalpControls) { state.value = value.normalized() }
+    override fun save(value: ScalpControls) = synchronized(this) { state.value = value.normalized() }
     override fun entries(now: Long): Int = synchronized(times) { times.filterKeys { it in (now / 1000 - 3600)..(now / 1000) }.values.sum() }
     override fun recordEntry(at: Long) = synchronized(times) {
         val sec = at / 1000
@@ -151,7 +153,7 @@ class SavedScalpControls(context: Context, private val flushDelayMs: Long = 1_00
     private var countAtSec = Long.MIN_VALUE
     private var cachedCount = 0
     init { prefs.registerOnSharedPreferenceChangeListener(listener) }
-    override fun save(value: ScalpControls) {
+    override fun save(value: ScalpControls) = synchronized(this) { // same monitor as update(): direct saves serialize with it
         val clean = value.normalized()
         prefs.edit().putString("settings", json.encodeToString(clean)).apply()
         state.value = clean

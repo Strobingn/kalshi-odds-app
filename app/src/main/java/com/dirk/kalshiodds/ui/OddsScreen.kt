@@ -26,6 +26,7 @@ fun OddsScreen(
     val paperOrders by viewModel.paperOrders.collectAsStateWithLifecycle()
     HomeScreen(
         state = state,
+        aiBanner = { AiPredictionBannerLive() },
         paperOrders = paperOrders,
         onSubmitPaperOrder = viewModel::submitPaperOrder,
         onEditPaperOrder = viewModel::editPaperOrder,
