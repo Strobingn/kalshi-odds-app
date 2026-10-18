@@ -34,7 +34,7 @@ class OfflineCacheRefreshTest {
         val repo = repo(cache, object : ThrowingApi() {
             override suspend fun getMarkets(
                 seriesTicker: String,
-                status: String,
+                status: String?,
                 limit: Int?,
                 cursor: String?,
                 ticker: String?,
@@ -57,7 +57,7 @@ class OfflineCacheRefreshTest {
         val repo = repo(cache, object : ThrowingApi() {
             override suspend fun getMarkets(
                 seriesTicker: String,
-                status: String,
+                status: String?,
                 limit: Int?,
                 cursor: String?,
                 ticker: String?,
@@ -99,12 +99,14 @@ class OfflineCacheRefreshTest {
     private open class ThrowingApi : KalshiApi {
         override suspend fun getMarkets(
             seriesTicker: String,
-            status: String,
+            status: String?,
             limit: Int?,
             cursor: String?,
             ticker: String?,
             eventTicker: String?
         ): MarketsResponse = throw IOException("offline")
+
+        override suspend fun getEvents(seriesTicker: String, status: String?, limit: Int?) = com.dirk.kalshiodds.data.dto.EventsResponse()
 
         override suspend fun getSeries(seriesTicker: String): SeriesResponse = SeriesResponse()
 
