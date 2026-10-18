@@ -85,6 +85,7 @@ class KalshiOddsApp : Application() {
         }
         appScope.launch(Dispatchers.IO) {
             runCatching { MarketRefreshScheduler.enqueue(this@KalshiOddsApp) }
+            runCatching { com.dirk.kalshiodds.worker.HomeSummaryScheduler.sync(this@KalshiOddsApp) }
             runCatching { LiveSignalsKeepAlive.enqueueWatchdogs(this@KalshiOddsApp) }
             runCatching { container.archive.repairInterruptedSessions(container.sessionId, System.currentTimeMillis()) }
             runCatching { com.dirk.kalshiodds.crash.ProcessExitLog.capture(this@KalshiOddsApp) }
