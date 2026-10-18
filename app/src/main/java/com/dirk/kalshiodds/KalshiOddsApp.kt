@@ -42,6 +42,14 @@ class KalshiOddsApp : Application() {
         runCatching { com.dirk.kalshiodds.decision.GbmModel.load(assets.open("btc15_gbm.json").bufferedReader().readText()) }
         container = AppContainer(this)
         runCatching { container.llmStrategy.start(appScope) }
+        // 1.0.9: auto-bench + alerts (paper only). Seeding reads SQLite, so off the main thread.
+        appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                container.scalpInsights.start()
+                container.llmStrategy.onCall = { id, dir, conf -> container.scalpInsights.onAiCall(id, dir, conf) }
+                container.scalpControls.state.collect { runCatching { container.scalpInsights.recompute() } }
+            }
+        }
         appScope.launch { runCatching { container.preferences.migrateAutopilotModePaperOnly() } }
         runCatching { container.lastOrderError.clearStaleLifecycleNotice() }
         HeavyMlGuard.persistHook = { reason ->

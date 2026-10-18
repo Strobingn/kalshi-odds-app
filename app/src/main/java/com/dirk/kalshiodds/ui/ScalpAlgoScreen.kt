@@ -153,7 +153,11 @@ fun ScalpAlgoContent(d: ScalpAlgoDetail, onBack: () -> Unit = {}, paged: android
 @Composable
 private fun ScalpWindowTrade(t: ScalpTrade, selected: Boolean, bid: Double?) {
     val c = DipTheme.colors
-    FieldCard(accentColor = if (selected) c.accentOrange else if ((t.netUsd ?: 0.0) > 0) c.up else if ((t.netUsd ?: 0.0) < 0) c.down else null) {
+    val openAi = LocalOpenAiTab.current
+    // 1.0.9: tap a trade → AI tab with a prefilled "why" question (sent automatically).
+    FieldCard(onClick = {
+        com.dirk.kalshiodds.decision.insights.AskAiWhy.ask(com.dirk.kalshiodds.decision.insights.AskAiWhy.question(com.dirk.kalshiodds.decision.ScalpModels.modelOf(t)?.label ?: t.variantId, t)); openAi()
+    }, accentColor = if (selected) c.accentOrange else if ((t.netUsd ?: 0.0) > 0) c.up else if ((t.netUsd ?: 0.0) < 0) c.down else null) {
         Text("${if (t.side == "YES") "UP / YES" else "DOWN / NO"} · ${ScalpAlgoCopy.state(t)} · ${t.remaining} ct left", color = c.textPrimary, fontWeight = FontWeight.SemiBold)
         Text("Signal ${ScalpTabCopy.cents(t.signalAsk)} · ${ScalpAlgoCopy.time(t.signalAtMs)} ET", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
         com.dirk.kalshiodds.decision.ScalpFills.orders(t).forEach { o -> Text("BUY limit posted ${ScalpTabCopy.cents(o.price)} · ${windowTime(o.atMs)} ET", color = c.textSecondary, style = MaterialTheme.typography.bodySmall) }
@@ -167,6 +171,7 @@ private fun ScalpWindowTrade(t: ScalpTrade, selected: Boolean, bid: Double?) {
         }
         Text(ScalpAlgoCopy.moneyLine(t) + (t.unrealizedUsd(bid)?.let { " · open ${ScalpTabCopy.money(it)}" } ?: ""), color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
         t.exitReason?.let { Text(it, color = c.textSecondary, style = MaterialTheme.typography.labelSmall) }
+        Text("Tap to ask the AI why →", color = c.accentBlue, style = MaterialTheme.typography.labelSmall)
         if (com.dirk.kalshiodds.decision.ScalpV2.isV2(t.variantId) && t.state in listOf(ScalpState.OPEN, ScalpState.PENDING_EXIT)) Text(com.dirk.kalshiodds.decision.ScalpV2.riskLabel(t), color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
     }
 }

@@ -97,6 +97,13 @@ class AppContainer(context: Context) {
         // 0.3.59 experiment: scalpers' paper bankroll is unlimited (no cash check). P&L still per algo; Autopilot unchanged.
         bankrollUsd = { Double.POSITIVE_INFINITY }
     )
+    /** 1.0.9 paper insights: auto-bench, alerts (hot streak / big loss / strong AI). Never touches real money. */
+    val scalpInsightNotifier by lazy { com.dirk.kalshiodds.signal.notify.ScalpInsightNotifier(app) }
+    val scalpInsights by lazy {
+        com.dirk.kalshiodds.decision.insights.ScalpInsights(scalp, scalpControls, resultsImpl as? com.dirk.kalshiodds.decision.ScalpPersistence) { a ->
+            scalpInsightNotifier.post(a.kind.name, a.key, a.title, a.body)
+        }
+    }
     /** Once-per-event trade notifications. */
     val tradeEvents = com.dirk.kalshiodds.signal.notify.TradeEventNotifier(app)
     /** 0.3.39: errors back off (30 s doubling to 10 min) and resume; they never disable Autopilot. */

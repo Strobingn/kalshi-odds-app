@@ -1220,6 +1220,8 @@ class ScalpBook(
         /** 0.3.69 green size: contracts per trade for scalpers net positive after fees. */
         const val GREEN_CLIP_DEFAULT = 25
         const val GREEN_MIN_TRADES = 20
+        /** 1.0.9 note marker: entry taken while its scalper was benched (shadow, not counted in paper P&L). */
+        const val BENCH_SHADOW = "bench=shadow"
     }
     private class Shadow(val tradeId: String, val ticker: String, val side: String, val n: Int, val cost: Double, val entryAtMs: Long,
                          val sf: Boolean, val exit: (ScalpRule.Quote, Double, Double, Double?) -> Boolean) { var value: Double? = null }
@@ -1407,14 +1409,30 @@ class ScalpBook(
         add.size
     }
 
+    /** 1.0.9 auto-bench: model codes whose new entries become shadow-only (paper P&L frozen, hypothetical still tracked). */
+    @Volatile var benched: Set<String> = emptySet()
+    /** 1.0.9: called (cheaply, under the book lock) when a primary or bench-shadow trade settles. Arg = scalper code. */
+    @Volatile var onSettled: ((String, ScalpTrade) -> Unit)? = null
+
+    private fun benchShadow(t: ScalpTrade): ScalpTrade {
+        if (!t.isPrimary || benched.isEmpty()) return t
+        val code = ScalpModels.modelOf(t)?.code ?: return t
+        if (code !in benched) return t
+        return t.copy(ruleVersion = t.ruleVersion.removeSuffix("|P") + "|S", note = (t.note + "; " + BENCH_SHADOW).trimStart(';', ' '))
+    }
+
     private fun save(tIn: ScalpTrade) {
         val prev = _all.value.firstOrNull { it.id == tIn.id }
-        val t0 = if (prev == null) fairGapEntryFilter(settingsEntryFilter(tIn)) else tIn
+        val tf = if (prev == null) fairGapEntryFilter(settingsEntryFilter(tIn)) else tIn
+        // Bench after the live entry gates, so the shadow book only holds entries the scalper would really have taken.
+        val t0 = if (prev == null && tf.ruleVersion.endsWith("|P")) benchShadow(tf) else tf
         val t = if (liveExtras) withDetail(t0, prev) else t0
+        if (t.state == ScalpState.CLOSED && prev != null && prev.state != ScalpState.CLOSED && (t.isPrimary || BENCH_SHADOW in t.note))
+            onSettled?.let { cb -> ScalpModels.modelOf(if (t.isPrimary) t else t.copy(ruleVersion = t.ruleVersion.removeSuffix("|S") + "|P"))?.code?.let { runCatching { cb(it, t) } } }
         // 0.3.67: enqueue DB+stats off the quote lock; flushBatches drains on a worker.
         writeQ.merge(t.id, t to prev) { old, neu -> neu.first to (old.second ?: neu.second) }
         if (writeQ.size >= 80) flushWrites() // 0.3.67: never let the queue grow unboundedly (soak / burst quotes)
-        if (prev == null && liveExtras) spawnV2(if (t0 !== tIn) tIn else t)
+        if (prev == null && liveExtras) spawnV2(if (t0 !== tIn) tIn else t) // benched originals still seed their v2 copies
         if (t.state == ScalpState.CLOSED && prev?.state != ScalpState.CLOSED && ScalpV2.isV2(t.variantId))
             ScalperBrain.parse(t.note)?.let { x -> ScalperBrain.learn(ScalpModels.modelOf(t)?.code ?: t.variantId, x, (t.netUsd ?: 0.0) > 0.0) }
         val cur = _all.value

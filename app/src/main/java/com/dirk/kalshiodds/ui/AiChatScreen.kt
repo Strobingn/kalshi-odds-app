@@ -48,11 +48,7 @@ fun AiChatScreen(viewModel: OddsViewModel) {
     val status = container?.llmStrategy?.status?.collectAsStateWithLifecycle()?.value ?: "unavailable"
     val settings = container?.llmSettings
     var hasKey by remember { mutableStateOf(settings?.hasKey == true) }
-    AiChatContent(
-        messages = messages, busy = busy, strategyStatus = status, hasKey = hasKey,
-        initialKey = settings?.apiKey.orEmpty(), initialModel = settings?.model.orEmpty(), initialBase = settings?.baseUrl.orEmpty(),
-        onSaveKey = { k, m, b -> settings?.apiKey = k; settings?.model = m; settings?.baseUrl = b; hasKey = settings?.hasKey == true },
-        onSend = { q ->
+    val onSend: (String) -> Unit = { q ->
             val rows = KashiArenaData.rows(st, true, KashiArenaData.Sort.NET) + KashiArenaData.rows(st, false, KashiArenaData.Sort.NET)
             val board = rows.sortedByDescending { it.netUsd }.take(25).joinToString("\n") {
                 String.format(Locale.US, "%s [%s]: net $%.2f, %d trades, %d wins", it.model.label, it.model.code, it.netUsd, it.roundTrips, it.wins)
@@ -71,7 +67,17 @@ fun AiChatScreen(viewModel: OddsViewModel) {
                 "\nOpen KXBTC15M markets:\n" + mkts.ifBlank { "(none loaded)" } +
                 "\nRecent scalper results (net):\n" + board + "\nLLM paper strategy status (separate; not a chat answer): $status"
             chat?.send(q, ctx) ?: Unit
-        },
+    }
+    // 1.0.9: "Ask the AI why" — a tapped trade's prefilled question is sent once.
+    val pendingAsk by com.dirk.kalshiodds.decision.insights.AskAiWhy.pending.collectAsStateWithLifecycle()
+    androidx.compose.runtime.LaunchedEffect(pendingAsk, chat, busy) {
+        if (pendingAsk != null && chat != null && !busy) com.dirk.kalshiodds.decision.insights.AskAiWhy.take()?.let(onSend)
+    }
+    AiChatContent(
+        messages = messages, busy = busy, strategyStatus = status, hasKey = hasKey,
+        initialKey = settings?.apiKey.orEmpty(), initialModel = settings?.model.orEmpty(), initialBase = settings?.baseUrl.orEmpty(),
+        onSaveKey = { k, m, b -> settings?.apiKey = k; settings?.model = m; settings?.baseUrl = b; hasKey = settings?.hasKey == true },
+        onSend = onSend,
         onApply = { chat?.applyProposal(it) }, onCancel = { chat?.cancelProposal(it) }, onClear = { chat?.clear() },
         unavailable = chat == null
     )

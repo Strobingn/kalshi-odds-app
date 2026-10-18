@@ -35,7 +35,8 @@ fun SwarmScalpSettingsDialog(onClose: () -> Unit) {
         val model = selected
         if (model != null) ScalpStrategySettingsContent(model, saved, onBack = { selected = null },
             onChange = { store.save(store.state.value.copy(strategySettings = store.state.value.strategySettings + (model.code to it))) },
-            onEnabled = { enabled -> val current = store.state.value; store.save(current.copy(disabledStrategies = if (enabled) current.disabledStrategies - model.code else current.disabledStrategies + model.code)) })
+            onEnabled = { enabled -> val current = store.state.value; store.save(current.copy(disabledStrategies = if (enabled) current.disabledStrategies - model.code else current.disabledStrategies + model.code)) },
+            onBenchOverride = { v -> val cur = store.state.value; store.save(cur.copy(benchOverrides = if (v == null) cur.benchOverrides - model.code else cur.benchOverrides + (model.code to v))) })
         else if (global) SwarmScalpSettingsContent(saved, onBack = { global = false }) { store.save(it); global = false }
         else ScalpSettingsChooser(onClose, { global = true }, { selected = it })
     }
@@ -127,6 +128,17 @@ fun SwarmScalpSettingsContent(initial: ScalpControls, onBack: () -> Unit = {}, o
                 SwarmNumber("Open positions (0 = unlimited)", draft.maxOpen.toDouble(), 0.0..1000.0, true, ::number) { draft = draft.copy(maxOpen = it.toInt()) }
                 SwarmNumber("Daily net loss limit ($; 0 = off)", draft.maxDailyLossUsd, 0.0..100000.0, true, ::number) { draft = draft.copy(maxDailyLossUsd = it) }
                 Text("Daily loss uses realized V2 results after fees and resets at midnight Eastern. Counts and limits survive restarts.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+            } }
+            item { SwarmCard("Auto-bench, reality check & alerts") {
+                SwarmToggle("Auto-bench losing scalpers", draft.autoBench) { draft = draft.copy(autoBench = it) }
+                SwarmNumber("Bench after settled trades (N)", draft.benchWindow.toDouble(), 5.0..500.0, draft.autoBench, ::number) { draft = draft.copy(benchWindow = it.toInt()) }
+                Text("After N settled trades a scalper net negative after fees is benched: no new paper trades, but its signals keep shadow-tracking. It returns when its last N shadow results would be net positive. Per-scalper override is in each strategy's settings.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+                SwarmNumber("Estimated slippage ($ cents/contract/leg)", draft.slipCents, 0.0..10.0, true, ::number) { draft = draft.copy(slipCents = it) }
+                SwarmToggle("Alert: hot streak (5 wins in a row)", draft.alertHotStreak) { draft = draft.copy(alertHotStreak = it) }
+                SwarmToggle("Alert: big single-trade loss", draft.alertBigLoss) { draft = draft.copy(alertBigLoss = it) }
+                SwarmNumber("Big loss threshold ($)", draft.bigLossUsd, 0.5..10000.0, draft.alertBigLoss, ::number) { draft = draft.copy(bigLossUsd = it) }
+                SwarmToggle("Alert: strong AI call (≥70% UP/DOWN)", draft.alertStrongAi) { draft = draft.copy(alertStrongAi = it) }
+                Text("Paper only. Each alert fires once per event.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
             } }
             item { SwarmCard("Optional dip filter") {
                 SwarmNumber("Feature window (seconds)", draft.windowSeconds.toDouble(), 10.0..600.0, true, ::number) { draft = draft.copy(windowSeconds = it.toInt()) }
