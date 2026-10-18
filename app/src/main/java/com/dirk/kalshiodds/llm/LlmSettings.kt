@@ -23,12 +23,16 @@ class LlmSettings(context: Context) {
         get() = prefs?.getString("base", DEFAULT_BASE).orEmpty().ifBlank { DEFAULT_BASE }
         set(v) { prefs?.edit()?.putString("base", v.trim())?.apply() }
     var model: String
-        get() = prefs?.getString("model", DEFAULT_MODEL).orEmpty().ifBlank { DEFAULT_MODEL }
+        get() = migrateModel(prefs?.getString("model", DEFAULT_MODEL).orEmpty()).also { m ->
+            if (prefs != null && prefs.getString("model", null) != m) prefs.edit().putString("model", m).apply() }
         set(v) { prefs?.edit()?.putString("model", v.trim())?.apply() }
     val hasKey: Boolean get() = apiKey.isNotBlank()
 
     companion object {
         const val DEFAULT_BASE = "https://api.x.ai/v1"
-        const val DEFAULT_MODEL = "grok-4"
+        /** 1.0.8: Grok 4.7 (xAI's public API id; the "Fast" serving tier has no separate public API id). */
+        const val DEFAULT_MODEL = "grok-4.7"
+        /** Blank or the old 1.0.x default "grok-4" → [DEFAULT_MODEL]; any other explicit choice is kept. */
+        fun migrateModel(saved: String): String = saved.trim().let { if (it.isEmpty() || it.equals("grok-4", true)) DEFAULT_MODEL else it }
     }
 }
