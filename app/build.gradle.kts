@@ -14,8 +14,8 @@ android {
         applicationId = "com.dirk.kalshiodds.bitscalpcursor"
         minSdk = 26
         targetSdk = 35
-        versionCode = 105
-        versionName = "0.3.90"
+        versionCode = 106
+        versionName = "0.3.91"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
