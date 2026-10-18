@@ -123,4 +123,19 @@ class ChatHistoryPersistenceTest {
         assertTrue(ChatHistoryStore(file()).load().isEmpty())
         gate.countDown()
     }
+
+    @Test fun sendBeforeRestoreKeepsOldHistory_andCardResolvesOnce() = runTest {
+        ChatHistoryStore(file()).append(ChatMessage(1, ChatMessage.USER, "old", 1))
+        val scope = TestScope(StandardTestDispatcher(testScheduler))
+        val controls = MemoryScalpControls()
+        val c = AiChatController(ChatHistoryStore(file()), controls, ask = { "m" to "x" }, hasKey = { true }, modelName = { "m" }, scope = scope)
+        val p = c.propose("stopCents", "8")!! // before the async restore ran
+        assertEquals(listOf("old", "Change stopCents?"), ChatHistoryStore(file()).load().map { it.text })
+        assertEquals(2L, p.id)
+        c.resolve(p.id, apply = true); c.resolve(p.id, apply = false)
+        assertEquals(8, controls.state.value.stopCents)
+        assertEquals(1, c.messages.value.count { it.role == ChatMessage.CHANGE })
+        scope.advanceUntilIdle()
+        assertEquals(3, c.messages.value.size)
+    }
 }

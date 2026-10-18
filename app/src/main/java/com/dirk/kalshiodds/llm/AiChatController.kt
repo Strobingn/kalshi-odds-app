@@ -30,15 +30,24 @@ class AiChatController(
     @Volatile private var generation = 0L
     private var job: kotlinx.coroutines.Job? = null
 
-    init { scope.launch { val h = store.load(); synchronized(lock) { val all = h + _messages.value.filter { m -> h.none { it.id == m.id } }; nextId = maxOf(nextId, (all.maxOfOrNull { it.id } ?: 0L) + 1); _messages.value = all } } }
+    private var loaded = false
+
+    /** Restores history exactly once, under [lock], before any add/replace/clear touches the list or the file. */
+    private fun ensureLoadedLocked() {
+        if (loaded) return
+        val h = store.load(); _messages.value = h; nextId = (h.maxOfOrNull { it.id } ?: 0L) + 1; loaded = true
+    }
+
+    init { scope.launch { synchronized(lock) { ensureLoadedLocked() } } }
 
     private fun add(role: String, text: String, key: String? = null, old: String? = null, new: String? = null, status: String? = null, gen: Long = generation): ChatMessage? =
         synchronized(lock) {
+            ensureLoadedLocked()
             if (gen != generation) return null
             ChatMessage(nextId++, role, text, now(), key, old, new, status).also { _messages.value = _messages.value + it; store.saveAll(_messages.value) }
         }
 
-    private fun replace(m: ChatMessage) = synchronized(lock) { _messages.value = _messages.value.map { if (it.id == m.id) m else it }; store.saveAll(_messages.value) }
+    private fun replace(m: ChatMessage) = synchronized(lock) { ensureLoadedLocked(); _messages.value = _messages.value.map { if (it.id == m.id) m else it }; store.saveAll(_messages.value) }
 
     /** OpenAI-compatible APIs want user/assistant alternation: errors and change logs become assistant turns, runs are merged. */
     internal fun llmHistory(msgs: List<ChatMessage>): List<Pair<String, String>> {
@@ -92,7 +101,13 @@ class AiChatController(
     fun cancelProposal(id: Long) = scope.launch { resolve(id, apply = false) }
 
     fun resolve(id: Long, apply: Boolean) {
-        val m = _messages.value.firstOrNull { it.id == id && it.role == ChatMessage.PROPOSAL && it.status == ChatMessage.PENDING } ?: return
+        // Atomically claim the card (pending → applying) so double taps / Apply+Cancel resolve it exactly once.
+        val m = synchronized(lock) {
+            ensureLoadedLocked()
+            val p = _messages.value.firstOrNull { it.id == id && it.role == ChatMessage.PROPOSAL && it.status == ChatMessage.PENDING } ?: return
+            _messages.value = _messages.value.map { if (it.id == id) it.copy(status = "applying") else it }
+            p
+        }
         val key = m.key ?: return; val new = m.newValue ?: return
         if (!apply) { replace(m.copy(status = ChatMessage.CANCELLED)); add(ChatMessage.CHANGE, "Cancelled: $key stays ${m.oldValue}", key, m.oldValue, new, ChatMessage.CANCELLED); return }
         var before = m.oldValue.orEmpty()
@@ -105,7 +120,7 @@ class AiChatController(
     }
 
     fun clear() {
-        synchronized(lock) { generation++; job?.cancel(); job = null; _messages.value = emptyList(); _busy.value = false }
+        synchronized(lock) { loaded = true; generation++; job?.cancel(); job = null; _messages.value = emptyList(); _busy.value = false }
         scope.launch { synchronized(lock) { if (_messages.value.isEmpty()) store.clear() else store.saveAll(_messages.value) } }
     }
 }

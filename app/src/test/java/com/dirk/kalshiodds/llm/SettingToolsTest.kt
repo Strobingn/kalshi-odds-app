@@ -18,6 +18,7 @@ class SettingToolsTest {
             assertNotNull(k, SettingTools.specFor(k))
         assertNull(SettingTools.specFor("strategy.not_a_code.stopCents"))
         assertNull(SettingTools.specFor("llm.model"))
+        assertNull(SettingTools.specFor("peakTrailEnabled")) // inert in execution (hard 3¢ trail)
         val r = SettingTools.propose(c, "somethingElse", "1") as SettingTools.Result.Rejected
         assertFalse(r.realMoneyBlocked)
     }

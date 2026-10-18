@@ -37,12 +37,12 @@ object SettingTools {
     private val b = Spec(Kind.BOOL)
 
     val GLOBAL: Map<String, Spec> = linkedMapOf(
-        "enabled" to b, "killSwitch" to b, "adaptive" to b, "manual" to b, "peakTrailEnabled" to b,
+        "enabled" to b, "killSwitch" to b, "adaptive" to b, "manual" to b,
         "maxAskCents" to i(1, 55), "stopCents" to i(1, 99), "takeProfitCents" to i(0, 99), "trailCents" to i(1, 20),
         "armCents" to i(1, 99, "paper trail arm threshold"), "contracts" to i(1, 1000), "greenContracts" to i(1, 500),
         "maxStakeUsd" to d(0.0, 100_000.0), "maxHoldSeconds" to i(0, 3600), "maxTradesPerHour" to i(0, 10_000),
         "maxDailyLossUsd" to d(0.0, 100_000.0), "maxOpen" to i(0, 1000), "windowSeconds" to i(10, 600),
-        "dipCents" to d(0.0, 30.0), "peakTrailCents" to i(1, 20), "stopLossPercent" to i(1, 99),
+        "dipCents" to d(0.0, 30.0), "stopLossPercent" to i(1, 99), // peak-trail knobs omitted: execution hard-codes the 3¢ trail
         "research.edgeCents" to d(0.0, 20.0), "research.lateMinS" to i(30, 600), "research.lateMaxS" to i(30, 900),
         "research.lateLoCents" to i(50, 98), "research.lateHiCents" to i(50, 99), "research.makerEdgeCents" to d(0.0, 20.0),
         "research.kellyFraction" to d(0.0, 1.0), "research.windowCapUsd" to d(1.0, 100_000.0), "research.clip" to i(1, 500),
@@ -122,7 +122,8 @@ object SettingTools {
         val again = propose(c, p.key, p.newValue)
         require(again is Result.Proposal) { (again as Result.Rejected).reason }
         val next = set(c, p.key, p.newValue).let { it.copy(research = it.research.normalized()) }
-        if (!p.key.startsWith("strategy.") || p.key.endsWith(".enabled") || p.key.endsWith(".aiLearns")) return next.normalized()
+        if (!p.key.startsWith("strategy.") || p.key.endsWith(".enabled")) return next.normalized()
+        // Like the settings screen: any manual per-strategy change (incl. the AI-learns toggle) restarts the learner.
         val code = p.key.split('.')[1]
         return next.copy(strategySettings = next.strategySettings + (code to next.settings(code).manual())).normalized()
     }
