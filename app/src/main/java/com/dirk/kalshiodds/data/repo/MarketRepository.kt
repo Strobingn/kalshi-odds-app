@@ -122,7 +122,7 @@ class MarketRepository(
     }
 
     suspend fun listOpen(series: String): List<MarketUiModel> {
-        val resp = resolveApi().openMarkets(series, OPEN_15M_LIMIT)
+        val resp = resolveApi().openMarkets(series, limit = OPEN_15M_LIMIT)
         val kind = when (series.uppercase()) {
             KalshiApi.SERIES_ETH -> SeriesKind.ETH
             KalshiApi.SERIES_SOL -> SeriesKind.SOL
@@ -199,13 +199,13 @@ class MarketRepository(
             val client = resolveApi()
             // A stored watch_btc=false must not blank Bitcoin.
             val btcDeferred = async {
-                client.openMarkets(KalshiApi.SERIES_BTC, OPEN_15M_LIMIT)
+                client.openMarkets(KalshiApi.SERIES_BTC, limit = OPEN_15M_LIMIT)
             }
             val ethDeferred = async {
-                if (watchEth) client.openMarkets(KalshiApi.SERIES_ETH, OPEN_15M_LIMIT) else null
+                if (watchEth) client.openMarkets(KalshiApi.SERIES_ETH, limit = OPEN_15M_LIMIT) else null
             }
             val solDeferred = async {
-                if (watchSol) client.openMarkets(KalshiApi.SERIES_SOL, OPEN_15M_LIMIT) else null
+                if (watchSol) client.openMarkets(KalshiApi.SERIES_SOL, limit = OPEN_15M_LIMIT) else null
             }
             val extrasDeferred = CryptoMarkets.liveTickers(extraTickers).map { ticker ->
                 async { fetchExtra(ticker) }
