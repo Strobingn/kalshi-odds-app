@@ -25,7 +25,7 @@ class ScalpInsightNotifier(private val context: Context) {
             }
             val pending = PendingIntent.getActivity(
                 context,
-                7000 + (key.hashCode() and 0xfff),
+                12000 + (key.hashCode() and 0xfff),
                 intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
@@ -39,7 +39,7 @@ class ScalpInsightNotifier(private val context: Context) {
                 .setContentIntent(pending)
                 .build()
             NotificationManagerCompat.from(context)
-                .notify(7000 + (key.hashCode() and 0xfff), notification)
+                .notify(12000 + (key.hashCode() and 0xfff), notification)
         }
     }
 
