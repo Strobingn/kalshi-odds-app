@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit
  * than the one requested (other than a dated snapshot such as grok-4-0709) the reply is rejected with an error.
  */
 class LlmClient(private val settings: LlmSettings) {
-    private val http = OkHttpClient.Builder().callTimeout(60, TimeUnit.SECONDS).build()
+    private val http = OkHttpClient.Builder().callTimeout(150, TimeUnit.SECONDS).readTimeout(150, TimeUnit.SECONDS).build()
 
     data class Reply(val text: String, val requested: String, val model: String)
 

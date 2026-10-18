@@ -35,7 +35,7 @@ class AiChatController(
     /** Restores history exactly once, under [lock], before any add/replace/clear touches the list or the file. */
     private fun ensureLoadedLocked() {
         if (loaded) return
-        val h = store.load(); _messages.value = h; nextId = (h.maxOfOrNull { it.id } ?: 0L) + 1; loaded = true
+        val h = runCatching { store.load() }.getOrDefault(emptyList()); _messages.value = h; nextId = (h.maxOfOrNull { it.id } ?: 0L) + 1; loaded = true
     }
 
     init { scope.launch { synchronized(lock) { ensureLoadedLocked() } } }
@@ -44,10 +44,11 @@ class AiChatController(
         synchronized(lock) {
             ensureLoadedLocked()
             if (gen != generation) return null
-            ChatMessage(nextId++, role, text, now(), key, old, new, status).also { _messages.value = _messages.value + it; store.saveAll(_messages.value) }
+            // 1.0.5: show the bubble even if saving to disk fails (a persistence error must never hide a reply).
+            ChatMessage(nextId++, role, text, now(), key, old, new, status).also { _messages.value = _messages.value + it; runCatching { store.saveAll(_messages.value) } }
         }
 
-    private fun replace(m: ChatMessage, gen: Long = generation) = synchronized(lock) { ensureLoadedLocked(); if (gen != generation) return@synchronized; _messages.value = _messages.value.map { if (it.id == m.id) m else it }; store.saveAll(_messages.value) }
+    private fun replace(m: ChatMessage, gen: Long = generation) = synchronized(lock) { ensureLoadedLocked(); if (gen != generation) return@synchronized; _messages.value = _messages.value.map { if (it.id == m.id) m else it }; runCatching { store.saveAll(_messages.value) }; Unit }
 
     /** OpenAI-compatible APIs want user/assistant alternation: errors and change logs become assistant turns, runs are merged. */
     internal fun llmHistory(msgs: List<ChatMessage>): List<Pair<String, String>> {
@@ -69,7 +70,8 @@ class AiChatController(
 
     /** [context] is a short leaderboard / strategy status block from the UI. */
     fun send(question: String, context: String) {
-        val q = question.trim(); if (q.isEmpty() || _busy.value) return
+        val q = question.trim(); if (q.isEmpty()) return
+        if (_busy.value) { scope.launch { add(ChatMessage.ERROR, "Still waiting for the previous answer — try again when it arrives.") }; return }
         _busy.value = true
         val gen = generation
         job = scope.launch {
@@ -84,9 +86,13 @@ class AiChatController(
                 val (model, text) = runCatching { ask(listOf("system" to sys) + history + ("user" to q)) }
                     .getOrElse { e -> if (e is kotlinx.coroutines.CancellationException) throw e
                         add(ChatMessage.ERROR, "Error (${modelName()}, no fallback model): ${e.message ?: e.javaClass.simpleName}", gen = gen); return@launch }
+                if (text.isBlank()) { add(ChatMessage.ERROR, "Error ($model): the model returned an empty answer — try again or ask a shorter question.", gen = gen); return@launch }
                 val body = SettingTools.stripCalls(text)
                 add(ChatMessage.AI, "[model $model] " + body.ifBlank { "(proposed a settings change)" }, gen = gen) ?: return@launch
                 SettingTools.parseCalls(text).take(5).forEach { (k, v) -> propose(k, v, gen) }
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e
+            } catch (e: Throwable) { // never a silent failure: anything unexpected becomes an error bubble
+                add(ChatMessage.ERROR, "Error: ${e.message ?: e.javaClass.simpleName}", gen = gen)
             } finally { if (gen == generation) _busy.value = false }
         }
     }

@@ -81,7 +81,7 @@ class AppContainer(context: Context) {
         com.dirk.kalshiodds.llm.AiChatController(
             store = com.dirk.kalshiodds.llm.ChatHistoryStore(File(app.filesDir, com.dirk.kalshiodds.llm.ChatHistoryStore.FILE_NAME)),
             controls = scalpControls,
-            ask = { msgs -> llmClient.chatReply(msgs, 800).let { it.model to it.text } },
+            ask = { msgs -> llmClient.chatReply(msgs, 4000).let { it.model to it.text } },
             hasKey = { llmSettings.hasKey },
             modelName = { llmSettings.model },
             scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO + com.dirk.kalshiodds.crash.SafeScopes.handler("ai-chat"))
