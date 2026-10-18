@@ -77,18 +77,19 @@ object BtcAiScalp {
 }
 
 /**
- * Bitcoin scalps whose settled paper total was already negative.
+ * Settled losing Bitcoin scalps, rewritten onto the same exit as [BtcAiScalp].
  *
- * The numbers are [G14Copies.SOURCES]: the Supabase snapshot stored when the
- * g14 copies were added. Every row has at least [BtcScalpTuner.MIN_TRADES]
- * trades and a negative net. That is the same bar the chat tuner uses.
+ * The numbers are [G14Copies.SOURCES]. Every row has at least
+ * [BtcScalpTuner.MIN_TRADES] trades and a negative net. Forecast ride already
+ * uses [BtcAiScalp] and is left on that path. Every other settled loser keeps
+ * its own signal, then:
  *
- * Forecast ride (`fcride`) is the one code that still opens a new KXBTC15M
- * trade. Its Bitcoin entries already follow [BtcAiScalp] instead of the
- * 40–60¢ band, the fade, and the hold toward the 15-minute close that lost
- * $85.13 over 185 trades. Every other settled loser is blocked, including the
- * g14 copies that hold to settlement. Shock fade-maker (sf28) is blocked too:
- * its v2 copy lost $25.56 over 53 trades, and a new Bitcoin entry does not fade.
+ * - buys only when that side is offered under 50¢ and at least 90 seconds remain
+ * - sells on a 2¢ drop under the fill, or when under 60 seconds remain
+ * - does not hold to the 15-minute settlement
+ *
+ * Fade (sf28 and forecast fade) used to buy the dumped side. On Bitcoin it
+ * buys the side the move went to.
  */
 object BtcRedo {
     const val KEPT_RIDE = "fcride"
@@ -98,7 +99,8 @@ object BtcRedo {
         return row.takeIf { it.netUsd < 0.0 && it.trades >= BtcScalpTuner.MIN_TRADES }
     }
 
-    fun blocksNewBitcoinEntry(code: String): Boolean {
+    /** True when this code's old Bitcoin rules lost money and the redo applies. */
+    fun applies(code: String): Boolean {
         if (code == KEPT_RIDE) return false
         if (G14Copies.isCopyCode(code) || G14Copies.isCopyVariant(code)) return true
         if (code == ForecastScalp.FADE_PREFIX || code.startsWith(ScalpV2.PREFIX + ForecastScalp.FADE_PREFIX)) return true
@@ -106,7 +108,19 @@ object BtcRedo {
         return settled(code) != null
     }
 
-    /** Shock / open-50 variant. Fade-maker and a settled-negative code cannot open. */
-    fun blocksShock(p: ShockFav.Params): Boolean =
-        p.kind == ShockFav.Kind.FADE_MAKER || blocksNewBitcoinEntry(p.code)
+    fun appliesShock(p: ShockFav.Params): Boolean =
+        p.kind == ShockFav.Kind.FADE_MAKER || applies(p.code)
+
+    /** Under 50¢, with enough time left to get out before the window ends. */
+    fun entryOk(ask: Double, tauS: Double): Boolean =
+        ask.isFinite() && ask > 0.0 && ask < BtcAiScalp.MAX_ASK - 1e-12 &&
+            ScalpRule.buyPriceOk(ask) &&
+            tauS.isFinite() && tauS >= BtcAiScalp.MIN_TAU_S
+
+    /** Positive move buys YES. Negative move buys NO. Flat is no trade. */
+    fun rideMoveSide(moveBp: Double): String? = when {
+        moveBp > 0.0 -> "YES"
+        moveBp < 0.0 -> "NO"
+        else -> null
+    }
 }

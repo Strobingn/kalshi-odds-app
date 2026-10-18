@@ -927,9 +927,16 @@ class ScalpBook(
         for (t in mine) {
             if (t.state != ScalpState.PENDING_ENTRY) continue
             val pk0 = ShockFav.byVariantId(t.variantId)
-            if (BtcDirection.isBitcoin(t.ticker) && pk0 != null && BtcRedo.blocksShock(pk0)) {
-                changed += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; losing bitcoin scalp does not open")
-                continue
+            if (BtcDirection.isBitcoin(t.ticker) && pk0 != null && BtcRedo.appliesShock(pk0)) {
+                val askNow = q.ask(t.side)
+                val tooDear = askNow != null && askNow >= BtcAiScalp.MAX_ASK - 1e-12
+                val tooLate = q.tauS < BtcAiScalp.MIN_TAU_S || q.nowMs >= q.closeMs
+                if (askNow == null || !BtcRedo.entryOk(askNow, q.tauS)) {
+                    if (tooDear || tooLate || q.nowMs - t.signalAtMs > giveUpMs(t)) {
+                        changed += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; redone bitcoin scalp needs the ask under 50¢ with 90s left")
+                    }
+                    continue
+                }
             }
             val age = q.nowMs - t.signalAtMs
             if (q.nowMs >= q.closeMs || age > giveUpMs(t)) {
@@ -956,7 +963,7 @@ class ScalpBook(
                 }
                 continue
             }
-            if (pk?.kind == ShockFav.Kind.FADE_MAKER) {
+            if (pk?.kind == ShockFav.Kind.FADE_MAKER && !(BtcDirection.isBitcoin(t.ticker) && BtcRedo.appliesShock(pk))) {
                 // 0.3.59 maker: post at the side's bid 2 s after the signal; filled only when the ask trades THROUGH (≤ px − 1¢).
                 val px = t.restingLimit
                 if (px != null && !ScalpRule.buyPriceOk(px)) { changed += cappedEntry(t, q.nowMs); continue }
@@ -1019,7 +1026,7 @@ class ScalpBook(
             val favLeg = ShockFav.isFavLeg(t.variantId)
             // 0.3.61 per-bet stop on every sf leg (fav legs included): bid ≤ entry − stop.
             val stopC = ShockFav.stopC(p)
-            val redo = BtcDirection.isBitcoin(t.ticker) && BtcRedo.blocksShock(p)
+            val redo = BtcDirection.isBitcoin(t.ticker) && BtcRedo.appliesShock(p)
             val redoReason = if (redo) BtcAiScalp.exitReason(Double.NaN, bid, t.entryPrice ?: 0.0, q.tauS) else null
             if (redo && redoReason == null) continue
             val stopHit = t.state == ScalpState.OPEN && !redo && bid <= (t.entryPrice ?: 0.0) - stopC / 100.0 + 1e-9
@@ -1101,7 +1108,9 @@ class ScalpBook(
                         ShockFav.Kind.LAGGARD -> ShockFav.laggardSide(p, coin, sfSpot, sec, q.tauS)?.takeIf { sd -> q.ask(sd)?.let { it in 0.10..0.90 } == true }
                         ShockFav.Kind.IMBALANCE -> ShockFav.imbalanceSide(p, yb, ya, q.yesBidSize ?: 0.0, q.yesAskSize ?: 0.0, q.tauS)?.takeIf { sd -> q.ask(sd)?.let { it in 0.10..0.90 } == true }
                         ShockFav.Kind.SIMPLE_DIP -> simpleDipSide(key, p, q)
-                        ShockFav.Kind.FADE_MAKER -> if (q.tauS in 120.0..870.0) ShockFav.moveBp(ring, sec, 5)?.takeIf { kotlin.math.abs(it) >= p.xBp }?.let { if (it > 0) "NO" else "YES" } else null
+                        ShockFav.Kind.FADE_MAKER -> if (q.tauS in 120.0..870.0) ShockFav.moveBp(ring, sec, 5)?.takeIf { kotlin.math.abs(it) >= p.xBp }?.let { move ->
+                            if (BtcDirection.isBitcoin(q.ticker) && BtcRedo.appliesShock(p)) BtcRedo.rideMoveSide(move) else if (move > 0) "NO" else "YES"
+                        } else null
                         else -> null
                     } ?: continue
                     val ask = q.ask(side) ?: continue
@@ -1118,7 +1127,9 @@ class ScalpBook(
                             sfEnter(q, p, p.shockId, side, ask, sideFair, openCost, bankroll, "shock")?.let { changed += it; openCost += it.entryCostUsd }
                     }
                 }
-                if (p.fav && mine.none { it.variantId == p.favId } && q.tauS <= p.favTmax && q.tauS >= p.favTmin) {
+                val redoneFav = BtcDirection.isBitcoin(q.ticker) && BtcRedo.applies(p.code)
+                val favWindow = if (redoneFav) q.tauS >= BtcAiScalp.MIN_TAU_S else q.tauS <= p.favTmax && q.tauS >= p.favTmin
+                if (p.fav && mine.none { it.variantId == p.favId } && favWindow) {
                     val fy = if (p.brti && sigma != null) {
                         brtiFair ?: run {
                             val m = (60.0 - q.tauS).toInt().coerceIn(0, 60)
@@ -1129,7 +1140,9 @@ class ScalpBook(
                     for (side in listOf("YES", "NO")) {
                         val f = if (side == "YES") fy else 1.0 - fy
                         val ask = q.ask(side) ?: continue
-                        if (!ShockFav.favEntryOk(p, f, ask, q.tauS, coin, q.closeMs)) continue
+                        if (redoneFav) {
+                            if (!BtcRedo.entryOk(ask, q.tauS) || f < p.fmin - 1e-9 || f - ask < p.gap - 1e-9) continue
+                        } else if (!ShockFav.favEntryOk(p, f, ask, q.tauS, coin, q.closeMs)) continue
                         sfEnter(q, p, p.favId, side, ask, f, openCost, bankroll, "late fav")?.let { changed += it; openCost += it.entryCostUsd }
                         break
                     }
@@ -1145,7 +1158,7 @@ class ScalpBook(
                         openCost: Double, bankroll: Double, what: String): ScalpTrade? {
         // Fade makers choose their purchase bid after the delay; the post/fill paths enforce the ceiling.
         if (ScalpRisk.entryBlocked(_all.value, vid, q.ticker, q.nowMs)) return null // 0.3.85 churn guard
-        if (BtcDirection.isBitcoin(q.ticker) && BtcRedo.blocksShock(p)) return null
+        if (BtcDirection.isBitcoin(q.ticker) && BtcRedo.appliesShock(p) && !BtcRedo.entryOk(ask, q.tauS)) return null
         if (p.kind != ShockFav.Kind.FADE_MAKER && !ScalpRule.buyPriceOk(if (p.o50 == ShockFav.O50.MAKER) ShockFav.O50_MAKER_PX else ask)) return null
         val n = if (p.kind == ShockFav.Kind.FADE_MAKER) ShockFav.CLIP else minOf(ShockFav.CLIP, kotlin.math.floor((q.askSize(side) ?: 0.0) + 1e-9).toInt())
         if (n <= 0) return null
@@ -1309,8 +1322,11 @@ class ScalpBook(
     private fun stepInner(t: ScalpTrade, q: ScalpRule.Quote, p: ScalpParams): ScalpTrade? {
         return when (t.state) {
             ScalpState.PENDING_ENTRY -> when {
-                BtcDirection.isBitcoin(t.ticker) && G14Copies.isCopyVariant(t.variantId) ->
-                    t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; losing bitcoin copy does not open")
+                BtcDirection.isBitcoin(t.ticker) && G14Copies.isCopyVariant(t.variantId) -> {
+                    val ask = q.ask(t.side)
+                    if (ask != null && BtcRedo.entryOk(ask, q.tauS)) fillEntry(t, q)
+                    else t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; redone bitcoin copy needs the ask under 50¢ with 90s left")
+                }
                 p.maker -> fillMakerEntry(t, q)
                 p.strategy == ScalpStrategy.CF_REPRICE -> fillRestingLimitEntry(t, q)
                 else -> fillEntry(t, q)
@@ -1481,8 +1497,6 @@ class ScalpBook(
     private fun spawnG14(t: ScalpTrade) {
         if (!t.isPrimary || G14Copies.isCopyVariant(t.variantId) || ScalpV2.isV2(t.variantId)) return
         if (t.state != ScalpState.PENDING_ENTRY && t.state != ScalpState.OPEN) return
-        // Every g14 source in G14Copies.SOURCES has a negative settled total, and the copy holds to settlement.
-        if (BtcDirection.isBitcoin(t.ticker)) return
         val orig = ScalpModels.modelOf(t) ?: return
         val copies = G14Copies.copiesTriggeredBy(orig.code)
         if (copies.isEmpty()) return
@@ -1492,6 +1506,8 @@ class ScalpBook(
         val recent = history[key]?.filter { it.atMs < q.nowMs }.orEmpty()
         val (sig, _) = ScalpRule.strategySignal(q, G14Copies.params, listOf(t.side), recent)
         if (sig == null || !ScalpRule.buyPriceOk(sig.ask)) return
+        // Bitcoin copies of settled losers use the under-50¢ entry and the 2¢ / 60s exit. They do not hold to settlement.
+        if (BtcDirection.isBitcoin(t.ticker) && !BtcRedo.entryOk(sig.ask, q.tauS)) return
         for (src in copies) {
             val vid = G14Copies.variantId(src)
             if (ScalpV2.isV2(src) && sig.ask > G14Copies.V2_MAX_ASK + 1e-9) continue
@@ -1711,7 +1727,7 @@ class ScalpBook(
             }
             val peak = maxOf(o50Peak[t.id] ?: bid, bid).also { o50Peak[t.id] = it }
             val legacyStop = bid <= entry - ShockFav.stopC(p) / 100.0 + 1e-9
-            val redo = BtcDirection.isBitcoin(t.ticker) && BtcRedo.blocksShock(p)
+            val redo = BtcDirection.isBitcoin(t.ticker) && BtcRedo.appliesShock(p)
             val redoReason = if (redo) BtcAiScalp.exitReason(Double.NaN, bid, entry, q.tauS) else null
             if (redo && redoReason == null) continue
             val reason = t.exitReason.takeIf { t.state == ScalpState.PENDING_EXIT }
@@ -1748,7 +1764,6 @@ class ScalpBook(
                 .map { it.windowKey }.toSet()
             val cfg = controls.state.value
             if (model == null || ScalpModels.isRetired(model) || !cfg.permits(model.code)) continue
-            if (BtcRedo.blocksNewBitcoinEntry(model.code)) continue
             val learned = ScalpV2.plan(seed.id, if (cfg.adaptive && !cfg.manual) v2Evidence else emptyList(), t.signalAtMs, model.code, unfinished)
             val feedback = controls.feedback(model.code)
             // Every completed trade updates this EWMA; completed-window evidence still controls promotion.
@@ -1757,6 +1772,8 @@ class ScalpBook(
             val knobs = cfg.settings(model.code)
             val close = ScalpTicker.closeMs(t.ticker)
             if (close != null && !knobs.timeOk(t.signalAtMs, close)) continue
+            if (close != null && BtcDirection.isBitcoin(t.ticker) && BtcRedo.applies(model.code) &&
+                !BtcRedo.entryOk(t.signalAsk, (close - t.signalAtMs) / 1000.0)) continue
             val checkKey = "${t.ticker}|${model.code}|${t.side}"
             val lastCheck = strategyEntryChecks[checkKey]
             if (lastCheck != null && t.signalAtMs - lastCheck < knobs.cadenceSeconds * 1000L) continue
@@ -1803,9 +1820,16 @@ class ScalpBook(
                 ScalpState.PENDING_ENTRY -> {
                     val age = q.nowMs - t.signalAtMs
                     val code = ScalpModels.modelOf(t)?.code ?: t.variantId
-                    if (BtcDirection.isBitcoin(t.ticker) && BtcRedo.blocksNewBitcoinEntry(code)) {
-                        out += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; settled losing bitcoin scalp does not open")
-                        continue
+                    if (BtcDirection.isBitcoin(t.ticker) && BtcRedo.applies(code)) {
+                        val askNow = q.ask(t.side)
+                        val tooDear = askNow != null && askNow >= BtcAiScalp.MAX_ASK - 1e-12
+                        val tooLate = q.tauS < BtcAiScalp.MIN_TAU_S || q.nowMs >= q.closeMs
+                        if (askNow == null || !BtcRedo.entryOk(askNow, q.tauS)) {
+                            if (tooDear || tooLate || age > ScalpV2.GIVE_UP_MS) {
+                                out += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; redone bitcoin scalp needs the ask under 50¢ with 90s left")
+                            }
+                            continue
+                        }
                     }
                     val blocked = cfg.entryBlock(code, openCount, controls.entries(q.nowMs), controlDailyNet + unflushedNet)
                     if (blocked != null) { out += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; $blocked"); continue }
@@ -1860,7 +1884,7 @@ class ScalpBook(
                 ScalpState.OPEN, ScalpState.PENDING_EXIT -> {
                     if (q.nowMs >= q.closeMs) continue
                     val code = ScalpModels.modelOf(t)?.code ?: t.variantId
-                    val redo = BtcDirection.isBitcoin(t.ticker) && BtcRedo.blocksNewBitcoinEntry(code)
+                    val redo = BtcDirection.isBitcoin(t.ticker) && BtcRedo.applies(code)
                     val maxHold = ScalpV2.savedNumber(t.note, "v2hold", 0.0)
                     val holdExpired = maxHold > 0 && q.nowMs - (t.entryAtMs ?: t.signalAtMs) >= maxHold * 1000
                     if (!ScalpV2.fresh(q)) {

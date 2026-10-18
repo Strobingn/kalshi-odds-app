@@ -14,7 +14,7 @@ object ScalpModels {
         CF_REPRICE("cfr", "CF-reprice", ScalpStrategy.CF_REPRICE.blurb),
         MAKER_DIP("mkdip", "Maker dip-rebound", "maker-first: post a bid after a fast ask drop (fee $0 maker), sell the rebound resting at the ask; queue-modelled fills"),
         /** 0.3.53: buy the side the short-horizon forecaster says will rise, near 50¢; exit when the forecast turns. */
-        FORECAST_RIDE("fcride", "Forecast ride", "near 50¢ (40–60¢), buy the side the deterministic short-horizon forecast says rises by more than spread + both fees; hold while it keeps pointing up"),
+        FORECAST_RIDE("fcride", "Forecast ride", "Bitcoin: under 50¢, buy the side the forecast says is about to rise; sell on a 2¢ drop, when the forecast turns down, or with under 60s left"),
         /** 0.3.53: exact mirror of Forecast ride — trades against the forecast with the same band, exits, sizing and fees. */
         FORECAST_FADE("fcfade", "Forecast fade", "mirror of Forecast ride: same band, exits, sizing and fees, but takes the side the forecast says falls"),
         /** 0.3.61 siblings: paper copies next to the unchanged originals. */

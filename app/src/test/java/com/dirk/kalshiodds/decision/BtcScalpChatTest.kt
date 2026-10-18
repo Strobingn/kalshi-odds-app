@@ -76,34 +76,40 @@ class BtcScalpChatTest {
     }
 
     @Test
-    fun settledNegativeBitcoinScalpsDoNotOpenAndRideStays() {
+    fun settledLosersUseTheUnderFiftyRedoAndRideStaysOnItsOwnPath() {
         val losers = G14Copies.SOURCES
         assertEquals(15, losers.size)
         losers.forEach { (code, row) ->
             assertTrue("$code trades", row.trades >= BtcScalpTuner.MIN_TRADES)
             assertTrue("$code net ${row.netUsd}", row.netUsd < 0.0)
-            if (code == BtcRedo.KEPT_RIDE) assertFalse(BtcRedo.blocksNewBitcoinEntry(code))
-            else assertTrue(code, BtcRedo.blocksNewBitcoinEntry(code))
+            if (code == BtcRedo.KEPT_RIDE) assertFalse(BtcRedo.applies(code))
+            else assertTrue(code, BtcRedo.applies(code))
         }
         assertEquals(-85.13, losers.getValue("fcride").netUsd, 1e-9)
         assertEquals(-57.6, losers.getValue("v2-fcride").netUsd, 1e-9)
         assertEquals(-53.59, losers.getValue("v2-fcfade").netUsd, 1e-9)
-        assertEquals(-12.74, losers.getValue("sf03").netUsd, 1e-9)
-        assertEquals(-10.18, losers.getValue("sf29").netUsd, 1e-9)
-        assertEquals(-7.52, losers.getValue("sf13").netUsd, 1e-9)
-        assertTrue(BtcRedo.blocksNewBitcoinEntry("fcride-g14"))
-        assertTrue(BtcRedo.blocksNewBitcoinEntry(G14Copies.variantId("fcride")))
-        assertTrue(BtcRedo.blocksNewBitcoinEntry("v2-fcfade"))
-        assertTrue(BtcRedo.blocksShock(ShockFav.v("sf28")))
-        assertTrue(BtcRedo.blocksShock(ShockFav.v("sf03")))
-        assertTrue(BtcRedo.blocksShock(ShockFav.v("sf29")))
-        assertFalse(BtcRedo.blocksShock(ShockFav.v("sf19")))
-        assertFalse(BtcRedo.blocksNewBitcoinEntry("v2-sf01"))
-        assertFalse(BtcRedo.blocksNewBitcoinEntry("fairh60"))
+        assertEquals(-1602.48, losers.getValue("sf32").netUsd, 1e-9)
+        assertEquals(-1579.7, losers.getValue("sf30").netUsd, 1e-9)
+        assertTrue(BtcRedo.entryOk(0.42, 200.0))
+        assertFalse(BtcRedo.entryOk(0.50, 200.0))
+        assertFalse(BtcRedo.entryOk(0.42, 60.0))
+        assertEquals("YES", BtcRedo.rideMoveSide(4.0))
+        assertEquals("NO", BtcRedo.rideMoveSide(-4.0))
+        assertNull(BtcRedo.rideMoveSide(0.0))
+        assertTrue(BtcRedo.applies("fcride-g14"))
+        assertTrue(BtcRedo.applies(G14Copies.variantId("fcride")))
+        assertTrue(BtcRedo.applies("v2-fcfade"))
+        assertTrue(BtcRedo.appliesShock(ShockFav.v("sf28")))
+        assertTrue(BtcRedo.appliesShock(ShockFav.v("sf03")))
+        assertTrue(BtcRedo.appliesShock(ShockFav.v("sf32")))
+        assertTrue(BtcRedo.appliesShock(ShockFav.v("sf41")))
+        assertFalse(BtcRedo.appliesShock(ShockFav.v("sf19")))
+        assertFalse(BtcRedo.applies("v2-sf01"))
+        assertFalse(BtcRedo.applies("fairh60"))
     }
 
     @Test
-    fun bitcoinRideDoesNotSpawnTheLosingV2OrSettlementCopy() {
+    fun redoneBitcoinCopyOpensUnderFiftyAndStopsTwoCentsDown() {
         val ticker = "KXBTC15M-26OCT122015-15"
         val close = ScalpTicker.closeMs(ticker)!!
         val book = ScalpBook(variants = emptyList(), liveExtras = true)
@@ -114,8 +120,15 @@ class BtcScalpChatTest {
             ruleVersion = "${ScalpRule.VERSION}|${ForecastScalp.variantId(true, 600)}|P"
         )
         assertEquals(1, book.importRestored(listOf(ride)))
-        assertTrue(book.allTrades().any { it.id == "ride" })
-        assertTrue(book.allTrades().none { it.variantId.startsWith("v2-fcride") || G14Copies.isCopyVariant(it.variantId) })
+        val spawned = book.allTrades().filter { it.id != "ride" && (it.variantId.startsWith("v2-fcride") || G14Copies.isCopyVariant(it.variantId)) }
+        assertTrue("redone copies ${spawned.map { it.variantId }}", spawned.isNotEmpty())
+        assertTrue(spawned.all { it.state == ScalpState.PENDING_ENTRY })
+        val expensiveAt = close - 400_000L
+        val blocked = ScalpBook(variants = emptyList(), liveExtras = true)
+        blocked.onQuote(ScalpRule.Quote(ticker, expensiveAt, close, expensiveAt, 0.58, 20.0, 0.60, 20.0, null, null, null), false)
+        val expensive = ride.copy(id = "expensive", signalAsk = 0.60)
+        blocked.importRestored(listOf(expensive))
+        assertTrue(blocked.allTrades().none { it.id != "expensive" && (it.variantId.startsWith("v2-fcride") || G14Copies.isCopyVariant(it.variantId)) })
     }
 
     @Test

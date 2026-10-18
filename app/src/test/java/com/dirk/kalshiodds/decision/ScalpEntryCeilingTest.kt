@@ -87,16 +87,14 @@ class ScalpEntryCeilingTest {
 
         val book = ScalpBook(variants = emptyList())
         for (sec in -300..0) book.tickSpot("BTC", 100_000.0, at + sec * 1000L)
-        // Downward spot shock creates a YES fade-maker signal. Ask 56¢, bid 54¢.
+        // Downward spot shock. The redone fade rides that move (NO) under 50¢ instead of buying the dumped YES side.
         book.onShockFavQuote(quote.copy(nowMs = at + 5_000, bookAtMs = at + 5_000, spot = 99_900.0), true)
         val signal = book.snapshot().first { it.variantId == "sf28" }
-        assertEquals("YES", signal.side)
+        assertEquals("NO", signal.side)
         book.onShockFavQuote(quote.copy(nowMs = at + 7_000, bookAtMs = at + 7_000, spot = 99_900.0), false)
-        assertEquals(.54, book.snapshot().first { it.id == signal.id }.restingLimit!!, 1e-9)
-        book.onShockFavQuote(q(at + 8_000, .48).copy(spot = 99_900.0), false)
         val filled = book.snapshot().first { it.id == signal.id }
         assertEquals(ScalpState.OPEN, filled.state)
-        assertEquals(.54, filled.entryPrice!!, 1e-9)
+        assertTrue(filled.entryPrice!! < BtcAiScalp.MAX_ASK)
     }
 
     @Test fun depthWalkingExcludesExpensiveTailEvenIfAverageWouldBeCheap() {
