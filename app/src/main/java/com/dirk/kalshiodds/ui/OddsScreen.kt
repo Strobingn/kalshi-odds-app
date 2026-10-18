@@ -31,6 +31,8 @@ fun OddsScreen(
         onSubmitPaperOrder = viewModel::submitPaperOrder,
         onEditPaperOrder = viewModel::editPaperOrder,
         onCancelPaperOrder = viewModel::cancelPaperOrder,
+        showHomeSummary = true,
+        homeSummary = { com.dirk.kalshiodds.ui.home.HomeSummarySection() },
         scalpLines = HomeScalpCopy.lines(scalpTrades, state.settings.paperTradingEnabled),
         onOpenScalp = onOpenScalp,
         onBuyDaily = { q, side -> viewModel.buyDaily(q, side) },
