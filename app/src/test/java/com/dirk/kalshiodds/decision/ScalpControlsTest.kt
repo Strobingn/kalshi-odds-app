@@ -13,9 +13,9 @@ class ScalpControlsTest {
     private val close = ScalpTicker.closeMs(tk)!!
     private val at = close - 300_000
     private fun q(now: Long, bid: Double = .39, ask: Double = .40) = ScalpRule.Quote(tk, now, close, now, bid, 100.0, ask, 100.0, 100_000.0, 100_000.0, 3e-5)
-    private fun source(id: String = "source") = ScalpTrade(id, tk, "YES", ScalpState.PENDING_ENTRY, at, .4, .5, ruleVersion = "${ScalpRule.VERSION}|sf41|P")
+    private fun source(id: String = "source") = ScalpTrade(id, tk, "YES", ScalpState.PENDING_ENTRY, at, .4, .5, ruleVersion = "${ScalpRule.VERSION}|sf43|P")
     private fun controls() = MemoryScalpControls(ScalpControls(stopLossPercent = 20, peakTrailEnabled = false, manual = true, contracts = 3, stopCents = 6,
-        armCents = 8, maxStakeUsd = 1.0, disabledStrategies = ScalpModels.V2_MODELS.map { it.code }.filter { it != "v2-sf41" }.toSet()))
+        armCents = 8, maxStakeUsd = 1.0, disabledStrategies = ScalpModels.V2_MODELS.map { it.code }.filter { it != "v2-sf43" }.toSet()))
     @Test fun unlimitedMeansNoHourlyOrWindowQuota() {
         val store = MemoryScalpControls()
         repeat(20000) { store.recordEntry(at) }
@@ -28,7 +28,7 @@ class ScalpControlsTest {
         val book = ScalpBook(liveExtras = true, variants = emptyList(), controls = control)
         book.importRestored(listOf(source()))
         book.onQuote(q(at + 2_000), false)
-        val t = book.snapshot().first { it.variantId == "v2-sf41" }
+        val t = book.snapshot().first { it.variantId == "v2-sf43" }
         assertEquals(2, t.contracts) // fee-inclusive $1 cap, manual requested clip = 3
         assertEquals(.06, ScalpV2.savedStop(t), 1e-9)
         assertEquals(.08, ScalpV2.savedNumber(t.note, "v2arm", 0.0), 1e-9)
@@ -37,10 +37,10 @@ class ScalpControlsTest {
         assertEquals(ScalpState.PENDING_EXIT, book.snapshot().first { it.id == t.id }.state)
         book.onQuote(q(at + 4_000, .33), false)
         book.flushWrites()
-        assertEquals(1, control.feedback("v2-sf41").trades)
-        assertTrue(control.feedback("v2-sf41").recentNetPerContract < 0)
+        assertEquals(1, control.feedback("v2-sf43").trades)
+        assertTrue(control.feedback("v2-sf43").recentNetPerContract < 0)
         book.flushWrites()
-        assertEquals(1, control.feedback("v2-sf41").trades)
+        assertEquals(1, control.feedback("v2-sf43").trades)
     }
     @Test fun userTakeProfitAndMaxHoldActuallyExit() {
         for (target in listOf(true, false)) {
@@ -49,7 +49,7 @@ class ScalpControlsTest {
             book.importRestored(listOf(source()))
             book.onQuote(q(at + 2_000), false)
             book.onQuote(q(at + 8_000, if (target) .45 else .39), false)
-            val held = book.snapshot().first { it.variantId == "v2-sf41" }
+            val held = book.snapshot().first { it.variantId == "v2-sf43" }
             assertEquals(ScalpState.PENDING_EXIT, held.state)
             assertTrue(held.exitReason!!.contains(if (target) "take-profit" else "max hold"))
         }

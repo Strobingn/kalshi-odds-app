@@ -23,14 +23,15 @@ object GrokChat {
     const val URL = "https://api.x.ai/v1/chat/completions"
 
     const val SYSTEM = """
-        You tune paper Bitcoin 15-minute scalps in bit-scalp-cursor. You do not place Kalshi orders.
+        You answer questions about paper Bitcoin 15-minute scalps in bit-scalp-cursor. You do not place Kalshi orders.
+        Answer the question in plain sentences. A normal question is not a settings change: reply with the answer and do not emit JSON.
         The model predicts the YES contract mid, not a dollar price. Positive means UP (buy YES). Negative means DOWN (buy NO). There is no side bias. A missing forecast is NO CALL.
         Bitcoin entries are only when that side is offered under 50¢ and at least 90 seconds remain. Sell when the forecast for the held side turns down, when the bid is 2¢ under the fill, or when under 60 seconds remain. Do not hold to the end of the 15-minute window.
-        You may only tighten settings: lower maxAskCents, fewer contracts, a smaller stopLossPercent, a smaller trailCents, or disable v2- strategy codes that are losing.
+        You may only tighten settings when the user asks you to change them: lower maxAskCents, fewer contracts, a smaller stopLossPercent, a smaller trailCents, or disable v2- strategy codes that are losing.
         Never raise size, never widen the ask cap, and never turn a strategy back on.
-        When you want a change, end with one JSON object and nothing after it:
+        When you do change a setting, explain the change in sentences first, then end with one JSON object and nothing after it:
         {"maxAskCents":40,"contracts":8,"stopLossPercent":4,"trailCents":2,"disable":["v2-example"]}
-        Omit any field you are not changing. If nothing should change, say so and do not emit JSON.
+        Omit any field you are not changing. If you are not changing a setting, do not emit JSON.
     """
 
     data class Turn(val role: String, val text: String)
@@ -80,13 +81,56 @@ object GrokChat {
                     .ifBlank { "Chat request failed (${response.code})" }
                 error(message.replace(key, "••••"))
             }
-            val text = JSONObject(raw)
-                .getJSONArray("choices")
-                .getJSONObject(0)
-                .getJSONObject("message")
-                .getString("content")
-            return Reply(text, parsePatch(text))
+            return replyFrom(raw)
         }
+    }
+
+    /**
+     * Assistant text the chat screen shows. Plain prose is kept whole.
+     * A trailing settings object is a patch; it does not replace the answer.
+     * Content may be a string or a list of text parts. Reasoning traces are not the answer.
+     */
+    fun replyFrom(raw: String): Reply {
+        val root = runCatching { JSONObject(raw) }.getOrElse { error("Chat reply was not readable.") }
+        val text = chatText(root).ifBlank { responsesText(root) }.trim()
+        if (text.isBlank()) error("The model returned no answer.")
+        return Reply(text, parsePatch(text))
+    }
+
+    private fun chatText(root: JSONObject): String {
+        val message = root.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message") ?: return ""
+        return textOf(message.opt("content"))
+    }
+
+    private fun responsesText(root: JSONObject): String {
+        val output = root.optJSONArray("output") ?: return ""
+        val parts = StringBuilder()
+        for (i in 0 until output.length()) {
+            val item = output.optJSONObject(i) ?: continue
+            if (item.optString("type") != "message") continue
+            parts.append(textOf(item.opt("content")))
+        }
+        return parts.toString()
+    }
+
+    private fun textOf(content: Any?): String = when (content) {
+        is String -> content
+        is JSONArray -> {
+            val parts = StringBuilder()
+            for (i in 0 until content.length()) {
+                when (val part = content.opt(i)) {
+                    is String -> parts.append(part)
+                    is JSONObject -> {
+                        val type = part.optString("type")
+                        if (type == "reasoning" || type == "reasoning_text") continue
+                        val bit = part.optString("text").ifBlank { part.optString("content") }
+                        if (bit.isNotBlank()) parts.append(bit)
+                    }
+                }
+            }
+            parts.toString()
+        }
+        else -> ""
     }
 
     private fun defaultClient(): OkHttpClient = OkHttpClient.Builder()

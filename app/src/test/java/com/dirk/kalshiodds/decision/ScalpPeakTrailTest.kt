@@ -7,15 +7,15 @@ class ScalpPeakTrailTest {
     private val ticker = "KXBTC15M-26OCT122015-15"
     private val close = ScalpTicker.closeMs(ticker)!!
     private val at = close - 300_000L
-    private fun controls(code: String = "v2-sf41") = MemoryScalpControls(ScalpControls(stopLossPercent = 20,
+    private fun controls(code: String = "v2-sf43") = MemoryScalpControls(ScalpControls(stopLossPercent = 20,
         disabledStrategies = ScalpModels.V2_MODELS.map { it.code }.filter { it != code }.toSet()))
     private fun source(side: String = "YES") = ScalpTrade("source", ticker, side, ScalpState.PENDING_ENTRY,
-        at, .40, .50, ruleVersion = "${ScalpRule.VERSION}|sf41|P")
+        at, .40, .50, ruleVersion = "${ScalpRule.VERSION}|sf43|P")
     private fun q(ms: Long, bid: Double = .39, ask: Double = .40, size: Double = 100.0, side: String = "YES") =
         ScalpRule.Quote(ticker, ms, close, ms,
             if (side == "YES") bid else 1 - ask, size,
             if (side == "YES") ask else 1 - bid, size, 100_000.0, 100_000.0, 3e-5)
-    private fun held(book: ScalpBook, code: String = "v2-sf41") = book.snapshot().first { it.variantId == code }
+    private fun held(book: ScalpBook, code: String = "v2-sf43") = book.snapshot().first { it.variantId == code }
 
     @Test fun threeCentsIsAbsoluteAndTwentyPercentUsesEntryPrice() {
         assertNull(ScalpV2.peakExit(.40, 20.0, .90, .90, .03))
@@ -58,7 +58,7 @@ class ScalpPeakTrailTest {
             again.onQuote(q(at + 8000, .94, .95, side = side), false) // rebound never cancels a triggered exit
             assertEquals(ScalpState.CLOSED, held(again).state)
             again.flushWrites()
-            assertEquals(1, cfg.feedback("v2-sf41").trades)
+            assertEquals(1, cfg.feedback("v2-sf43").trades)
         }
     }
 
@@ -88,17 +88,17 @@ class ScalpPeakTrailTest {
     }
 
     @Test fun percentStopUsesDepthWalkAverageFillAndStaleBooksCannotMovePeak() {
-        val cfg = controls("v2-sf41x5")
+        val cfg = controls("v2-sf43x5")
         val book = ScalpBook(variants = emptyList(), liveExtras = true, controls = cfg)
         book.importRestored(listOf(source()))
         book.onQuote(q(at + 2000).copy(noBidsDesc = listOf(.60 to 2.0, .50 to 3.0)), false)
-        val trade = held(book, "v2-sf41x5")
+        val trade = held(book, "v2-sf43x5")
         assertEquals(.46, trade.entryPrice!!, 1e-9)
         assertEquals(.092, ScalpV2.savedStop(trade), 1e-9)
         book.onQuote(q(at + 3000, .99, 1.0).copy(bookGap = true), false)
         book.onQuote(q(at + 4000, .40, .41), false)
-        assertEquals(ScalpState.OPEN, held(book, "v2-sf41x5").state)
+        assertEquals(ScalpState.OPEN, held(book, "v2-sf43x5").state)
         book.onQuote(q(at + 5000, .20, .21), false)
-        assertTrue(held(book, "v2-sf41x5").exitReason!!.contains("20%"))
+        assertTrue(held(book, "v2-sf43x5").exitReason!!.contains("20%"))
     }
 }

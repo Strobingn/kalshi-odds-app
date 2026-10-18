@@ -78,7 +78,7 @@ class ScalpV2AdaptiveTest {
     }
 
     @Test fun profitTrailAndPendingExitSurviveProcessRestart() {
-        val (book, store) = book(open())
+        val (book, store) = book(open(variant = "v2-sf43"))
         book.onQuote(q(now, .60), false)
         book.flushWrites()
         val restarted = ScalpBook(store = store, variants = emptyList(), liveExtras = true, controls = MemoryScalpControls(ScalpControls(stopLossPercent = 20)))
@@ -93,7 +93,7 @@ class ScalpV2AdaptiveTest {
     }
 
     @Test fun closeExitLatchesWithoutLiquidityAndEvenWhenEntriesAreDisabled() {
-        val (book, _) = book(open())
+        val (book, _) = book(open(variant = "v2-sf43"))
         book.onQuote(q(close - 50_000, null, 0.0), false)
         val pending = book.snapshot().first { it.id == "held" }
         assertEquals(ScalpState.PENDING_EXIT, pending.state)

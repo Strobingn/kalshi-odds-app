@@ -706,6 +706,7 @@ class ScalpBook(
         // 0.3.56: stale/missing lead → no forecast. No entries, and open trades HOLD (only TP/horizon/close exits)
         // instead of reading a fake 0 forecast as "forecast turned".
         val pred = pred54 ?: Double.NaN
+        if (BtcDirection.isBitcoin(key)) noteBtcForecast(key, pred)
         val enabledNow = enabled && pred54 != null
         val changed = ArrayList<ScalpTrade>().apply { addAll(riskChanges) }
         for (ride in listOf(true, false)) {
@@ -791,6 +792,20 @@ class ScalpBook(
     fun tickSpot(coin: String, spot: Double?, nowMs: Long) = synchronized(lock) {
         if (spot != null && spot.isFinite() && spot > 0.0) sfSpot.getOrPut(coin) { ShockFav.SpotRing() }.put(nowMs / 1000L, spot)
     }
+
+    /** Latest YES-mid forecast per ticker. NaN means the model had no call. Missing key means no forecast yet. */
+    private val btcForecastByTicker = HashMap<String, Double>()
+
+    internal fun noteBtcForecast(ticker: String, yesForecast: Double) = synchronized(lock) {
+        val key = ticker.uppercase()
+        btcForecastByTicker[key] = if (yesForecast.isFinite()) yesForecast else Double.NaN
+        if (btcForecastByTicker.size > 200) {
+            btcForecastByTicker.keys.filter { (ScalpTicker.closeMs(it) ?: Long.MAX_VALUE) < System.currentTimeMillis() - 60_000L }
+                .forEach { btcForecastByTicker.remove(it) }
+        }
+    }
+
+    private fun btcYesForecast(ticker: String): Double = btcForecastByTicker[ticker.uppercase()] ?: Double.NaN
 
     /**
      * One conflated quote → all twenty sf57 variants (paper). Called from the paper lane (never Main). Cheap: one scan
@@ -929,11 +944,14 @@ class ScalpBook(
             val pk0 = ShockFav.byVariantId(t.variantId)
             if (BtcDirection.isBitcoin(t.ticker) && pk0 != null && BtcRedo.appliesShock(pk0)) {
                 val askNow = q.ask(t.side)
-                val tooDear = askNow != null && askNow >= BtcAiScalp.MAX_ASK - 1e-12
-                val tooLate = q.tauS < BtcAiScalp.MIN_TAU_S || q.nowMs >= q.closeMs
-                if (askNow == null || !BtcRedo.entryOk(askNow, q.tauS)) {
-                    if (tooDear || tooLate || q.nowMs - t.signalAtMs > giveUpMs(t)) {
-                        changed += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; redone bitcoin scalp needs the ask under 50¢ with 90s left")
+                val yesF = btcYesForecast(t.ticker)
+                val ok = askNow != null && BtcRedo.agrees(t.side, yesF, askNow, q.tauS)
+                if (!ok) {
+                    val tooDear = askNow != null && askNow >= BtcAiScalp.MAX_ASK - 1e-12
+                    val tooLate = q.tauS < BtcAiScalp.MIN_TAU_S || q.nowMs >= q.closeMs
+                    val disagrees = yesF.isFinite() && BtcDirection.rideSide(yesF) != t.side
+                    if (tooDear || tooLate || disagrees || q.nowMs - t.signalAtMs > giveUpMs(t)) {
+                        changed += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; redone bitcoin scalp needs the forecast on this side, the ask under 50¢, and 90s left")
                     }
                     continue
                 }
@@ -1027,7 +1045,7 @@ class ScalpBook(
             // 0.3.61 per-bet stop on every sf leg (fav legs included): bid ≤ entry − stop.
             val stopC = ShockFav.stopC(p)
             val redo = BtcDirection.isBitcoin(t.ticker) && BtcRedo.appliesShock(p)
-            val redoReason = if (redo) BtcAiScalp.exitReason(Double.NaN, bid, t.entryPrice ?: 0.0, q.tauS) else null
+            val redoReason = if (redo) BtcRedo.exitFor(t.side, btcYesForecast(t.ticker), bid, t.entryPrice ?: 0.0, q.tauS) else null
             if (redo && redoReason == null) continue
             val stopHit = t.state == ScalpState.OPEN && !redo && bid <= (t.entryPrice ?: 0.0) - stopC / 100.0 + 1e-9
             if (stopHit && t.isPrimary) {
@@ -1141,7 +1159,7 @@ class ScalpBook(
                         val f = if (side == "YES") fy else 1.0 - fy
                         val ask = q.ask(side) ?: continue
                         if (redoneFav) {
-                            if (!BtcRedo.entryOk(ask, q.tauS) || f < p.fmin - 1e-9 || f - ask < p.gap - 1e-9) continue
+                            if (!BtcRedo.agrees(side, btcYesForecast(q.ticker), ask, q.tauS) || f < p.fmin - 1e-9 || f - ask < p.gap - 1e-9) continue
                         } else if (!ShockFav.favEntryOk(p, f, ask, q.tauS, coin, q.closeMs)) continue
                         sfEnter(q, p, p.favId, side, ask, f, openCost, bankroll, "late fav")?.let { changed += it; openCost += it.entryCostUsd }
                         break
@@ -1158,7 +1176,7 @@ class ScalpBook(
                         openCost: Double, bankroll: Double, what: String): ScalpTrade? {
         // Fade makers choose their purchase bid after the delay; the post/fill paths enforce the ceiling.
         if (ScalpRisk.entryBlocked(_all.value, vid, q.ticker, q.nowMs)) return null // 0.3.85 churn guard
-        if (BtcDirection.isBitcoin(q.ticker) && BtcRedo.appliesShock(p) && !BtcRedo.entryOk(ask, q.tauS)) return null
+        if (BtcDirection.isBitcoin(q.ticker) && BtcRedo.appliesShock(p) && !BtcRedo.agrees(side, btcYesForecast(q.ticker), ask, q.tauS)) return null
         if (p.kind != ShockFav.Kind.FADE_MAKER && !ScalpRule.buyPriceOk(if (p.o50 == ShockFav.O50.MAKER) ShockFav.O50_MAKER_PX else ask)) return null
         val n = if (p.kind == ShockFav.Kind.FADE_MAKER) ShockFav.CLIP else minOf(ShockFav.CLIP, kotlin.math.floor((q.askSize(side) ?: 0.0) + 1e-9).toInt())
         if (n <= 0) return null
@@ -1324,8 +1342,8 @@ class ScalpBook(
             ScalpState.PENDING_ENTRY -> when {
                 BtcDirection.isBitcoin(t.ticker) && G14Copies.isCopyVariant(t.variantId) -> {
                     val ask = q.ask(t.side)
-                    if (ask != null && BtcRedo.entryOk(ask, q.tauS)) fillEntry(t, q)
-                    else t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; redone bitcoin copy needs the ask under 50¢ with 90s left")
+                    if (ask != null && BtcRedo.agrees(t.side, btcYesForecast(t.ticker), ask, q.tauS)) fillEntry(t, q)
+                    else t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; redone bitcoin copy needs the forecast on this side, the ask under 50¢, and 90s left")
                 }
                 p.maker -> fillMakerEntry(t, q)
                 p.strategy == ScalpStrategy.CF_REPRICE -> fillRestingLimitEntry(t, q)
@@ -1336,7 +1354,7 @@ class ScalpBook(
                 val entry = t.entryPrice ?: return null
                 if (BtcDirection.isBitcoin(t.ticker) && G14Copies.isCopyVariant(t.variantId)) {
                     val bid = q.bid(t.side) ?: Double.NaN
-                    val ai = BtcAiScalp.exitReason(Double.NaN, bid, entry, q.tauS) ?: return null
+                    val ai = BtcRedo.exitFor(t.side, btcYesForecast(t.ticker), bid, entry, q.tauS) ?: return null
                     return t.copy(state = ScalpState.PENDING_EXIT, exitDecidedAtMs = q.nowMs, exitReason = ai, restingLimit = null, restingSinceMs = null)
                 }
                 val reason = (if (p.hold60) hold60Exit(t, q, p, entry)
@@ -1506,8 +1524,8 @@ class ScalpBook(
         val recent = history[key]?.filter { it.atMs < q.nowMs }.orEmpty()
         val (sig, _) = ScalpRule.strategySignal(q, G14Copies.params, listOf(t.side), recent)
         if (sig == null || !ScalpRule.buyPriceOk(sig.ask)) return
-        // Bitcoin copies of settled losers use the under-50¢ entry and the 2¢ / 60s exit. They do not hold to settlement.
-        if (BtcDirection.isBitcoin(t.ticker) && !BtcRedo.entryOk(sig.ask, q.tauS)) return
+        // Bitcoin copies open only when the forecast would buy this side under 50¢ with 90s left, and they exit with the ride.
+        if (BtcDirection.isBitcoin(t.ticker) && !BtcRedo.agrees(sig.side, btcYesForecast(t.ticker), sig.ask, q.tauS)) return
         for (src in copies) {
             val vid = G14Copies.variantId(src)
             if (ScalpV2.isV2(src) && sig.ask > G14Copies.V2_MAX_ASK + 1e-9) continue
@@ -1728,7 +1746,7 @@ class ScalpBook(
             val peak = maxOf(o50Peak[t.id] ?: bid, bid).also { o50Peak[t.id] = it }
             val legacyStop = bid <= entry - ShockFav.stopC(p) / 100.0 + 1e-9
             val redo = BtcDirection.isBitcoin(t.ticker) && BtcRedo.appliesShock(p)
-            val redoReason = if (redo) BtcAiScalp.exitReason(Double.NaN, bid, entry, q.tauS) else null
+            val redoReason = if (redo) BtcRedo.exitFor(t.side, btcYesForecast(t.ticker), bid, entry, q.tauS) else null
             if (redo && redoReason == null) continue
             val reason = t.exitReason.takeIf { t.state == ScalpState.PENDING_EXIT }
                 ?: redoReason
@@ -1757,7 +1775,14 @@ class ScalpBook(
         val m = ScalpModels.modelOf(t) ?: return
         ScalpModels.v2Of(m) ?: return
         // 0.3.68: plain v2 copy + (for sf41–44) tweak and size copies; each carries its own params in the note.
-        for (seed in listOf(ScalpV2.spec(ScalpV2.v2Id(t.variantId))) + ScalpV2.extrasFor(t.variantId)) {
+        // Bitcoin forecast fade lost by fading. Its v2 copy is spawned from the ride, on the ride side.
+        val seeds = ArrayList<ScalpV2.Spec>()
+        seeds += ScalpV2.spec(ScalpV2.v2Id(t.variantId))
+        seeds += ScalpV2.extrasFor(t.variantId)
+        if (BtcDirection.isBitcoin(t.ticker) && m == ScalpModels.Model.FORECAST_RIDE) {
+            seeds += ScalpV2.spec(ScalpV2.v2Id(t.variantId.replace(ForecastScalp.RIDE_PREFIX, ForecastScalp.FADE_PREFIX)))
+        }
+        for (seed in seeds) {
             val model = ScalpModels.modelOf(t.copy(ruleVersion = "${ScalpRule.VERSION}|${seed.id}|P"))
             // A closed contract is not complete evidence while this model still awaits an exit/settlement.
             val unfinished = _all.value.asSequence().filter { isActive(it) && ScalpModels.modelOf(it) == model }
@@ -1773,7 +1798,7 @@ class ScalpBook(
             val close = ScalpTicker.closeMs(t.ticker)
             if (close != null && !knobs.timeOk(t.signalAtMs, close)) continue
             if (close != null && BtcDirection.isBitcoin(t.ticker) && BtcRedo.applies(model.code) &&
-                !BtcRedo.entryOk(t.signalAsk, (close - t.signalAtMs) / 1000.0)) continue
+                !BtcRedo.agrees(t.side, btcYesForecast(t.ticker), t.signalAsk, (close - t.signalAtMs) / 1000.0)) continue
             val checkKey = "${t.ticker}|${model.code}|${t.side}"
             val lastCheck = strategyEntryChecks[checkKey]
             if (lastCheck != null && t.signalAtMs - lastCheck < knobs.cadenceSeconds * 1000L) continue
@@ -1822,11 +1847,14 @@ class ScalpBook(
                     val code = ScalpModels.modelOf(t)?.code ?: t.variantId
                     if (BtcDirection.isBitcoin(t.ticker) && BtcRedo.applies(code)) {
                         val askNow = q.ask(t.side)
-                        val tooDear = askNow != null && askNow >= BtcAiScalp.MAX_ASK - 1e-12
-                        val tooLate = q.tauS < BtcAiScalp.MIN_TAU_S || q.nowMs >= q.closeMs
-                        if (askNow == null || !BtcRedo.entryOk(askNow, q.tauS)) {
-                            if (tooDear || tooLate || age > ScalpV2.GIVE_UP_MS) {
-                                out += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; redone bitcoin scalp needs the ask under 50¢ with 90s left")
+                        val yesF = btcYesForecast(t.ticker)
+                        val ok = askNow != null && BtcRedo.agrees(t.side, yesF, askNow, q.tauS)
+                        if (!ok) {
+                            val tooDear = askNow != null && askNow >= BtcAiScalp.MAX_ASK - 1e-12
+                            val tooLate = q.tauS < BtcAiScalp.MIN_TAU_S || q.nowMs >= q.closeMs
+                            val disagrees = yesF.isFinite() && BtcDirection.rideSide(yesF) != t.side
+                            if (tooDear || tooLate || disagrees || age > ScalpV2.GIVE_UP_MS) {
+                                out += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; redone bitcoin scalp needs the forecast on this side, the ask under 50¢, and 90s left")
                             }
                             continue
                         }
@@ -1918,7 +1946,7 @@ class ScalpBook(
                         else ScalpV2.exit(entry, stop, pk, it, armed, t.contracts, trail, armThreshold = arm, netGain = ScalpV2.netPerContract(t, it)))
                             ?: if (target > 0 && ScalpV2.netPerContract(t, it) >= target - 1e-9) "V2 user net take-profit" else null
                     }
-                    val aiExit = if (redo) BtcAiScalp.exitReason(Double.NaN, bid ?: Double.NaN, entry, q.tauS) else null
+                    val aiExit = if (redo) BtcRedo.exitFor(t.side, btcYesForecast(t.ticker), bid ?: Double.NaN, entry, q.tauS) else null
                     val reason = t.exitReason.takeIf { t.state == ScalpState.PENDING_EXIT }
                         ?: if (redo) aiExit else priceExit ?: timeExit ?: ScalpV2.closeExit(q, t.side, entry, t.contracts)
                     if (reason == null) { if (marked != t) out += marked; continue }

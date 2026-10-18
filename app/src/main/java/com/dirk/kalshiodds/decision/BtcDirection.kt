@@ -77,22 +77,23 @@ object BtcAiScalp {
 }
 
 /**
- * Settled losing Bitcoin scalps, rewritten onto the same exit as [BtcAiScalp].
+ * Settled losing Bitcoin scalps. They keep their code and label, and their old
+ * signal still chooses a side, but a new Bitcoin trade opens only when that
+ * side is the side [BtcDirection.rideSide] would buy and [BtcAiScalp.wantsEntry]
+ * passes. No finite forecast means no new trade.
  *
- * The numbers are [G14Copies.SOURCES]. Every row has at least
- * [BtcScalpTuner.MIN_TRADES] trades and a negative net. Forecast ride already
- * uses [BtcAiScalp] and is left on that path. Every other settled loser keeps
- * its own signal, then:
+ * The numbers are [G14Copies.SOURCES]. Forecast ride already uses [BtcAiScalp]
+ * and stays on that path. v2 copies and g14 copies of the losers use the same
+ * entry and the same [BtcAiScalp.exitReason] exit: 2¢ under the fill, the
+ * forecast for the held side turning down, or under 60 seconds left. They do
+ * not hold to the 15-minute settlement.
  *
- * - buys only when that side is offered under 50¢ and at least 90 seconds remain
- * - sells on a 2¢ drop under the fill, or when under 60 seconds remain
- * - does not hold to the 15-minute settlement
- *
- * Fade (sf28 and forecast fade) used to buy the dumped side. On Bitcoin it
- * buys the side the move went to.
+ * Fade (sf28) used to buy the dumped side. On Bitcoin it buys the side the
+ * spot move went to, and only when the forecast agrees with that side.
  */
 object BtcRedo {
     const val KEPT_RIDE = "fcride"
+    private val EXTRA = Regex("(t1|t2|x5|x10)$")
 
     fun settled(code: String): G14Copies.Snapshot? {
         val row = G14Copies.SOURCES[code] ?: return null
@@ -101,11 +102,14 @@ object BtcRedo {
 
     /** True when this code's old Bitcoin rules lost money and the redo applies. */
     fun applies(code: String): Boolean {
-        if (code == KEPT_RIDE) return false
+        if (code == KEPT_RIDE || code.isEmpty()) return false
         if (G14Copies.isCopyCode(code) || G14Copies.isCopyVariant(code)) return true
-        if (code == ForecastScalp.FADE_PREFIX || code.startsWith(ScalpV2.PREFIX + ForecastScalp.FADE_PREFIX)) return true
+        if (code == ForecastScalp.FADE_PREFIX || code.removePrefix(ScalpV2.PREFIX).startsWith(ForecastScalp.FADE_PREFIX)) return true
         if (code == "sf28" || code == "v2-sf28") return true
-        return settled(code) != null
+        if (settled(code) != null) return true
+        val root = rootOf(code)
+        if (root == code || root == KEPT_RIDE) return false
+        return root == "sf28" || settled(root) != null
     }
 
     fun appliesShock(p: ShockFav.Params): Boolean =
@@ -117,10 +121,36 @@ object BtcRedo {
             ScalpRule.buyPriceOk(ask) &&
             tauS.isFinite() && tauS >= BtcAiScalp.MIN_TAU_S
 
+    /**
+     * New Bitcoin entry for a losing scalp: the strategy's side is the forecast
+     * ride side, the ask is under 50¢, the move clears the flat threshold, and
+     * at least 90 seconds remain. A missing or flat forecast does not enter.
+     */
+    fun agrees(side: String, yesForecast: Double, ask: Double, tauS: Double): Boolean {
+        if (BtcDirection.rideSide(yesForecast) != side) return false
+        return BtcAiScalp.wantsEntry(ask, kotlin.math.abs(yesForecast), tauS)
+    }
+
+    /** Forecast for the held side. NaN when the YES forecast is missing. */
+    fun sideForecast(side: String, yesForecast: Double): Double =
+        if (!yesForecast.isFinite()) Double.NaN else if (side == "YES") yesForecast else -yesForecast
+
+    fun exitFor(side: String, yesForecast: Double, bid: Double, entry: Double, tauS: Double): String? =
+        BtcAiScalp.exitReason(sideForecast(side, yesForecast), bid, entry, tauS)
+
     /** Positive move buys YES. Negative move buys NO. Flat is no trade. */
     fun rideMoveSide(moveBp: Double): String? = when {
         moveBp > 0.0 -> "YES"
         moveBp < 0.0 -> "NO"
         else -> null
+    }
+
+    /** v2-sf41t2 / v2-sf42x10 / g14x-sf30 → the original loser code, when there is one. */
+    private fun rootOf(code: String): String {
+        var c = code
+        if (c.startsWith(G14Copies.VARIANT_PREFIX)) c = c.removePrefix(G14Copies.VARIANT_PREFIX)
+        if (c.endsWith(G14Copies.SUFFIX)) c = c.removeSuffix(G14Copies.SUFFIX)
+        if (c.startsWith(ScalpV2.PREFIX)) c = c.removePrefix(ScalpV2.PREFIX)
+        return c.replace(EXTRA, "")
     }
 }

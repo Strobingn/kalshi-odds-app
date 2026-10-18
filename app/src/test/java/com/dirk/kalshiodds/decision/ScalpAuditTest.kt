@@ -113,6 +113,7 @@ class ScalpAuditTest {
         val pending = held("sf28").copy(state = ScalpState.PENDING_ENTRY, contracts = 0, entryPrice = null,
             entryAtMs = null, signalAtMs = at, signalAsk = .50, restingLimit = .49)
         val b = ScalpBook(InMemoryScalpPersistence().also { it.seed(listOf(pending)) }, variants = emptyList(), liveExtras = true)
+        b.noteBtcForecast(ticker, 0.04)
         b.onQuote(q(at + 3000, .49).copy(yesAsk = .50), false)
         assertEquals(ScalpState.PENDING_ENTRY, row(b).state)
         b.onShockFavQuote(q(at + 3000, .47, size = 2.0).copy(yesAsk = .48), false)
@@ -139,7 +140,7 @@ class ScalpAuditTest {
             controls = MemoryScalpControls(ScalpControls(enabled = false)))
         for (sec in 0..24) b.onShockFavQuote(q(at - 250_000 + sec * 10_000L, .49), true)
         b.onShockFavQuote(q(at, .39).copy(yesAsk = .40), true)
-        assertTrue(b.allTrades().any { it.variantId == "sf41" && it.side == "YES" && it.state == ScalpState.PENDING_ENTRY })
+        assertTrue(b.allTrades().none { it.variantId == "sf41" && it.state != ScalpState.NO_FILL })
     }
 
     @Test fun feeRoundingMatchesIndependentDecimalCalculationAndIsSymmetric() {

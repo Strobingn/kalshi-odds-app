@@ -51,8 +51,8 @@ fun ScalpChatScreen() {
     var keyDraft by remember { mutableStateOf(container.extraSecrets.xaiApiKey) }
     var draft by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
-    var note by remember { mutableStateOf("Tuner only tightens. Losing Bitcoin scalps can be turned off. Size never goes up.") }
-    var turns by remember { mutableStateOf(listOf(GrokChat.Turn("assistant", "I'm ${GrokChat.DISPLAY_NAME}. Ask me to tune the Bitcoin scalps, or tap Tune BTC now."))) }
+    var note by remember { mutableStateOf("Questions get a normal answer. A tune only tightens paper settings and never places an order.") }
+    var turns by remember { mutableStateOf(listOf(GrokChat.Turn("assistant", "I'm ${GrokChat.DISPLAY_NAME}. Ask a question about the Bitcoin scalps, or tap Tune BTC now."))) }
 
     fun applyPatch(patch: BtcScalpTuner.Patch) {
         val next = BtcScalpTuner.apply(container.scalpControls.state.value, patch)
@@ -87,7 +87,8 @@ fun ScalpChatScreen() {
                 runCatching { GrokChat.complete(key, history) }
             }
             reply.onSuccess { result ->
-                turns = history + GrokChat.Turn("assistant", result.text)
+                val shown = result.text.trim().ifBlank { "No answer came back." }
+                turns = history + GrokChat.Turn("assistant", shown)
                 val obj = result.patch
                 if (obj != null) {
                     val current = container.scalpControls.state.value

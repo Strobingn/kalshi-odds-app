@@ -35,7 +35,7 @@ class ScalpEntryCeilingTest {
     }
 
     @Test fun delayedOriginalAndRestoredV2FillsRespectBothSidesAndFiftyFiveCentBoundary() {
-        for (variant in listOf(ScalpParams.CLASSIC.id, "v2-sf41", "v2-sf41t2")) {
+        for (variant in listOf(ScalpParams.CLASSIC.id, "v2-sf43", "v2-sf43t2")) {
             for (side in listOf("YES", "NO")) {
                 for (price in listOf(.55, .56)) {
                     val book = book(pending(variant, side, price = .55).copy(note = "v2ask=0.99"))
@@ -87,14 +87,9 @@ class ScalpEntryCeilingTest {
 
         val book = ScalpBook(variants = emptyList())
         for (sec in -300..0) book.tickSpot("BTC", 100_000.0, at + sec * 1000L)
-        // Downward spot shock. The redone fade rides that move (NO) under 50¢ instead of buying the dumped YES side.
+        // A downward spot shock used to open the fade. Without a forecast that agrees, it does not.
         book.onShockFavQuote(quote.copy(nowMs = at + 5_000, bookAtMs = at + 5_000, spot = 99_900.0), true)
-        val signal = book.snapshot().first { it.variantId == "sf28" }
-        assertEquals("NO", signal.side)
-        book.onShockFavQuote(quote.copy(nowMs = at + 7_000, bookAtMs = at + 7_000, spot = 99_900.0), false)
-        val filled = book.snapshot().first { it.id == signal.id }
-        assertEquals(ScalpState.OPEN, filled.state)
-        assertTrue(filled.entryPrice!! < BtcAiScalp.MAX_ASK)
+        assertTrue(book.allTrades().none { it.variantId == "sf28" && it.state != ScalpState.NO_FILL })
     }
 
     @Test fun depthWalkingExcludesExpensiveTailEvenIfAverageWouldBeCheap() {
@@ -104,6 +99,7 @@ class ScalpEntryCeilingTest {
         assertEquals(1.45, usd, 1e-9)
         for (side in listOf("YES", "NO")) {
             val book = book(pending("v2-sf41x5", side, .40).copy(note = "v2ask=0.99"))
+            book.noteBtcForecast(ticker, if (side == "YES") 0.04 else -0.04)
             val quote = q(at + 2_000, .40, side)
             val bids = listOf(.60 to 2.0, .44 to 100.0) // asks 40¢ then 56¢
             book.onQuote(if (side == "YES") quote.copy(noBidsDesc = bids) else quote.copy(yesBidsDesc = bids), false)

@@ -9,20 +9,20 @@ class ScalpStrategySettingsTest {
     private val tk = "KXBTC15M-26OCT122015-15"
     private val close = ScalpTicker.closeMs(tk)!!
     private val at = close - 300_000
-    private fun source(id: String = "source", ms: Long = at) = ScalpTrade(id, tk, "YES", ScalpState.PENDING_ENTRY, ms, .4, .5, ruleVersion = "v|sf41|P")
+    private fun source(id: String = "source", ms: Long = at) = ScalpTrade(id, tk, "YES", ScalpState.PENDING_ENTRY, ms, .4, .5, ruleVersion = "v|sf43|P")
     private fun q(ms: Long, bid: Double = .39, ask: Double = .4) = ScalpRule.Quote(tk, ms, close, ms, bid, 100.0, ask, 100.0, 100_000.0, 100_000.0, 3e-5)
-    private fun cfg(knobs: ScalpStrategySettings) = MemoryScalpControls(ScalpControls(stopLossPercent = 20, strategySettings = mapOf("v2-sf41" to knobs),
-        disabledStrategies = ScalpModels.V2_MODELS.map { it.code }.filter { it != "v2-sf41" }.toSet()))
+    private fun cfg(knobs: ScalpStrategySettings) = MemoryScalpControls(ScalpControls(stopLossPercent = 20, strategySettings = mapOf("v2-sf43" to knobs),
+        disabledStrategies = ScalpModels.V2_MODELS.map { it.code }.filter { it != "v2-sf43" }.toSet()))
     @Test fun perStrategySizingAndRiskAreFrozenAndKeepExitsAfterDisable() {
         val controls = cfg(ScalpStrategySettings(contracts = 3, stopLossPercent = 10, trailCents = 5))
         val book = ScalpBook(variants = emptyList(), liveExtras = true, controls = controls)
         book.importRestored(listOf(source()))
         book.onQuote(q(at + 2000), false)
-        val held = book.snapshot().single { it.variantId == "v2-sf41" }
+        val held = book.snapshot().single { it.variantId == "v2-sf43" }
         assertEquals(3, held.contracts)
         assertEquals(.04, ScalpV2.savedStop(held), 1e-9)
         assertEquals(.05, ScalpV2.savedNumber(held.note, "v2trail", 0.0), 1e-9)
-        controls.save(controls.state.value.copy(enabled = false, strategySettings = mapOf("v2-sf41" to ScalpStrategySettings(stopLossPercent = 80, trailCents = 20))))
+        controls.save(controls.state.value.copy(enabled = false, strategySettings = mapOf("v2-sf43" to ScalpStrategySettings(stopLossPercent = 80, trailCents = 20))))
         book.onQuote(q(at + 3000, bid = .30), false)
         assertEquals(ScalpState.PENDING_EXIT, book.snapshot().first { it.id == held.id }.state)
         assertTrue(book.snapshot().first { it.id == held.id }.exitReason!!.contains("10%"))
@@ -42,17 +42,17 @@ class ScalpStrategySettingsTest {
         val book = ScalpBook(variants = emptyList(), liveExtras = true, controls = controls)
         book.importRestored(listOf(source()))
         book.onQuote(q(at + 2000, .29, .30), false)
-        assertEquals(ScalpState.PENDING_ENTRY, book.snapshot().first { it.variantId == "v2-sf41" }.state)
+        assertEquals(ScalpState.PENDING_ENTRY, book.snapshot().first { it.variantId == "v2-sf43" }.state)
         book.onQuote(q(at + 3000), false)
-        assertEquals(ScalpState.PENDING_ENTRY, book.snapshot().first { it.variantId == "v2-sf41" }.state)
+        assertEquals(ScalpState.PENDING_ENTRY, book.snapshot().first { it.variantId == "v2-sf43" }.state)
         book.onQuote(q(at + 5000), false)
-        assertEquals(ScalpState.OPEN, book.snapshot().first { it.variantId == "v2-sf41" }.state)
+        assertEquals(ScalpState.OPEN, book.snapshot().first { it.variantId == "v2-sf43" }.state)
     }
     @Test fun untilMinuteBlocksNewOrdersButDoesNotDisableExits() {
         val controls = cfg(ScalpStrategySettings(untilMinute = 9))
         val book = ScalpBook(variants = emptyList(), liveExtras = true, controls = controls)
         book.importRestored(listOf(source())) // signal is in minute ten
-        assertTrue(book.snapshot().none { it.variantId == "v2-sf41" })
+        assertTrue(book.snapshot().none { it.variantId == "v2-sf43" })
         assertTrue(ScalpStrategySettings(untilMinute = 10).timeOk(close - 900_000, close))
         assertFalse(ScalpStrategySettings(untilMinute = 10).timeOk(close - 300_000, close))
     }

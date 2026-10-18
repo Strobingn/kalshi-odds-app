@@ -1,6 +1,7 @@
 package com.dirk.kalshiodds.decision
 
 import com.dirk.kalshiodds.ui.GrokChat
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -103,9 +104,32 @@ class BtcScalpChatTest {
         assertTrue(BtcRedo.appliesShock(ShockFav.v("sf03")))
         assertTrue(BtcRedo.appliesShock(ShockFav.v("sf32")))
         assertTrue(BtcRedo.appliesShock(ShockFav.v("sf41")))
+        assertTrue(BtcRedo.applies("v2-sf30"))
+        assertTrue(BtcRedo.applies("v2-sf32"))
+        assertTrue(BtcRedo.applies("v2-sf41"))
+        assertTrue(BtcRedo.applies("v2-sf42"))
+        assertTrue(BtcRedo.applies("v2-sf41t2"))
+        assertTrue(BtcRedo.applies("v2-sf42x10"))
+        assertTrue(BtcRedo.applies("v2-sf28"))
+        assertTrue(BtcRedo.applies("v2-sf51"))
+        assertTrue(BtcRedo.applies("v2-sf27"))
+        assertTrue(BtcRedo.applies("v2-sf02"))
+        assertTrue(BtcRedo.applies("v2-fcride"))
         assertFalse(BtcRedo.appliesShock(ShockFav.v("sf19")))
+        assertFalse(BtcRedo.applies("sf19"))
+        assertFalse(BtcRedo.applies("sf21"))
+        assertFalse(BtcRedo.applies("sf23"))
+        assertFalse(BtcRedo.applies("v2-sf19"))
         assertFalse(BtcRedo.applies("v2-sf01"))
         assertFalse(BtcRedo.applies("fairh60"))
+        assertTrue(BtcRedo.agrees("YES", 0.04, 0.42, 200.0))
+        assertTrue(BtcRedo.agrees("NO", -0.04, 0.42, 200.0))
+        assertFalse(BtcRedo.agrees("NO", 0.04, 0.42, 200.0))
+        assertFalse(BtcRedo.agrees("YES", Double.NaN, 0.42, 200.0))
+        assertFalse(BtcRedo.agrees("YES", 0.04, 0.50, 200.0))
+        assertFalse(BtcRedo.agrees("YES", 0.04, 0.42, 60.0))
+        assertEquals("forecast turning down", BtcRedo.exitFor("YES", -0.02, 0.41, 0.42, 200.0))
+        assertEquals("stop −2¢", BtcRedo.exitFor("NO", -0.04, 0.40, 0.42, 200.0))
     }
 
     @Test
@@ -115,6 +139,7 @@ class BtcScalpChatTest {
         val book = ScalpBook(variants = emptyList(), liveExtras = true)
         val at = close - 400_000L
         book.onQuote(ScalpRule.Quote(ticker, at, close, at, 0.40, 20.0, 0.42, 20.0, null, null, null), false)
+        book.noteBtcForecast(ticker, 0.04)
         val ride = ScalpTrade(
             "ride", ticker, "YES", ScalpState.PENDING_ENTRY, at, 0.42, 0.5,
             ruleVersion = "${ScalpRule.VERSION}|${ForecastScalp.variantId(true, 600)}|P"
@@ -126,6 +151,7 @@ class BtcScalpChatTest {
         val expensiveAt = close - 400_000L
         val blocked = ScalpBook(variants = emptyList(), liveExtras = true)
         blocked.onQuote(ScalpRule.Quote(ticker, expensiveAt, close, expensiveAt, 0.58, 20.0, 0.60, 20.0, null, null, null), false)
+        blocked.noteBtcForecast(ticker, 0.04)
         val expensive = ride.copy(id = "expensive", signalAsk = 0.60)
         blocked.importRestored(listOf(expensive))
         assertTrue(blocked.allTrades().none { it.id != "expensive" && (it.variantId.startsWith("v2-fcride") || G14Copies.isCopyVariant(it.variantId)) })
@@ -163,11 +189,90 @@ class BtcScalpChatTest {
         assertEquals("grok-4.7", GrokChat.MODEL)
         assertEquals("Grok 4.7 Fast", GrokChat.DISPLAY_NAME)
         assertEquals("low", GrokChat.REASONING_EFFORT)
-        val body = GrokChat.requestBody(listOf(GrokChat.Turn("user", "Tune bitcoin")))
+        val body = GrokChat.requestBody(listOf(GrokChat.Turn("user", "Why is the forecast flat?")))
         assertTrue(body.contains("\"model\":\"grok-4.7\""))
         assertTrue(body.contains("\"reasoning_effort\":\"low\""))
+        assertTrue(body.contains("Answer the question in plain sentences"))
         val patch = GrokChat.parsePatch("Tighten it.\n{\"maxAskCents\":40,\"disable\":[\"v2-sf51\"]}")
         assertEquals(40, patch!!.getInt("maxAskCents"))
         assertNull(GrokChat.parsePatch("No change."))
+        assertNull(GrokChat.parsePatch("The forecast is flat because the move is under a tenth of a cent."))
+        val answer = "The forecast is flat because the move is under a tenth of a cent."
+        val reply = GrokChat.replyFrom(
+            """{"choices":[{"message":{"role":"assistant","content":"$answer"}}]}"""
+        )
+        assertEquals(answer, reply.text)
+        assertNull(reply.patch)
+        val parts = GrokChat.replyFrom(
+            """{"choices":[{"message":{"content":[{"type":"reasoning","text":"hidden"},{"type":"output_text","text":"$answer"}]}}]}"""
+        )
+        assertEquals(answer, parts.text)
+        assertNull(parts.patch)
+        val tuned = GrokChat.replyFrom(
+            """{"choices":[{"message":{"content":${JSONObject.quote("Lowering the ask cap.\n{\"maxAskCents\":40}")}}}]}"""
+        )
+        assertTrue(tuned.text.contains("Lowering the ask cap."))
+        assertEquals(40, tuned.patch!!.getInt("maxAskCents"))
+    }
+
+    @Test
+    fun bigLosersStayQuietUntilTheForecastAgreesThenStopTwoCentsDown() {
+        val ticker = "KXBTC15M-26OCT122015-15"
+        val close = ScalpTicker.closeMs(ticker)!!
+        val at = close - 400_000L
+        fun book() = ScalpBook(variants = emptyList(), liveExtras = true, bankrollUsd = { Double.POSITIVE_INFINITY })
+        fun warm(b: ScalpBook) {
+            for (k in 200 downTo 1) b.tickSpot("BTC", 100_000.0 * (1 + (if (k % 2 == 0) 5e-5 else -5e-5)), at - k * 1000L)
+        }
+        fun imb(ms: Long, bid: Double, ask: Double) = ScalpRule.Quote(
+            ticker, ms, close, ms, bid, 90.0, ask, 10.0, 100_000.0, 100_000.0, 3e-5
+        )
+        val missing = book()
+        warm(missing)
+        missing.onShockFavQuote(imb(at, 0.40, 0.42), true)
+        assertTrue(missing.allTrades().none { it.variantId == "sf30" || it.variantId == "sf32" })
+
+        val against = book()
+        warm(against)
+        against.noteBtcForecast(ticker, -0.04)
+        against.onShockFavQuote(imb(at, 0.40, 0.42), true)
+        assertTrue(against.allTrades().none { it.variantId == "sf30" && it.state != ScalpState.NO_FILL })
+
+        val agreed = book()
+        warm(agreed)
+        agreed.noteBtcForecast(ticker, 0.04)
+        agreed.onShockFavQuote(imb(at, 0.40, 0.42), true)
+        val pending = agreed.allTrades().filter { it.variantId == "sf30" && it.state == ScalpState.PENDING_ENTRY }
+        assertEquals(1, pending.size)
+        assertEquals("YES", pending.single().side)
+        agreed.onShockFavQuote(imb(at + 3_000L, 0.40, 0.42), true)
+        val open = agreed.allTrades().single { it.variantId == "sf30" && it.id == pending.single().id }
+        assertEquals(ScalpState.OPEN, open.state)
+        assertEquals(0.42, open.entryPrice!!, 1e-9)
+        agreed.onShockFavQuote(imb(at + 4_000L, 0.40, 0.42), true)
+        val closed = agreed.allTrades().single { it.id == open.id }
+        assertEquals(ScalpState.CLOSED, closed.state)
+        assertEquals("stop −2¢", closed.exitReason)
+
+        fun dip(b: ScalpBook, forecast: Double?) {
+            if (forecast != null) b.noteBtcForecast(ticker, forecast)
+            val start = at - 250_000L
+            for (sec in 0..24) {
+                val ms = start + sec * 10_000L
+                b.onShockFavQuote(ScalpRule.Quote(ticker, ms, close, ms, 0.48, 20.0, 0.49, 20.0, null, null, null), true)
+            }
+            b.onShockFavQuote(ScalpRule.Quote(ticker, at, close, at, 0.39, 20.0, 0.40, 20.0, null, null, null), true)
+        }
+        val dipMissing = book()
+        dip(dipMissing, null)
+        assertTrue(dipMissing.allTrades().none { it.variantId == "sf41" && it.state != ScalpState.NO_FILL })
+        val dipAgainst = book()
+        dip(dipAgainst, -0.04)
+        assertTrue(dipAgainst.allTrades().none { it.variantId == "sf41" && it.state != ScalpState.NO_FILL })
+        val dipYes = book()
+        dip(dipYes, 0.04)
+        val dipRow = dipYes.allTrades().single { it.variantId == "sf41" }
+        assertEquals("YES", dipRow.side)
+        assertEquals(ScalpState.PENDING_ENTRY, dipRow.state)
     }
 }
