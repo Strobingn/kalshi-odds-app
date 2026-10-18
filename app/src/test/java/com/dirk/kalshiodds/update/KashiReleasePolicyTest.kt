@@ -242,8 +242,8 @@ class KashiReleasePolicyTest {
         assertFalse(yml.contains("assembleRelease"))
         val gradle = java.io.File(root, "app/build.gradle.kts").readText()
         assertTrue(gradle.contains(KashiReleasePolicy.CERT_SHA256))
-        assertTrue(gradle.contains("versionName = \"0.3.87\""))
-        assertTrue(gradle.contains("versionCode = 102"))
+        assertTrue(gradle.contains("versionName = \"0.3.88\""))
+        assertTrue(gradle.contains("versionCode = 103"))
     }
 
     @Test

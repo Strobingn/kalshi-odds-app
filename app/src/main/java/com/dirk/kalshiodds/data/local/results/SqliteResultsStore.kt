@@ -1377,6 +1377,13 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
     }
 
     private class Helper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, DB_VERSION) {
+        // 0.3.88: job 5101 ANR — a chart read waited on a sync write's connection. WAL lets readers run
+        // concurrently with the single writer instead of blocking on it.
+        override fun onConfigure(db: SQLiteDatabase) {
+            super.onConfigure(db)
+            runCatching { db.enableWriteAheadLogging() }
+        }
+
         override fun onCreate(db: SQLiteDatabase) {
             db.execSQL(
                 """

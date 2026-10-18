@@ -68,11 +68,23 @@ class ChartWindowService(
     fun seriesForCard(
         market: MarketUiModel,
         nowMs: Long = this.nowMs()
+    ): List<BidPoint> = seriesForCardFrom(market, storedForCard(market, nowMs), nowMs)
+
+    /** Disk read for a card's window. Blocking SQLite — call from Dispatchers.IO only (0.3.88). */
+    fun storedForCard(market: MarketUiModel, nowMs: Long = this.nowMs()): List<BidPoint> {
+        val end = market.closeTimeEpochMs ?: nowMs
+        return archive.chartTicks(market.ticker, end - WINDOW_MS, end, ChartSeriesMerge.MAX_WINDOW_POINTS)
+            .map { it.toBidPoint() }
+    }
+
+    /** Pure in-memory merge of pre-read [stored] ticks with the live book. Safe on main (0.3.88). */
+    fun seriesForCardFrom(
+        market: MarketUiModel,
+        stored: List<BidPoint>,
+        nowMs: Long = this.nowMs()
     ): List<BidPoint> {
         val end = market.closeTimeEpochMs ?: nowMs
         val start = end - WINDOW_MS
-        val stored = archive.chartTicks(market.ticker, start, end, ChartSeriesMerge.MAX_WINDOW_POINTS)
-            .map { it.toBidPoint() }
         val live = runCatching { book.bidHistory(market.ticker) }.getOrElse { emptyList() }
         val merged = ChartSeriesMerge.merge(stored, live)
         val headed = ChartSeriesMerge.withLiveHead(
