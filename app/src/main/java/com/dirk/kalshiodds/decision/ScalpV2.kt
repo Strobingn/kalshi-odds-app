@@ -103,24 +103,56 @@ object ScalpV2 {
      * different sells) and two size copies (x5/x10) whose paper fills walk the real order-book depth.
      */
     data class Spec(val id: String, val base: String, val maxAsk: Double = MAX_ASK, val trail: Double = TRAIL,
-                    val stop: Double? = null, val clip: Int = CLIP, val walk: Boolean = false, val tag: String = "")
+                    val stop: Double? = null, val clip: Int = CLIP, val walk: Boolean = false, val tag: String = "",
+                    /** 0.3.89: true when [trail] is this variant's own setting (wins over the global peak-trail default). */
+                    val ownTrail: Boolean = false,
+                    /** 0.3.89: this variant's own net take-profit per contract (null = none). */
+                    val tpNet: Double? = null)
 
     private val SHOCK_ASK = listOf(MAX_ASK, 0.48, 0.46, 0.44, 0.42)
     private val SHOCK_TRAIL = listOf(0.02, 0.01, 0.03, 0.04)
     private val SHOCK_SPECS: List<Spec> = (1..20).map { i ->
         val b = String.format(java.util.Locale.US, "sf%02d", i)
-        Spec(PREFIX + b, b, maxAsk = SHOCK_ASK[(i - 1) % 5], trail = SHOCK_TRAIL[(i - 1) / 5])
+        Spec(PREFIX + b, b, maxAsk = SHOCK_ASK[(i - 1) % 5], trail = SHOCK_TRAIL[(i - 1) / 5], ownTrail = true)
     }
     private val SIMPLE_BASES = listOf("sf41", "sf42", "sf43", "sf44")
     val EXTRA_SPECS: List<Spec> = SIMPLE_BASES.flatMapIndexed { k, b ->
         listOf(
-            Spec(PREFIX + b + "t1", b, maxAsk = 0.44 + 0.01 * k, trail = 0.01, stop = 0.10 + 0.02 * k, tag = "tweak 1"),
-            Spec(PREFIX + b + "t2", b, maxAsk = MAX_ASK, trail = 0.03, stop = 0.20 + 0.02 * k, tag = "tweak 2"),
+            Spec(PREFIX + b + "t1", b, maxAsk = 0.44 + 0.01 * k, trail = 0.01, stop = 0.10 + 0.02 * k, tag = "tweak 1", ownTrail = true),
+            Spec(PREFIX + b + "t2", b, maxAsk = MAX_ASK, trail = 0.03, stop = 0.20 + 0.02 * k, tag = "tweak 2", ownTrail = true),
             Spec(PREFIX + b + "x5", b, clip = 5, walk = true, tag = "5 contracts"),
             Spec(PREFIX + b + "x10", b, clip = 10, walk = true, tag = "10 contracts")
         )
     }
-    private val BY_ID: Map<String, Spec> = (SHOCK_SPECS + EXTRA_SPECS).associateBy { it.id }
+    /** Trail used for take-profit-only Open 50 variants: effectively off (the 4% stop still protects). */
+    const val NO_TRAIL = 0.20
+    /**
+     * 0.3.89: v2 Open 50 copies (v2-sf51…v2-sf60) previously had no Spec, so every copy got the same default
+     * (55¢ / global 3¢ trail / no TP) and each group of five traded identically. Each now carries its original's
+     * own trail or net take-profit, and the maker variants keep their 49¢ entry ceiling.
+     */
+    val O50_SPECS: List<Spec> = ShockFav.VARIANTS.filter { it.kind == ShockFav.Kind.OPEN50 && it.o50 != ShockFav.O50.AI }.map { p ->
+        Spec(PREFIX + p.code, p.code,
+            maxAsk = if (p.o50 == ShockFav.O50.MAKER) ShockFav.O50_MAKER_PX else MAX_ASK,
+            trail = p.trail ?: NO_TRAIL, ownTrail = true, tpNet = p.tpNetO50, tag = p.label)
+    }
+    private val BY_ID: Map<String, Spec> = (SHOCK_SPECS + EXTRA_SPECS + O50_SPECS).associateBy { it.id }
+    /**
+     * 0.3.89: the trail a new v2 entry really uses. A per-strategy user knob wins; then a variant's own trail
+     * (unless the user switched to manual global parameters); then the global peak-trail default.
+     */
+    fun resolvedSpec(spec: Spec, knobTrailCents: Int?, peakTrailEnabled: Boolean, peakTrailCents: Int, manual: Boolean): Spec = spec.copy(trail = when {
+        knobTrailCents != null -> knobTrailCents / 100.0
+        spec.ownTrail && !manual -> spec.trail
+        peakTrailEnabled -> peakTrailCents / 100.0
+        else -> spec.trail
+    })
+    /** Net take-profit $/contract for a new v2 entry: user knob, else manual global, else the variant's own. */
+    fun resolvedTakeProfit(spec: Spec, knobTpCents: Int?, manual: Boolean, globalTpCents: Int): Double = when {
+        knobTpCents != null -> knobTpCents / 100.0
+        manual -> globalTpCents / 100.0
+        else -> spec.tpNet ?: 0.0
+    }
     fun spec(variantId: String): Spec = BY_ID[variantId] ?: Spec(variantId, variantId.removePrefix(PREFIX))
     /** Extra (non-plain) v2 copies to spawn for one original signal. */
     fun extrasFor(originalVariantId: String): List<Spec> = EXTRA_SPECS.filter { it.base == originalVariantId }
