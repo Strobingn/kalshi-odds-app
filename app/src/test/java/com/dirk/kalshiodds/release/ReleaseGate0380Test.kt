@@ -38,7 +38,9 @@ class ReleaseGate0380Test {
     @Test fun copiesStayActiveWhileRetiredOriginalsStayRetired() {
         ScalpModels.retirementForTest(true)
         try {
-            assertTrue(ScalpModels.isRetired(ScalpModels.modelByCode("sf32")!!))
+            assertFalse(ScalpModels.isRetired(ScalpModels.modelByCode("sf32")!!))
+            assertTrue(ScalpModels.modelByCode("sf32")!! in ScalpModels.ACTIVE)
+            assertTrue(ScalpModels.isRetired(ScalpModels.modelByCode("sf43")!!))
             for (src in G14Copies.SOURCES.keys) assertTrue(ScalpModels.modelByCode(G14Copies.copyCode(src))!! in ScalpModels.ACTIVE)
             // winners untouched and still active
             for (w in listOf("fairh60", "v2-sf08", "v2-sf09", "v2-sf01", "v2-sf06", "v2-sf07", "v2-sf24", "v2-sf17"))

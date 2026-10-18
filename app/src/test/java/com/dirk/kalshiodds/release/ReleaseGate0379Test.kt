@@ -14,8 +14,9 @@ class ReleaseGate0379Test {
     @org.junit.After fun off() = ScalpModels.retirementForTest(false)
 
     @Test fun retiredNewTradeBecomesHiddenShadowKeptOneStaysPrimary() {
-        val sh = ScalpModels.toShadowIfRetired(trade("sf30"))
-        assertFalse(sh.isPrimary); assertEquals("sf30", sh.variantId); assertNull(ScalpModels.modelOf(sh))
+        val sh = ScalpModels.toShadowIfRetired(trade("sf43"))
+        assertFalse(sh.isPrimary); assertEquals("sf43", sh.variantId); assertNull(ScalpModels.modelOf(sh))
+        assertTrue(ScalpModels.toShadowIfRetired(trade("sf30")).isPrimary)
         assertTrue(ScalpModels.toShadowIfRetired(trade("v2-sf01")).isPrimary)
     }
 
@@ -23,7 +24,7 @@ class ReleaseGate0379Test {
         state = ScalpState.PENDING_ENTRY, signalAtMs = 1L, signalAsk = .5, fairAtSignal = .5, ruleVersion = "${ScalpRule.VERSION}|$vid|P")
 
     @Test fun retiredModelsAreOffCardsAndBoard() {
-        for (code in listOf("sf30", "sf32", "sf41", "sf42", "sf43", "sf44", "v2-sf30", "v2-sf32", "v2-sf41x10", "dip", "mkdip")) {
+        for (code in listOf("sf43", "sf44", "v2-sf43", "v2-sf44", "dip", "mkdip")) {
             val m = ScalpModels.modelByCode(code)!!
             assertTrue(code, ScalpModels.isRetired(m))
             assertFalse(code, m in ScalpModels.ACTIVE)
@@ -33,7 +34,7 @@ class ReleaseGate0379Test {
     }
 
     @Test fun smallSampleWinnersStay() {
-        for (code in listOf("v2-sf01", "v2-sf08", "v2-sf09", "v2-sf24", "fairh60", "fcride", "sf29", "sf13", "sf03")) {
+        for (code in listOf("v2-sf01", "v2-sf08", "v2-sf09", "v2-sf24", "fairh60", "fcride", "sf29", "sf13", "sf03", "sf30", "sf32", "sf41", "sf42", "v2-sf30", "v2-sf32", "v2-sf41", "v2-sf42")) {
             val m = ScalpModels.modelByCode(code)!!
             assertFalse(code, ScalpModels.isRetired(m))
             assertTrue(code, m in ScalpModels.ACTIVE)
@@ -42,6 +43,7 @@ class ReleaseGate0379Test {
 
     @Test fun retiredOriginalStillMapsForOldLedgerRows() {
         assertEquals("sf30", ScalpModels.modelOf(trade("sf30"))?.code) // old rows still map
+        assertEquals("sf43", ScalpModels.modelOf(trade("sf43"))?.code)
         assertEquals(ScalpModels.ALL.size, ScalpModels.Model.values().size)
     }
 
