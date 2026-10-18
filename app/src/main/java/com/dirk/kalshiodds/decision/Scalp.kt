@@ -1727,8 +1727,7 @@ class ScalpBook(
             if (strategyEntryChecks.size > 2000) strategyEntryChecks.keys.filter { (ScalpTicker.closeMs(it.substringBefore('|')) ?: 0) < t.signalAtMs }.forEach { strategyEntryChecks.remove(it) }
             if (ScalpRisk.entryBlocked(_all.value, seed.id, t.ticker, t.signalAtMs)) continue // 0.3.85 churn guard
             val plan = cfg.plan(informed, model.code)
-            val sp = if (cfg.peakTrailEnabled) plan.spec.copy(trail = (knobs.trailCents ?: cfg.peakTrailCents) / 100.0)
-                else plan.spec.copy(trail = knobs.trailCents?.div(100.0) ?: plan.spec.trail)
+            val sp = ScalpV2.resolvedSpec(plan.spec, knobs.trailCents, cfg.peakTrailEnabled, cfg.peakTrailCents, cfg.manual)
             val stopPct = cfg.protectivePercent(model.code)
             val stop = plan.stop
             save(ScalpTrade(id = idFactory(), ticker = t.ticker.uppercase(), side = t.side, state = ScalpState.PENDING_ENTRY,
@@ -1737,7 +1736,7 @@ class ScalpBook(
                     m.label, t.variantId, if (sp.tag.isNotEmpty()) " " + sp.tag else "", sp.maxAsk * 100, sp.trail * 100, sp.clip,
                     if (sp.walk) " depth-walk" else "", stop) +
                     String.format(Locale.US, " · v2ask=%.4f · v2trail=%.4f · v2arm=%.4f · %s", sp.maxAsk, sp.trail, plan.arm, plan.note + "; learned ${feedback.trades} closed; recent net/ct ${feedback.recentNetPerContract}") +
-                    String.format(Locale.US, " · v2tp=%.4f · v2hold=%d · v2clip=%d", (knobs.takeProfitCents ?: if (cfg.manual) cfg.takeProfitCents else 0) / 100.0, knobs.maxHoldSeconds ?: cfg.maxHoldSeconds, sp.clip) +
+                    String.format(Locale.US, " · v2tp=%.4f · v2hold=%d · v2clip=%d", ScalpV2.resolvedTakeProfit(sp, knobs.takeProfitCents, cfg.manual, cfg.takeProfitCents), knobs.maxHoldSeconds ?: cfg.maxHoldSeconds, sp.clip) +
                     (if (cfg.peakTrailEnabled) " · v2peakrule=1 · v2stopPct=$stopPct · exit policy: $stopPct% below fill / ${Math.round(sp.trail * 100)}¢ below bid peak, active from entry" else "") +
                     (savedOpeningMid(t)?.let { " · o50open=" + String.format(Locale.US, "%.6f", it) } ?: "") +
                     " · v2min=${knobs.minEntryCents / 100.0} · v2until=${knobs.untilMinute} · v2sidecap=${knobs.maxOpenPerSide} · v2cadence=${knobs.cadenceSeconds}",

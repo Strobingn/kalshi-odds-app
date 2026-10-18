@@ -34,7 +34,7 @@ class ScalpLiveDirectionTest {
             assertEquals(.55, held.entryPrice!!, 1e-9)
             assertTrue(ScalpV2.peakRule(held))
             assertEquals(4.0, ScalpV2.stopPercent(held), 0.0)
-            assertEquals(.03, ScalpV2.savedNumber(held.note, "v2trail", 0.0), 1e-9)
+            assertEquals(.02, ScalpV2.savedNumber(held.note, "v2trail", 0.0), 1e-9) // 0.3.89: sf51's own 2¢ trail, not the global 3¢
         }
     }
 
