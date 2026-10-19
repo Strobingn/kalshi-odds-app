@@ -19,6 +19,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.decision.*
 import com.dirk.kalshiodds.ui.charts.ChartSeries
+import com.dirk.kalshiodds.ui.charts.ChartShapes
 import com.dirk.kalshiodds.ui.charts.DailyNetBars
 import com.dirk.kalshiodds.ui.charts.NetBar
 import com.dirk.kalshiodds.ui.charts.PnlSparkline
@@ -121,6 +122,26 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
                     Text("All time · first eight in selected sort", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
                     ArenaBars(rows, fees = true)
                 } }
+                item(key = "insight-charts") {
+                    ArenaCard {
+                        ScalpWindowInsightCharts(
+                            windows = st.windows,
+                            nowMs = st.updatedAtMs,
+                            models = rows.map { it.model },
+                            pnlBars = rows.filter { it.roundTrips > 0 }.map { NetBar(it.model.label, it.netUsd) },
+                            gauges = rows.filter { it.roundTrips > 0 }.map { Triple(it.model.label, it.winRate, it.roundTrips) },
+                            tweaks = rows.mapNotNull { r -> ChartShapes.tweakMark(r.model.label, st.controls.settings(r.model.code).aiNote) }
+                        )
+                    }
+                }
+                item(key = "live-trade-charts") {
+                    val live = remember(st.arenaChart.trades, st.activeScalps) {
+                        (st.arenaChart.trades + st.activeScalps).distinctBy { it.id }
+                    }
+                    ArenaCard {
+                        ScalpTradeInsightCharts(live, "Live window and open positions. All-time curves are above.")
+                    }
+                }
                 item(key = "analysis-data") { OutlinedButton(onClick = onHistory, modifier = Modifier.fillMaxWidth()) { Text("Detailed results & comparison") } }
             }
             KashiArenaTab.CHAT -> item(key = "chat") { LlmChatPanel(rows) }

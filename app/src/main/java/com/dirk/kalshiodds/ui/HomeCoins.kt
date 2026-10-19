@@ -16,6 +16,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.signal.d3.D3Quote
 import com.dirk.kalshiodds.signal.engine.BookLevelSnapshot
+import com.dirk.kalshiodds.ui.charts.ChartShapes
+import com.dirk.kalshiodds.ui.charts.DepthChart
 import com.dirk.kalshiodds.ui.components.FieldCard
 import com.dirk.kalshiodds.ui.theme.DipTheme
 import java.util.Locale
@@ -107,18 +109,20 @@ fun OrderBookCard(book: BookLevelSnapshot?) {
         Text("Order book (live)", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary, fontWeight = FontWeight.SemiBold)
         if (yes.isEmpty() && no.isEmpty()) {
             Text("No live book yet — needs Live signals / WS.", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
-            return@FieldCard
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            Column(Modifier.weight(1f)) {
-                Text("UP bids", style = MaterialTheme.typography.labelMedium, color = colors.up)
-                yes.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textPrimary) }
+        } else {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Column(Modifier.weight(1f)) {
+                    Text("UP bids", style = MaterialTheme.typography.labelMedium, color = colors.up)
+                    yes.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textPrimary) }
+                }
+                Column(Modifier.weight(1f)) {
+                    Text("DOWN bids", style = MaterialTheme.typography.labelMedium, color = colors.down)
+                    no.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textPrimary) }
+                }
             }
-            Column(Modifier.weight(1f)) {
-                Text("DOWN bids", style = MaterialTheme.typography.labelMedium, color = colors.down)
-                no.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textPrimary) }
-            }
         }
+        Text("Depth · both sides", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary, modifier = Modifier.padding(top = 8.dp))
+        DepthChart(ChartShapes.depthRungs(book?.yes.orEmpty(), book?.no.orEmpty()))
     }
 }
 
