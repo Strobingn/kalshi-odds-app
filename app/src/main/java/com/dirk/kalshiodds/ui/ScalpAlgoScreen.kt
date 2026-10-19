@@ -85,7 +85,8 @@ fun ScalpAlgoScreen(viewModel: OddsViewModel, onBack: () -> Unit) {
         androidx.activity.compose.BackHandler { settingsOpen = false }
         ScalpStrategySettingsContent(model, controls, onBack = { settingsOpen = false },
             onChange = { viewModel.saveScalpStrategySettings(model.code, it) },
-            onEnabled = { viewModel.enableScalpStrategy(model.code, it) })
+            onEnabled = { viewModel.enableScalpStrategy(model.code, it) },
+            onBenchOverride = { viewModel.setScalpBenchOverride(model.code, it) })
     } else ScalpAlgoContent(d, onBack, paged, viewModel::selectScalpChartWindow, viewModel::followScalpChartLive,
         onSettings = if (model != null) ({ settingsOpen = true }) else null)
 }

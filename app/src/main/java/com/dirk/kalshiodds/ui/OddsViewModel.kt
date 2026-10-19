@@ -366,6 +366,14 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         container.scalpControls.save(current.copy(disabledStrategies = if (enabled) current.disabledStrategies - code else current.disabledStrategies + code))
     }
 
+    /** 1.0.11: Auto (null) / Force trade ("ACTIVE") / Force bench ("BENCHED") for one scalper. */
+    fun setScalpBenchOverride(code: String, value: String?) {
+        val current = container.scalpControls.state.value
+        val overrides = if (value == null) current.benchOverrides - code else current.benchOverrides + (code to value)
+        container.scalpControls.save(current.copy(benchOverrides = overrides))
+        runCatching { container.scalpInsights.recompute() }
+    }
+
     private var scalpAlgoJob: Job? = null
     fun openScalpAlgo(model: com.dirk.kalshiodds.decision.ScalpModels.Model) {
         scalpAlgoJob?.cancel()
