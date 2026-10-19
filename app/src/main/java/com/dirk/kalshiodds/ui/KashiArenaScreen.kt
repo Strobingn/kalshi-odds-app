@@ -18,6 +18,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.decision.*
+import com.dirk.kalshiodds.ui.charts.ChartSeries
+import com.dirk.kalshiodds.ui.charts.DailyNetBars
+import com.dirk.kalshiodds.ui.charts.NetBar
+import com.dirk.kalshiodds.ui.charts.PnlSparkline
+import com.dirk.kalshiodds.ui.charts.RankedNetBars
 import com.dirk.kalshiodds.ui.theme.DipTheme
 
 internal enum class KashiArenaTab(val label: String) { OVERVIEW("Overview"), STRATEGIES("Strategies"), ANALYSIS("Analysis"), TRADES("Trades"), CHAT("AI chat") }
@@ -39,6 +44,7 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
     val active = st.activeScalps.filter { ScalpModels.modelOf(it) in models && it.isPrimary }
     val liveTrades = st.arenaChart.trades.filter { ScalpModels.modelOf(it) in models && it.isPrimary }
     val curve = remember(st.windows, v2, st.updatedAtMs) { KashiArenaData.curve(st.windows, st.updatedAtMs, models) }
+    val daily = remember(st.windows, v2, st.updatedAtMs) { ChartSeries.dailyNet(st.windows, st.updatedAtMs, models) }
     LazyColumn(Modifier.fillMaxSize().background(c.bg), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (aiPanel != null) item(key = "ai-watch") { AiWatchPanel(aiPanel, onAiFollows) }
         item(key = "arena-header") {
@@ -72,6 +78,16 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
                     Text("Net after fees · recent completed windows", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
                     ArenaProfitChart(curve)
                     Text("Starts at $0 for this range. Each strategy has its own paper ledger.", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
+                } }
+                item(key = "net-ranked") { ArenaCard {
+                    Text("Net by scalper", color = c.textPrimary, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text("All time · net after fees · best first", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+                    RankedNetBars(rows.filter { it.roundTrips > 0 }.map { NetBar(it.model.label, it.netUsd) }, Modifier.fillMaxWidth())
+                } }
+                item(key = "daily-net") { ArenaCard {
+                    Text("Daily net", color = c.textPrimary, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text("Recorded windows · ET days", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+                    DailyNetBars(daily, Modifier.fillMaxWidth())
                 } }
                 item(key = "live") {
                     ScalpWindowChart(ScalpAlgoDetail(chart = st.arenaChart.copy(trades = liveTrades)), title = "Live window") { id -> liveTrades.firstOrNull { it.id == id }?.let { ScalpModels.modelOf(it)?.let(onOpen) } }
@@ -156,9 +172,9 @@ internal fun ArenaStrategyRow(row: ScalpModels.Row, st: ScalpTabState, onOpen: (
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text(if (row.roundTrips > 0) ScalpTabCopy.money(row.netUsd) else "—", color = pnlColor(row.netUsd), style = ArenaUi.mono(MaterialTheme.typography.titleMedium), fontWeight = FontWeight.Bold)
-                if (points.size >= 2) Box(Modifier.width(76.dp)) { ArenaProfitChart(points, compact = true) }
             }
         }
+        PnlSparkline(points.map { it.net }, Modifier.fillMaxWidth().padding(vertical = 4.dp), height = 32.dp)
         val ai = st.controls.settings(row.model.code)
         Text(if (ai.aiLearns) "AI learns: on" + (if (ai.aiNote.isNotBlank()) " · last adjusted: ${ai.aiNote}" else "") else "AI learns: off", color = c.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 2)
         if (ScalpModels.isResearch(row.model)) {

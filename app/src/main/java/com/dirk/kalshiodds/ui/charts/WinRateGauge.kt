@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -33,7 +34,7 @@ fun WinRateGauge(
     val c = DipTheme.colors
 
     if (rate == null || !rate.isFinite() || settled <= 0) {
-        ChartEmptyState(modifier, size * 0.6f)
+        ChartEmptyState(modifier.width(size), size * 0.6f)
         return
     }
 

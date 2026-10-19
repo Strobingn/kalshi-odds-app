@@ -36,7 +36,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import java.util.Locale
+import com.dirk.kalshiodds.ui.charts.DonutSlice
+import com.dirk.kalshiodds.ui.charts.ShareDonut
 import com.dirk.kalshiodds.ui.theme.DipTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -344,15 +345,25 @@ private fun StatsCard(state: DataUiState) {
         )
         Text(s.dateRangeLabel, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
         Spacer(Modifier.height(8.dp))
-        Text(
-            String.format(
-                Locale.US,
-                "BTC %d · ETH %d · SOL %d · YES %d · NO %d",
-                s.btc, s.eth, s.sol, s.yesSettled, s.noSettled
+        Text("Settled outcome", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+        ShareDonut(
+            listOf(
+                DonutSlice("UP", s.yesSettled.toDouble(), colors.upButton),
+                DonutSlice("DOWN", s.noSettled.toDouble(), colors.downButton)
             ),
-            style = MaterialTheme.typography.bodyMedium,
-            color = colors.textPrimary,
-            fontWeight = FontWeight.SemiBold
+            Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            size = 84.dp
+        )
+        Text("Windows by coin", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+        val series = com.dirk.kalshiodds.ui.theme.ArenaColors.current().series
+        ShareDonut(
+            listOf(
+                DonutSlice("BTC", s.btc.toDouble(), series[0]),
+                DonutSlice("ETH", s.eth.toDouble(), series[1]),
+                DonutSlice("SOL", s.sol.toDouble(), series[2])
+            ),
+            Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            size = 84.dp
         )
         Text(
             "Price path ${s.pathPoints} · spot candles ${s.spotCandles} · fills ${s.fills}",
