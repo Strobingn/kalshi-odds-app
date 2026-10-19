@@ -22,6 +22,15 @@ object Research {
         LATE_T2 to LateSpec(minS = 90, maxS = 360, edgeCents = 8, maxGap = 0.23, loCents = 22, hiCents = 44)
     )
     fun isLate(id: String): Boolean = id == LATE || id in LATE_SPECS
+    /** Seconds left in the window. Spec bounds are seconds, not milliseconds. Inclusive on both ends. */
+    fun lateWindowOk(tauS: Double, id: String, fallbackMinS: Int, fallbackMaxS: Int): Boolean {
+        val spec = LATE_SPECS[id]
+        val min = (spec?.minS ?: fallbackMinS).toDouble()
+        val max = (spec?.maxS ?: fallbackMaxS).toDouble()
+        return tauS >= min && tauS <= max
+    }
+    /** Max fair-gap after fees, in dollars (21¢ is 0.21, not 21). */
+    fun lateMaxGapDollars(id: String): Double = LATE_SPECS[id]?.maxGap ?: FairGapTune.MAX_GAP
     /** Price band of a late-favourite leg: your price sliders win, else the copy's own band, else the fair-gap 24–42¢. */
     fun lateBand(id: String, s: ScalpStrategySettings?): FairGapTune.Band {
         val sp = LATE_SPECS[id]

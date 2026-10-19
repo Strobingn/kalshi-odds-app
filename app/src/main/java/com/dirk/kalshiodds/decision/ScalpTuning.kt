@@ -165,6 +165,8 @@ data class ScalpParams(
             listOf(seedFor("BTC").copy(minGap = 0.12, target = 0.10), seedFor("BTC").copy(minGap = 0.16, target = 0.14))
         }
         val FAIR_TWEAK_IDS: Set<String> by lazy { FAIR_TWEAKS.map { it.id }.toSet() }
+        /** BTC only. ETH/SOL keep the main Fair-gap seed and do not run these copies. */
+        fun fairTweaksFor(coin: String): List<ScalpParams> = if (coin.equals("BTC", ignoreCase = true)) FAIR_TWEAKS else emptyList()
         val ALL_VARIANTS: List<ScalpParams> get() = GRID + STRATEGY_GRID + MAKER_VARIANTS
 
         /** 0.3.43: one maker-entry + maker-exit variant per strategy (fair-gap per coin seed), shadow-tracked. */

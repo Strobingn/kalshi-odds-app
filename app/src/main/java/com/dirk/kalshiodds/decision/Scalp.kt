@@ -570,7 +570,7 @@ class ScalpBook(
         val primary = paramsFor(coin)
         // 0.3.50: six paper models = five strategy primaries + maker-first dip (buy the dip at the bid, sell the rebound at the ask).
         // 1.0.10: Dip-hunter maker / hold / no-TP copies removed (ScalpModels.REMOVED_CODES). 1.0.14: + fair-t1/t2 Fair-gap copies.
-        val primaries = ScalpStrategy.values().map { paramsFor(coin, it) } + (ScalpParams.HOLD60_SIBLINGS + ScalpParams.QUEUED_COPIES).filter { !ScalpModels.isRemoved(ScalpModels.modelOf(it).code) } + (if (coin.equals("BTC", ignoreCase = true)) ScalpParams.FAIR_TWEAKS else emptyList()) // BTC seed copies only
+        val primaries = ScalpStrategy.values().map { paramsFor(coin, it) } + (ScalpParams.HOLD60_SIBLINGS + ScalpParams.QUEUED_COPIES).filter { !ScalpModels.isRemoved(ScalpModels.modelOf(it).code) } + ScalpParams.fairTweaksFor(coin)
         val primaryIds = primaries.map { it.id }.toSet()
         val key = q.ticker.uppercase()
         val hist = history.getOrPut(key) { ArrayDeque() }
@@ -1801,11 +1801,10 @@ class ScalpBook(
             val edge = (s.edgeCents ?: Research.defaultEdge(id)).toDouble()
             // r-late and r-late-t1/t2 use their own window / band / max gap. Sliders and AI algo overrides still win the band.
             val late = Research.isLate(id)
-            val spec = Research.LATE_SPECS[id]
             val fgBand = Research.lateBand(id, entryView(id) ?: explicit(id))
             val lo = if (late) Math.round(fgBand.lo * 100).toInt() else maxOf(s.minEntryCents, 1)
             val hi = if (late) Math.round(fgBand.hi * 100).toInt() else (s.maxEntryCents ?: 99)
-            if (late && (q.tauS < (spec?.minS ?: rp.lateMinS) || q.tauS > (spec?.maxS ?: rp.lateMaxS))) continue
+            if (late && !Research.lateWindowOk(q.tauS, id, rp.lateMinS, rp.lateMaxS)) continue
             val clip = s.contracts ?: rp.clip
             var placed: ScalpTrade? = null
             for (side in listOf("YES", "NO")) {
@@ -1824,7 +1823,7 @@ class ScalpBook(
                 val hold = late
                 val n = if (id == Research.KELLY) minOf(Research.kellyContracts(ps, ask, rp.kellyFraction, rp.kellyBankrollUsd, rp.windowCapUsd - exposure), 1000) else clip
                 if (n <= 0 || !Research.gateOk(ps, ask, n, hold, edge)) continue
-                if (late && (!f.brti || Research.edgeAfterCosts(ps, ask, n, true) > (spec?.maxGap ?: FairGapTune.MAX_GAP) + 1e-9)) continue
+                if (late && (!f.brti || Research.edgeAfterCosts(ps, ask, n, true) > Research.lateMaxGapDollars(id) + 1e-9)) continue
                 val cost = n * ask + ScalpRule.orderFee(n, ask)
                 if (!shadowCode(id) && exposure + cost > rp.windowCapUsd + 1e-9) continue
                 placed = ScalpTrade(id = idFactory(), ticker = q.ticker.uppercase(), side = side, state = ScalpState.PENDING_ENTRY, signalAtMs = q.nowMs,

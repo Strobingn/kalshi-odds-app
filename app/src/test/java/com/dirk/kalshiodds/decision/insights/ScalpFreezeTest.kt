@@ -5,6 +5,7 @@ import com.dirk.kalshiodds.decision.ScalpBook
 import com.dirk.kalshiodds.decision.ScalpModels
 import com.dirk.kalshiodds.decision.ScalpParams
 import com.dirk.kalshiodds.decision.ScalpStat
+import com.dirk.kalshiodds.decision.ScalpRule
 import com.dirk.kalshiodds.decision.ScalpState
 import com.dirk.kalshiodds.decision.ScalpStrategy
 import com.dirk.kalshiodds.decision.ScalpTrade
@@ -72,11 +73,42 @@ class ScalpFreezeTest {
     @Test fun autoFreezeNeedsThirtyClearlyLosingTrades() {
         assertNull("29 trades is warm-up", ScalpFreeze.autoFreeze(List(29) { closed("sf41", it, -1.0) }))
         assertNull("net -9 is not below -10", ScalpFreeze.autoFreeze(List(30) { closed("sf41", it, -0.30) }))
-        assertNull("-0.25/trade is not clearly negative", ScalpFreeze.autoFreeze(List(30) { closed("sf41", it, -0.25) } + List(10) { closed("sf41", 100 + it, 0.0) }))
+        // Newest 30 at exactly -$0.25 each sum to -$7.50, which is not below -$10.
+        assertNull("-$0.25/trade over 30 is only -$7.50", ScalpFreeze.autoFreeze(List(30) { closed("sf41", it, -0.25) }))
+        val per = -10.0 / 30.0
+        val first = List(29) { closed("sf41", it, per) }
+        val exact = first + closed("sf41", 29, -10.0 - first.sumOf { it.netUsd!! })
+        assertEquals(-10.0, exact.sumOf { it.netUsd!! }, 0.0)
+        assertNull("exactly -$10 is not below -$10", ScalpFreeze.autoFreeze(exact))
         val hit = ScalpFreeze.autoFreeze(List(30) { closed("sf41", it, -0.50) })!!
         assertEquals(-15.0, hit.first, 1e-9); assertEquals(30, hit.second)
         // Only the newest 30 count: an old losing streak followed by 30 winners is not frozen.
         assertNull(ScalpFreeze.autoFreeze(List(30) { closed("sf41", it, -2.0) } + List(30) { closed("sf41", 100 + it, 0.5) }))
+    }
+
+    @Test fun frozenStrategyOpensNoNewPaperTrade() {
+        val close = 1_792_342_800_000L
+        val start = close - 900_000L
+        val tk = "KXBTC15M-26OCT181300-00"
+        val book = ScalpBook(liveExtras = false, bankrollUsd = { Double.POSITIVE_INFINITY })
+        book.benched = setOf("sf41")
+        val rnd = java.util.Random(7)
+        var spot = 100_000.0
+        for (k in 400 downTo 1) { spot += (rnd.nextDouble() - 0.5) * 20; book.tickSpot("BTC", spot, start - k * 1000L) }
+        var t = start
+        while (t < start + 400_000L) {
+            spot += (rnd.nextDouble() - 0.5) * 20
+            book.tickSpot("BTC", spot, t)
+            val mid = if (t >= start + 300_000L) 0.42 else 0.50
+            val q = ScalpRule.Quote(tk, t, close, t, mid - 0.01, 50.0, mid + 0.01, 50.0, spot, 100_000.0, 3e-5)
+            book.onShockFavQuote(q, true)
+            t += 1_000L
+        }
+        val rows = book.allTrades().filter { it.variantId == "sf41" }
+        assertTrue("the dip still signals", rows.isNotEmpty())
+        assertTrue(book.snapshot().none { it.variantId == "sf41" })
+        assertTrue(rows.none { it.isPrimary })
+        assertTrue(rows.all { it.ruleVersion.endsWith("|S") && "bench=shadow" in it.note })
     }
 
     @Test fun dollarLossAndDeepLossShareOneFrozenBadge() {
