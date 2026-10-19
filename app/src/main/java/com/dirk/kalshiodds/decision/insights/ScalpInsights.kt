@@ -57,7 +57,7 @@ class ScalpInsights(
         recompute()
     }
 
-    private fun keep(c: ScalpControls) = c.benchWindow.coerceIn(5, 500) * 2
+    private fun keep(c: ScalpControls) = maxOf(c.benchWindow.coerceIn(5, 500) * 2, ScalpFreeze.WINDOW) // 1.0.14: freeze needs 30
 
     fun onSettled(code: String, t: ScalpTrade) {
         val c = controls.state.value
@@ -85,7 +85,7 @@ class ScalpInsights(
     fun recompute() {
         val c = controls.state.value
         if (seededWindow != -1 && c.benchWindow > seededWindow) { seededWindow = c.benchWindow; seed(); return } // window grew: reload history
-        val next = synchronized(lock) {
+        val benchNext = synchronized(lock) {
             (real.keys + shadow.keys + c.benchOverrides.keys).associateWith { code ->
                 val ov = when (c.benchOverrides[code]) { "ACTIVE" -> BenchOverride.FORCE_ACTIVE; "BENCHED" -> BenchOverride.FORCE_BENCHED; else -> BenchOverride.AUTO }
                 val was = decisions[code]?.status == BenchStatus.BENCHED
@@ -98,20 +98,13 @@ class ScalpInsights(
                 }
             }
         }
-        val forcedActive = c.benchOverrides.filterValues { it == "ACTIVE" }.keys
-        val merged = next.toMutableMap()
-        for (code in c.aiBench) {
-            if (code in forcedActive) continue
-            val cur = merged[code]
-            if (cur?.status == BenchStatus.FORCED_ACTIVE || cur?.status == BenchStatus.FORCED_BENCHED) continue
-            if (cur == null || cur.trading) {
-                merged[code] = BenchDecision(code, BenchStatus.BENCHED, cur?.settled ?: 0, cur?.netUsd ?: 0.0, cur?.shadowNetUsd ?: 0.0,
-                    "AI bench: paper net clearly negative")
-            }
-        }
-        decisions = merged
-        book.benched = merged.values.filter { !it.trading }.map { it.scalperId }.toSet()
-        BenchRegistry.publish(merged)
+        val realLists = synchronized(lock) { real.mapValues { it.value.toList() } }
+        val shadowLists = synchronized(lock) { shadow.mapValues { it.value.toList() } }
+        // One freeze: default losers, the deep-loss rule, and the AI >$1 rule. Force trade / Force bench are left alone.
+        val next = ScalpFreeze.apply(benchNext, realLists, c.benchOverrides, shadowLists, decisions)
+        decisions = next
+        book.benched = next.values.filter { !it.trading }.map { it.scalperId }.toSet()
+        BenchRegistry.publish(next)
     }
 
     /** Recent settled nets for the AI watcher. Real history is the seeded window; shadow history is in memory. */
@@ -119,17 +112,17 @@ class ScalpInsights(
         val byId = stats.associateBy { it.scalperId }
         ScalpModels.ALL.map { m ->
             val st = byId[m.code]
-            val real = real[m.code]?.mapNotNull { it.netUsd?.takeIf { n -> n.isFinite() } }.orEmpty()
+            val realNets = real[m.code]?.mapNotNull { it.netUsd?.takeIf { n -> n.isFinite() } }.orEmpty()
             val sh = shadow[m.code]?.mapNotNull { it.netUsd?.takeIf { n -> n.isFinite() } }.orEmpty()
-            val wins = st?.wins ?: real.count { it > 0.0 }
-            val n = st?.n ?: real.size
+            val wins = st?.wins ?: realNets.count { it > 0.0 }
+            val n = st?.n ?: realNets.size
             PaperTape(
                 code = m.code,
                 trades = n,
                 wins = wins,
-                netUsd = st?.netUsd ?: real.sum(),
+                netUsd = st?.netUsd ?: realNets.sum(),
                 winRate = if (n == 0) null else wins.toDouble() / n,
-                recentReal = real,
+                recentReal = realNets,
                 shadow = sh
             )
         }

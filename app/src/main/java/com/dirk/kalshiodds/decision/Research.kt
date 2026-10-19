@@ -13,8 +13,32 @@ import kotlin.math.sqrt
 object Research {
     const val PREFIX = "r-"
     const val LATE = "r-late"; const val HOLD = "r-hold"; const val MAKER = "r-maker"; const val KELLY = "r-kelly"
-    /** 1.0.10: r-kelly removed from the registry (KELLY kept so old saved trades still close/decode). */
-    val IDS = listOf(LATE, HOLD, MAKER)
+    /** 1.0.14: two tweaked paper copies of r-late (the money maker): own entry window, edge gate, max gap and default band. */
+    const val LATE_T1 = "r-late-t1"; const val LATE_T2 = "r-late-t2"
+    data class LateSpec(val minS: Int, val maxS: Int, val edgeCents: Int, val maxGap: Double, val loCents: Int, val hiCents: Int)
+    /** t1 = tighter (2–4 min left, edge ≥ 12¢, 26–42¢); t2 = looser (1.5–6 min left, edge ≥ 8¢, gap ≤ 23¢, 22–44¢). */
+    val LATE_SPECS: Map<String, LateSpec> = mapOf(
+        LATE_T1 to LateSpec(minS = 120, maxS = 240, edgeCents = 12, maxGap = 0.21, loCents = 26, hiCents = 42),
+        LATE_T2 to LateSpec(minS = 90, maxS = 360, edgeCents = 8, maxGap = 0.23, loCents = 22, hiCents = 44)
+    )
+    fun isLate(id: String): Boolean = id == LATE || id in LATE_SPECS
+    /** Seconds left in the window. Spec bounds are seconds, not milliseconds. Inclusive on both ends. */
+    fun lateWindowOk(tauS: Double, id: String, fallbackMinS: Int, fallbackMaxS: Int): Boolean {
+        val spec = LATE_SPECS[id]
+        val min = (spec?.minS ?: fallbackMinS).toDouble()
+        val max = (spec?.maxS ?: fallbackMaxS).toDouble()
+        return tauS >= min && tauS <= max
+    }
+    /** Max fair-gap after fees, in dollars (21¢ is 0.21, not 21). */
+    fun lateMaxGapDollars(id: String): Double = LATE_SPECS[id]?.maxGap ?: FairGapTune.MAX_GAP
+    /** Price band of a late-favourite leg: your price sliders win, else the copy's own band, else the fair-gap 24–42¢. */
+    fun lateBand(id: String, s: ScalpStrategySettings?): FairGapTune.Band {
+        val sp = LATE_SPECS[id]
+        val manual = s != null && (s.minEntryCents > 1 || s.maxEntryCents != null)
+        return if (sp == null || manual) FairGapTune.band(s) else FairGapTune.Band(sp.loCents / 100.0, sp.hiCents / 100.0)
+    }
+    /** 1.0.10: r-kelly removed from the registry (KELLY kept so old saved trades still close/decode). 1.0.14: + r-late-t1/t2. */
+    val IDS = listOf(LATE, HOLD, MAKER, LATE_T1, LATE_T2)
     fun isResearch(variantId: String) = variantId.startsWith(PREFIX)
 
     /** Frozen research parameters (sliders). */
@@ -89,7 +113,7 @@ object Research {
     }
 
     /** Default per-strategy edge gate (¢) when the slider is untouched. */
-    fun defaultEdge(id: String): Int = if (id == LATE) 10 else 2 // 1.0.3: late favourite → fair-gap 10¢ minimum gap
+    fun defaultEdge(id: String): Int = LATE_SPECS[id]?.edgeCents ?: if (id == LATE) 10 else 2 // 1.0.3: late favourite → fair-gap 10¢ minimum gap
 
     /**
      * "AI learns" (all strategies): every 3 closed paper trades, nudge ONE slider by 1¢ from the strategy's own net.

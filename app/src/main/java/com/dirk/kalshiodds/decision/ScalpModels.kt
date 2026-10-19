@@ -151,7 +151,12 @@ object ScalpModels {
         V2_SF44T1("v2-sf44t1", "v2 · sf44 tweak 1 · " + ScalpV2.spec("v2-sf44t1").let { s -> if (s.walk) "${s.clip} contracts, book-walk fills" else "ask ≤ ${Math.round(s.maxAsk * 100)}¢" }, V2_BLURB),
         V2_SF44T2("v2-sf44t2", "v2 · sf44 tweak 2 · " + ScalpV2.spec("v2-sf44t2").let { s -> if (s.walk) "${s.clip} contracts, book-walk fills" else "ask ≤ ${Math.round(s.maxAsk * 100)}¢" }, V2_BLURB),
         V2_SF44X5("v2-sf44x5", "v2 · sf44 5 contracts · " + ScalpV2.spec("v2-sf44x5").let { s -> if (s.walk) "${s.clip} contracts, book-walk fills" else "ask ≤ ${Math.round(s.maxAsk * 100)}¢" }, V2_BLURB),
-        V2_SF44X10("v2-sf44x10", "v2 · sf44 10 contracts · " + ScalpV2.spec("v2-sf44x10").let { s -> if (s.walk) "${s.clip} contracts, book-walk fills" else "ask ≤ ${Math.round(s.maxAsk * 100)}¢" }, V2_BLURB)
+        V2_SF44X10("v2-sf44x10", "v2 · sf44 10 contracts · " + ScalpV2.spec("v2-sf44x10").let { s -> if (s.walk) "${s.clip} contracts, book-walk fills" else "ask ≤ ${Math.round(s.maxAsk * 100)}¢" }, V2_BLURB),
+        // 1.0.14: tweaked paper copies of the two money makers (own ids, own cards).
+        FAIR_T1("fair-t1", "Fair-gap tweak 1 · gap 12¢ · TP +10¢", "Fair-gap entries at gap ≥ 12¢ after fee (original 14¢), take profit +10¢ (original +12¢), stop 8¢, turn-down 15¢, from 5 min left. Paper only."),
+        FAIR_T2("fair-t2", "Fair-gap tweak 2 · gap 16¢ · TP +14¢", "Fair-gap entries at gap ≥ 16¢ after fee (original 14¢), take profit +14¢ (original +12¢), stop 8¢, turn-down 15¢, from 5 min left. Paper only."),
+        R_LATE_T1("r-late-t1", "Research · Late favourite tight", "r-late copy, tighter: 2–4 min left, 26–42¢, BRTI fair beats price by 12–21¢ after the taker fee; holds to settlement; one side per window. Paper only."),
+        R_LATE_T2("r-late-t2", "Research · Late favourite loose", "r-late copy, looser: 1.5–6 min left, 22–44¢, BRTI fair beats price by 8–23¢ after the taker fee; holds to settlement; one side per window. Paper only.")
     }
 
     const val V2_BLURB = "v2 paper: new trades default to a 3¢ bid-peak trail active from entry and independent 20% fill-price stop. Existing trades retain saved exits. Preserve positive/inconclusive entry settings; bounded adjustments for sustained losses. Every trade has a protective stop. Exit in the final minute unless fresh CF fair ≥ 97%, bid ≥ 90¢ and holding beats selling. Decisions are estimates, never guaranteed wins. Actual stop/trail and adaptation evidence are in the trade note."
@@ -220,7 +225,9 @@ object ScalpModels {
     /** 0.3.54: no per-model split — every scalper draws from the whole shared free paper bankroll. */
     fun sliceUsd(bankrollUsd: Double): Double = (bankrollUsd.takeIf { it.isFinite() } ?: 0.0).coerceAtLeast(0.0)
 
-    fun modelOf(p: ScalpParams): Model =
+    /** 1.0.14: fair-t1 / fair-t2 param ids → their own models. */
+    private val FAIR_TWEAK_MODELS: Map<String, Model> by lazy { mapOf(ScalpParams.FAIR_TWEAKS[0].id to Model.FAIR_T1, ScalpParams.FAIR_TWEAKS[1].id to Model.FAIR_T2) }
+    fun modelOf(p: ScalpParams): Model = FAIR_TWEAK_MODELS[p.id] ?:
         if (p.hold60 && p.strategy == ScalpStrategy.FAIR_GAP) Model.FAIR_HOLD
         else if (p.target >= ScalpParams.NO_TP - 1e-9) (if (p.strategy == ScalpStrategy.MOMENTUM) Model.MOMO_NOTP else Model.DIP_NOTP)
         else if (p.hold60) (if (p.strategy == ScalpStrategy.MOMENTUM) Model.MOMO_HOLD else Model.DIP_HOLD) else if (p.maker && p.strategy == ScalpStrategy.DIP_HUNTER) Model.MAKER_DIP else modelOf(p.strategy)
@@ -266,6 +273,8 @@ object ScalpModels {
             Model.FAIR_HOLD -> "stop ${Math.round(ScalpParams.QUEUED_COPIES[0].stop * 100)}¢ after 60s"
             Model.DIP_NOTP -> "stop ${Math.round(ScalpParams.QUEUED_COPIES[1].stop * 100)}¢"
             Model.MOMO_NOTP -> "stop ${Math.round(ScalpParams.QUEUED_COPIES[2].stop * 100)}¢"
+            Model.FAIR_T1 -> "stop ${Math.round(ScalpParams.FAIR_TWEAKS[0].stop * 100)}¢"
+            Model.FAIR_T2 -> "stop ${Math.round(ScalpParams.FAIR_TWEAKS[1].stop * 100)}¢"
             else -> ScalpModels.legacyStop(m)
         }
     }

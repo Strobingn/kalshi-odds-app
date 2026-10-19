@@ -30,8 +30,10 @@ object ScalpAggUi {
             "95% CI $/trade (normal): " + (ci?.let { String.format(Locale.US, "[%+.3f, %+.3f]", it.first, it.second) } ?: "—")
         )
         val breakdown = ScalpModels.leaderboardFromStats(st, exits = book.loadExits()).filter { it.roundTrips > 0 }.take(12).map { r ->
-            String.format(Locale.US, "%s · %d trips · %+.2f USD · win %s%s", r.model.label, r.roundTrips, r.netUsd,
-                r.winRate?.let { String.format(Locale.US, "%.0f%%", it * 100) } ?: "—", if (r.exitReasons.isNotBlank()) " · " + r.exitReasons else "")
+            String.format(Locale.US, "%s · %d trips · %+.2f USD · win %s%s%s", r.model.label, r.roundTrips, r.netUsd,
+                r.winRate?.let { String.format(Locale.US, "%.0f%%", it * 100) } ?: "—", if (r.exitReasons.isNotBlank()) " · " + r.exitReasons else "",
+                // 1.0.14: frozen losers keep their scorecard line, tagged.
+                if (com.dirk.kalshiodds.decision.insights.ScalpFreeze.isFrozen(com.dirk.kalshiodds.decision.insights.BenchRegistry.decisions.value[r.model.code])) " · " + com.dirk.kalshiodds.decision.insights.ScalpFreeze.BADGE else "")
         }
         val windows = ScalpModels.windowsFromAgg(book.loadWindows(12), 12).map { w ->
             val tot = w.netByModel.values.sum()

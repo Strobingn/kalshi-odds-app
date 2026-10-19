@@ -24,8 +24,10 @@ object FairGapTune {
     const val HOLD_S = 270
     const val QUOTE_MAX_AGE_MS = 10_000L
 
-    /** Winners — unchanged in 1.0.3 (fair-gap family + fair-value research legs + the LLM lane, whose only change is model transparency). */
-    val KEEP: Set<String> = setOf("fair", "fairh60", "v2-fair", "v2-fairh60", Research.HOLD, Research.KELLY, Research.MAKER, "v2-llm")
+    /** Winners — unchanged in 1.0.3 (fair-gap family + fair-value research legs + the LLM lane, whose only change is model transparency).
+     *  1.0.14: fair-t1/t2 and r-late-t1/t2 copies run their own rules.
+     */
+    val KEEP: Set<String> = setOf("fair", "fairh60", "v2-fair", "v2-fairh60", Research.HOLD, Research.KELLY, Research.MAKER, "v2-llm", "fair-t1", "fair-t2", Research.LATE_T1, Research.LATE_T2)
 
     fun isTweaked(code: String?): Boolean = code != null && code !in KEEP
 
