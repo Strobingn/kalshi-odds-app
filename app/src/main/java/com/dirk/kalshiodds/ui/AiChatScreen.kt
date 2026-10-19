@@ -165,7 +165,7 @@ private fun AiLiveFeedCard(live: com.dirk.kalshiodds.llm.AiLiveSnapshot, on: Boo
         Text(live.ticker.ifBlank { "KXBTC15M" } + " · ${left / 60}:${"%02d".format(left % 60)} left", color = c.textPrimary, fontWeight = FontWeight.SemiBold)
         val dist = live.distanceUsd?.let { String.format(Locale.US, "%+,.2f", it) } ?: "—"
         Text("Strike ${fmtPx(live.strike)} · BTC ${fmtPx(live.btc)} · ${dist}", color = c.textPrimary, style = MaterialTheme.typography.bodySmall)
-        Text("UP ${cents(live.yesBid)}/${cents(live.yesAsk)} · DOWN ${cents(live.noBid)}/${cents(live.noAsk)} · AI UP ${live.modelUp?.let { "${"%.0f".format(it * 100)}%" } ?: "—"}", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+        Text(com.dirk.kalshiodds.llm.AiLiveFeed.cardOddsLine(live), color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
         if (live.positions.isEmpty()) Text("No open paper scalps", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
         else live.positions.take(6).forEach { p ->
             Text("${p.label} ${p.side} ${p.contracts} · ${String.format(Locale.US, "%+.2f", p.pnlUsd)}", color = if (p.pnlUsd >= 0) c.up else c.down, style = MaterialTheme.typography.labelSmall)
@@ -203,7 +203,6 @@ private fun LiveMiniChart(live: com.dirk.kalshiodds.llm.AiLiveSnapshot) {
 }
 
 private fun fmtPx(v: Double?) = v?.takeIf { it.isFinite() }?.let { String.format(Locale.US, "$%,.2f", it) } ?: "—"
-private fun cents(v: Double?) = v?.takeIf { it.isFinite() }?.let { String.format(Locale.US, "%.0f¢", it * 100) } ?: "—"
 
 @Composable
 private fun KeyFields(k0: String, m0: String, b0: String, providerLabel: String = "", onSave: (String, String, String) -> Unit) {

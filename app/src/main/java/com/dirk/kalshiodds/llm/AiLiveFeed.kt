@@ -3,7 +3,16 @@ package com.dirk.kalshiodds.llm
 import java.util.Locale
 
 /** One point on the live card chart. Prices in dollars, odds in 0–1. */
-data class AiLivePoint(val atMs: Long, val btc: Double?, val strike: Double?, val up: Double?, val down: Double?)
+data class AiLivePoint(
+    val atMs: Long,
+    val btc: Double?,
+    val strike: Double?,
+    val up: Double?,
+    val down: Double?,
+    val upAsk: Double? = null,
+    val downAsk: Double? = null,
+    val modelUp: Double? = null
+)
 
 data class AiLivePosition(val label: String, val side: String, val contracts: Int, val pnlUsd: Double)
 
@@ -49,7 +58,10 @@ object AiLiveFeed {
             prev.ticker.isNotBlank() && incoming.ticker.isNotBlank() && prev.ticker != incoming.ticker && !closer(prev, incoming)) {
             prev.copy(atMs = incoming.atMs, btc = incoming.btc ?: prev.btc)
         } else incoming
-        val point = AiLivePoint(kept.atMs, kept.btc, kept.strike, kept.yesBid, kept.noBid ?: kept.noAsk)
+        val point = AiLivePoint(
+            kept.atMs, kept.btc, kept.strike, kept.yesBid, kept.noBid,
+            upAsk = kept.yesAsk, downAsk = kept.noAsk, modelUp = kept.modelUp
+        )
         val sameWindow = prev != null && prev.windowKey.isNotBlank() && prev.windowKey == kept.windowKey
         val points = (if (sameWindow) prev.points else emptyList()).plus(point).takeLast(MAX_POINTS)
         return kept.copy(points = points)
@@ -91,15 +103,46 @@ object AiLiveFeed {
     fun prefer(current: LiveTrigger, next: LiveTrigger): LiveTrigger =
         if (current == LiveTrigger.NONE || next.ordinal < current.ordinal) next else current
 
+    /** Soonest open window, then the strike nearest the live BTC print. Same rule as the chat. */
+    fun atm(snaps: List<AiLiveSnapshot>): AiLiveSnapshot? {
+        val open = snaps.filter { it.ticker.isNotBlank() && it.closeMs > it.atMs }
+        if (open.isEmpty()) return null
+        val close = open.minOf { it.closeMs }
+        return open.filter { it.closeMs == close }.minWithOrNull(compareBy<AiLiveSnapshot> { s ->
+            s.distanceUsd?.takeIf { it.isFinite() }?.let { kotlin.math.abs(it) } ?: Double.MAX_VALUE
+        }.thenBy { it.ticker })
+    }
+
+    /**
+     * Cents for the live card. 99.6¢ stays 99.6¢. Only a real 100.0 price shows as 100¢.
+     */
+    fun centsLabel(v: Double?): String {
+        val p = v?.takeIf { it.isFinite() } ?: return "—"
+        val cents = (kotlin.math.round(p * 1000.0) / 10.0)
+        val whole = kotlin.math.round(cents)
+        return if (kotlin.math.abs(cents - whole) < 0.05) "${whole.toInt()}¢" else String.format(Locale.US, "%.1f¢", cents)
+    }
+
+    /** One decimal so 98.4% is not shown as 100%. */
+    fun upChanceLabel(p: Double?): String {
+        val v = p?.takeIf { it.isFinite() } ?: return "—"
+        val pct = kotlin.math.round(v.coerceIn(0.0, 1.0) * 1000.0) / 10.0
+        val whole = kotlin.math.round(pct)
+        return if (kotlin.math.abs(pct - whole) < 0.05) "${whole.toInt()}%" else String.format(Locale.US, "%.1f%%", pct)
+    }
+
+    fun cardOddsLine(s: AiLiveSnapshot): String =
+        "UP ${centsLabel(s.yesBid)}/${centsLabel(s.yesAsk)} · DOWN ${centsLabel(s.noBid)}/${centsLabel(s.noAsk)} · AI UP ${upChanceLabel(s.modelUp)}"
+
     fun post(live: AiLiveSnapshot?, trigger: LiveTrigger, tweaks: List<AiAdjustment>): String {
         val s = live
         val call = s?.modelUp?.takeIf { it.isFinite() }?.let { if (it >= 0.5) "UP" else "DOWN" } ?: "no call"
-        val pct = s?.modelUp?.takeIf { it.isFinite() }?.let { String.format(Locale.US, "%.0f%%", it * 100) } ?: "—"
+        val pct = upChanceLabel(s?.modelUp)
         val btc = s?.btc?.let { money(it) } ?: "—"
         val strike = s?.strike?.let { money(it) } ?: "—"
         val dist = s?.distanceUsd?.let { signed(it) } ?: "—"
-        val up = px(s?.yesBid) + "/" + px(s?.yesAsk)
-        val down = px(s?.noBid) + "/" + px(s?.noAsk)
+        val up = centsLabel(s?.yesBid) + "/" + centsLabel(s?.yesAsk)
+        val down = centsLabel(s?.noBid) + "/" + centsLabel(s?.noAsk)
         val why = when (trigger) {
             LiveTrigger.WINDOW -> "window open/close"
             LiveTrigger.BIG_MOVE -> "big move"
@@ -129,5 +172,4 @@ object AiLiveFeed {
 
     private fun money(v: Double) = String.format(Locale.US, "$%,.2f", v)
     private fun signed(v: Double) = String.format(Locale.US, "%+,.2f", v)
-    private fun px(v: Double?) = v?.takeIf { it.isFinite() }?.let { String.format(Locale.US, "%.0f¢", it * 100) } ?: "—"
 }
