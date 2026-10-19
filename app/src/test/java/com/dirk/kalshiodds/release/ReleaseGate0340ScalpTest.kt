@@ -35,6 +35,9 @@ class ReleaseGate0340ScalpTest {
         return ScalpBook(InMemoryScalpPersistence(), variants, InMemoryScalpTuneStore(pin)) { "s${ids.incrementAndGet()}" }
     }
 
+    // 1.0.14: fair-t1/t2 tweak cards fire alongside the seed; these gates check the original rows.
+    private fun ScalpBook.legacy() = snapshot().filter { it.variantId !in ScalpParams.FAIR_TWEAKS.map { t -> t.id } }
+
     @Test
     fun tickerCloseTimeParsesInEasternTime() {
         // 26OCT091015 = 2026-10-09 10:15 ET = 14:15 UTC.
@@ -74,21 +77,21 @@ class ReleaseGate0340ScalpTest {
         var t = close - 700_000L
         b.onQuote(q(t, 0.34, 0.35), true)                 // signal YES
         b.onQuote(q(t + 3_000L, 0.34, 0.35), true)        // fill @35
-        assertEquals(1, b.snapshot().size)                // still one: YES side already open
+        assertEquals(1, b.legacy().size)                // still one: YES side already open
         b.onQuote(q(t + 6_000L, 0.44, 0.45), true)        // target hit → pending exit
         b.onQuote(q(t + 9_000L, 0.44, 0.45), true)        // sold @44
-        val first = b.snapshot().single()
+        val first = b.legacy().single()
         assertEquals(ScalpState.CLOSED, first.state)
         assertTrue(first.netUsd!! > 0.0)
         // Cooldown: a fresh dip 10 s later does not re-enter …
         b.onQuote(q(t + 19_000L, 0.34, 0.35), true)
-        assertEquals(1, b.snapshot().size)
+        assertEquals(1, b.legacy().size)
         // … but after the 15 s cooldown it does: second fair-gap round trip in the same window.
         b.onQuote(q(t + 40_000L, 0.34, 0.35), true)
-        val fair = b.snapshot().filter { it.strategy == ScalpStrategy.FAIR_GAP }
+        val fair = b.legacy().filter { it.strategy == ScalpStrategy.FAIR_GAP }
         assertEquals(2, fair.size)
         // The 10¢ ask drop over 40 s also fires the dip-hunter alongside (separate strategy, same side allowed).
-        assertTrue(b.snapshot().any { it.strategy == ScalpStrategy.DIP_HUNTER && it.side == "YES" })
+        assertTrue(b.legacy().any { it.strategy == ScalpStrategy.DIP_HUNTER && it.side == "YES" })
         val per = ScalpBreakdown.roundTripsPerWindow(fair.map { if (it.state == ScalpState.PENDING_ENTRY) it.copy(state = ScalpState.CLOSED, netUsd = 0.0, contracts = 10) else it })
         assertEquals(2.0, per.avg, 1e-9)
     }
@@ -99,8 +102,8 @@ class ReleaseGate0340ScalpTest {
         val b = ScalpBook(InMemoryScalpPersistence(), ScalpParams.GRID, InMemoryScalpTuneStore()) { "v${ids.incrementAndGet()}" }
         b.onQuote(q(close - 700_000L, 0.29, 0.30), true)
         assertTrue(b.allTrades().size > 1)
-        assertEquals(1, b.snapshot().filter { !it.variantId.endsWith("-h60") }.size) // 0.3.63: Fair-gap hold copy also fires
-        assertTrue(b.snapshot().filter { !it.variantId.endsWith("-h60") }.all { it.isPrimary && it.variantId == ScalpParams.seedFor("BTC").id })
+        assertEquals(1, b.legacy().filter { !it.variantId.endsWith("-h60") }.size) // 0.3.63: Fair-gap hold copy also fires
+        assertTrue(b.legacy().filter { !it.variantId.endsWith("-h60") }.all { it.isPrimary && it.variantId == ScalpParams.seedFor("BTC").id })
         assertEquals(8, ScalpParams.GRID.size)
         // Every coin's walk-forward seed is inside the tuner grid.
         ScalpParams.COINS.forEach { assertTrue(ScalpParams.seedFor(it) in ScalpParams.GRID) }

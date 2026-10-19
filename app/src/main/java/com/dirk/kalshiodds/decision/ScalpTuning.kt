@@ -157,6 +157,13 @@ data class ScalpParams(
                 STRATEGY_SEEDS.getValue(ScalpStrategy.MOMENTUM).copy(target = NO_TP))
         }
         const val NO_TP = 0.99
+        /**
+         * 1.0.14: two tweaked paper copies of the Fair-gap money maker (BTC seed g14-t12-s08-d15-w300): gap 12¢ with a
+         * quicker +10¢ take profit, and gap 16¢ with a wider +14¢ take profit. Same stop / turn-down / 5-min window. Own ids.
+         */
+        val FAIR_TWEAKS: List<ScalpParams> by lazy {
+            listOf(seedFor("BTC").copy(minGap = 0.12, target = 0.10), seedFor("BTC").copy(minGap = 0.16, target = 0.14))
+        }
         val ALL_VARIANTS: List<ScalpParams> get() = GRID + STRATEGY_GRID + MAKER_VARIANTS
 
         /** 0.3.43: one maker-entry + maker-exit variant per strategy (fair-gap per coin seed), shadow-tracked. */
@@ -170,7 +177,7 @@ data class ScalpParams(
          */
         private val BY_ID: Map<String, ScalpParams> by lazy {
             val m = LinkedHashMap<String, ScalpParams>()
-            (GRID + STRATEGY_GRID + SEEDS.values + STRATEGY_SEEDS.values + CLASSIC + MAKER_VARIANTS + HOLD60_SIBLINGS + QUEUED_COPIES).forEach { m.putIfAbsent(it.id, it) }
+            (GRID + STRATEGY_GRID + SEEDS.values + STRATEGY_SEEDS.values + CLASSIC + MAKER_VARIANTS + HOLD60_SIBLINGS + QUEUED_COPIES + FAIR_TWEAKS).forEach { m.putIfAbsent(it.id, it) }
             m
         }
 

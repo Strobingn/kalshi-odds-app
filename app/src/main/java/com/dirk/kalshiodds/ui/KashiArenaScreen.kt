@@ -14,6 +14,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -167,7 +168,9 @@ internal fun ArenaStrategyRow(row: ScalpModels.Row, st: ScalpTabState, onOpen: (
                     Text("Reality check: after est. slippage ${ScalpTabCopy.money(r.netAfterSlippageUsd)} (−$${String.format(java.util.Locale.US, "%.2f", r.slippageUsd)} @ ${st.controls.slipCents}¢/ct/leg)", color = pnlColor(r.netAfterSlippageUsd), style = MaterialTheme.typography.labelSmall)
                 }
                 val bench = com.dirk.kalshiodds.decision.insights.BenchRegistry.decisions.collectAsState().value[row.model.code]
-                if (bench != null && !bench.trading) Text("BENCHED · shadow only · " + bench.reason, color = c.down, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, maxLines = 2)
+                // 1.0.14: frozen losers stay listed with their history and a FROZEN badge (Force trade unfreezes).
+                if (com.dirk.kalshiodds.decision.insights.ScalpFreeze.isFrozen(bench)) Text(bench!!.reason.replaceFirst(com.dirk.kalshiodds.decision.insights.ScalpFreeze.BADGE, com.dirk.kalshiodds.decision.insights.ScalpFreeze.BADGE + " · no new paper trades"), color = c.down, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, maxLines = 2, modifier = Modifier.testTag("FROZEN_BADGE_" + row.model.code))
+                else if (bench != null && !bench.trading) Text("BENCHED · shadow only · " + bench.reason, color = c.down, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, maxLines = 2)
                 else if (bench?.status == com.dirk.kalshiodds.decision.insights.BenchStatus.FORCED_ACTIVE) Text("Bench override · forced trading", color = c.spot, style = MaterialTheme.typography.labelSmall)
             }
             Column(horizontalAlignment = Alignment.End) {

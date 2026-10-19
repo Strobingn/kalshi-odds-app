@@ -569,8 +569,8 @@ class ScalpBook(
         val coin = ScalpParams.coinOf(q.ticker)
         val primary = paramsFor(coin)
         // 0.3.50: six paper models = five strategy primaries + maker-first dip (buy the dip at the bid, sell the rebound at the ask).
-        // 1.0.10: Dip-hunter maker / hold / no-TP copies removed (ScalpModels.REMOVED_CODES).
-        val primaries = ScalpStrategy.values().map { paramsFor(coin, it) } + (ScalpParams.HOLD60_SIBLINGS + ScalpParams.QUEUED_COPIES).filter { !ScalpModels.isRemoved(ScalpModels.modelOf(it).code) }
+        // 1.0.10: Dip-hunter maker / hold / no-TP copies removed (ScalpModels.REMOVED_CODES). 1.0.14: + fair-t1/t2 Fair-gap copies.
+        val primaries = ScalpStrategy.values().map { paramsFor(coin, it) } + (ScalpParams.HOLD60_SIBLINGS + ScalpParams.QUEUED_COPIES).filter { !ScalpModels.isRemoved(ScalpModels.modelOf(it).code) } + ScalpParams.FAIR_TWEAKS
         val primaryIds = primaries.map { it.id }.toSet()
         val key = q.ticker.uppercase()
         val hist = history.getOrPut(key) { ArrayDeque() }
@@ -1106,7 +1106,9 @@ class ScalpBook(
                         openCost: Double, bankroll: Double, what: String): ScalpTrade? {
         // Fade makers choose their purchase bid after the delay; the post/fill paths enforce the ceiling.
         if (p.kind != ShockFav.Kind.FADE_MAKER && !ScalpRule.buyPriceOk(if (p.o50 == ShockFav.O50.MAKER) ShockFav.O50_MAKER_PX else ask)) return null
-        if (15.0 - q.tauS / 60.0 > sfOpenMin(p.code)) return null // window-start entries only
+        // Window-start entries only. 1.0.14 fix: Simple-dip counts after its 4-min history; late-favourite legs (end of window
+        // by definition) are exempt like the Research strategies — both could never enter before.
+        if (!ShockFav.isFavLeg(vid) && 15.0 - q.tauS / 60.0 > ShockFav.entryOpenMin(p, sfOpenMin(p.code))) return null
         val n = if (p.kind == ShockFav.Kind.FADE_MAKER) ShockFav.CLIP else minOf(ShockFav.CLIP, kotlin.math.floor((q.askSize(side) ?: 0.0) + 1e-9).toInt())
         if (n <= 0) return null
         val cost = ask * n + ScalpRule.orderFee(n, ask)
@@ -1571,7 +1573,7 @@ class ScalpBook(
             // Kalshi Scalper rules: entries only in the first minutes of each 15-minute window, and only when this
             // strategy's self-learned confidence clears its own learned threshold.
             val minuteIn = close?.let { 15.0 - (it - t.signalAtMs) / 60_000.0 } ?: 99.0
-            if (minuteIn < 0.0 || minuteIn > seed.openMin) continue
+            if (minuteIn < 0.0 || minuteIn > ScalpV2.entryOpenMin(seed)) continue // 1.0.14: Simple-dip copies count after the 4-min history
             // Direction: the on-device GBM must favour this side (fair value used when the model is missing).
             val gq = _marks.value[t.ticker.uppercase()]
             val gp = gq?.let { GbmModel.pSide(it, t.side, dm60(t.ticker.uppercase(), it.nowMs)) }
@@ -1757,11 +1759,13 @@ class ScalpBook(
             if (!cfg.permits(id) || mine.any { it.variantId == id }) continue
             val s = cfg.settings(id)
             val edge = (s.edgeCents ?: Research.defaultEdge(id)).toDouble()
-            // 1.0.3: late favourite retuned toward fair-gap — 24–42¢ (your price sliders override), BRTI gap 10–21¢ after fee, hold to settle.
-            val fgBand = FairGapTune.band(explicit(id))
-            val lo = if (id == Research.LATE) Math.round(fgBand.lo * 100).toInt() else maxOf(s.minEntryCents, 1)
-            val hi = if (id == Research.LATE) Math.round(fgBand.hi * 100).toInt() else (s.maxEntryCents ?: 99)
-            if (id == Research.LATE && (q.tauS < rp.lateMinS || q.tauS > rp.lateMaxS)) continue
+            // 1.0.14: r-late-t1/t2 use their own window / band / max gap (Research.LATE_SPECS); sliders still override the band.
+            val late = Research.isLate(id)
+            val spec = Research.LATE_SPECS[id]
+            val fgBand = Research.lateBand(id, explicit(id))
+            val lo = if (late) Math.round(fgBand.lo * 100).toInt() else maxOf(s.minEntryCents, 1)
+            val hi = if (late) Math.round(fgBand.hi * 100).toInt() else (s.maxEntryCents ?: 99)
+            if (late && (q.tauS < (spec?.minS ?: rp.lateMinS) || q.tauS > (spec?.maxS ?: rp.lateMaxS))) continue
             val clip = s.contracts ?: rp.clip
             var placed: ScalpTrade? = null
             for (side in listOf("YES", "NO")) {
@@ -1777,10 +1781,10 @@ class ScalpBook(
                     exposure += clip * lim; break
                 }
                 if (ask < lo / 100.0 - 1e-9 || ask > hi / 100.0 + 1e-9) continue
-                val hold = id == Research.LATE
+                val hold = late
                 val n = if (id == Research.KELLY) minOf(Research.kellyContracts(ps, ask, rp.kellyFraction, rp.kellyBankrollUsd, rp.windowCapUsd - exposure), 1000) else clip
                 if (n <= 0 || !Research.gateOk(ps, ask, n, hold, edge)) continue
-                if (id == Research.LATE && (!f.brti || Research.edgeAfterCosts(ps, ask, n, true) > FairGapTune.MAX_GAP + 1e-9)) continue
+                if (late && (!f.brti || Research.edgeAfterCosts(ps, ask, n, true) > (spec?.maxGap ?: FairGapTune.MAX_GAP) + 1e-9)) continue
                 val cost = n * ask + ScalpRule.orderFee(n, ask)
                 if (exposure + cost > rp.windowCapUsd + 1e-9) continue
                 placed = ScalpTrade(id = idFactory(), ticker = q.ticker.uppercase(), side = side, state = ScalpState.PENDING_ENTRY, signalAtMs = q.nowMs,

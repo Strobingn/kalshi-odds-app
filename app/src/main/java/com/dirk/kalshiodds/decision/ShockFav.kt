@@ -141,6 +141,8 @@ object ShockFav {
     }
     const val SIMPLE_WINDOW_MS = 300_000L
     const val SIMPLE_MIN_HISTORY_MS = 240_000L
+    /** 1.0.14 fix: Simple-dip needs 4 min of its window's history, so its window-start limit starts counting after that (sf41 2 → 6 min). */
+    fun entryOpenMin(p: Params, base: Double): Double = if (p.kind == Kind.SIMPLE_DIP) base + SIMPLE_MIN_HISTORY_MS / 60_000.0 else base
     /** Pure Simple-dip entry rule. */
     fun simpleDipSide(p: Params, askYes: Double?, avgYes: Double, askNo: Double?, avgNo: Double): String? {
         // 1.0.11: when both sides dip, take the larger dip relative to its 5-min average (no UP-first default).

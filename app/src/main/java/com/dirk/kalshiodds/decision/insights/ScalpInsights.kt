@@ -56,7 +56,7 @@ class ScalpInsights(
         recompute()
     }
 
-    private fun keep(c: ScalpControls) = c.benchWindow.coerceIn(5, 500) * 2
+    private fun keep(c: ScalpControls) = maxOf(c.benchWindow.coerceIn(5, 500) * 2, ScalpFreeze.WINDOW) // 1.0.14: freeze needs 30
 
     fun onSettled(code: String, t: ScalpTrade) {
         val c = controls.state.value
@@ -84,7 +84,7 @@ class ScalpInsights(
     fun recompute() {
         val c = controls.state.value
         if (seededWindow != -1 && c.benchWindow > seededWindow) { seededWindow = c.benchWindow; seed(); return } // window grew: reload history
-        val next = synchronized(lock) {
+        val benchNext = synchronized(lock) {
             (real.keys + shadow.keys + c.benchOverrides.keys).associateWith { code ->
                 val ov = when (c.benchOverrides[code]) { "ACTIVE" -> BenchOverride.FORCE_ACTIVE; "BENCHED" -> BenchOverride.FORCE_BENCHED; else -> BenchOverride.AUTO }
                 val was = decisions[code]?.status == BenchStatus.BENCHED
@@ -97,6 +97,8 @@ class ScalpInsights(
                 }
             }
         }
+        // 1.0.14: freeze losers on top of auto-bench (see ScalpFreeze); manual overrides win.
+        val next = ScalpFreeze.apply(benchNext, synchronized(lock) { real.mapValues { it.value.toList() } }, c.benchOverrides)
         decisions = next
         book.benched = next.values.filter { !it.trading }.map { it.scalperId }.toSet()
         BenchRegistry.publish(next)
