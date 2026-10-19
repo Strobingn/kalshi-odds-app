@@ -15,10 +15,20 @@ import kotlinx.coroutines.flow.asStateFlow
  * 0.3.38 intra-window SCALP rule (PAPER ONLY). Deterministic and versioned; no LLM, no
  * fitted weights at runtime.
  *
- * Derivation (scalp-research/REPORT.md, 2026-10-09):
+ * Derivation (scalp-research/REPORT.md, 2026-10-09), checked against Kalshi on 2026-10-18:
+ *  - KXBTC15M is "Bitcoin price up down" (fifteen_min). YES if the 60-second simple average of
+ *    CF Benchmarks' BRTI before the close is at least the 60-second average before the open.
+ *    A tie is YES. The final average is rounded to two decimal places. Sources:
+ *    https://help.kalshi.com/en/articles/13823838-crypto-markets
+ *    https://assets.kalshi.com/contract_terms/CRYPTO.pdf
+ *    GET /trade-api/v2/series/KXBTC15M (fee_type=quadratic, fee_multiplier=1, settlement_sources CF Benchmarks).
+ *    The live book uses price_level_structure=tapered_deci_cent: 0.1¢ outside 10–90¢, 1¢ inside.
+ *    Contract terms still state a $0.01 minimum tick.
  *  - Spot-implied fair value of YES: p = Φ(z), z = ln(S/K) / (σ·√τeff), with σ per √second and
- *    τeff = τ − 40 s, because settlement averages the final 60 s of the CF index (variance of a 60 s mean ≈ 20 s).
- *  - A round trip costs spread + fee(entry) + fee(exit), with fee = ceil(0.07·C·P·(1−P)) to the cent per order.
+ *    τeff = τ − 40 s. That is this model's shortcut for the variance of a 60 s mean, not the settlement print.
+ *  - A round trip costs spread + fee(entry) + fee(exit). Taker fee = ceil(0.07·C·P·(1−P)) to the cent,
+ *    which matches KalshiFee for cent prices (quadratic coefficient 0.07, then the non-direct $0.01 balance round).
+ *    https://docs.kalshi.com/getting_started/fee_rounding
  *    At 50¢ and 10 contracts that is 1¢ + 1.8¢ + 1.8¢ = 4.6¢ per contract.
  *  - By optional stopping, take-profit, stop-loss and trailing exits on a martingale price add nothing.
  *    The only edge is the predictable part of the move, β·gap. Estimated β ≈ 0.03 at 30 s, 0.10 at 120 s,
@@ -93,7 +103,11 @@ object ScalpRule {
         }
     }
 
-    /** Taker fee for one order of [contracts] at [price], rounded up to the cent (dollars). */
+    /**
+     * Taker fee for one order of [contracts] at [price], dollars, rounded up to the cent.
+     * Published quadratic model round_up(0.07 × C × P × (1−P)), fee_multiplier 1 on KXBTC15M.
+     * https://docs.kalshi.com/getting_started/fee_rounding
+     */
     fun orderFee(contracts: Int, price: Double): Double {
         if (contracts <= 0 || !price.isFinite() || price <= 0.0 || price >= 1.0) return 0.0
         val cents = ceil(7.0 * contracts * price * (1.0 - price) - 1e-9)
@@ -722,15 +736,24 @@ class ScalpBook(
             if (ScalpRisk.entryBlocked(_all.value, vid, key, q.nowMs)) continue // 0.3.85 churn guard (was no cooldown)
             val side = if (f > 0) "YES" else "NO"
             val ask = q.ask(side) ?: continue
-            if (!ForecastScalp.wantsEntry(mid, ya - yb, ask, kotlin.math.abs(f), q.tauS, cfg.marginUsd)) continue
+            val bitcoin = BtcDirection.isBitcoin(key)
+            // Proven-loser fade stays retired. Bitcoin rides enter only when the forecast clears
+            // the spread and both taker fees. Paper only — not a claim that the forecast is profitable.
+            if (bitcoin && !ride) continue
+            if (bitcoin) {
+                val call = BtcDirection.rideSide(pred) ?: continue
+                if (call != side) continue
+                if (!BtcAiScalp.wantsEntry(ask, ya - yb, kotlin.math.abs(pred), q.tauS)) continue
+            } else if (!ForecastScalp.wantsEntry(mid, ya - yb, ask, kotlin.math.abs(f), q.tauS, cfg.marginUsd)) continue
             val model = if (ride) ScalpModels.Model.FORECAST_RIDE else ScalpModels.Model.FORECAST_FADE
             val cost = ask * ScalpRule.CONTRACTS + ScalpRule.orderFee(ScalpRule.CONTRACTS, ask)
             if (openCostUsd() + cost > bankrollUsd() + 1e-9) continue
             changed += ScalpTrade(
                 id = idFactory(), ticker = key, side = side, state = ScalpState.PENDING_ENTRY, signalAtMs = q.nowMs,
                 signalAsk = ask, fairAtSignal = (if (side == "YES") mid + f else 1.0 - mid - f).coerceIn(0.0, 1.0), restingLimit = ask, restingSinceMs = q.nowMs,
-                note = String.format(Locale.US, "%s · forecast %+.1f¢ over %s · %s", if (ride) "Forecast ride" else "Forecast fade",
-                    f * 100, ShortHorizonForecaster.horizonLabel(h54), LeadForecaster.VERSION),
+                note = String.format(Locale.US, "%s · forecast %+.1f¢ over %s · %s%s", if (ride) "Forecast ride" else "Forecast fade",
+                    f * 100, ShortHorizonForecaster.horizonLabel(h54), LeadForecaster.VERSION,
+                    if (bitcoin) " · btc-ai paper-only, not proven" else ""),
                 ruleVersion = "${ScalpRule.VERSION}|$vid|P"
             )
         }
@@ -755,10 +778,15 @@ class ScalpBook(
                 if (q.nowMs >= q.closeMs || !ScalpV2.fresh(q) || !ScalpFills.canSell(t, q.bookAtMs)) return null
                 val bid = q.bid(t.side)?.takeIf { it > 0.0 } ?: return null
                 val fcEntry = t.entryPrice ?: 0.0
-                val stopHit = t.state == ScalpState.OPEN && bid <= fcEntry - ForecastScalp.STOP_C / 100.0 + 1e-9
+                val bitcoin = BtcDirection.isBitcoin(t.ticker)
+                val ref = if (bitcoin && ScalpRisk.hasRef(t)) ScalpRisk.refBid(t) else null
+                val btcStop = bitcoin && t.state == ScalpState.OPEN && BtcAiScalp.stopHit(fcEntry, bid, ref)
+                val legacyStop = !bitcoin && t.state == ScalpState.OPEN && bid <= fcEntry - ForecastScalp.STOP_C / 100.0 + 1e-9
+                val stopHit = btcStop || legacyStop
                 if (stopHit && t.isPrimary) addShadow(t, sf = false) { qq, _, b, _ -> b >= ForecastScalp.TAKE_PROFIT - 1e-9 || qq.tauS < ForecastScalp.EXIT_BEFORE_CLOSE_S }
                 val reason = t.exitReason.takeIf { t.state == ScalpState.PENDING_EXIT }
-                    ?: (if (stopHit) "stop −${ForecastScalp.STOP_C}¢" else null)
+                    ?: (if (btcStop) BtcAiScalp.exitReason(sideF, bid, fcEntry, q.tauS, ref) else null)
+                    ?: (if (legacyStop) "stop −${ForecastScalp.STOP_C}¢" else null)
                     ?: ForecastScalp.wantsExit(sideF, bid, (q.nowMs - (t.entryAtMs ?: q.nowMs)) / 1000.0, horizon, q.tauS, t.remaining.coerceAtLeast(1)) ?: return null
                 val n = minOf(t.remaining, kotlin.math.floor((q.bidSize(t.side) ?: 0.0) + 1e-9).toInt())
                 val base = if (t.state == ScalpState.OPEN) t.copy(state = ScalpState.PENDING_EXIT, exitDecidedAtMs = q.nowMs, exitReason = reason) else t

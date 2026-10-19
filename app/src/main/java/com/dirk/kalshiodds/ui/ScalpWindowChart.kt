@@ -135,6 +135,32 @@ internal fun ScalpWindowChart(d: ScalpAlgoDetail, onWindow: (String) -> Unit = {
             Text("○ Buy order   ▲ Buy fill   ■ Sell fill   · Signal", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
             Text("Dashed 55¢ buy ceiling · tap a marker for price and time", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
             if (data.points.none { (if (side == "YES") it.upBidCents else it.downBidCents) != null }) Text("No recorded bids for this side yet. Missing history is left blank.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+            val spots = data.recordedSpots().filter { it.first in data.startMs..minOf(data.nowMs, data.closeMs) }
+            val spotRange = com.dirk.kalshiodds.chart.SpotAxis.range(spots.map { it.second }, null)
+            if (spots.size >= 2 && spotRange != null) {
+                Text("Recorded index", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
+                Canvas(Modifier.fillMaxWidth().height(88.dp).semantics { contentDescription = "Recorded index, ${spots.size} prints" }) {
+                    val left = 8.dp.toPx(); val top = 8.dp.toPx()
+                    val w = size.width - left - 8.dp.toPx(); val h = size.height - top - 8.dp.toPx()
+                    val (lo, hi) = spotRange
+                    fun x(at: Long) = left + ((at - data.startMs) / 900_000f) * w
+                    fun y(px: Double) = top + com.dirk.kalshiodds.chart.SpotAxis.yFraction(px, lo, hi) * h
+                    var previous: Pair<Long, Offset>? = null
+                    val path = Path()
+                    spots.forEachIndexed { i, (at, px) ->
+                        val next = Offset(x(at), y(px))
+                        if (i == 0) path.moveTo(next.x, next.y) else path.lineTo(next.x, next.y)
+                        previous?.takeIf { at - it.first in 0..15_000 }?.let { drawLine(c.spot, it.second, next, 2.dp.toPx()) }
+                        previous = at to next
+                    }
+                    drawPath(path, c.spot.copy(alpha = 0.9f), style = Stroke(2.dp.toPx()))
+                }
+                Text(
+                    String.format(Locale.US, "Low %,.0f · high %,.0f · last %,.2f", spots.minOf { it.second }, spots.maxOf { it.second }, spots.last().second),
+                    color = c.textSecondary,
+                    style = MaterialTheme.typography.labelSmall
+                )
+            }
             selectedMarker?.let { m -> Text("${markerName(m.kind)} · ${m.qty.takeIf { it > 0 }?.let { "$it ct · " }.orEmpty()}${ScalpTabCopy.cents(m.price)} · ${windowTime(m.recordedAtMs)} ET", color = c.textPrimary, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall) }
             data.error?.let { Text(it, color = c.down, style = MaterialTheme.typography.bodySmall) }
         }

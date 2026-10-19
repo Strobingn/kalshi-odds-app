@@ -25,6 +25,11 @@ data class ScalpWindowChartData(
     }.filter { it.atMs in startMs..closeMs && it.price.isFinite() && it.price in 0.0..1.0 }.sortedBy { it.atMs }
     fun bid(side: String): Double? = points.lastOrNull { (if (side == "YES") it.upBidCents else it.downBidCents) != null }
         ?.let { (if (side == "YES") it.upBidCents else it.downBidCents)?.toDouble()?.div(100) }
+    /** Recorded index prints only. Missing or non-positive spots are left out — nothing is invented. */
+    fun recordedSpots(): List<Pair<Long, Double>> = points.mapNotNull { p ->
+        val spot = p.spotUsd?.takeIf { it.isFinite() && it > 0.0 } ?: return@mapNotNull null
+        p.tMs to spot
+    }
     fun windowNet() = trades.sumOf { it.netUsd ?: 0.0 }
     fun openNet() = trades.sumOf { it.unrealizedUsd(bid(it.side)) ?: 0.0 }
     companion object {

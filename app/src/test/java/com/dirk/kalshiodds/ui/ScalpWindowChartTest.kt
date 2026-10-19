@@ -13,6 +13,19 @@ class ScalpWindowChartTest {
         contracts = 10, entryPrice = .40, entryFeeUsd = .18, entryAtMs = start + 62_000,
         ruleVersion = "${ScalpRule.VERSION}|v2-sf41|P")
 
+    @Test fun recordedIndexUsesOnlyPositivePrints() {
+        val data = ScalpWindowChartData(
+            tk, close, start + 30_000,
+            points = listOf(
+                BidPoint(start + 1_000, 40f, 60f, spotUsd = 100_000.0),
+                BidPoint(start + 2_000, 41f, 59f, spotUsd = null),
+                BidPoint(start + 3_000, null, null, spotUsd = 0.0),
+                BidPoint(start + 4_000, 42f, 58f, spotUsd = 100_050.5)
+            )
+        )
+        assertEquals(listOf(100_000.0, 100_050.5), data.recordedSpots().map { it.second })
+    }
+
     @Test fun partialSalesPersistExactTimesAndDoNotTurnIntoAnAverageFinalSale() {
         val first = ScalpFills.sell(trade(), start + 90_000, 2, 1.20, .04)
         val last = ScalpFills.sell(first, start + 100_000, 8, 4.40, .14).copy(state = ScalpState.CLOSED,
