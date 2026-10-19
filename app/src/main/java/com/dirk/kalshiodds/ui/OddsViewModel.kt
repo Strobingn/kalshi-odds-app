@@ -191,7 +191,14 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                         val now1 = container.clock.nowMs()
                         live.filter { com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(it.ticker) in com.dirk.kalshiodds.domain.CryptoMarkets.FIFTEEN_SERIES }
                             .groupBy { com.dirk.kalshiodds.decision.ScalpParams.coinOf(it.ticker) }
-                            .forEach { (coin, ms) -> runCatching { container.scalp.tickSpot(coin, settlementFor(ms.first().ticker, now1).spot, now1) } }
+                            .forEach { (coin, ms) ->
+                                val spot = settlementFor(ms.first().ticker, now1).spot
+                                runCatching { container.scalp.tickSpot(coin, spot, now1) }
+                                if (coin == "BTC" && spot != null) {
+                                    val cur = container.aiWatch.live.value
+                                    if (cur != null) runCatching { container.aiWatcher.noteKalshi(cur.copy(atMs = now1, btc = spot, points = emptyList())) }
+                                }
+                            }
                         val open = container.scalp.openTickers()
                         val withOpen = live.filter { it.ticker in open }
                         if (withOpen.isNotEmpty()) runScalp(withOpen, s)
@@ -379,7 +386,9 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     fun setScalpBenchOverride(code: String, value: String?) {
         val current = container.scalpControls.state.value
         val overrides = if (value == null) current.benchOverrides - code else current.benchOverrides + (code to value)
-        container.scalpControls.save(current.copy(benchOverrides = overrides))
+        val next = current.copy(benchOverrides = overrides)
+        notePaperEdit(current, next)
+        container.scalpControls.save(next)
         runCatching { container.scalpInsights.recompute() }
     }
 
@@ -1760,9 +1769,33 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             }
             // 0.3.57 sf57: twenty shock / late-favourite paper scalpers on the same conflated quote (paper lane).
             runCatching { container.scalp.onShockFavQuote(qq, enabled = s.paperTradingEnabled) }
+            if (coin == "BTC") runCatching { container.aiWatcher.noteKalshi(liveSnap(market, qq, now)) }
         }
         // 0.3.67: batch SQLite+stats writes off the quote path (same paperLane worker, not Main).
         runCatching { container.scalp.flushWrites() }
+    }
+
+    /** Same quote the scalp lane just applied. The AI card takes this tick, not a timer. */
+    private fun liveSnap(market: com.dirk.kalshiodds.domain.MarketUiModel, qq: com.dirk.kalshiodds.decision.ScalpRule.Quote, now: Long): com.dirk.kalshiodds.llm.AiLiveSnapshot {
+        val dm = runCatching { container.scalp.dm60Snapshot(market.ticker.uppercase(), now) }.getOrDefault(0.0)
+        val up = com.dirk.kalshiodds.llm.ChatPrompt.modelUp(qq, dm)
+        val key = com.dirk.kalshiodds.domain.MarketLifecycle.windowKey(market.ticker) ?: market.ticker
+        val positions = container.scalp.snapshot().asSequence().filter { t ->
+            t.ticker.equals(market.ticker, true) && t.isPrimary &&
+                t.state != com.dirk.kalshiodds.decision.ScalpState.CLOSED &&
+                t.state != com.dirk.kalshiodds.decision.ScalpState.NO_FILL
+        }.take(8).map { t ->
+            val mark = qq.bid(t.side) ?: t.entryPrice ?: t.signalAsk
+            val entry = t.entryPrice ?: t.signalAsk
+            val pnl = (mark - entry) * t.contracts.coerceAtLeast(0) - t.entryFeeUsd
+            com.dirk.kalshiodds.llm.AiLivePosition(t.variantId, t.side, t.contracts, pnl)
+        }.toList()
+        return com.dirk.kalshiodds.llm.AiLiveSnapshot(
+            atMs = now, windowKey = key, ticker = market.ticker.uppercase(), closeMs = qq.closeMs,
+            strike = qq.strike, btc = qq.spot, yesBid = qq.yesBid, yesAsk = qq.yesAsk,
+            noBid = qq.bid("NO"), noAsk = qq.ask("NO"), modelUp = up, positions = positions,
+            fillNote = positions.joinToString(",") { it.label + it.side + it.contracts }
+        )
     }
 
     /**

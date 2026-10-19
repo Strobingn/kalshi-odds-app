@@ -34,7 +34,14 @@ data class ScalpControls(
     val alertHotStreak: Boolean = true,
     val alertBigLoss: Boolean = true,
     val bigLossUsd: Double = 5.0,
-    val alertStrongAi: Boolean = true
+    val alertStrongAi: Boolean = true,
+    /**
+     * 1.0.14 AI tuner: per-strategy algorithm overrides (`strategy code` → knob → value).
+     * Absent on older saves; those load as an empty map.
+     */
+    val algo: Map<String, Map<String, Double>> = emptyMap(),
+    /** 1.0.14 strategies the AI watcher has benched. Force trade / Force bench in [benchOverrides] still win. */
+    val aiBench: Set<String> = emptySet()
 ) {
     fun settings(code: String): ScalpStrategySettings = strategySettings[code]?.normalized() ?: ScalpStrategySettings()
     fun normalized() = copy(strategySettings = strategySettings.mapValues { it.value.normalized() }, peakTrailCents = peakTrailCents.coerceIn(1, 20), stopLossPercent = stopLossPercent.coerceIn(1, 99), maxAskCents = maxAskCents.coerceIn(1, 55), greenContracts = greenContracts.coerceIn(1, 500), stopCents = stopCents.coerceIn(1, 99),
@@ -46,7 +53,10 @@ data class ScalpControls(
         maxOpen = maxOpen.coerceIn(0, 1000), windowSeconds = windowSeconds.coerceIn(10, 600),
         dipCents = dipCents.takeIf { it.isFinite() }?.coerceIn(0.0, 30.0) ?: 0.0,
         benchWindow = benchWindow.coerceIn(5, 500), slipCents = slipCents.takeIf { it.isFinite() }?.coerceIn(0.0, 10.0) ?: 1.0,
-        bigLossUsd = bigLossUsd.takeIf { it.isFinite() }?.coerceIn(0.5, 10_000.0) ?: 5.0)
+        bigLossUsd = bigLossUsd.takeIf { it.isFinite() }?.coerceIn(0.5, 10_000.0) ?: 5.0,
+        aiBench = aiBench.filter { ScalpModels.modelByCode(it) != null }.toSet()).let { clean ->
+        clean.copy(algo = StrategyAlgo.sanitize(clean))
+    }
     fun permits(modelCode: String) = enabled && !killSwitch && modelCode !in disabledStrategies
     fun plan(base: ScalpV2.Plan, modelCode: String? = null): ScalpV2.Plan {
         val chosen = if (!manual) base else base.copy(

@@ -188,7 +188,10 @@ internal fun ArenaStrategyRow(row: ScalpModels.Row, st: ScalpTabState, onOpen: (
                     Text("Reality check: after est. slippage ${ScalpTabCopy.money(r.netAfterSlippageUsd)} (−$${String.format(java.util.Locale.US, "%.2f", r.slippageUsd)} @ ${st.controls.slipCents}¢/ct/leg)", color = pnlColor(r.netAfterSlippageUsd), style = MaterialTheme.typography.labelSmall)
                 }
                 val bench = com.dirk.kalshiodds.decision.insights.BenchRegistry.decisions.collectAsState().value[row.model.code]
-                if (bench != null && !bench.trading) Text("BENCHED · shadow only · " + bench.reason, color = c.down, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, maxLines = 2)
+                if (bench != null && !bench.trading) {
+                    Text("FROZEN", color = c.down, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                    Text("BENCHED · shadow only · " + bench.reason, color = c.down, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, maxLines = 2)
+                }
                 else if (bench?.status == com.dirk.kalshiodds.decision.insights.BenchStatus.FORCED_ACTIVE) Text("Bench override · forced trading", color = c.spot, style = MaterialTheme.typography.labelSmall)
             }
             Column(horizontalAlignment = Alignment.End) {

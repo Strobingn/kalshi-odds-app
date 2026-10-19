@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.decision.insights
 
+import com.dirk.kalshiodds.decision.PaperTape
 import com.dirk.kalshiodds.decision.ScalpBook
 import com.dirk.kalshiodds.decision.ScalpControls
 import com.dirk.kalshiodds.decision.ScalpControlsRepository
@@ -97,8 +98,40 @@ class ScalpInsights(
                 }
             }
         }
-        decisions = next
-        book.benched = next.values.filter { !it.trading }.map { it.scalperId }.toSet()
-        BenchRegistry.publish(next)
+        val forcedActive = c.benchOverrides.filterValues { it == "ACTIVE" }.keys
+        val merged = next.toMutableMap()
+        for (code in c.aiBench) {
+            if (code in forcedActive) continue
+            val cur = merged[code]
+            if (cur?.status == BenchStatus.FORCED_ACTIVE || cur?.status == BenchStatus.FORCED_BENCHED) continue
+            if (cur == null || cur.trading) {
+                merged[code] = BenchDecision(code, BenchStatus.BENCHED, cur?.settled ?: 0, cur?.netUsd ?: 0.0, cur?.shadowNetUsd ?: 0.0,
+                    "AI bench: paper net clearly negative")
+            }
+        }
+        decisions = merged
+        book.benched = merged.values.filter { !it.trading }.map { it.scalperId }.toSet()
+        BenchRegistry.publish(merged)
+    }
+
+    /** Recent settled nets for the AI watcher. Real history is the seeded window; shadow history is in memory. */
+    fun tapes(stats: List<com.dirk.kalshiodds.decision.ScalpStat>): List<PaperTape> = synchronized(lock) {
+        val byId = stats.associateBy { it.scalperId }
+        ScalpModels.ALL.map { m ->
+            val st = byId[m.code]
+            val real = real[m.code]?.mapNotNull { it.netUsd?.takeIf { n -> n.isFinite() } }.orEmpty()
+            val sh = shadow[m.code]?.mapNotNull { it.netUsd?.takeIf { n -> n.isFinite() } }.orEmpty()
+            val wins = st?.wins ?: real.count { it > 0.0 }
+            val n = st?.n ?: real.size
+            PaperTape(
+                code = m.code,
+                trades = n,
+                wins = wins,
+                netUsd = st?.netUsd ?: real.sum(),
+                winRate = if (n == 0) null else wins.toDouble() / n,
+                recentReal = real,
+                shadow = sh
+            )
+        }
     }
 }

@@ -1,5 +1,7 @@
 package com.dirk.kalshiodds.llm
 
+import com.dirk.kalshiodds.decision.AiBench
+import com.dirk.kalshiodds.decision.PaperTape
 import com.dirk.kalshiodds.decision.Research
 import com.dirk.kalshiodds.decision.ScalpControls
 import com.dirk.kalshiodds.decision.ScalpControlsRepository
@@ -7,6 +9,7 @@ import com.dirk.kalshiodds.decision.ScalpModels
 import com.dirk.kalshiodds.decision.ScalpRule
 import com.dirk.kalshiodds.decision.ScalpStrategySettings
 import com.dirk.kalshiodds.decision.ScalpV2
+import com.dirk.kalshiodds.decision.StrategyAlgo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -147,6 +150,13 @@ object PaperSettingsDiff {
                 val k = "strategy.${m.code}.$f"
                 if (SettingTools.get(before, k) != SettingTools.get(after, k)) keys += k
             }
+            val bAlgo = before.algo[m.code].orEmpty()
+            val aAlgo = after.algo[m.code].orEmpty()
+            for (k in bAlgo.keys + aAlgo.keys) {
+                if (bAlgo[k] != aAlgo[k]) keys += "strategy.${m.code}.algo.$k"
+            }
+            if ((m.code in before.aiBench) != (m.code in after.aiBench)) keys += "strategy.${m.code}.bench"
+            if (before.benchOverrides[m.code] != after.benchOverrides[m.code]) keys += "strategy.${m.code}.bench"
         }
         return keys
     }
@@ -165,17 +175,38 @@ object AiWindowContext {
         val positions: String
     )
 
-    data class Scalper(val code: String, val bench: String, val trades: Int, val netUsd: Double, val settings: String, val open: Int)
+    data class Scalper(
+        val code: String,
+        val bench: String,
+        val trades: Int,
+        val netUsd: Double,
+        val settings: String,
+        val open: Int,
+        val winRate: Double? = null,
+        val last20: String = "",
+        val algo: String = ""
+    )
+
+    fun line(label: String, s: Scalper): String {
+        val wr = s.winRate?.takeIf { it.isFinite() }?.let { String.format(java.util.Locale.US, "%.0f%%", it * 100) } ?: "—"
+        val net = if (s.netUsd.isFinite()) String.format(java.util.Locale.US, "%+.2f", s.netUsd) else "—"
+        val last = s.last20.ifBlank { "—" }
+        val algo = s.algo.ifBlank { "—" }
+        return "$label [${s.code}] bench=${s.bench} trades=${s.trades} net=$net win=$wr last20=$last open=${s.open} settings=${s.settings} algo=$algo"
+    }
 
     fun fingerprint(m: Market, scalpers: List<Scalper>): String {
         val spot = m.spot?.takeIf { it.isFinite() }?.let { kotlin.math.round(it / 10.0).toLong() }
         val up = m.modelUp?.takeIf { it.isFinite() }?.let { (it * 100).roundToInt() }
         val body = scalpers.sortedBy { it.code }.joinToString(";") {
             val net = if (it.netUsd.isFinite()) (it.netUsd * 100).roundToInt() else 0
-            "${it.code}:${it.bench}:${it.trades}:$net:${it.open}:${it.settings}"
+            val wr = sWin(it.winRate)
+            "${it.code}:${it.bench}:${it.trades}:$net:$wr:${it.last20}:${it.open}:${it.settings}:${it.algo}"
         }
         return listOf(m.windowKey, spot, cents(m.yesBid), cents(m.yesAsk), cents(m.noBid), cents(m.noAsk), up, m.positions, body).joinToString("|")
     }
+
+    private fun sWin(rate: Double?): Int = rate?.takeIf { it.isFinite() }?.let { (it * 100).roundToInt() } ?: -1
 
     fun compose(liveWindow: String, lines: List<String>): String = buildString {
         append(liveWindow.trim())
@@ -199,6 +230,9 @@ Rules:
 - At most 3 setting changes per scalper. If nothing should change, return {"adjustments":[]}.
 - Numeric changes are clamped to the AI-learns band: research edgeCents stays at or above the user's baseline and at most 4 cents above it; other strategies' maxEntryCents stays at or below the user's baseline and at most 10 cents below it; every other number stays within 10 below and 4 above its current value, and inside the setting's allowed range.
 - Only change fields that scalper already uses.
+- Each scalper also lists its own algorithm knobs as algo key=current[min..max step N]. Those keys are separate from the settings above. Move an algorithm knob by at most one step, and stay inside its min and max. Do not jump.
+- The context includes each scalper's paper net $, win rate, trade count, and last 20 trade P&L (oldest to newest). Spend changes on scalpers that are making money, and tighten the ones that are losing: higher edge or gap, lower entry ceiling, smaller size, tighter stop. One step at a time.
+- Bench is decided in code from paper results. Do not emit an order, a live arm, or a force-bench. A scalper whose last 30 or more paper trades are clearly negative is benched automatically; shadow paper can bring it back. Force trade and Force bench, when Dirk set them, always win.
 """.trimIndent()
 }
 
@@ -258,8 +292,15 @@ class AiWindowWatcher(
     private val ask: (LlmEndpoint, List<Pair<String, String>>) -> LlmClient.Reply,
     private val endpoint: () -> LlmEndpoint,
     private val scalpersRunning: () -> Boolean = { true },
-    private val now: () -> Long = System::currentTimeMillis
+    private val now: () -> Long = System::currentTimeMillis,
+    private val paper: () -> List<PaperTape> = { emptyList() },
+    private val onBenched: () -> Unit = {},
 ) {
+    var onLivePost: (String) -> Unit = {}
+    var onWake: () -> Unit = {}
+    private var liveSnap: AiLiveSnapshot? = null
+    private var pending = LiveTrigger.NONE
+    private val gate = java.util.concurrent.atomic.AtomicBoolean(false)
     private var windowKey = ""
     private var bases = emptyMap<String, Int>()
     private val applied = HashMap<String, Int>()
@@ -289,9 +330,16 @@ class AiWindowWatcher(
     }
 
     fun tick() {
+        if (!gate.compareAndSet(false, true)) return
+        try { tickBody() } finally { gate.set(false) }
+    }
+
+    private fun tickBody() {
         if (!runCatching { scalpersRunning() }.getOrDefault(false)) return
         val cfg = store.config.value
         if (!cfg.followsWindow) { store.setNotice(""); return }
+        runCatching { maybeLive() }
+        runCatching { autoBench() }
         val cap = cfg.budgetOrNull()
         if (cap != null && store.budgetPaused(now())) {
             store.setNotice(LlmUsageText.budgetNotice(store.todaySpend(now()), cap))
@@ -330,15 +378,51 @@ class AiWindowWatcher(
         lastCalledWindow = snap.windowKey
         lastFingerprint = snap.fingerprint
         store.record(LlmSources.WATCHER, ep.provider, reply.model.ifBlank { ep.model }, reply.promptTokens, reply.completionTokens, now())
-        apply(reply.text)
+        val tweaks = apply(reply.text)
+        if (store.config.value.liveFeed) runCatching { onLivePost(AiLiveFeed.post(liveSnap, LiveTrigger.NONE, tweaks)) }
         val capAfter = store.config.value.budgetOrNull()
         if (capAfter != null && store.budgetPaused(now())) store.setNotice(LlmUsageText.budgetNotice(store.todaySpend(now()), capAfter))
         else store.setNotice("")
     }
 
-    private fun apply(text: String) {
+    /** Every Kalshi odds/book tick and BTC price tick. Updates the card immediately. Wakes the decision loop only when 25s spacing allows. */
+    fun noteKalshi(incoming: AiLiveSnapshot) {
+        val prev = liveSnap
+        val next = AiLiveFeed.reduce(prev, incoming)
+        liveSnap = next
+        store.publishLive(next)
+        val t = AiLiveFeed.trigger(prev, next)
+        if (t != LiveTrigger.NONE) pending = AiLiveFeed.prefer(pending, t)
+        val cfg = store.config.value
+        if (!cfg.liveFeed || !cfg.followsWindow || pending == LiveTrigger.NONE) return
+        if (AiLiveFeed.llmDue(lastCallAt, now(), pending, false)) runCatching { onWake() }
+    }
+
+    private fun maybeLive() {
+        val cfg = store.config.value
+        if (!cfg.liveFeed || !cfg.followsWindow || pending == LiveTrigger.NONE) return
+        val trigger = pending
+        if (!AiLiveFeed.llmDue(lastCallAt, now(), trigger, false)) return
+        val cap = cfg.budgetOrNull()
+        if (cap != null && store.budgetPaused(now())) return
+        val ep = runCatching { endpoint() }.getOrNull() ?: return
+        if (!ep.usable) return
+        val snap = runCatching { snapshot() }.getOrNull() ?: return
+        if (snap.windowKey.isBlank()) return
+        pending = LiveTrigger.NONE
+        val reply = runCatching { ask(ep, AiWatchPrompt.messages(snap.context)) }.getOrNull() ?: return
+        lastCallAt = now()
+        lastCalledWindow = snap.windowKey
+        lastFingerprint = snap.fingerprint
+        val src = AiLiveFeed.source(trigger)
+        store.record(src, ep.provider, reply.model.ifBlank { ep.model }, reply.promptTokens, reply.completionTokens, now())
+        val tweaks = apply(reply.text)
+        runCatching { onLivePost(AiLiveFeed.post(liveSnap, trigger, tweaks)) }
+    }
+
+    private fun apply(text: String): List<AiAdjustment> {
         val items = AiWatchJson.parse(text)
-        if (items.isEmpty()) return
+        if (items.isEmpty()) return emptyList()
         val at = now()
         val logged = ArrayList<AiAdjustment>()
         controls.update { start ->
@@ -346,8 +430,21 @@ class AiWindowWatcher(
             for (item in items) {
                 val key = "strategy.${item.scalper}.${item.setting}"
                 if (SettingTools.isRealMoneyKey(key) || SettingTools.isRealMoneyKey(item.setting) || SettingTools.isRealMoneyKey(item.value)) continue
-                if (store.manualBlocks(key, at)) continue
+                if (store.manualBlocks(key, at) || store.manualBlocks("strategy.${item.scalper}.algo.${item.setting}", at)) continue
                 if ((applied[item.scalper] ?: 0) >= AiWatchBounds.MAX_PER_SCALPER) continue
+                // Existing paper settings keep the 1.0.12 band. Algorithm-only keys move one step inside their own min/max.
+                val knob = if (item.setting in SettingTools.fieldsFor(item.scalper)) null else StrategyAlgo.knob(cur, item.scalper, item.setting)
+                if (knob != null) {
+                    val proposed = item.value.toDoubleOrNull() ?: continue
+                    val nowVal = StrategyAlgo.current(cur, item.scalper, knob)
+                    val next = StrategyAlgo.step(nowVal, proposed, knob) ?: continue
+                    if (kotlin.math.abs(next - nowVal) < 1e-9) continue
+                    val prev = cur.algo[item.scalper].orEmpty()
+                    cur = cur.copy(algo = cur.algo + (item.scalper to prev + (knob.key to next)))
+                    applied[item.scalper] = (applied[item.scalper] ?: 0) + 1
+                    logged += AiAdjustment(at, item.scalper, knob.key, StrategyAlgo.fmt(nowVal), StrategyAlgo.fmt(next), item.reason.ifBlank { "algo step" })
+                    continue
+                }
                 val clamped = AiWatchBounds.clamp(cur, item.scalper, item.setting, item.value, bases["${item.scalper}.${item.setting}"]) ?: continue
                 val proposed = SettingTools.propose(cur, key, clamped)
                 if (proposed !is SettingTools.Result.Proposal) continue
@@ -358,6 +455,39 @@ class AiWindowWatcher(
             cur
         }
         logged.forEach { store.addAdjustment(it) }
+        return logged
+    }
+
+    /** Bench from paper stats. Force trade / Force bench and a manual bench edit this window always win. */
+    private fun autoBench() {
+        val tapes = runCatching { paper() }.getOrDefault(emptyList())
+        if (tapes.isEmpty()) return
+        val at = now()
+        val logged = ArrayList<AiAdjustment>()
+        val start = controls.state.value
+        var cur = start
+        val window = maxOf(AiBench.MIN_TRADES, cur.benchWindow)
+        for (t in tapes) {
+            if (ScalpModels.modelByCode(t.code) == null) continue
+            val manual = cur.benchOverrides[t.code]
+            if (manual == "ACTIVE" || manual == "BENCHED") continue
+            if (store.manualBlocks("strategy.${t.code}.bench", at)) continue
+            val was = t.code in cur.aiBench
+            val d = AiBench.decide(was, t.recentReal, t.shadow, window)
+            when {
+                d.bench && !was -> {
+                    cur = cur.copy(aiBench = cur.aiBench + t.code)
+                    logged += AiAdjustment(at, t.code, "bench", "ACTIVE", "FROZEN", d.reason)
+                }
+                d.unbench && was -> {
+                    cur = cur.copy(aiBench = cur.aiBench - t.code)
+                    logged += AiAdjustment(at, t.code, "bench", "FROZEN", "ACTIVE", d.reason)
+                }
+            }
+        }
+        if (cur.aiBench != start.aiBench) controls.save(cur)
+        logged.forEach { store.addAdjustment(it) }
+        if (logged.isNotEmpty()) runCatching { onBenched() }
     }
 
     companion object {
