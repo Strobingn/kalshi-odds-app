@@ -10,7 +10,9 @@ import java.io.File
 data class AiWatchConfig(
     val followsWindow: Boolean = true,
     val intervalMs: Long = DEFAULT_INTERVAL_MS,
-    val budgetUsd: Double? = null
+    val budgetUsd: Double? = null,
+    /** 1.0.14: AI posts and re-evaluates from the live feed. Default on. The card still shows Kalshi ticks when this is off. */
+    val liveFeed: Boolean = true
 ) {
     /** Blank / 0 / negative means the budget is off. A positive amount pauses the watcher once today's estimate reaches it. */
     fun budgetOrNull(): Double? = budgetUsd?.takeIf { it.isFinite() && it > 0.0 }
@@ -29,10 +31,12 @@ data class AiWatchConfig(
 class AiWatchStore(private val file: File? = null) {
     private val lock = Any()
     private var follows = true
+    private var liveFeed = true
     private var intervalMs = AiWatchConfig.DEFAULT_INTERVAL_MS
     private var budgetUsd: Double? = null
     private var priceTable: List<ModelPrice>? = null
     private val usage = ArrayList<UsageBucket>()
+    private val hours = ArrayList<UsageHour>()
     private val log = ArrayList<AiAdjustment>()
     private val manualUntil = HashMap<String, Long>()
 
@@ -44,12 +48,20 @@ class AiWatchStore(private val file: File? = null) {
     val adjustments: StateFlow<List<AiAdjustment>> = _adjustments
     private val _notice = MutableStateFlow("")
     val notice: StateFlow<String> = _notice
+    private val _live = MutableStateFlow<AiLiveSnapshot?>(null)
+    val live: StateFlow<AiLiveSnapshot?> = _live
 
     init { load() }
 
     fun prices(): List<ModelPrice> = synchronized(lock) { priceTable ?: LlmPrices.DEFAULTS }
 
     fun setFollows(on: Boolean) = synchronized(lock) { follows = on; publishConfig(); persist() }
+
+    fun setLiveFeed(on: Boolean) = synchronized(lock) { liveFeed = on; publishConfig(); persist() }
+
+    fun publishLive(s: AiLiveSnapshot) { _live.value = s }
+
+    fun hourBuckets(): List<UsageHour> = synchronized(lock) { hours.toList() }
 
     fun setIntervalMs(ms: Long) = synchronized(lock) {
         intervalMs = ms.coerceIn(AiWatchConfig.MIN_INTERVAL_MS, AiWatchConfig.MAX_INTERVAL_MS)
@@ -108,6 +120,13 @@ class AiWatchStore(private val file: File? = null) {
             val b = usage[i]
             usage[i] = b.copy(calls = b.calls + addCalls, promptTokens = b.promptTokens + p, completionTokens = b.completionTokens + c)
         }
+        val hour = LlmPrices.hourOf(atMs)
+        val h = hours.indexOfFirst { it.day == day && it.hour == hour && it.source == src && it.model == id }
+        if (h < 0) hours += UsageHour(day, hour, src, id, addCalls, p, c)
+        else {
+            val b = hours[h]
+            hours[h] = b.copy(calls = b.calls + addCalls, promptTokens = b.promptTokens + p, completionTokens = b.completionTokens + c)
+        }
         publishSummary(); persist()
     }
 
@@ -124,7 +143,7 @@ class AiWatchStore(private val file: File? = null) {
         return usage.filter { it.day == day }.sumOf { LlmPrices.costUsd(it.promptTokens, it.completionTokens, LlmPrices.priceFor(it.model, prices)) }
     }
 
-    private fun publishConfig() { _config.value = AiWatchConfig(follows, intervalMs, budgetUsd) }
+    private fun publishConfig() { _config.value = AiWatchConfig(follows, intervalMs, budgetUsd, liveFeed) }
 
     private fun publishSummary() {
         _summary.value = LlmPrices.summarize(usage.toList(), priceTable ?: LlmPrices.DEFAULTS, System.currentTimeMillis())
@@ -137,6 +156,7 @@ class AiWatchStore(private val file: File? = null) {
         val js = runCatching { JSONObject(text) }.getOrNull() ?: return
         synchronized(lock) {
             follows = js.optBoolean("followsWindow", true)
+            liveFeed = js.optBoolean("liveFeed", true)
             intervalMs = js.optLong("intervalMs", AiWatchConfig.DEFAULT_INTERVAL_MS)
                 .coerceIn(AiWatchConfig.MIN_INTERVAL_MS, AiWatchConfig.MAX_INTERVAL_MS)
             budgetUsd = if (js.has("budgetUsd") && !js.isNull("budgetUsd")) js.optDouble("budgetUsd").takeIf { it.isFinite() && it > 0.0 } else null
@@ -146,6 +166,14 @@ class AiWatchStore(private val file: File? = null) {
                 for (i in 0 until arr.length()) {
                     val o = arr.optJSONObject(i) ?: continue
                     usage += UsageBucket(o.optString("day"), o.optString("source"), o.optString("provider"), o.optString("model"),
+                        o.optInt("calls"), o.optLong("prompt"), o.optLong("completion"))
+                }
+            }
+            hours.clear()
+            js.optJSONArray("hours")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    hours += UsageHour(o.optString("day"), o.optInt("hour"), o.optString("source"), o.optString("model"),
                         o.optInt("calls"), o.optLong("prompt"), o.optLong("completion"))
                 }
             }
@@ -173,6 +201,7 @@ class AiWatchStore(private val file: File? = null) {
         val f = file ?: return
         val js = JSONObject()
             .put("followsWindow", follows)
+            .put("liveFeed", liveFeed)
             .put("intervalMs", intervalMs)
             .put("budgetUsd", budgetUsd ?: JSONObject.NULL)
         if (priceTable == null) js.put("prices", JSONObject.NULL) else js.put("prices", JSONArray().apply {
@@ -180,6 +209,10 @@ class AiWatchStore(private val file: File? = null) {
         })
         js.put("usage", JSONArray().apply {
             usage.forEach { put(JSONObject().put("day", it.day).put("source", it.source).put("provider", it.provider).put("model", it.model)
+                .put("calls", it.calls).put("prompt", it.promptTokens).put("completion", it.completionTokens)) }
+        })
+        js.put("hours", JSONArray().apply {
+            hours.forEach { put(JSONObject().put("day", it.day).put("hour", it.hour).put("source", it.source).put("model", it.model)
                 .put("calls", it.calls).put("prompt", it.promptTokens).put("completion", it.completionTokens)) }
         })
         js.put("adjustments", JSONArray().apply {

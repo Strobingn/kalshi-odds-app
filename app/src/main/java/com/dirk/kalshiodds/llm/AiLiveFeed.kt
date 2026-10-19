@@ -1,0 +1,133 @@
+package com.dirk.kalshiodds.llm
+
+import java.util.Locale
+
+/** One point on the live card chart. Prices in dollars, odds in 0–1. */
+data class AiLivePoint(val atMs: Long, val btc: Double?, val strike: Double?, val up: Double?, val down: Double?)
+
+data class AiLivePosition(val label: String, val side: String, val contracts: Int, val pnlUsd: Double)
+
+/**
+ * Latest KXBTC15M picture. Replaced on every Kalshi odds/book tick and every BTC price tick.
+ * [atMs] is the tick time, not a 1-second timer.
+ */
+data class AiLiveSnapshot(
+    val atMs: Long,
+    val windowKey: String,
+    val ticker: String,
+    val closeMs: Long,
+    val strike: Double?,
+    val btc: Double?,
+    val yesBid: Double?,
+    val yesAsk: Double?,
+    val noBid: Double?,
+    val noAsk: Double?,
+    val modelUp: Double?,
+    val positions: List<AiLivePosition> = emptyList(),
+    val points: List<AiLivePoint> = emptyList(),
+    val fillNote: String = ""
+) {
+    val distanceUsd: Double? get() = if (btc != null && strike != null && btc.isFinite() && strike.isFinite()) btc - strike else null
+    fun ageMs(nowMs: Long): Long = (nowMs - atMs).coerceAtLeast(0L)
+}
+
+enum class LiveTrigger { WINDOW, BIG_MOVE, FILL, LIVE_TICK, NONE }
+
+/**
+ * 1.0.14 live feed. The card state updates on every tick.
+ * The LLM decision loop waits at least [MIN_SPACING_MS] between calls.
+ */
+object AiLiveFeed {
+    /** Dirk: LLM re-evaluation at most once every 25 seconds. */
+    const val MIN_SPACING_MS = 25_000L
+    const val MATERIAL_CENTS = 2.0
+    const val BIG_MOVE_CENTS = 10.0
+    const val MAX_POINTS = 180
+
+    fun reduce(prev: AiLiveSnapshot?, incoming: AiLiveSnapshot): AiLiveSnapshot {
+        val kept = if (prev != null && prev.windowKey.isNotBlank() && prev.windowKey == incoming.windowKey &&
+            prev.ticker.isNotBlank() && incoming.ticker.isNotBlank() && prev.ticker != incoming.ticker && !closer(prev, incoming)) {
+            prev.copy(atMs = incoming.atMs, btc = incoming.btc ?: prev.btc)
+        } else incoming
+        val point = AiLivePoint(kept.atMs, kept.btc, kept.strike, kept.yesBid, kept.noBid ?: kept.noAsk)
+        val sameWindow = prev != null && prev.windowKey.isNotBlank() && prev.windowKey == kept.windowKey
+        val points = (if (sameWindow) prev.points else emptyList()).plus(point).takeLast(MAX_POINTS)
+        return kept.copy(points = points)
+    }
+
+    private fun closer(current: AiLiveSnapshot, incoming: AiLiveSnapshot): Boolean {
+        fun dist(s: AiLiveSnapshot) = s.distanceUsd?.takeIf { it.isFinite() }?.let { kotlin.math.abs(it) } ?: Double.MAX_VALUE
+        return dist(incoming) < dist(current)
+    }
+
+    fun trigger(prev: AiLiveSnapshot?, next: AiLiveSnapshot): LiveTrigger {
+        if (prev == null) return if (next.windowKey.isBlank()) LiveTrigger.NONE else LiveTrigger.WINDOW
+        if (next.windowKey.isNotBlank() && next.windowKey != prev.windowKey) return LiveTrigger.WINDOW
+        if (prev.closeMs > 0 && prev.atMs < prev.closeMs && next.atMs >= prev.closeMs) return LiveTrigger.WINDOW
+        val move = centsMove(prev, next)
+        val crossed = crossedStrike(prev, next)
+        if (move >= BIG_MOVE_CENTS || crossed) return LiveTrigger.BIG_MOVE
+        if (next.fillNote.isNotBlank() && next.fillNote != prev.fillNote) return LiveTrigger.FILL
+        if (move >= MATERIAL_CENTS) return LiveTrigger.LIVE_TICK
+        return LiveTrigger.NONE
+    }
+
+    /**
+     * True when the decision loop may call the model.
+     * A call inside the last [MIN_SPACING_MS] is refused even if a tick or the regular interval is due.
+     */
+    fun llmDue(lastCallAt: Long, nowMs: Long, trigger: LiveTrigger, intervalDue: Boolean): Boolean {
+        if (lastCallAt != Long.MIN_VALUE && nowMs - lastCallAt < MIN_SPACING_MS) return false
+        return trigger != LiveTrigger.NONE || intervalDue
+    }
+
+    fun source(trigger: LiveTrigger): String = when (trigger) {
+        LiveTrigger.WINDOW -> LlmSources.WINDOW
+        LiveTrigger.BIG_MOVE -> LlmSources.BIG_MOVE
+        LiveTrigger.FILL, LiveTrigger.LIVE_TICK -> LlmSources.LIVE_TICK
+        LiveTrigger.NONE -> LlmSources.WATCHER
+    }
+
+    fun prefer(current: LiveTrigger, next: LiveTrigger): LiveTrigger =
+        if (current == LiveTrigger.NONE || next.ordinal < current.ordinal) next else current
+
+    fun post(live: AiLiveSnapshot?, trigger: LiveTrigger, tweaks: List<AiAdjustment>): String {
+        val s = live
+        val call = s?.modelUp?.takeIf { it.isFinite() }?.let { if (it >= 0.5) "UP" else "DOWN" } ?: "no call"
+        val pct = s?.modelUp?.takeIf { it.isFinite() }?.let { String.format(Locale.US, "%.0f%%", it * 100) } ?: "—"
+        val btc = s?.btc?.let { money(it) } ?: "—"
+        val strike = s?.strike?.let { money(it) } ?: "—"
+        val dist = s?.distanceUsd?.let { signed(it) } ?: "—"
+        val up = px(s?.yesBid) + "/" + px(s?.yesAsk)
+        val down = px(s?.noBid) + "/" + px(s?.noAsk)
+        val why = when (trigger) {
+            LiveTrigger.WINDOW -> "window open/close"
+            LiveTrigger.BIG_MOVE -> "big move"
+            LiveTrigger.FILL -> "new fill"
+            LiveTrigger.LIVE_TICK -> "odds move"
+            LiveTrigger.NONE -> "scheduled tick"
+        }
+        val changes = if (tweaks.isEmpty()) "no setting changes" else tweaks.joinToString("; ") {
+            "${it.scalper} ${it.setting} ${it.oldValue} → ${it.newValue}"
+        }
+        return "Live feed · $why · ${s?.ticker ?: "KXBTC15M"} · BTC $btc vs strike $strike ($dist) · UP $up · DOWN $down · call $call ($pct). $changes"
+    }
+
+    private fun centsMove(a: AiLiveSnapshot, b: AiLiveSnapshot): Double {
+        val d = listOf(a.yesAsk to b.yesAsk, a.yesBid to b.yesBid, a.noAsk to b.noAsk).firstNotNullOfOrNull { (x, y) ->
+            if (x != null && y != null && x.isFinite() && y.isFinite()) kotlin.math.abs(y - x) * 100.0 else null
+        }
+        return d ?: 0.0
+    }
+
+    private fun crossedStrike(a: AiLiveSnapshot, b: AiLiveSnapshot): Boolean {
+        val as_ = a.btc; val ak = a.strike; val bs = b.btc; val bk = b.strike
+        if (as_ == null || ak == null || bs == null || bk == null) return false
+        if (!as_.isFinite() || !ak.isFinite() || !bs.isFinite() || !bk.isFinite()) return false
+        return (as_ - ak) * (bs - bk) < 0.0
+    }
+
+    private fun money(v: Double) = String.format(Locale.US, "$%,.2f", v)
+    private fun signed(v: Double) = String.format(Locale.US, "%+,.2f", v)
+    private fun px(v: Double?) = v?.takeIf { it.isFinite() }?.let { String.format(Locale.US, "%.0f¢", it * 100) } ?: "—"
+}

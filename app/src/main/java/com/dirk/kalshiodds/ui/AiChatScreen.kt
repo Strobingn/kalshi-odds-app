@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.ui
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -15,6 +16,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -64,13 +68,16 @@ fun AiChatScreen(viewModel: OddsViewModel) {
         if (pendingAsk != null && chat != null && !busy) com.dirk.kalshiodds.decision.insights.AskAiWhy.take()?.let(onSend)
     }
     val endpoint = settings?.chatEndpoint()
+    val live = container?.aiWatch?.live?.collectAsStateWithLifecycle()?.value
+    val liveOn = container?.aiWatch?.config?.collectAsStateWithLifecycle()?.value?.liveFeed ?: true
     AiChatContent(
         messages = messages, busy = busy, strategyStatus = status, hasKey = ready, providerLabel = providerLabel,
         initialKey = endpoint?.apiKey.orEmpty(), initialModel = endpoint?.model.orEmpty(), initialBase = endpoint?.baseUrl.orEmpty(),
         onSaveKey = { k, m, b -> settings?.saveSlot(settings.providerId, k, m, b) },
         onSend = onSend,
         onApply = { chat?.applyProposal(it) }, onCancel = { chat?.cancelProposal(it) }, onClear = { chat?.clear() },
-        unavailable = chat == null
+        unavailable = chat == null,
+        live = live, liveOn = liveOn, onLiveFeed = { on -> container?.aiWatch?.setLiveFeed(on) }
     )
 }
 
@@ -81,7 +88,8 @@ fun AiChatContent(
     initialKey: String = "", initialModel: String = "", initialBase: String = "",
     providerLabel: String = "",
     onSaveKey: (String, String, String) -> Unit = { _, _, _ -> }, onSend: (String) -> Unit = {},
-    onApply: (Long) -> Unit = {}, onCancel: (Long) -> Unit = {}, onClear: () -> Unit = {}, unavailable: Boolean = false
+    onApply: (Long) -> Unit = {}, onCancel: (Long) -> Unit = {}, onClear: () -> Unit = {}, unavailable: Boolean = false,
+    live: com.dirk.kalshiodds.llm.AiLiveSnapshot? = null, liveOn: Boolean = true, onLiveFeed: (Boolean) -> Unit = {}
 ) {
     val c = DipTheme.colors
     var input by remember { mutableStateOf("") }
@@ -112,6 +120,7 @@ fun AiChatContent(
         }
         Text("Paper strategy: $strategyStatus", color = c.textSecondary, style = MaterialTheme.typography.bodySmall, maxLines = 2,
             modifier = Modifier.padding(horizontal = 16.dp))
+        if (live != null) AiLiveFeedCard(live, liveOn, onLiveFeed)
         if (showKey) KeyFields(initialKey, initialModel, initialBase, providerLabel) { k, m, b -> onSaveKey(k, m, b); showKey = false }
 
         LazyColumn(state = list, modifier = Modifier.weight(1f).fillMaxWidth().testTag("AI_MESSAGES"),
@@ -141,6 +150,60 @@ fun AiChatContent(
         }
     }
 }
+
+@Composable
+private fun AiLiveFeedCard(live: com.dirk.kalshiodds.llm.AiLiveSnapshot, on: Boolean, onToggle: (Boolean) -> Unit) {
+    val c = DipTheme.colors
+    val left = ((live.closeMs - live.atMs).coerceAtLeast(0L)) / 1000L
+    val age = live.ageMs(System.currentTimeMillis()) / 1000L
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).border(1.dp, c.border, RoundedCornerShape(12.dp)).background(c.surface, RoundedCornerShape(12.dp)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Live • updated ${age}s ago", color = c.up, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
+            Text("AI live feed", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
+            Switch(checked = on, onCheckedChange = onToggle)
+        }
+        Text(live.ticker.ifBlank { "KXBTC15M" } + " · ${left / 60}:${"%02d".format(left % 60)} left", color = c.textPrimary, fontWeight = FontWeight.SemiBold)
+        val dist = live.distanceUsd?.let { String.format(Locale.US, "%+,.2f", it) } ?: "—"
+        Text("Strike ${fmtPx(live.strike)} · BTC ${fmtPx(live.btc)} · ${dist}", color = c.textPrimary, style = MaterialTheme.typography.bodySmall)
+        Text("UP ${cents(live.yesBid)}/${cents(live.yesAsk)} · DOWN ${cents(live.noBid)}/${cents(live.noAsk)} · AI UP ${live.modelUp?.let { "${"%.0f".format(it * 100)}%" } ?: "—"}", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+        if (live.positions.isEmpty()) Text("No open paper scalps", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
+        else live.positions.take(6).forEach { p ->
+            Text("${p.label} ${p.side} ${p.contracts} · ${String.format(Locale.US, "%+.2f", p.pnlUsd)}", color = if (p.pnlUsd >= 0) c.up else c.down, style = MaterialTheme.typography.labelSmall)
+        }
+        LiveMiniChart(live)
+    }
+}
+
+@Composable
+private fun LiveMiniChart(live: com.dirk.kalshiodds.llm.AiLiveSnapshot) {
+    val c = DipTheme.colors
+    val pts = live.points
+    Canvas(Modifier.fillMaxWidth().height(72.dp)) {
+        if (pts.size < 2) return@Canvas
+        fun line(sel: (com.dirk.kalshiodds.llm.AiLivePoint) -> Double?, color: Color) {
+            val vals = pts.map { sel(it) }
+            val finite = vals.filterNotNull().filter { it.isFinite() }
+            if (finite.size < 2) return
+            val lo = finite.min(); val hi = finite.max(); val span = (hi - lo).takeIf { it > 1e-9 } ?: 1.0
+            var prev: Offset? = null
+            vals.forEachIndexed { i, v ->
+                if (v == null || !v.isFinite()) { prev = null; return@forEachIndexed }
+                val x = i * size.width / (pts.size - 1).coerceAtLeast(1)
+                val y = size.height - ((v - lo) / span).toFloat() * size.height
+                val cur = Offset(x, y)
+                prev?.let { drawLine(color, it, cur, strokeWidth = 3f, cap = StrokeCap.Round) }
+                prev = cur
+            }
+        }
+        line({ it.btc }, c.spot)
+        line({ it.strike }, c.textSecondary)
+        line({ it.up }, c.up)
+        line({ it.down }, c.down)
+    }
+}
+
+private fun fmtPx(v: Double?) = v?.takeIf { it.isFinite() }?.let { String.format(Locale.US, "$%,.2f", it) } ?: "—"
+private fun cents(v: Double?) = v?.takeIf { it.isFinite() }?.let { String.format(Locale.US, "%.0f¢", it * 100) } ?: "—"
 
 @Composable
 private fun KeyFields(k0: String, m0: String, b0: String, providerLabel: String = "", onSave: (String, String, String) -> Unit) {

@@ -93,7 +93,10 @@ fun SettingsScreen(
         belowScalping = {
             val app = LocalContext.current.applicationContext as? com.dirk.kalshiodds.KalshiOddsApp
             val container = app?.let { runCatching { it.container }.getOrNull() }
-            if (container != null) AiUsageSettingsCard(container.aiWatch, container.llmSettings)
+            if (container != null) {
+                AiUsageSettingsCard(container.aiWatch, container.llmSettings)
+                AiUsageChartsCard(container.aiWatch)
+            }
         }
     )
 }
