@@ -53,19 +53,8 @@ fun AiChatScreen(viewModel: OddsViewModel) {
             val board = rows.sortedByDescending { it.netUsd }.take(25).joinToString("\n") {
                 String.format(Locale.US, "%s [%s]: net $%.2f, %d trades, %d wins", it.model.label, it.model.code, it.netUsd, it.roundTrips, it.wins)
             }
-            val nowMs = System.currentTimeMillis()
-            val et = java.time.format.DateTimeFormatter.ofPattern("h:mm a").withZone(java.time.ZoneId.of("America/New_York"))
-            val btc = runCatching { container?.scalp?.marks?.value?.values.orEmpty().filter { it.ticker.uppercase().contains("BTC") && it.closeMs > nowMs }.sortedBy { it.closeMs } }.getOrDefault(emptyList())
-            val mkts = btc.take(8).joinToString("\n") { m ->
-                String.format(Locale.US, "%s: strike $%.2f, closes %s ET (%.1f min left), YES bid/ask %s/%s, on-phone model P(UP/YES) %s",
-                    m.ticker, m.strike ?: 0.0, et.format(java.time.Instant.ofEpochMilli(m.closeMs)), (m.closeMs - nowMs) / 60000.0,
-                    m.yesBid?.let { "%.2f".format(Locale.US, it) } ?: "-", m.yesAsk?.let { "%.2f".format(Locale.US, it) } ?: "-",
-                    m.fair("YES")?.let { "%.2f".format(Locale.US, it) } ?: "-")
-            }
-            val spot = btc.firstNotNullOfOrNull { it.spot }
-            val ctx = "Now: ${et.format(java.time.Instant.ofEpochMilli(nowMs))} ET\nBTC price: " + (spot?.let { String.format(Locale.US, "$%.2f", it) } ?: "unknown") +
-                "\nOpen KXBTC15M markets:\n" + mkts.ifBlank { "(none loaded)" } +
-                "\nRecent scalper results (net):\n" + board + "\nLLM paper strategy status (separate; not a chat answer): $status"
+            // The current KXBTC15M window is attached inside the controller at send time, from live marks.
+            val ctx = "Recent scalper results (net):\n" + board + "\nLLM paper strategy status (separate; not a chat answer): $status"
             chat?.send(q, ctx) ?: Unit
     }
     // 1.0.9: "Ask the AI why" — a tapped trade's prefilled question is sent once.
