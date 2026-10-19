@@ -570,7 +570,7 @@ class ScalpBook(
         val primary = paramsFor(coin)
         // 0.3.50: six paper models = five strategy primaries + maker-first dip (buy the dip at the bid, sell the rebound at the ask).
         // 1.0.10: Dip-hunter maker / hold / no-TP copies removed (ScalpModels.REMOVED_CODES). 1.0.14: + fair-t1/t2 Fair-gap copies.
-        val primaries = ScalpStrategy.values().map { paramsFor(coin, it) } + (ScalpParams.HOLD60_SIBLINGS + ScalpParams.QUEUED_COPIES).filter { !ScalpModels.isRemoved(ScalpModels.modelOf(it).code) } + ScalpParams.FAIR_TWEAKS
+        val primaries = ScalpStrategy.values().map { paramsFor(coin, it) } + (ScalpParams.HOLD60_SIBLINGS + ScalpParams.QUEUED_COPIES).filter { !ScalpModels.isRemoved(ScalpModels.modelOf(it).code) } + (if (coin.equals("BTC", ignoreCase = true)) ScalpParams.FAIR_TWEAKS else emptyList()) // BTC seed copies only
         val primaryIds = primaries.map { it.id }.toSet()
         val key = q.ticker.uppercase()
         val hist = history.getOrPut(key) { ArrayDeque() }
@@ -604,7 +604,7 @@ class ScalpBook(
             val sliceUsed = HashMap<ScalpModels.Model, Double>()
             _trades.value.forEach { t -> if (isActive(t)) ScalpModels.modelOf(t)?.let { m -> sliceUsed[m] = (sliceUsed[m] ?: 0.0) + activeCost(t) } }
             changed.forEach { t -> if (t.isPrimary && t.state == ScalpState.PENDING_ENTRY && t.signalAtMs == q.nowMs) ScalpModels.modelOf(t)?.let { m -> sliceUsed[m] = (sliceUsed[m] ?: 0.0) + activeCost(t) } }
-            var openCost = openCostUsd() + changed.filter { it.isPrimary && it.state == ScalpState.PENDING_ENTRY && it.signalAtMs == q.nowMs }
+            var openCost = openCostUsd() + changed.filter { it.isPrimary && it.state == ScalpState.PENDING_ENTRY && it.signalAtMs == q.nowMs && !shadowEntry(it) }
                 .sumOf { it.signalAsk * ScalpRule.CONTRACTS + ScalpRule.orderFee(ScalpRule.CONTRACTS, it.signalAsk) }
             for (p in run) {
                 val mine = mineAll.filter { it.variantId == p.id }.map { old -> changed.firstOrNull { it.id == old.id } ?: old }
@@ -620,7 +620,7 @@ class ScalpBook(
                 val (sig, _) = ScalpRule.strategySignal(q, p, free, recent)
                 if (sig != null && ScalpRule.buyPriceOk(if (p.maker) q.bid(sig.side) else sig.ask)) {
                     val role = if (p.id in primaryIds) "P" else "S"
-                    if (role == "P") {
+                    if (role == "P" && !shadowCode(ScalpModels.modelOf(p).code)) { // 1.0.14: frozen/benched entries reserve nothing
                         val cost = sig.ask * ScalpRule.CONTRACTS + ScalpRule.orderFee(ScalpRule.CONTRACTS, sig.ask)
                         if (openCost + cost > bankrollUsd() + 1e-9) continue // paper bankroll fully committed
                         // 0.3.50: each of the six models has its own bankroll slice (independent ledger).
@@ -1033,7 +1033,7 @@ class ScalpBook(
                         val what = if (p.o50 == ShockFav.O50.AI) "open 50 · ${Open50Model.VERSION}" else "open 50"
                         sfEnter(q, p, vid, sd, ask, f, openCost, bankroll, what)?.let {
                             val tr = if (p.o50 == ShockFav.O50.MAKER) it.copy(restingLimit = ShockFav.O50_MAKER_PX, restingSinceMs = q.nowMs) else it
-                            changed += tr; openCost += tr.entryCostUsd
+                            changed += tr; if (!shadowEntry(tr)) openCost += tr.entryCostUsd
                         }
                     }
                     continue
@@ -1049,7 +1049,7 @@ class ScalpBook(
                     } ?: continue
                     val ask = q.ask(side) ?: continue
                     val f = if (side == "YES") fairYes else 1.0 - fairYes
-                    sfEnter(q, p, p.shockId, side, ask, f, openCost, bankroll, p.kind.name.lowercase().replace('_', ' '))?.let { changed += it; openCost += it.entryCostUsd }
+                    sfEnter(q, p, p.shockId, side, ask, f, openCost, bankroll, p.kind.name.lowercase().replace('_', ' '))?.let { changed += it; if (!shadowEntry(it)) openCost += it.entryCostUsd }
                     continue
                 }
                 if (p.shock && mine.none { it.variantId == p.shockId && isActive(it) }) {
@@ -1058,7 +1058,7 @@ class ScalpBook(
                         val sideFair = if (side == "YES") fairYes else 1.0 - fairYes
                         val ask = q.ask(side)
                         if (ask != null && ShockFav.shockEntryOk(p, sideFair, ask))
-                            sfEnter(q, p, p.shockId, side, ask, sideFair, openCost, bankroll, "shock")?.let { changed += it; openCost += it.entryCostUsd }
+                            sfEnter(q, p, p.shockId, side, ask, sideFair, openCost, bankroll, "shock")?.let { changed += it; if (!shadowEntry(it)) openCost += it.entryCostUsd }
                     }
                 }
                 val favFg = FairGapTune.isTweaked(p.favId.take(4)) // 1.0.3: late favourite retuned toward fair-gap (last 5 min, 24–42¢, BRTI gap 10–21¢)
@@ -1075,7 +1075,7 @@ class ScalpBook(
                         val ask = q.ask(side) ?: continue
                         if (favFg) { if (FairGapTune.entryBlock(q, side, ask, ShockFav.CLIP, explicit(p.favId.take(4)), false, q.nowMs) != null) continue }
                         else if (!ShockFav.favEntryOk(p, f, ask, q.tauS, coin, q.closeMs)) continue
-                        sfEnter(q, p, p.favId, side, ask, f, openCost, bankroll, "late fav")?.let { changed += it; openCost += it.entryCostUsd }
+                        sfEnter(q, p, p.favId, side, ask, f, openCost, bankroll, "late fav")?.let { changed += it; if (!shadowEntry(it)) openCost += it.entryCostUsd }
                         break
                     }
                 }
@@ -1112,7 +1112,7 @@ class ScalpBook(
         val n = if (p.kind == ShockFav.Kind.FADE_MAKER) ShockFav.CLIP else minOf(ShockFav.CLIP, kotlin.math.floor((q.askSize(side) ?: 0.0) + 1e-9).toInt())
         if (n <= 0) return null
         val cost = ask * n + ScalpRule.orderFee(n, ask)
-        if (p.kind != ShockFav.Kind.OPEN50 && openCost + cost > bankroll + 1e-9) return null // 0.3.65: Open 50 unlimited paper
+        if (p.kind != ShockFav.Kind.OPEN50 && !shadowCode(p.code) && openCost + cost > bankroll + 1e-9) return null // 0.3.65: Open 50 unlimited paper
         return ScalpTrade(
             id = idFactory(), ticker = q.ticker.uppercase(), side = side, state = ScalpState.PENDING_ENTRY, signalAtMs = q.nowMs,
             signalAsk = ask, fairAtSignal = fair,
@@ -1418,6 +1418,9 @@ class ScalpBook(
 
     /** 1.0.9 auto-bench: model codes whose new entries become shadow-only (paper P&L frozen, hypothetical still tracked). */
     @Volatile var benched: Set<String> = emptySet()
+    /** 1.0.14: benched / frozen entries become shadows, so they must not reserve paper bankroll or window cap. */
+    private fun shadowCode(code: String?): Boolean = code != null && benched.isNotEmpty() && code in benched
+    private fun shadowEntry(t: ScalpTrade): Boolean = benched.isNotEmpty() && shadowCode(ScalpModels.modelOf(t)?.code)
     /** 1.0.9: called (cheaply, under the book lock) when a primary or bench-shadow trade settles. Arg = scalper code. */
     @Volatile var onSettled: ((String, ScalpTrade) -> Unit)? = null
 
@@ -1573,7 +1576,7 @@ class ScalpBook(
             // Kalshi Scalper rules: entries only in the first minutes of each 15-minute window, and only when this
             // strategy's self-learned confidence clears its own learned threshold.
             val minuteIn = close?.let { 15.0 - (it - t.signalAtMs) / 60_000.0 } ?: 99.0
-            if (minuteIn < 0.0 || minuteIn > ScalpV2.entryOpenMin(seed)) continue // 1.0.14: Simple-dip copies count after the 4-min history
+            if (minuteIn < 0.0 || (!ShockFav.isFavLeg(seed.base) && minuteIn > ScalpV2.entryOpenMin(seed))) continue // 1.0.14: Simple-dip copies count after the 4-min history
             // Direction: the on-device GBM must favour this side (fair value used when the model is missing).
             val gq = _marks.value[t.ticker.uppercase()]
             val gp = gq?.let { GbmModel.pSide(it, t.side, dm60(t.ticker.uppercase(), it.nowMs)) }
@@ -1773,12 +1776,12 @@ class ScalpBook(
                 if (id == Research.MAKER) {
                     val lim = kotlin.math.floor((ps - rp.makerEdgeCents / 100.0) * 100 + 1e-9) / 100.0
                     if (lim !in maxOf(0.05, lo / 100.0)..minOf(0.95, hi / 100.0) || lim >= ask - 0.005) continue
-                    if (exposure + clip * lim > rp.windowCapUsd + 1e-9) continue
+                    if (!shadowCode(id) && exposure + clip * lim > rp.windowCapUsd + 1e-9) continue
                     placed = ScalpTrade(id = idFactory(), ticker = q.ticker.uppercase(), side = side, state = ScalpState.PENDING_ENTRY, signalAtMs = q.nowMs,
                         signalAsk = lim, fairAtSignal = ps, restingLimit = lim, restingSinceMs = q.nowMs,
                         note = String.format(Locale.US, "Research maker: resting bid %.0f¢ = fair %.1f¢ − %.1f¢ · rn=%d", lim * 100, ps * 100, rp.makerEdgeCents, clip),
                         ruleVersion = "${ScalpRule.VERSION}|$id|P")
-                    exposure += clip * lim; break
+                    if (!shadowCode(id)) exposure += clip * lim; break
                 }
                 if (ask < lo / 100.0 - 1e-9 || ask > hi / 100.0 + 1e-9) continue
                 val hold = late
@@ -1786,13 +1789,13 @@ class ScalpBook(
                 if (n <= 0 || !Research.gateOk(ps, ask, n, hold, edge)) continue
                 if (late && (!f.brti || Research.edgeAfterCosts(ps, ask, n, true) > (spec?.maxGap ?: FairGapTune.MAX_GAP) + 1e-9)) continue
                 val cost = n * ask + ScalpRule.orderFee(n, ask)
-                if (exposure + cost > rp.windowCapUsd + 1e-9) continue
+                if (!shadowCode(id) && exposure + cost > rp.windowCapUsd + 1e-9) continue
                 placed = ScalpTrade(id = idFactory(), ticker = q.ticker.uppercase(), side = side, state = ScalpState.PENDING_ENTRY, signalAtMs = q.nowMs,
                     signalAsk = ask, fairAtSignal = ps,
                     note = String.format(Locale.US, "Research %s: fair %.1f¢ vs ask %.0f¢ · edge after fees %.1f¢ (gate %.0f¢) · %s · rn=%d", id, ps * 100, ask * 100,
                         Research.edgeAfterCosts(ps, ask, n, hold) * 100, edge, if (f.brti) "BRTI" else "spot fallback", n),
                     ruleVersion = "${ScalpRule.VERSION}|$id|P")
-                exposure += cost; break
+                if (!shadowCode(id)) exposure += cost; break
             }
             placed?.let { out += it }
         }

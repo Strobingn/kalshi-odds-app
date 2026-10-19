@@ -164,6 +164,7 @@ data class ScalpParams(
         val FAIR_TWEAKS: List<ScalpParams> by lazy {
             listOf(seedFor("BTC").copy(minGap = 0.12, target = 0.10), seedFor("BTC").copy(minGap = 0.16, target = 0.14))
         }
+        val FAIR_TWEAK_IDS: Set<String> by lazy { FAIR_TWEAKS.map { it.id }.toSet() }
         val ALL_VARIANTS: List<ScalpParams> get() = GRID + STRATEGY_GRID + MAKER_VARIANTS
 
         /** 0.3.43: one maker-entry + maker-exit variant per strategy (fair-gap per coin seed), shadow-tracked. */
@@ -279,7 +280,8 @@ object ScalpTuner {
         for (strategy in ScalpStrategy.values()) for (coin in ScalpParams.COINS) {
             val key = ScalpParams.key(coin, strategy)
             val tag = "$coin ${strategy.label}"
-            val mine = closed.filter { it.coin == coin && it.strategy == strategy }
+            // 1.0.14: fair-t1/t2 are fixed experiment cards, never tuner candidates (else a winning tweak would become the seed).
+            val mine = closed.filter { it.coin == coin && it.strategy == strategy && it.variantId !in ScalpParams.FAIR_TWEAK_IDS }
             val windows = mine.map { ScalpTicker.closeMs(it.ticker) ?: it.signalAtMs }.distinct().sorted()
             val current = cur.paramsFor(coin, strategy)
             if (windows.size < 5) {
