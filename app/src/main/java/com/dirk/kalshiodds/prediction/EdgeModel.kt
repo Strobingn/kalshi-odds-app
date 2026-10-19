@@ -56,11 +56,14 @@ data class EdgeModel(
      * Flag an edge only when |model − market| clears the official
      * order-level taker fee (amortized at the $5 ticket) + [confidenceMargin].
      */
-    fun qualifiesEdge(modelYes: Double, marketMid: Double, feeRate: Double = feeMargin.toDouble()): Boolean {
+    fun qualifiesEdge(
+        modelYes: Double, marketMid: Double, feeRate: Double = feeMargin.toDouble(),
+        askYes: Double? = null, askNo: Double? = null
+    ): Boolean {
         val m = marketMid.coerceIn(0.02, 0.98)
-        val gap = kotlin.math.abs(modelYes - m)
         val fee = com.dirk.kalshiodds.signal.trade.KalshiFee.perContract(m, feeRate)
-        return gap > fee + confidenceMargin
+        // 1.0.11: symmetric — UP edge p−askYes vs DOWN edge (1−p)−askNo, one threshold, larger side wins.
+        return AiBias.edgeSide(modelYes, askYes ?: m, askNo ?: (1.0 - m), fee + confidenceMargin) != null
     }
 
     fun blendWithMarket(modelYes: Double, marketMid: Double): Double {
