@@ -19,7 +19,8 @@ data class AiWatchConfig(
 
     companion object {
         const val DEFAULT_INTERVAL_MS = 60_000L
-        const val MIN_INTERVAL_MS = 15_000L
+        /** Chat LLM follow interval cannot be shorter than the 60s automatic cap. */
+        const val MIN_INTERVAL_MS = 60_000L
         const val MAX_INTERVAL_MS = 600_000L
     }
 }
@@ -53,7 +54,7 @@ class AiWatchStore(private val file: File? = null) {
 
     init { load() }
 
-    fun prices(): List<ModelPrice> = synchronized(lock) { priceTable ?: LlmPrices.DEFAULTS }
+    fun prices(): List<ModelPrice> = synchronized(lock) { LlmPrices.withDefaults(priceTable) }
 
     fun setFollows(on: Boolean) = synchronized(lock) { follows = on; publishConfig(); persist() }
 
@@ -103,7 +104,7 @@ class AiWatchStore(private val file: File? = null) {
     fun todaySpend(nowMs: Long): Double = synchronized(lock) { todaySpendLocked(nowMs) }
 
     fun summaryAt(nowMs: Long): UsageSummary = synchronized(lock) {
-        LlmPrices.summarize(usage.toList(), priceTable ?: LlmPrices.DEFAULTS, nowMs)
+        LlmPrices.summarize(usage.toList(), LlmPrices.withDefaults(priceTable), nowMs)
     }
 
     fun record(source: String, provider: String, model: String, promptTokens: Long, completionTokens: Long, atMs: Long) = synchronized(lock) {
@@ -139,14 +140,14 @@ class AiWatchStore(private val file: File? = null) {
 
     private fun todaySpendLocked(nowMs: Long): Double {
         val day = LlmPrices.dayKey(nowMs)
-        val prices = priceTable ?: LlmPrices.DEFAULTS
+        val prices = LlmPrices.withDefaults(priceTable)
         return usage.filter { it.day == day }.sumOf { LlmPrices.costUsd(it.promptTokens, it.completionTokens, LlmPrices.priceFor(it.model, prices)) }
     }
 
     private fun publishConfig() { _config.value = AiWatchConfig(follows, intervalMs, budgetUsd, liveFeed) }
 
     private fun publishSummary() {
-        _summary.value = LlmPrices.summarize(usage.toList(), priceTable ?: LlmPrices.DEFAULTS, System.currentTimeMillis())
+        _summary.value = LlmPrices.summarize(usage.toList(), LlmPrices.withDefaults(priceTable), System.currentTimeMillis())
         _adjustments.value = log.asReversed()
     }
 

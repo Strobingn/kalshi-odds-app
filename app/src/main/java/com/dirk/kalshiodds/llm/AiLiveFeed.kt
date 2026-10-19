@@ -43,12 +43,13 @@ data class AiLiveSnapshot(
 enum class LiveTrigger { WINDOW, BIG_MOVE, FILL, LIVE_TICK, NONE }
 
 /**
- * 1.0.14 live feed. The card state updates on every tick.
- * The LLM decision loop waits at least [MIN_SPACING_MS] between calls.
+ * 1.0.15 live feed. The card and tick history update on every Kalshi tick with no LLM call.
+ * Automatic chat-LLM re-checks (every provider) wait at least [MIN_SPACING_MS].
+ * On-device scalpers, the forecast, auto-freeze, and the paper strategy are not on this clock.
  */
 object AiLiveFeed {
-    /** Dirk: LLM re-evaluation at most once every 25 seconds. */
-    const val MIN_SPACING_MS = 25_000L
+    /** Automatic chat LLM calls, live posts, and odds/BTC re-checks: at most once every 60 seconds, all providers. */
+    const val MIN_SPACING_MS = 60_000L
     const val MATERIAL_CENTS = 2.0
     const val BIG_MOVE_CENTS = 10.0
     const val MAX_POINTS = 180

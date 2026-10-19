@@ -82,6 +82,40 @@ class LlmUsageTest {
         assertEquals(LlmSources.CHAT, second.summaryAt(now).allTime.bySource.filterValues { it.calls > 0 }.keys.single())
     }
 
+    @Test fun openAiCallsArePricedEvenWhenTheSavedTableOnlyHasGrok() {
+        val file = tmp.newFile("grok-only.json")
+        file.writeText("""{"prices":[{"model":"grok-4.7","input":2.0,"output":6.0}],"followsWindow":true,"intervalMs":60000}""")
+        val store = AiWatchStore(file)
+        val now = at(LocalDate.of(2026, 10, 19), 15)
+        assertEquals(2.0, LlmPrices.priceFor("gpt-4.1", store.prices())!!.inputPerMillion, 0.0)
+        assertEquals(8.0, LlmPrices.priceFor("gpt-4.1", store.prices())!!.outputPerMillion, 0.0)
+        assertEquals(1.25, LlmPrices.priceFor("gpt-5", store.prices())!!.inputPerMillion, 0.0)
+        assertEquals(5.0, LlmPrices.priceFor("gpt-4o-2024-05-13", store.prices())!!.inputPerMillion, 0.0)
+        store.record(LlmSources.CHAT, LlmProviders.OPENAI, "gpt-4.1", 1_000_000, 500_000, now)
+        store.record(LlmSources.LIVE_TICK, LlmProviders.OPENAI, "gpt-4.1-2025-04-14", 0, 1_000_000, now)
+        val today = store.summaryAt(now).today
+        assertEquals(2, today.calls)
+        // Chat: 1M in * $2 + 0.5M out * $8. Dated gpt-4.1 snapshot: 1M out * $8.
+        assertEquals(2.0 + 4.0 + 8.0, today.costUsd, 1e-9)
+        assertEquals(6.0, today.bySource.getValue(LlmSources.CHAT).costUsd, 1e-6)
+        val custom = LlmPrices.withDefaults(listOf(ModelPrice("gpt-4.1", 3.0, 9.0)))
+        assertEquals(3.0, LlmPrices.priceFor("gpt-4.1", custom)!!.inputPerMillion, 0.0)
+        assertEquals("gpt-4.1", LlmSettings.migrateModel("gpt-4.1"))
+        assertEquals("gpt-5.4", LlmSettings.migrateModel("gpt-5.4"))
+        assertEquals("grok-4.7", LlmSettings.migrateModel("grok-4"))
+        val settings = listOf(
+            java.io.File("app/src/main/java/com/dirk/kalshiodds/llm/LlmSettings.kt"),
+            java.io.File("src/main/java/com/dirk/kalshiodds/llm/LlmSettings.kt")
+        ).first { it.isFile }.readText()
+        assertTrue(settings.contains("must not clear"))
+        val paper = listOf(
+            java.io.File("app/src/main/java/com/dirk/kalshiodds/llm/LlmPaperStrategy.kt"),
+            java.io.File("src/main/java/com/dirk/kalshiodds/llm/LlmPaperStrategy.kt")
+        ).first { it.isFile }.readText()
+        assertTrue(paper.contains("delay(15_000)"))
+        assertFalse(paper.contains("MIN_SPACING_MS"))
+    }
+
     @Test fun providerResolveFillsDefaultsAndRejectsCleartext() {
         val xai = LlmProviders.resolve(LlmProviders.XAI, "k", "", "")
         assertEquals("https://api.x.ai/v1", xai.baseUrl)

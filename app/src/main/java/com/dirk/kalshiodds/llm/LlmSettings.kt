@@ -28,7 +28,10 @@ class LlmSettings(context: Context) {
         set(v) { prefs?.edit()?.putString("model", v.trim())?.apply() }
     val hasKey: Boolean get() = apiKey.isNotBlank()
 
-    /** 1.0.12: chat + window watcher. The paper strategy keeps using [apiKey] / [model] / [baseUrl] (the xAI slot). */
+    /**
+     * 1.0.12: chat + window watcher. The paper strategy keeps using [apiKey] / [model] / [baseUrl] (the xAI slot).
+     * An upgrade must not clear this id or any `key.<provider>` slot. [migrateModel] rewrites only the legacy xAI model name.
+     */
     var providerId: String
         get() {
             val id = prefs?.getString("provider", LlmProviders.XAI).orEmpty().ifBlank { LlmProviders.XAI }
