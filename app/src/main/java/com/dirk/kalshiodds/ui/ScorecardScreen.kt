@@ -715,7 +715,8 @@ private fun CumulativePnlCard(points: List<Pair<Long, Double>>) {
     ) {
         Text(ScorecardCopy.PNL_TITLE, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
         Spacer(Modifier.height(8.dp))
-        PnlLineChart(points.map { it.second }, Modifier.fillMaxWidth(), height = 120.dp)
+        // Start at $0 so the first settled pick already draws a segment.
+        PnlLineChart(if (points.isEmpty()) emptyList() else listOf(0.0) + points.map { it.second }, Modifier.fillMaxWidth(), height = 120.dp)
     }
 }
 

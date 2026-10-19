@@ -86,7 +86,7 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
                 } }
                 item(key = "daily-net") { ArenaCard {
                     Text("Daily net", color = c.textPrimary, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Text("Recorded windows · ET days", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+                    Text("Latest recorded windows (up to 48) · ET days · oldest day may be partial", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
                     DailyNetBars(daily, Modifier.fillMaxWidth())
                 } }
                 item(key = "live") {

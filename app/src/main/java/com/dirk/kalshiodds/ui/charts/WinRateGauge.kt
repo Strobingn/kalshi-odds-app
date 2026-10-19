@@ -61,9 +61,10 @@ fun WinRateGauge(
                     }
             ) {
                 val stroke = strokeWidth.toPx()
-                val radius = minOf(this.size.width / 2f, this.size.height) - stroke / 2f
+                val tick = 2.dp.toPx()
+                val radius = minOf(this.size.width / 2f, this.size.height) - stroke / 2f - tick
                 val centerX = this.size.width / 2f
-                val centerY = radius + stroke / 2f
+                val centerY = radius + stroke / 2f + tick
 
                 // Track arc (full 180 degrees)
                 drawArc(
@@ -91,8 +92,8 @@ fun WinRateGauge(
                 breakEven?.let { be ->
                     val tickAngle = 180f + (180f * be.coerceIn(0.0, 1.0))
                     val rad = Math.toRadians(tickAngle.toDouble())
-                    val innerRadius = radius - stroke / 2f - 2.dp.toPx()
-                    val outerRadius = radius + stroke / 2f + 2.dp.toPx()
+                    val innerRadius = radius - stroke / 2f - tick
+                    val outerRadius = radius + stroke / 2f + tick
                     val innerX = centerX + innerRadius * cos(rad).toFloat()
                     val innerY = centerY + innerRadius * sin(rad).toFloat()
                     val outerX = centerX + outerRadius * cos(rad).toFloat()

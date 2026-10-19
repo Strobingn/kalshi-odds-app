@@ -165,10 +165,10 @@ fun HomeDailySummaryCard(
                         style = MaterialTheme.typography.bodyMedium,
                         color = colors.textPrimary
                     )
-                    if (summary.trades <= 0) ChartEmptyState() else Row(
+                    if (summary.trades <= 0) ChartEmptyState() else Column(
                         Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         WinRateGauge(summary.winRate, summary.trades, size = 88.dp, unit = "trades")
                         RankedNetBars(
@@ -177,9 +177,9 @@ fun HomeDailySummaryCard(
                                 summary.worst?.takeIf { it.scalperId != summary.best?.scalperId }
                                     ?.let { NetBar("Worst · ${it.label}", it.netUsd) }
                             ),
-                            Modifier.weight(1f),
+                            Modifier.fillMaxWidth(),
                             ranked = false,
-                            labelWidthDp = 96
+                            labelWidthDp = 120
                         )
                     }
                     Text(

@@ -11,7 +11,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
@@ -45,9 +44,6 @@ fun DailyNetBars(
     val dataMax = max(0.0, maxNet)
     val rangeSpan = max(dataMax - dataMin, 0.01)
 
-    val density = LocalDensity.current
-    val canvasHeightPx = with(density) { height.toPx() }
-    val zeroY = canvasHeightPx * (dataMax / rangeSpan).toFloat()
 
     Column(modifier) {
         Canvas(
@@ -57,11 +53,13 @@ fun DailyNetBars(
                 .semantics { contentDescription = contentDesc }
         ) {
             val canvasWidth = size.width
+            val canvasHeightPx = size.height
+            val zeroY = canvasHeightPx * (dataMax / rangeSpan).toFloat()
             val n = finiteDays.size
             if (n == 0) return@Canvas
 
             val slotWidth = canvasWidth / n
-            val barWidthPx = min(slotWidth * 0.6f, with(density) { 28.dp.toPx() })
+            val barWidthPx = min(slotWidth * 0.6f, 28.dp.toPx())
 
             finiteDays.forEachIndexed { i, day ->
                 val slotLeft = i * slotWidth
@@ -89,7 +87,7 @@ fun DailyNetBars(
                         barBottom = zeroY + barHeightPx
                     }
                     val color = if (h > 0) c.upButton else c.downButton
-                    val cornerRadius = with(density) { CornerRadius(3.dp.toPx()) }
+                    val cornerRadius = CornerRadius(3.dp.toPx())
                     drawRoundRect(
                         color = color,
                         topLeft = Offset(barLeft, barTop),

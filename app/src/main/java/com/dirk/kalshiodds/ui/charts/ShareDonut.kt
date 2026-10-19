@@ -65,7 +65,8 @@ fun ShareDonut(
                 val inset = strokeWidth / 2
                 var startAngle = -90f
                 validSlices.forEach { slice ->
-                    val sweep = (360f * (slice.value / total)).toFloat() - gapDegrees
+                    val full = (360f * (slice.value / total)).toFloat()
+                    val sweep = (full - minOf(gapDegrees, full / 2f)).coerceAtLeast(0.5f)
                     drawArc(
                         color = slice.color,
                         startAngle = startAngle,
@@ -75,7 +76,7 @@ fun ShareDonut(
                         topLeft = androidx.compose.ui.geometry.Offset(inset, inset),
                         size = androidx.compose.ui.geometry.Size(diameter - strokeWidth, diameter - strokeWidth)
                     )
-                    startAngle += sweep + gapDegrees
+                    startAngle += full
                 }
             }
             val centerText = centerLabel ?: run {

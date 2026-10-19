@@ -360,7 +360,8 @@ private fun StatsCard(state: DataUiState) {
             listOf(
                 DonutSlice("BTC", s.btc.toDouble(), series[0]),
                 DonutSlice("ETH", s.eth.toDouble(), series[1]),
-                DonutSlice("SOL", s.sol.toDouble(), series[2])
+                DonutSlice("SOL", s.sol.toDouble(), series[2]),
+                DonutSlice("Other", s.other.toDouble(), series[3])
             ),
             Modifier.fillMaxWidth().padding(vertical = 4.dp),
             size = 84.dp
