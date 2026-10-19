@@ -8,9 +8,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -25,7 +26,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -51,16 +51,12 @@ import com.dirk.kalshiodds.domain.MarketQuoteView
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.config.SignalSettings
 import com.dirk.kalshiodds.signal.trade.BetCall
+import com.dirk.kalshiodds.signal.trade.TradeModeLabel
 import com.dirk.kalshiodds.ui.DisagreementLabel
-import com.dirk.kalshiodds.ui.HomeCardDetails
 import com.dirk.kalshiodds.ui.HomeCopy
 import com.dirk.kalshiodds.ui.SideColor
 import com.dirk.kalshiodds.ui.theme.DipTheme
 import java.util.Locale
-import kotlin.math.PI
-import kotlin.math.abs
-import kotlin.math.cos
-import kotlin.math.sin
 
 /**
  * Enhanced Market Card with improved visualizations:
@@ -436,16 +432,16 @@ fun DonutChart(
     val strokeWidthPx = with(LocalDensity.current) { strokeWidth.toPx() }
 
     Canvas(modifier = modifier) {
-        val center = Offset(size.width / 2, size.height / 2)
-        val radius = (size.minDimension - strokeWidthPx) / 2
+        val center = Offset(size.width / 2f, size.height / 2f)
+        val radius = (size.minDimension - strokeWidthPx) / 2f
 
         drawArc(
             color = colors.down,
-            startAngle = 0.0f,
+            startAngle = 0f,
             sweepAngle = noSweep,
             useCenter = false,
             topLeft = Offset(center.x - radius, center.y - radius),
-            size = androidx.compose.ui.geometry.Size(radius * 2.0f, radius * 2.0f),
+            size = androidx.compose.ui.geometry.Size(radius * 2f, radius * 2f),
             style = Stroke(width = strokeWidthPx)
         )
 
@@ -455,26 +451,26 @@ fun DonutChart(
             sweepAngle = yesSweep,
             useCenter = false,
             topLeft = Offset(center.x - radius, center.y - radius),
-            size = androidx.compose.ui.geometry.Size(radius * 2.0f, radius * 2.0f),
+            size = androidx.compose.ui.geometry.Size(radius * 2f, radius * 2f),
             style = Stroke(width = strokeWidthPx, cap = StrokeCap.Butt)
         )
 
         drawCircle(
             color = MaterialTheme.colorScheme.surface,
-            radius = radius - strokeWidthPx / 2.0f,
+            radius = radius - strokeWidthPx / 2f,
             center = center
         )
 
-        with(drawContext.canvas.nativeCanvas) {
-            val text = String.format(Locale.US, "%.0f%%", yesPercent)
-            val paint = android.graphics.Paint().apply {
-                textSize = with(LocalDensity.current) { 14.sp.toPx() }
-                textAlign = android.graphics.Paint.Align.CENTER
-                color = android.graphics.Color.WHITE
-                setTypeface(android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD))
-            }
-            drawText(text, center.x, center.y + paint.textSize / 3f, paint)
+        val text = String.format(Locale.US, "%.0f%%", yesPercent)
+        val paint = android.graphics.Paint().apply {
+            textSize = with(LocalDensity.current) { 14.sp.toPx() }
+            textAlign = android.graphics.Paint.Align.CENTER
+            color = android.graphics.Color.WHITE
+            setTypeface(android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD))
         }
+        drawContext.canvas.nativeCanvas.drawText(
+            text, center.x, center.y + paint.textSize / 3f, paint
+        )
     }
 }
 
@@ -509,7 +505,7 @@ fun EdgeComparisonBar(
         ) {
             Box(
                 modifier = Modifier
-                    .fillMaxWidth((mid / 100.0f).coerceIn(0.0f, 1.0f))
+                    .fillMaxWidth((mid / 100.0f).coerceIn(0f, 1f))
                     .fillMaxHeight()
                     .background(
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
@@ -520,7 +516,7 @@ fun EdgeComparisonBar(
             val aiPosition = (mid + edge) / 100.0f
             Box(
                 modifier = Modifier
-                    .fillMaxWidth(aiPosition.coerceIn(0.0f, 1.0f))
+                    .fillMaxWidth(aiPosition.coerceIn(0f, 1f))
                     .fillMaxHeight()
                     .background(
                         Brush.horizontalGradient(
@@ -530,10 +526,11 @@ fun EdgeComparisonBar(
                     )
             )
 
-            val arrowPosition = (mid / 100.0f).coerceIn(0.0f, 1.0f)
+            val arrowPosition = (mid / 100.0f).coerceIn(0f, 1f)
+            val density = LocalDensity.current
             Box(
                 modifier = Modifier
-                    .padding(start = (size.width * arrowPosition))
+                    .padding(start = with(density) { (size.width * arrowPosition).toDp() })
                     .size(20.dp)
                     .background(
                         color = if (edge > 0.0) colors.up else colors.down,
@@ -658,9 +655,10 @@ fun EnhancedOddsSparkline(
     }
 
     Canvas(modifier = modifier) {
+        val density = LocalDensity.current
         val width = size.width
         val height = size.height
-        val padding = with(LocalDensity.current) { 8.dp.toPx() }
+        val padding = with(density) { 8.dp.toPx() }
         val drawWidth = width - padding * 2
         val drawHeight = height - padding * 2
 
@@ -679,19 +677,17 @@ fun EnhancedOddsSparkline(
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f),
             start = Offset(padding, padding + drawHeight / 2),
             end = Offset(padding + drawWidth, padding + drawHeight / 2),
-            strokeWidth = with(LocalDensity.current) { 1.dp.toPx() }
+            strokeWidth = with(density) { 1.dp.toPx() }
         )
 
         val midYPos = padding + drawHeight * (1.0f - ((mid / 100.0 - minY) / range).coerceIn(0.0f, 1.0f))
+        val dashIntervals = with(density) { floatArrayOf(5.dp.toPx(), 3.dp.toPx()) }
         drawLine(
             color = colors.accentBlue.copy(alpha = 0.5f),
             start = Offset(padding, midYPos),
             end = Offset(padding + drawWidth, midYPos),
-            strokeWidth = with(LocalDensity.current) { 1.5f.dp.toPx() },
-            pathEffect = PathEffect.dashPathEffect(
-                floatArrayOf(with(LocalDensity.current) { 5.dp.toPx() }, with(LocalDensity.current) { 3.dp.toPx() }),
-                0f
-            )
+            strokeWidth = with(density) { 1.5f.dp.toPx() },
+            pathEffect = PathEffect.dashPathEffect(dashIntervals, 0f)
         )
 
         val path = Path().apply {
@@ -711,7 +707,7 @@ fun EnhancedOddsSparkline(
             path = path,
             color = color,
             style = Stroke(
-                width = with(LocalDensity.current) { 2.5f.dp.toPx() },
+                width = with(density) { 2.5f.dp.toPx() },
                 cap = StrokeCap.Round,
                 join = PathEffect.Join.Round
             )
@@ -743,7 +739,7 @@ fun EnhancedOddsSparkline(
         val lastY = padding + drawHeight * (1.0f - ((points.last() - minY) / range).coerceIn(0.0f, 1.0f))
         drawCircle(
             color = color,
-            radius = with(LocalDensity.current) { 4.dp.toPx() },
+            radius = with(density) { 4.dp.toPx() },
             center = Offset(lastX, lastY)
         )
     }
