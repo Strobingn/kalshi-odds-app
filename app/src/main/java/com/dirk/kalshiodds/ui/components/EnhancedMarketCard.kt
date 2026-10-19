@@ -38,6 +38,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalDensity
@@ -147,7 +148,7 @@ fun EnhancedMarketCard(
 
             // Edge vs Market Comparison
             EdgeComparisonBar(
-                edgePercent = market.edgePercent ?: 0.0,
+                edgePercent = market.edgePp ?: 0.0,
                 marketMid = market.yesProbabilityPercent,
                 modifier = Modifier.fillMaxWidth()
             )
@@ -179,7 +180,7 @@ fun EnhancedMarketCard(
                     container = colors.upContainer,
                     highlighted = call.headline == BetCall.Headline.BET_UP,
                     modifier = Modifier.weight(1f),
-                    progress = (market.aiYesPercent ?: 50.0) / 100.0f
+                    progress = ((market.aiYesPercent ?: 50.0) / 100.0).toFloat()
                 )
                 EnhancedPriceTile(
                     title = "DOWN",
@@ -191,7 +192,7 @@ fun EnhancedMarketCard(
                     container = colors.downContainer,
                     highlighted = call.headline == BetCall.Headline.BET_DOWN,
                     modifier = Modifier.weight(1f),
-                    progress = (market.aiNoPercent ?: 50.0) / 100.0f
+                    progress = ((market.aiNoPercent ?: 50.0) / 100.0).toFloat()
                 )
             }
 
@@ -239,7 +240,7 @@ fun EnhancedMarketCard(
             // Model vs Market Text
             val disagreement = DisagreementLabel.of(market)
             if (disagreement != null && call.headline != BetCall.Headline.NO_BET) {
-                DisagreementWarning(disagreement)
+                DisagreementWarningPublic(disagreement)
             } else if (disagreement == null) {
                 Text(
                     text = HomeCopy.modelVsMarket(market, call),
@@ -274,7 +275,7 @@ fun EnhancedMarketCard(
                 }
             } else {
                 if (disagreement != null && call.headline == BetCall.Headline.NO_BET) {
-                    DisagreementWarning(disagreement)
+                    DisagreementWarningPublic(disagreement)
                 } else if (disagreement == null) {
                     call.noBetReason?.let {
                         Text(
@@ -316,7 +317,7 @@ fun EnhancedMarketCard(
                         disabledContainerColor = colors.up.copy(alpha = 0.38f),
                         disabledContentColor = colors.onUp.copy(alpha = 0.70f)
                     ),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                     modifier = Modifier.weight(1f).height(48.dp)
                 ) {
                     Text(
@@ -336,7 +337,7 @@ fun EnhancedMarketCard(
                         disabledContainerColor = colors.down.copy(alpha = 0.38f),
                         disabledContentColor = colors.onDown.copy(alpha = 0.70f)
                     ),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                     modifier = Modifier.weight(1f).height(48.dp)
                 ) {
                     Text(
@@ -365,7 +366,7 @@ fun EnhancedMarketCard(
                 OutlinedButton(
                     onClick = onSell,
                     modifier = Modifier.fillMaxWidth().height(40.dp)
-                ) { Text(HomeCopy.SELL) }
+                ) { Text("SELL") }
             }
         }
     }
@@ -438,11 +439,11 @@ fun DonutChart(
 
         drawArc(
             color = colors.down,
-            startAngle = 0f,
+            startAngle = 0.0f,
             sweepAngle = noSweep,
             useCenter = false,
             topLeft = Offset(center.x - radius, center.y - radius),
-            size = androidx.compose.ui.geometry.Size(radius * 2, radius * 2),
+            size = androidx.compose.ui.geometry.Size(radius * 2.0f, radius * 2.0f),
             style = Stroke(width = strokeWidthPx)
         )
 
@@ -452,7 +453,7 @@ fun DonutChart(
             sweepAngle = yesSweep,
             useCenter = false,
             topLeft = Offset(center.x - radius, center.y - radius),
-            size = androidx.compose.ui.geometry.Size(radius * 2, radius * 2),
+            size = androidx.compose.ui.geometry.Size(radius * 2.0f, radius * 2.0f),
             style = Stroke(width = strokeWidthPx, cap = StrokeCap.Butt)
         )
 
@@ -470,7 +471,7 @@ fun DonutChart(
                 color = android.graphics.Color.WHITE
                 setTypeface(android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD))
             }
-            drawText(text, center.x, center.y + paint.textSize / 3, paint)
+            nativeCanvas.drawText(text, center.x, center.y + paint.textSize / 3, paint)
         }
     }
 }
@@ -506,7 +507,7 @@ fun EdgeComparisonBar(
         ) {
             Box(
                 modifier = Modifier
-                    .fillMaxWidth((mid / 100f).coerceIn(0f, 1f))
+                    .fillMaxWidth(((mid / 100f).coerceIn(0f, 1f)))
                     .fillMaxHeight()
                     .background(
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
@@ -517,7 +518,7 @@ fun EdgeComparisonBar(
             val aiPosition = (mid + edge) / 100f
             Box(
                 modifier = Modifier
-                    .fillMaxWidth(aiPosition.coerceIn(0f, 1f))
+                    .fillMaxWidth((aiPosition.coerceIn(0f, 1f)))
                     .fillMaxHeight()
                     .background(
                         Brush.horizontalGradient(
@@ -530,7 +531,7 @@ fun EdgeComparisonBar(
             val arrowPosition = (mid / 100f).coerceIn(0f, 1f)
             Box(
                 modifier = Modifier
-                    .padding(start = (size.width * arrowPosition).dp)
+                    .padding(start = (size.width * arrowPosition))
                     .size(20.dp)
                     .background(
                         color = if (edge > 0) colors.up else colors.down,
@@ -620,7 +621,7 @@ fun EnhancedPriceTile(
         }
 
         LinearProgressIndicator(
-            progress = { progress },
+            progress = progress,
             modifier = Modifier.fillMaxWidth().height(4.dp),
             color = accent,
             trackColor = accent.copy(alpha = 0.3f)
@@ -680,7 +681,7 @@ fun EnhancedOddsSparkline(
             strokeWidth = 1.dp.toPx()
         )
 
-        val midYPos = padding + drawHeight * (1 - ((mid / 100f - minY) / range).coerceIn(0f, 1f))
+        val midYPos = padding + drawHeight * (1.0f - ((mid / 100f - minY) / range).coerceIn(0.0f, 1.0f))
         drawLine(
             color = colors.accentBlue.copy(alpha = 0.5f),
             start = Offset(padding, midYPos),
@@ -693,7 +694,7 @@ fun EnhancedOddsSparkline(
             val stepX = drawWidth / (points.size - 1)
             points.forEachIndexed { i, y ->
                 val x = padding + i * stepX
-                val yPos = padding + drawHeight * (1 - ((y - minY) / range).coerceIn(0f, 1f))
+                val yPos = padding + drawHeight * (1.0f - ((y - minY) / range).coerceIn(0.0f, 1.0f))
                 if (i == 0) {
                     moveTo(x, yPos)
                 } else {
@@ -716,7 +717,7 @@ fun EnhancedOddsSparkline(
             val stepX = drawWidth / (points.size - 1)
             points.forEachIndexed { i, y ->
                 val x = padding + i * stepX
-                val yPos = padding + drawHeight * (1 - ((y - minY) / range).coerceIn(0f, 1f))
+                val yPos = padding + drawHeight * (1.0f - ((y - minY) / range).coerceIn(0.0f, 1.0f))
                 if (i == 0) {
                     moveTo(x, padding + drawHeight)
                     lineTo(x, yPos)
@@ -735,11 +736,39 @@ fun EnhancedOddsSparkline(
         )
 
         val lastX = padding + drawWidth
-        val lastY = padding + drawHeight * (1 - ((points.last() - minY) / range).coerceIn(0f, 1f))
+        val lastY = padding + drawHeight * (1.0f - ((points.last() - minY) / range).coerceIn(0.0f, 1.0f))
         drawCircle(
             color = color,
             radius = 4.dp.toPx(),
             center = Offset(lastX, lastY)
+        )
+    }
+}
+
+@Composable
+fun DisagreementWarningPublic(copy: com.dirk.kalshiodds.ui.DisagreementLabel.Copy) {
+    val colors = com.dirk.kalshiodds.ui.theme.DipTheme.colors
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                Icons.Filled.Warning,
+                contentDescription = copy.title,
+                tint = colors.accentOrange
+            )
+            Text(
+                copy.title,
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.accentOrange,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+        Text(
+            copy.detail,
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.accentOrange
         )
     }
 }

@@ -38,6 +38,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -80,7 +81,7 @@ fun EnhancedHomeScreen(
     nowMs: Long = System.currentTimeMillis(),
     versionLabel: String = AppVersion.label
 ) {
-    val colors = DipTheme.colors
+    val colors = com.dirk.kalshiodds.ui.theme.DipTheme.colors
     val mode = TradeModeLabel.forApprove(state.settings)
     val hasKey = state.settings.tradingCredentialsConfigured()
     val ctx = TicketBuilder.Context(settings = state.settings, alertsPaused = state.alertsPaused, nowMs = nowMs)
@@ -138,7 +139,7 @@ fun EnhancedHomeScreen(
             state.scorecardSummary?.let { summary ->
                 PnlHeader(
                     pnl = summary.paperPnlUsd.toFloat(),
-                    winRate = summary.winRate,
+                    winRate = summary.winRate?.toDouble(),
                     settledCount = summary.settledCount,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -281,9 +282,9 @@ fun PnlHeader(
     val isPositive = pnl >= 0
 
     val gradientColors = if (isPositive) {
-        listOf(Color(0xFF00C853), Color(0xFF4CAF50))
+        listOf(androidx.compose.ui.graphics.Color(0xFF00C853), androidx.compose.ui.graphics.Color(0xFF4CAF50))
     } else {
-        listOf(Color(0xFFFF5722), Color(0xFFE91E63))
+        listOf(androidx.compose.ui.graphics.Color(0xFFFF5722), androidx.compose.ui.graphics.Color(0xFFE91E63))
     }
 
     Box(
