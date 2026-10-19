@@ -289,7 +289,8 @@ class ScoringEngine(
                 openInterest = oi ?: 0.0
             )
         }.getOrNull()
-        val mlpPp = ai?.yes?.times(100.0)
+        // 1.0.11: shrink the raw model toward the market (symmetric logit blend) so a ~50% output doesn't read as UP edge.
+        val mlpPp = ai?.yes?.let { com.dirk.kalshiodds.prediction.AiBias.shrinkToMarket(it, mid01) }?.times(100.0)
         val tteFrac = ((tteSec ?: 900L).toDouble() / 900.0).coerceIn(0.0, 1.0)
         val spotRet = spotFeat?.let { it.spotReturn1m ?: it.spotReturn5m }
         heavy.pushFrame(
@@ -365,7 +366,7 @@ class ScoringEngine(
             heavy.lightOutput(ai?.yes, "0.2.x blend (heavy ML failed)")
         }
         val aiPp = if (settings.heavyMlEnabled && heavyOut.usedHeavy) {
-            heavyOut.ensembleYes * 100.0
+            com.dirk.kalshiodds.prediction.AiBias.shrinkToMarket(heavyOut.ensembleYes, mid01) * 100.0
         } else {
             mlpPp
         }
@@ -663,10 +664,10 @@ class ScoringEngine(
                     coinbaseCloses = if (spotFeat?.modelUsable == true) spotFeat.minuteCloses else emptyList()
                 )
             )
-            val pYes = loaded.predictYes(feats)
+            val pYes = com.dirk.kalshiodds.prediction.AiBias.shrinkToMarket(loaded.predictYes(feats), mid01)
             importedModelPp = pYes * 100.0
             importedBlendW = loaded.blendWeight.toDouble()
-            modelEdgeQualified = loaded.qualifiesEdge(pYes, mid01, settings.feeRate)
+            modelEdgeQualified = loaded.qualifiesEdge(pYes, mid01, settings.feeRate, askYes = tick.yesAsk, askNo = tick.noAsk ?: tick.yesBid?.let { 1.0 - it })
             val blended = loaded.blendWithMarket(pYes, mid01)
             fair = (0.55 * (fair / 100.0) + 0.45 * blended).times(100.0).coerceIn(2.0, 98.0)
             delta = fair - midPp
