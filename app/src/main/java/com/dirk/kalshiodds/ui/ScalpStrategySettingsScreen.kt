@@ -78,6 +78,7 @@ internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: Sc
             val benched by com.dirk.kalshiodds.decision.insights.BenchRegistry.benched.collectAsState()
             val benchedNow = model.code in benched
             Text(benchStatusLine(ov, benchedNow), color = if (benchedNow || ov == "BENCHED") c.spot else c.textPrimary, fontWeight = FontWeight.SemiBold, modifier = Modifier.testTag("BENCH_STATUS"))
+            if (benchedNow && ov != "ACTIVE") Text("FROZEN · new paper trades stopped · history stays · Force trade unfreezes", color = c.down, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(null to "Auto", "ACTIVE" to "Force trade", "BENCHED" to "Force bench").forEach { (v, label) ->
                     FilterChip(selected = ov == v, onClick = { onBenchOverride(v) }, label = { Text(label) },
