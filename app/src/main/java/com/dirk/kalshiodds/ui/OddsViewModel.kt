@@ -1721,6 +1721,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     private fun runScalp(live: List<MarketUiModel>, s: com.dirk.kalshiodds.signal.config.SignalSettings) {
         val now = container.clock.nowMs()
         val openScalps = container.scalp.openTickers()
+        val cardSnaps = ArrayList<com.dirk.kalshiodds.llm.AiLiveSnapshot>()
         live.forEach { market ->
             val series = com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(market.ticker)
             if (series !in com.dirk.kalshiodds.domain.CryptoMarkets.FIFTEEN_SERIES) return@forEach
@@ -1769,7 +1770,10 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             }
             // 0.3.57 sf57: twenty shock / late-favourite paper scalpers on the same conflated quote (paper lane).
             runCatching { container.scalp.onShockFavQuote(qq, enabled = s.paperTradingEnabled) }
-            if (coin == "BTC") runCatching { container.aiWatcher.noteKalshi(liveSnap(market, qq, now)) }
+            if (coin == "BTC") cardSnaps += liveSnap(market, qq, now)
+        }
+        com.dirk.kalshiodds.llm.AiLiveFeed.atm(cardSnaps)?.let { atm ->
+            runCatching { container.aiWatcher.noteKalshi(atm) }
         }
         // 0.3.67: batch SQLite+stats writes off the quote path (same paperLane worker, not Main).
         runCatching { container.scalp.flushWrites() }

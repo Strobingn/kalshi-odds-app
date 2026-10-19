@@ -119,7 +119,11 @@ class AiRelease1014Test {
     @Test fun promptSaysTheFeedIsLiveAndTheSnapshotIsFreshAtSend() {
         val system = ChatPrompt.system("settings", "ctx")
         assertTrue(system.contains(ChatPrompt.LIVE_FEED))
-        assertTrue(system.contains("Never say you can only see the window when the user sends a message"))
+        assertTrue(system.contains("Never tell the user to ping or message again"))
+        assertTrue(system.contains("Never say you cannot watch continuously"))
+        assertFalse(system.contains("as of this message"))
+        assertFalse(system.contains("next message"))
+        assertFalse(system.contains("snapshot", ignoreCase = true))
         assertTrue(system.contains("can never touch real money"))
         assertTrue(system.startsWith(ChatPrompt.MARKER))
         var now = 5_000L
@@ -138,10 +142,8 @@ class AiRelease1014Test {
         chat.send("what is the window", "")
         scope.advanceUntilIdle()
         assertEquals(1, reads)
-        assertTrue(sent.contains("snapshotAsOfMs=8000"))
+        assertFalse(sent.contains("snapshotAsOfMs"))
         assertTrue(sent.contains("builtAt=8000"))
-        val asOf = Regex("snapshotAsOfMs=(\\d+)").find(sent)!!.groupValues[1].toLong()
-        assertTrue(kotlin.math.abs(asOf - now) < 5_000L)
     }
 
     @Test fun usageChartsAggregateRealCallsOnly() {

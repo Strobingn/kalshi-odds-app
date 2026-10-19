@@ -42,7 +42,7 @@ class LlmPaperStrategy(
         val q = book.marks.value.values.filter { it.ticker.uppercase().contains("BTC") && it.closeMs > it.nowMs }.minByOrNull { it.closeMs } ?: run { _status.value = "idle: no BTC quote"; return }
         val minuteIn = 15.0 - q.tauS / 60.0
         if (q.ticker == lastWindow) return
-        if (minuteIn > LLM_OPEN_MIN) { _status.value = "idle until next window start"; return }
+        if (minuteIn > LLM_OPEN_MIN) { _status.value = PAST_OPEN_STATUS; return }
         lastWindow = q.ticker // rate limit: one decision per window, even on failure
         val prompt = String.format(Locale.US, STRATEGY_PROMPT,
             q.ticker, q.strike ?: 0.0, q.spot ?: 0.0, q.tauS / 60, q.yesBid?.let { "%.2f".format(Locale.US, it) } ?: "-", q.yesAsk?.let { "%.2f".format(Locale.US, it) } ?: "-",
@@ -60,6 +60,8 @@ class LlmPaperStrategy(
 
     companion object {
         const val LLM_OPEN_MIN = 3.0
+        /** Mid-window the paper strategy waits; the live feed on the card is still running. */
+        const val PAST_OPEN_STATUS = "watching this window; next paper decision when the next window opens. Live feed still running."
         const val STRATEGY_PROMPT = "Kalshi BTC 15-minute market %s. Strike %.2f, BTC spot %.2f, minutes left %.1f. YES bid/ask %s/%s. Model fair YES %s. " +
             "Paper trade only. Rules: buy at most 55c, 3c trailing stop. Reply ONE line: 'YES <conf 0-1>' or 'NO <conf 0-1>' or 'SKIP'."
         fun parse(reply: String): Pair<String, Double>? {

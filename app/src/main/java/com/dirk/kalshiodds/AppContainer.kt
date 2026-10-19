@@ -132,9 +132,13 @@ class AppContainer(context: Context) {
             val dm = runCatching { scalp.dm60Snapshot(q.ticker.uppercase(), now) }.getOrDefault(0.0)
             com.dirk.kalshiodds.llm.ChatPrompt.modelUp(q, dm)
         }
-        return com.dirk.kalshiodds.llm.ChatPrompt.liveWindow(
+        val window = com.dirk.kalshiodds.llm.ChatPrompt.liveWindow(
             com.dirk.kalshiodds.llm.ChatPrompt.LiveWindow(now, quotes, scalp.snapshot(), atOpen, up)
         )
+        val card = aiWatch.live.value
+        val posts = runCatching { aiChat.messages.value.map { it.text } }.getOrDefault(emptyList())
+        val history = com.dirk.kalshiodds.llm.ChatPrompt.tickHistory(card, aiWatch.adjustments.value, posts)
+        return listOf(window, history).filter { it.isNotBlank() }.joinToString("\n")
     }
 
     private fun recordLlm(source: String, provider: String, model: String, prompt: Long, completion: Long) {
