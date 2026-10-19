@@ -135,11 +135,11 @@ fun EnhancedHomeScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            if (state.scorecardSummary != null) {
+            state.scorecardSummary?.let { summary ->
                 PnlHeader(
-                    pnl = state.scorecardSummary.paperPnlUsd.toFloat(),
-                    winRate = state.scorecardSummary.winRate,
-                    settledCount = state.scorecardSummary.settledCount,
+                    pnl = summary.paperPnlUsd.toFloat(),
+                    winRate = summary.winRate,
+                    settledCount = summary.settledCount,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 8.dp)
@@ -277,7 +277,7 @@ fun PnlHeader(
     settledCount: Int?,
     modifier: Modifier = Modifier
 ) {
-    val colors = DipTheme.colors
+    val colors = com.dirk.kalshiodds.ui.theme.DipTheme.colors
     val isPositive = pnl >= 0
 
     val gradientColors = if (isPositive) {
