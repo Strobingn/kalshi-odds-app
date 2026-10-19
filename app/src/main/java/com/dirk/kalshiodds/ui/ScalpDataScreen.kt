@@ -284,6 +284,11 @@ fun ScalpDataContent(
         }
         item {
             DecisionCard {
+                ScalpTradeInsightCharts(trades, "Closed and open scalps loaded on this screen.")
+            }
+        }
+        item {
+            DecisionCard {
                 Text("By strategy, coin and hour (ET)", fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
                 v.breakdown.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textPrimary) }
             }

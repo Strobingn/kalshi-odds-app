@@ -10,19 +10,21 @@ data class ScalpWindowChartData(
 ) {
     val startMs get() = closeMs - 900_000L
     enum class Kind { SIGNAL, ORDER, BUY, SELL, SETTLEMENT, LEGACY_EXIT }
-    data class Marker(val id: String, val tradeId: String, val atMs: Long, val price: Double, val qty: Int, val kind: Kind, val recordedAtMs: Long = atMs)
+    data class Marker(val id: String, val tradeId: String, val atMs: Long, val price: Double, val qty: Int, val kind: Kind, val recordedAtMs: Long = atMs, val side: String = "")
     fun markers(side: String): List<Marker> = buildList {
         for (t in trades.filter { it.ticker.equals(ticker, true) && it.side == side }) {
             val orders = ScalpFills.orders(t)
-            orders.forEachIndexed { i, o -> add(Marker("${t.id}-order-$i", t.id, o.atMs, o.price, 0, Kind.ORDER)) }
-            if (t.signalAtMs in startMs..closeMs && orders.none { it.atMs == t.signalAtMs && kotlin.math.abs(it.price - t.signalAsk) < 1e-9 }) add(Marker("${t.id}-signal", t.id, t.signalAtMs, t.signalAsk, 0, Kind.SIGNAL))
-            if (t.entryPrice != null && t.entryAtMs != null) add(Marker("${t.id}-buy", t.id, t.entryAtMs, t.entryPrice, t.contracts, Kind.BUY))
+            orders.forEachIndexed { i, o -> add(Marker("${t.id}-order-$i", t.id, o.atMs, o.price, 0, Kind.ORDER, side = side)) }
+            if (t.signalAtMs in startMs..closeMs && orders.none { it.atMs == t.signalAtMs && kotlin.math.abs(it.price - t.signalAsk) < 1e-9 }) add(Marker("${t.id}-signal", t.id, t.signalAtMs, t.signalAsk, 0, Kind.SIGNAL, side = side))
+            if (t.entryPrice != null && t.entryAtMs != null) add(Marker("${t.id}-buy", t.id, t.entryAtMs, t.entryPrice, t.contracts, Kind.BUY, side = side))
             val sales = ScalpFills.sales(t)
-            sales.forEachIndexed { i, f -> add(Marker("${t.id}-sell-$i", t.id, if (f.settlement) minOf(f.atMs, closeMs) else f.atMs, f.price, f.contracts, if (f.settlement) Kind.SETTLEMENT else Kind.SELL, f.atMs)) }
+            sales.forEachIndexed { i, f -> add(Marker("${t.id}-sell-$i", t.id, if (f.settlement) minOf(f.atMs, closeMs) else f.atMs, f.price, f.contracts, if (f.settlement) Kind.SETTLEMENT else Kind.SELL, f.atMs, side)) }
             // Older trades have only an aggregate exit, never invent individual partial fills.
-            if (sales.isEmpty() && t.soldContracts > 0 && t.closedAtMs != null) add(Marker("${t.id}-avg", t.id, t.closedAtMs, t.proceedsUsd / t.soldContracts, t.soldContracts, Kind.LEGACY_EXIT))
+            if (sales.isEmpty() && t.soldContracts > 0 && t.closedAtMs != null) add(Marker("${t.id}-avg", t.id, t.closedAtMs, t.proceedsUsd / t.soldContracts, t.soldContracts, Kind.LEGACY_EXIT, side = side))
         }
     }.filter { it.atMs in startMs..closeMs && it.price.isFinite() && it.price in 0.0..1.0 }.sortedBy { it.atMs }
+    /** UP and DOWN markers together. Same rows [markers] returns, one side at a time. */
+    fun allMarkers(): List<Marker> = (markers("YES") + markers("NO")).sortedWith(compareBy({ it.atMs }, { it.id }))
     fun bid(side: String): Double? = points.lastOrNull { (if (side == "YES") it.upBidCents else it.downBidCents) != null }
         ?.let { (if (side == "YES") it.upBidCents else it.downBidCents)?.toDouble()?.div(100) }
     fun windowNet() = trades.sumOf { it.netUsd ?: 0.0 }

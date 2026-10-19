@@ -19,12 +19,23 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.chart.BidPoint
 import com.dirk.kalshiodds.domain.MarketUiModel
+import com.dirk.kalshiodds.ui.charts.ChartBlock
+import com.dirk.kalshiodds.ui.charts.ChartShapes
+import com.dirk.kalshiodds.ui.charts.LineSeries
+import com.dirk.kalshiodds.ui.charts.MultiLineChart
+import java.util.Locale
+import kotlin.math.roundToInt
 import com.dirk.kalshiodds.ui.components.AiFairLabel
 import com.dirk.kalshiodds.ui.components.BidChart
 import com.dirk.kalshiodds.ui.components.MarketAskHero
@@ -109,6 +120,64 @@ fun ChartDetailScreen(
                 color = colors.textSecondary,
                 modifier = Modifier.padding(top = 12.dp)
             )
+            ChartBlock(
+                "Bitcoin · this 15-minute window",
+                "Recorded spot with the strike. No prints yet stays empty."
+            ) {
+                MultiLineChart(
+                    series = listOf(LineSeries("BTC", colors.spot, ChartShapes.spotSamples(points), strokeDp = 3f)),
+                    yFormat = { String.format(Locale.US, "$%,.0f", it) },
+                    fixedRange = null,
+                    guideY = market.floorStrike?.takeIf { it.isFinite() && it > 0.0 },
+                    guideLabel = "Strike",
+                    height = 240.dp,
+                    contentLabel = "Bitcoin price"
+                )
+            }
+            ChartBlock("UP and DOWN together", "Both bids on one scale, with the 50¢ line. Drag to read either side.") {
+                MultiLineChart(
+                    series = listOf(
+                        LineSeries("UP", colors.upButton, ChartShapes.bidSamples(points, true), maxGapMs = 15_000),
+                        LineSeries("DOWN", colors.downButton, ChartShapes.bidSamples(points, false), maxGapMs = 15_000)
+                    ),
+                    yFormat = { "${it.roundToInt()}¢" },
+                    fixedRange = 0.0 to 100.0,
+                    guideY = 50.0,
+                    guideLabel = "50¢",
+                    height = 240.dp,
+                    contentLabel = "UP and DOWN bids"
+                )
+            }
+            var aiSamples by remember(market.ticker) { mutableStateOf(emptyList<ChartShapes.Sample>()) }
+            val aiNow = market.aiYesPercent?.takeIf { it.isFinite() && it in 0.0..100.0 }
+                ?: market.importedModelPp?.takeIf { it.isFinite() && it in 0.0..100.0 }
+            val stamp = points.lastOrNull()?.tMs
+            LaunchedEffect(market.ticker, aiNow, stamp) {
+                if (aiNow != null) {
+                    val t = stamp ?: System.currentTimeMillis()
+                    val last = aiSamples.lastOrNull()
+                    if (last == null || last.tMs != t || last.value != aiNow) {
+                        aiSamples = (aiSamples + ChartShapes.Sample(t, aiNow)).takeLast(360)
+                    }
+                }
+            }
+            ChartBlock(
+                    "AI UP chance vs market UP",
+                    "Market is the recorded UP bid. AI is marked as this screen sees it — older AI samples are not stored."
+                ) {
+                    MultiLineChart(
+                        series = listOf(
+                            LineSeries("Market UP", colors.upButton, ChartShapes.bidSamples(points, true), maxGapMs = 15_000),
+                            LineSeries("AI UP", colors.textPrimary, aiSamples, dashed = true)
+                        ),
+                        yFormat = { "${it.roundToInt()}" },
+                        fixedRange = 0.0 to 100.0,
+                        guideY = 50.0,
+                        guideLabel = "50",
+                        height = 240.dp,
+                        contentLabel = "AI UP chance versus market"
+                    )
+                }
             OrderBookCard(book)
             UpDownBuyButtons(
                 market = market,
