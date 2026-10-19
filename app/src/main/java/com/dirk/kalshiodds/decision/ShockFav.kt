@@ -142,10 +142,17 @@ object ShockFav {
     const val SIMPLE_WINDOW_MS = 300_000L
     const val SIMPLE_MIN_HISTORY_MS = 240_000L
     /** Pure Simple-dip entry rule. */
-    fun simpleDipSide(p: Params, askYes: Double?, avgYes: Double, askNo: Double?, avgNo: Double): String? = when {
-        askYes != null && askYes in 0.05..0.95 && askYes <= avgYes - p.dip + 1e-9 -> "YES"
-        askNo != null && askNo in 0.05..0.95 && askNo <= avgNo - p.dip + 1e-9 -> "NO"
-        else -> null
+    fun simpleDipSide(p: Params, askYes: Double?, avgYes: Double, askNo: Double?, avgNo: Double): String? {
+        // 1.0.11: when both sides dip, take the larger dip relative to its 5-min average (no UP-first default).
+        fun rel(ask: Double?, avg: Double): Double? =
+            if (ask != null && ask in 0.05..0.95 && avg > 0 && ask <= avg - p.dip + 1e-9) (avg - ask) / avg else null
+        val y = rel(askYes, avgYes); val n = rel(askNo, avgNo)
+        return when {
+            y != null && n != null -> if (y > n + 1e-12) "YES" else if (n > y + 1e-12) "NO" else null
+            y != null -> "YES"
+            n != null -> "NO"
+            else -> null
+        }
     }
     fun v(code: String): Params = VARIANTS.first { it.code == code }
     val VARIANTS: List<Params> = listOf(
