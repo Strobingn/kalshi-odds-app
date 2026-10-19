@@ -29,7 +29,8 @@ fun WinRateGauge(
     settled: Int,
     modifier: Modifier = Modifier,
     size: Dp = 120.dp,
-    breakEven: Double? = null
+    breakEven: Double? = null,
+    unit: String = "settled"
 ) {
     val c = DipTheme.colors
 
@@ -56,7 +57,7 @@ fun WinRateGauge(
             Canvas(
                 modifier = Modifier.fillMaxSize()
                     .semantics {
-                        contentDescription = "Win rate ${chartPct(rate)} over $settled settled"
+                        contentDescription = "Win rate ${chartPct(rate)} over $settled $unit"
                     }
             ) {
                 val stroke = strokeWidth.toPx()
@@ -112,7 +113,7 @@ fun WinRateGauge(
                     color = c.textPrimary
                 )
                 Text(
-                    text = "$settled settled",
+                    text = "$settled $unit",
                     style = MaterialTheme.typography.labelSmall,
                     color = c.textSecondary
                 )

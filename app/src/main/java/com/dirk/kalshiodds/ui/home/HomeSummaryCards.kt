@@ -170,7 +170,7 @@ fun HomeDailySummaryCard(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        WinRateGauge(summary.winRate, summary.trades, size = 88.dp)
+                        WinRateGauge(summary.winRate, summary.trades, size = 88.dp, unit = "trades")
                         RankedNetBars(
                             listOfNotNull(
                                 summary.best?.let { NetBar("Best · ${it.label}", it.netUsd) },
