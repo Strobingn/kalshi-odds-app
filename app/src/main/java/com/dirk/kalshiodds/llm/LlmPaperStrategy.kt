@@ -33,6 +33,7 @@ class LlmPaperStrategy(
     fun start(scope: CoroutineScope) = scope.launch {
         while (isActive) {
             runCatching { tick() }.onFailure { _status.value = "error (${settings.model}, no fallback model): ${it.message?.take(120)}" }
+            // Built-in paper strategy. Not the chat LLM's 60s cap; still one decision per window.
             delay(15_000)
         }
     }

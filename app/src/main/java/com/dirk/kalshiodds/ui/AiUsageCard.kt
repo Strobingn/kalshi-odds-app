@@ -132,7 +132,7 @@ fun AiUsageSettingsCard(store: AiWatchStore, settings: LlmSettings) {
     FieldCard {
         Text("AI usage", color = colors.onSurface, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Text(
-            "Chat and the window watcher share this provider. The paper LLM strategy stays on the xAI key. Nothing here places orders or changes real money.",
+            "Chat and the window watcher share this provider (xAI, OpenAI, Mistral, OpenRouter, or Custom). Automatic chat calls, live posts, and odds or BTC re-checks wait at least 60 seconds in total, whichever provider is selected. A message you send is answered right away. The on-device paper scalpers, forecast, auto-freeze, and tuner keep their own pace. Nothing here places orders or changes real money.",
             color = colors.onSurfaceVariant,
             style = MaterialTheme.typography.bodySmall
         )
@@ -162,7 +162,7 @@ fun AiUsageSettingsCard(store: AiWatchStore, settings: LlmSettings) {
         }
         OutlinedTextField(
             interval, { interval = it },
-            label = { Text("Follow interval (seconds)") },
+            label = { Text("Follow interval (seconds, minimum 60)") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             modifier = Modifier.fillMaxWidth()

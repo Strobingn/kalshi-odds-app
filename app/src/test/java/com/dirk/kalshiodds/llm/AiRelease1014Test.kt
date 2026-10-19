@@ -22,21 +22,25 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 
-/** 1.0.14 tuner, 25s live loop, Kalshi-tick feed, and usage charts. Old behavior stays. */
+/** 1.0.14 tuner, 60s chat-LLM cap, Kalshi-tick feed, and usage charts. Old behavior stays. */
 @OptIn(ExperimentalCoroutinesApi::class)
 class AiRelease1014Test {
     @get:Rule val tmp = TemporaryFolder()
     private val et = ZoneId.of("America/New_York")
     private fun at(day: LocalDate, hour: Int) = day.atTime(LocalTime.of(hour, 0)).atZone(et).toInstant().toEpochMilli()
 
-    @Test fun spacingIsTwentyFiveSeconds() {
-        assertEquals(25_000L, AiLiveFeed.MIN_SPACING_MS)
-        assertFalse(AiLiveFeed.llmDue(0L, 24_999L, LiveTrigger.LIVE_TICK, true))
-        assertFalse(AiLiveFeed.llmDue(0L, 24_999L, LiveTrigger.WINDOW, true))
-        assertTrue(AiLiveFeed.llmDue(0L, 25_000L, LiveTrigger.BIG_MOVE, false))
-        assertTrue(AiLiveFeed.llmDue(0L, 25_000L, LiveTrigger.NONE, true))
-        assertFalse(AiLiveFeed.llmDue(0L, 25_000L, LiveTrigger.NONE, false))
+    @Test fun spacingIsSixtySecondsForEveryChatProvider() {
+        assertEquals(60_000L, AiLiveFeed.MIN_SPACING_MS)
+        assertEquals(60_000L, AiWatchConfig.MIN_INTERVAL_MS)
+        assertFalse(AiLiveFeed.llmDue(0L, 59_999L, LiveTrigger.LIVE_TICK, true))
+        assertFalse(AiLiveFeed.llmDue(0L, 59_999L, LiveTrigger.WINDOW, true))
+        assertTrue(AiLiveFeed.llmDue(0L, 60_000L, LiveTrigger.BIG_MOVE, false))
+        assertTrue(AiLiveFeed.llmDue(0L, 60_000L, LiveTrigger.NONE, true))
+        assertFalse(AiLiveFeed.llmDue(0L, 60_000L, LiveTrigger.NONE, false))
         assertTrue(AiLiveFeed.llmDue(Long.MIN_VALUE, 0L, LiveTrigger.NONE, true))
+        val store = AiWatchStore()
+        store.setIntervalMs(10_000L)
+        assertEquals(60_000L, store.config.value.intervalMs)
     }
 
     @Test fun liveStateUpdatesOnEachKalshiTick() {

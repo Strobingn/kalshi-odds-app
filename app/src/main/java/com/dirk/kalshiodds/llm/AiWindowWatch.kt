@@ -338,8 +338,9 @@ class AiWindowWatcher(
         if (!runCatching { scalpersRunning() }.getOrDefault(false)) return
         val cfg = store.config.value
         if (!cfg.followsWindow) { store.setNotice(""); return }
-        runCatching { maybeLive() }
+        // On-device freeze/bench runs every poll, before any chat-LLM wait.
         runCatching { autoBench() }
+        runCatching { maybeLive() }
         val cap = cfg.budgetOrNull()
         if (cap != null && store.budgetPaused(now())) {
             store.setNotice(LlmUsageText.budgetNotice(store.todaySpend(now()), cap))
@@ -356,7 +357,12 @@ class AiWindowWatcher(
         }
         if (snap.windowKey.isBlank()) { store.setNotice(""); return }
         val windowChanged = snap.windowKey != lastCalledWindow
-        val due = lastCallAt == Long.MIN_VALUE || windowChanged || now() - lastCallAt >= cfg.intervalMs
+        val elapsed = if (lastCallAt == Long.MIN_VALUE) Long.MAX_VALUE else now() - lastCallAt
+        val spacingOk = elapsed >= AiLiveFeed.MIN_SPACING_MS
+        val intervalDue = elapsed >= cfg.intervalMs
+        // 60s is a hard cap for every chat provider. A window roll or a shorter saved interval cannot cut it.
+        // A longer saved interval still waits. This does not gate autoBench above.
+        val due = lastCallAt == Long.MIN_VALUE || (spacingOk && (intervalDue || windowChanged))
         if (!due) { store.setNotice(""); return }
         if (!windowChanged && snap.fingerprint == lastFingerprint && lastCallAt != Long.MIN_VALUE) {
             lastCallAt = now()
@@ -385,7 +391,7 @@ class AiWindowWatcher(
         else store.setNotice("")
     }
 
-    /** Every Kalshi odds/book tick and BTC price tick. Updates the card immediately. Wakes the decision loop only when 25s spacing allows. */
+    /** Every Kalshi odds/book tick and BTC price tick. Updates the card immediately. Wakes the chat LLM only when 60s spacing allows. */
     fun noteKalshi(incoming: AiLiveSnapshot) {
         val prev = liveSnap
         val next = AiLiveFeed.reduce(prev, incoming)
@@ -410,9 +416,10 @@ class AiWindowWatcher(
         val snap = runCatching { snapshot() }.getOrNull() ?: return
         if (snap.windowKey.isBlank()) return
         pending = LiveTrigger.NONE
-        val reply = runCatching { ask(ep, AiWatchPrompt.messages(snap.context)) }.getOrNull() ?: return
+        // Reserve the slot before the HTTP call so a failure cannot immediately call a second provider.
         lastCallAt = now()
         lastCalledWindow = snap.windowKey
+        val reply = runCatching { ask(ep, AiWatchPrompt.messages(snap.context)) }.getOrNull() ?: return
         lastFingerprint = snap.fingerprint
         val src = AiLiveFeed.source(trigger)
         store.record(src, ep.provider, reply.model.ifBlank { ep.model }, reply.promptTokens, reply.completionTokens, now())
@@ -491,6 +498,7 @@ class AiWindowWatcher(
     }
 
     companion object {
+        /** On-device bench/freeze cadence. The chat LLM cap is [AiLiveFeed.MIN_SPACING_MS], not this poll. */
         const val POLL_MS = 5_000L
     }
 }

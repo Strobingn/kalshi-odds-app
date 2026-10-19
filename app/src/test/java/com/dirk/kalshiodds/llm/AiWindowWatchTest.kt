@@ -1,6 +1,7 @@
 package com.dirk.kalshiodds.llm
 
 import com.dirk.kalshiodds.decision.MemoryScalpControls
+import com.dirk.kalshiodds.decision.PaperTape
 import com.dirk.kalshiodds.decision.Research
 import com.dirk.kalshiodds.decision.ScalpControls
 import com.dirk.kalshiodds.decision.ScalpModels
@@ -145,6 +146,9 @@ class AiWindowWatchTest {
         nowMs += 5_000
         snap = snap.copy(windowKey = "W2", fingerprint = "fp-next")
         w.tick()
+        assertEquals(2, calls) // a window roll inside 60s does not call the chat LLM
+        nowMs += 60_000
+        w.tick()
         assertEquals(3, calls)
     }
 
@@ -176,11 +180,101 @@ class AiWindowWatchTest {
         nowMs += 1_000
         snap = snap.copy(windowKey = "W2", fingerprint = "fp-2")
         w.tick()
+        assertEquals(listOf(LlmProviders.XAI), seen.map { it.provider })
+        nowMs += 60_000
+        w.tick()
         assertEquals(listOf(LlmProviders.XAI, LlmProviders.OPENAI), seen.map { it.provider })
         assertEquals("https://api.x.ai/v1", seen[0].baseUrl)
         assertEquals("grok-4.7", seen[0].model)
         assertEquals("https://api.openai.com/v1", seen[1].baseUrl)
         assertEquals("gpt-4.1", seen[1].model)
+    }
+
+    @Test fun everyChatProviderSharesOneSixtySecondCap() {
+        val seen = mutableListOf<String>()
+        val w = watcher(MemoryScalpControls()) { ep, _ -> seen += ep.provider; reply("""{"adjustments":[]}""") }
+        w.tick()
+        for (id in listOf(LlmProviders.OPENAI, LlmProviders.MISTRAL, LlmProviders.OPENROUTER, LlmProviders.CUSTOM)) {
+            provider = id
+            nowMs += 5_000
+            snap = snap.copy(windowKey = "W-$id", fingerprint = "fp-$id")
+            w.tick()
+        }
+        assertEquals(listOf(LlmProviders.XAI), seen)
+        provider = LlmProviders.OPENAI
+        nowMs += 60_000
+        snap = snap.copy(windowKey = "W-open", fingerprint = "fp-open")
+        w.tick()
+        assertEquals(listOf(LlmProviders.XAI, LlmProviders.OPENAI), seen)
+    }
+
+    @Test fun onDeviceFreezeRunsWhileTheChatLlmWaits() {
+        val codes = ScalpModels.ALL.filter { ScalpModels.isV2(it) && it != ScalpModels.Model.V2_LLM }.take(2).map { it.code }
+        val first = codes[0]
+        val second = codes[1]
+        val controls = MemoryScalpControls()
+        var paperCode = first
+        var calls = 0
+        val losing = List(30) { -1.0 }
+        val w = AiWindowWatcher(
+            controls = controls,
+            store = AiWatchStore(),
+            snapshot = { snap },
+            ask = { _, _ -> calls++; reply("""{"adjustments":[]}""") },
+            endpoint = { LlmProviders.resolve(provider, "k", "", "") },
+            now = { nowMs },
+            paper = { listOf(PaperTape(paperCode, 30, 0, -30.0, 0.0, losing, emptyList())) }
+        )
+        w.tick()
+        assertEquals(1, calls)
+        assertTrue(first in controls.state.value.aiBench)
+        nowMs += 10_000
+        paperCode = second
+        snap = snap.copy(fingerprint = "inside-cap")
+        w.tick()
+        assertEquals(1, calls)
+        assertTrue(second in controls.state.value.aiBench)
+    }
+
+    @Test fun liveCardUpdatesOnEveryTickWithoutAnotherChatCall() {
+        val store = AiWatchStore()
+        var calls = 0
+        val w = watcher(MemoryScalpControls(), store) { _, _ -> calls++; reply("""{"adjustments":[]}""") }
+        w.onWake = { w.tick() }
+        fun point(i: Int) = AiLiveSnapshot(
+            atMs = nowMs, windowKey = "W", ticker = "KXBTC15M-W", closeMs = nowMs + 600_000L,
+            strike = 80_000.0, btc = 80_010.0 + i, yesBid = 0.40 + i * 0.12, yesAsk = 0.42 + i * 0.12,
+            noBid = 0.50, noAsk = 0.52, modelUp = 0.55
+        )
+        w.noteKalshi(point(0))
+        assertEquals(1, calls)
+        repeat(6) { i ->
+            nowMs += 3_000
+            w.noteKalshi(point(i + 1))
+        }
+        assertEquals(1, calls)
+        assertEquals(7, store.live.value!!.points.size)
+        assertEquals(nowMs, store.live.value!!.atMs)
+    }
+
+    @Test fun aHandTypedMessageIsNotHeldForTheCap() {
+        var calls = 0
+        val w = watcher(MemoryScalpControls()) { _, _ -> calls++; reply("""{"adjustments":[]}""") }
+        w.tick()
+        nowMs += 1_000
+        val scope = TestScope(StandardTestDispatcher())
+        var chatCalls = 0
+        val chat = AiChatController(
+            ChatHistoryStore(tmp.newFile("hand.json")), MemoryScalpControls(),
+            ask = { chatCalls++; "gpt-4.1" to "answered" },
+            hasKey = { true }, modelName = { "gpt-4.1" }, scope = scope
+        )
+        scope.advanceUntilIdle()
+        chat.send("what is BTC doing", "leaderboard")
+        scope.advanceUntilIdle()
+        assertEquals(1, calls)
+        assertEquals(1, chatCalls)
+        assertTrue(chat.messages.value.any { it.role == ChatMessage.AI && it.text.contains("answered") })
     }
 
     @Test fun budgetPausesTheWatcherAndChatStillSends() {

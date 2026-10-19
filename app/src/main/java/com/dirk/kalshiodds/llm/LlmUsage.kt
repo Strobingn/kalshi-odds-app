@@ -67,19 +67,36 @@ data class AiAdjustment(
 )
 
 /**
- * Editable $/1M prices. Defaults are the public short-context rates (Oct 2026 for grok-4.7: $2 in / $6 out).
+ * Editable $/1M prices. Defaults are public short-context standard rates (Oct 2026).
+ * OpenAI rows cover the chat default (gpt-4.1) and the other chat models the picker is likely to use.
  * Unknown models estimate $0 until Dirk adds a row. Cached-token discounts are not applied.
+ * A saved table keeps Dirk's prices and still fills any missing default, so an older Grok-only file prices OpenAI.
  */
 object LlmPrices {
     val ET: ZoneId = ZoneId.of("America/New_York")
     val DEFAULTS = listOf(
         ModelPrice("grok-4.7", 2.0, 6.0),
         ModelPrice("gpt-4.1", 2.0, 8.0),
+        ModelPrice("gpt-4.1-mini", 0.40, 1.60),
+        ModelPrice("gpt-4.1-nano", 0.10, 0.40),
         ModelPrice("gpt-4o", 2.5, 10.0),
+        ModelPrice("gpt-4o-2024-05-13", 5.0, 15.0),
         ModelPrice("gpt-4o-mini", 0.15, 0.60),
+        ModelPrice("gpt-5", 1.25, 10.0),
+        ModelPrice("gpt-5-mini", 0.25, 2.0),
+        ModelPrice("gpt-5-nano", 0.05, 0.40),
+        ModelPrice("gpt-5.4", 2.50, 15.0),
+        ModelPrice("gpt-5.4-mini", 0.75, 4.50),
         ModelPrice("mistral-large-latest", 2.0, 6.0),
         ModelPrice("openai/gpt-4o-mini", 0.15, 0.60)
     )
+
+    /** Saved rows win. Defaults fill models the file never listed, including after a provider switch. */
+    fun withDefaults(saved: List<ModelPrice>?): List<ModelPrice> {
+        if (saved.isNullOrEmpty()) return DEFAULTS
+        val extra = DEFAULTS.filter { def -> priceFor(def.model, saved) == null }
+        return saved + extra
+    }
 
     fun dayKey(ms: Long, zone: ZoneId = ET): String = Instant.ofEpochMilli(ms).atZone(zone).toLocalDate().toString()
     fun hourOf(ms: Long, zone: ZoneId = ET): Int = Instant.ofEpochMilli(ms).atZone(zone).hour
