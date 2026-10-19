@@ -4,8 +4,6 @@ import android.content.Context
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
@@ -26,10 +24,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.KalshiOddsApp
 import com.dirk.kalshiodds.ui.ScalpTabCopy
-import com.dirk.kalshiodds.ui.charts.ChartEmptyState
-import com.dirk.kalshiodds.ui.charts.NetBar
-import com.dirk.kalshiodds.ui.charts.RankedNetBars
-import com.dirk.kalshiodds.ui.charts.WinRateGauge
 import com.dirk.kalshiodds.ui.components.FieldCard
 import com.dirk.kalshiodds.ui.theme.DipTheme
 import com.dirk.kalshiodds.worker.HomeSummaryScheduler
@@ -112,18 +106,7 @@ fun HomeBestScalperCard(
             Text(HomeSummaryCopy.PAPER, style = MaterialTheme.typography.labelSmall, color = colors.textSecondary)
             WindowBlock("Last 24h", best24, loading, failed)
             WindowBlock("Last 7d", best7, loading, failed)
-            if (!loading && !failed) {
-                Spacer(Modifier.height(4.dp))
-                RankedNetBars(
-                    listOfNotNull(
-                        best24?.let { NetBar("24h · ${it.label}", it.netUsd) },
-                        best7?.let { NetBar("7d · ${it.label}", it.netUsd) }
-                    ),
-                    Modifier.fillMaxWidth(),
-                    ranked = false,
-                    labelWidthDp = 120
-                )
-            }
+            if (!loading && !failed) HomeBestScalperChart(best24, best7)
         }
     }
 }
@@ -165,23 +148,9 @@ fun HomeDailySummaryCard(
                         style = MaterialTheme.typography.bodyMedium,
                         color = colors.textPrimary
                     )
-                    if (summary.trades <= 0) ChartEmptyState() else Column(
-                        Modifier.fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        WinRateGauge(summary.winRate, summary.trades, size = 88.dp, unit = "trades")
-                        RankedNetBars(
-                            listOfNotNull(
-                                summary.best?.let { NetBar("Best · ${it.label}", it.netUsd) },
-                                summary.worst?.takeIf { it.scalperId != summary.best?.scalperId }
-                                    ?.let { NetBar("Worst · ${it.label}", it.netUsd) }
-                            ),
-                            Modifier.fillMaxWidth(),
-                            ranked = false,
-                            labelWidthDp = 120
-                        )
-                    }
+                    ScalperExtreme("Best", summary.best)
+                    ScalperExtreme("Worst", summary.worst)
+                    HomeTodayCharts(summary)
                     Text(
                         HomeSummaryCopy.settingsHeadline(summary),
                         style = MaterialTheme.typography.bodySmall,
@@ -251,6 +220,22 @@ private fun WindowBlock(title: String, rank: RankedScalper?, loading: Boolean, f
                 color = pnlColor(rank.netUsd, colors.up, colors.down, colors.textSecondary)
             )
         }
+    }
+}
+
+@Composable
+private fun ScalperExtreme(title: String, rank: RankedScalper?) {
+    val colors = DipTheme.colors
+    if (rank == null) {
+        Text("$title —", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+    } else {
+        Text(
+            "$title ${rank.label} · ${ScalpTabCopy.money(rank.netUsd)} · ${ScalpTabCopy.pct(rank.winRate)} · ${HomeSummaryCopy.tradeCount(rank.trades)}",
+            style = MaterialTheme.typography.bodySmall,
+            color = pnlColor(rank.netUsd, colors.up, colors.down, colors.textSecondary),
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
