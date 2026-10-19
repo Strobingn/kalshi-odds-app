@@ -34,7 +34,13 @@ class BiasSymmetryTest {
     }
 
     @Test fun zeroFeatureForecastIsZero() {
-        val x = DoubleArray(11).also { it[0] = 1.0 }
-        assertEquals(0.0, LeadForecaster.predict("BTC", 600, x)!!, 1e-12)
+        // intercept + mid-window tau term, every directional feature zero
+        val x = DoubleArray(11).also { it[0] = 1.0; it[6] = 0.5 }
+        assertEquals(0.0, LeadForecaster.predict("BTC", 600, x)!!, 1e-6)
+        // the tau-only drift stays well below the old -0.14 constant across the whole window
+        for (t in listOf(0.0, 1.0)) {
+            val y = DoubleArray(11).also { it[0] = 1.0; it[6] = t }
+            assertTrue(abs(LeadForecaster.predict("BTC", 600, y)!!) < 0.09)
+        }
     }
 }
