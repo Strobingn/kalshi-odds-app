@@ -17,7 +17,7 @@
         android:fullBackupContent="@xml/backup_rules"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
-        android:label="@string/app_name"
+        android:label="DipHunter Enhanced"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.KalshiOdds"
@@ -26,7 +26,7 @@
 
         <provider
             android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.updates"
+            android:authorities="com.dirk.kalshiodds.enhanced.updates"
             android:exported="false"
             android:grantUriPermissions="true">
             <meta-data

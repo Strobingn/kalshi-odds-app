@@ -11,6 +11,7 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
  */
 object AppRoutes {
     const val HOME = "odds"
+    const val ENHANCED_HOME = "enhanced-home"
     const val SETTINGS = "settings"
     const val SCORECARD = "scorecard"
     const val DATA = "data"
@@ -19,7 +20,7 @@ object AppRoutes {
     const val CHART = "chart"
 
     val ALL: List<String> = listOf(
-        HOME, SETTINGS, SCORECARD, DATA, HISTORY, SIGNAL_HISTORY, CHART
+        HOME, ENHANCED_HOME, SETTINGS, SCORECARD, DATA, HISTORY, SIGNAL_HISTORY, CHART
     )
 }
 

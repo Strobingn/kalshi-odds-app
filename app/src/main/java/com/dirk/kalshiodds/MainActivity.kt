@@ -153,6 +153,46 @@ class MainActivity : ComponentActivity() {
                                 onBack = { navigator.back() }
                             )
                         },
+                        enhancedHome = {
+                            EnhancedHomeScreen(
+                                state = oddsState,
+                                onOpenSettings = {
+                                    settingsFocusApiKey = false
+                                    navigator.open(AppRoutes.SETTINGS)
+                                },
+                                onOpenApiKeySettings = {
+                                    settingsFocusApiKey = true
+                                    navigator.open(AppRoutes.SETTINGS)
+                                },
+                                onOpenScorecard = { navigator.open(AppRoutes.SCORECARD) },
+                                onOpenData = { navigator.open(AppRoutes.DATA) },
+                                onOpenHistory = { navigator.open(AppRoutes.HISTORY) },
+                                onOpenSignalHistory = { navigator.open(AppRoutes.SIGNAL_HISTORY) },
+                                onOpenChart = {
+                                    chartTicker = it.ticker
+                                    navigator.open(AppRoutes.CHART)
+                                },
+                                onRefresh = { oddsViewModel.refresh() },
+                                onBuyMarket = { market, side -> oddsViewModel.buyMarket(market, side) },
+                                onPaperSide = { market, side -> oddsViewModel.paperBuySide(market, side) },
+                                onSellMarket = { market ->
+                                    val pos = oddsState.positions.firstOrNull { it.ticker == market.ticker } ?: return@EnhancedHomeScreen
+                                    oddsViewModel.sellPosition(pos.ticker, pos.side)
+                                },
+                                onSetPaperTrading = oddsViewModel::setPaperTrading,
+                                onResetPaper = oddsViewModel::resetPaperBook,
+                                onSellPosition = { ticker, side -> oddsViewModel.sellPosition(ticker, side) },
+                                onReviewTicket = { oddsViewModel.openTicketApprove(it) },
+                                onDismissTicket = { oddsViewModel.dismissTicket(it) },
+                                onApproveTicket = { oddsViewModel.approveTicket(it) },
+                                onApproveSellTicket = { id, count, price -> oddsViewModel.approveSellTicket(id, count, price) },
+                                onPaperTicket = { oddsViewModel.paperTicket(it) },
+                                onPaperSellTicket = { id, count, price -> oddsViewModel.paperSellTicket(id, count, price) },
+                                onCancelApprove = { oddsViewModel.cancelTicketApprove() },
+                                onCancelOrder = { oddsViewModel.cancelWorkingOrder(it) },
+                                onResumeAlerts = { oddsViewModel.resumeAlerts() }
+                            )
+                        },
                         chart = {
                             val market = chartMarket
                             if (market == null) {
@@ -162,8 +202,8 @@ class MainActivity : ComponentActivity() {
                                         navigator.back()
                                     }
                                 }
-                                OddsScreen(
-                                    viewModel = oddsViewModel,
+                                EnhancedHomeScreen(
+                                    state = oddsState,
                                     onOpenSettings = { navigator.open(AppRoutes.SETTINGS) },
                                     onOpenScorecard = { navigator.open(AppRoutes.SCORECARD) },
                                     onOpenData = { navigator.open(AppRoutes.DATA) },
@@ -172,7 +212,26 @@ class MainActivity : ComponentActivity() {
                                     onOpenChart = {
                                         chartTicker = it.ticker
                                         navigator.open(AppRoutes.CHART)
-                                    }
+                                    },
+                                    onRefresh = { oddsViewModel.refresh() },
+                                    onBuyMarket = { market, side -> oddsViewModel.buyMarket(market, side) },
+                                    onPaperSide = { market, side -> oddsViewModel.paperBuySide(market, side) },
+                                    onSellMarket = { market ->
+                                        val pos = oddsState.positions.firstOrNull { it.ticker == market.ticker } ?: return@EnhancedHomeScreen
+                                        oddsViewModel.sellPosition(pos.ticker, pos.side)
+                                    },
+                                    onSetPaperTrading = oddsViewModel::setPaperTrading,
+                                    onResetPaper = oddsViewModel::resetPaperBook,
+                                    onSellPosition = { ticker, side -> oddsViewModel.sellPosition(ticker, side) },
+                                    onReviewTicket = { oddsViewModel.openTicketApprove(it) },
+                                    onDismissTicket = { oddsViewModel.dismissTicket(it) },
+                                    onApproveTicket = { oddsViewModel.approveTicket(it) },
+                                    onApproveSellTicket = { id, count, price -> oddsViewModel.approveSellTicket(id, count, price) },
+                                    onPaperTicket = { oddsViewModel.paperTicket(it) },
+                                    onPaperSellTicket = { id, count, price -> oddsViewModel.paperSellTicket(id, count, price) },
+                                    onCancelApprove = { oddsViewModel.cancelTicketApprove() },
+                                    onCancelOrder = { oddsViewModel.cancelWorkingOrder(it) },
+                                    onResumeAlerts = { oddsViewModel.resumeAlerts() }
                                 )
                             } else {
                                 ChartDetailScreen(

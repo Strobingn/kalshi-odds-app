@@ -11,9 +11,10 @@ android {
     compileSdk = 35
 
     defaultConfig {
+        // Enhanced UI redesign with charts and diagrams
         // Independent install from the original DipHunter app. Keep this ID
         // and the committed debug signing key stable for future APK updates.
-        applicationId = "com.dirk.kalshiodds.chatgtp"
+        applicationId = "com.dirk.kalshiodds.enhanced"
         minSdk = 26
         targetSdk = 35
         // GitHub Actions run numbers increase with each branch push, so a

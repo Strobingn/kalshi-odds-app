@@ -1,0 +1,374 @@
+package com.dirk.kalshiodds.ui
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Assessment
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import com.dirk.kalshiodds.domain.MarketUiModel
+import com.dirk.kalshiodds.signal.trade.BetCall
+import com.dirk.kalshiodds.signal.trade.TradeModeLabel
+import com.dirk.kalshiodds.ui.components.EnhancedMarketCard
+import com.dirk.kalshiodds.ui.components.NextWindowLoadingCard
+import com.dirk.kalshiodds.ui.components.ThisWindowCard
+import com.dirk.kalshiodds.ui.components.TradeModeChip
+import com.dirk.kalshiodds.ui.components.TradeTicketsSection
+
+/**
+ * Enhanced Home Screen with improved visualizations and animations
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EnhancedHomeScreen(
+    state: OddsUiState,
+    onOpenSettings: () -> Unit,
+    onOpenApiKeySettings: () -> Unit = onOpenSettings,
+    onOpenScorecard: () -> Unit,
+    onOpenHistory: () -> Unit,
+    onOpenSignalHistory: () -> Unit = onOpenHistory,
+    onOpenChart: (MarketUiModel) -> Unit,
+    onRefresh: () -> Unit,
+    onBuyMarket: (MarketUiModel, String) -> Unit,
+    onPaperSide: (MarketUiModel, String) -> Unit,
+    onSellMarket: (MarketUiModel) -> Unit,
+    onSetPaperTrading: (Boolean) -> Unit,
+    onResetPaper: () -> Unit,
+    onSellPosition: (String, String) -> Unit,
+    onReviewTicket: (String) -> Unit,
+    onDismissTicket: (String) -> Unit,
+    onApproveTicket: (String) -> Unit,
+    onApproveSellTicket: (String, Int, Double) -> Unit,
+    onPaperTicket: (String) -> Unit,
+    onPaperSellTicket: (String, Int, Double) -> Unit,
+    onCancelApprove: () -> Unit,
+    onCancelOrder: (String) -> Unit,
+    onResumeAlerts: () -> Unit = {},
+    nowMs: Long = System.currentTimeMillis(),
+    versionLabel: String = AppVersion.label
+) {
+    val colors = DipTheme.colors
+    val mode = TradeModeLabel.forApprove(state.settings)
+    val hasKey = state.settings.tradingCredentialsConfigured()
+    val ctx = TicketBuilder.Context(settings = state.settings, alertsPaused = state.alertsPaused, nowMs = nowMs)
+    val coinCards = HomeMarkets.coinCards(state.snapshot?.allMarkets.orEmpty(), nowMs)
+    val windowMarkets = coinCards.mapNotNull { it.market }
+    val decisions = HomeMarkets.decisions(windowMarkets, ctx)
+    val ranked = HomeMarkets.ranked(windowMarkets, decisions, state.settings)
+    val best = HomeMarkets.best(ranked, decisions)
+    val snackbar = remember { SnackbarHostState() }
+    
+    // Animation for total P&L
+    val totalPnl = state.scorecardSummary?.paperPnlUsd ?: 0.0
+    val pnlAnim = remember { Animatable(0f) }
+    
+    LaunchedEffect(totalPnl) {
+        pnlAnim.animateTo(
+            targetValue = totalPnl.toFloat(),
+            animationSpec = tween(durationMillis = 1000, easing = LinearEasing)
+        )
+    }
+
+    LaunchedEffect(state.userMessage) {
+        val msg = state.userMessage ?: return@LaunchedEffect
+        snackbar.showSnackbar(msg)
+    }
+
+    Scaffold(
+        containerColor = colors.bg,
+        contentWindowInsets = WindowInsets.safeDrawing,
+        snackbarHost = { SnackbarHost(snackbar) },
+        topBar = {
+            TopAppBar(
+                title = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(HomeCopy.TITLE, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        TradeModeChip(mode)
+                    }
+                },
+                actions = {
+                    IconButton(onClick = onOpenScorecard) {
+                        Icon(Icons.Default.Assessment, contentDescription = HomeCopy.SCORECARD_CONTENT_DESCRIPTION)
+                    }
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(Icons.Default.Settings, contentDescription = HomeCopy.SETTINGS_CONTENT_DESCRIPTION)
+                    }
+                    IconButton(onClick = onRefresh, enabled = !state.isLoading) {
+                        Icon(Icons.Default.Refresh, contentDescription = HomeCopy.REFRESH_CONTENT_DESCRIPTION)
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = colors.bg,
+                    titleContentColor = colors.textPrimary,
+                    actionIconContentColor = colors.accentBlue
+                )
+            )
+        }
+    ) { padding ->
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(padding)
+        ) {
+            // Enhanced P&L Header with Gradient
+            if (state.scorecardSummary != null) {
+                PnlHeader(
+                    pnl = pnlAnim.value,
+                    winRate = state.scorecardSummary.winRate,
+                    settledCount = state.scorecardSummary.settledCount,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                )
+            }
+            
+            if (ApiKeyUi.showNoKeyBanner(hasKey)) {
+                Text(
+                    ApiKeyUi.BANNER,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.accentOrange,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .background(colors.accentOrange.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
+                        .padding(12.dp)
+                        .clickable(onClick = onOpenApiKeySettings)
+                )
+            }
+            
+            PullToRefreshBox(
+                isRefreshing = state.isLoading,
+                onRefresh = onRefresh,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                if (state.snapshot == null && state.isLoading) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = colors.accentBlue)
+                    }
+                } else {
+                    Box(Modifier.fillMaxSize()) {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(colors.bg),
+                            contentPadding = PaddingValues(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // Pause banner
+                            state.pauseBanner?.let { banner ->
+                                item {
+                                    AnimatedVisibility(
+                                        visible = true,
+                                        enter = slideInVertically() + fadeIn(),
+                                        exit = slideOutVertically() + fadeOut()
+                                    ) {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .background(colors.accentOrange.copy(alpha = 0.16f), RoundedCornerShape(12.dp))
+                                                .padding(12.dp)
+                                        ) {
+                                            Text(banner, style = MaterialTheme.typography.bodyMedium, color = colors.accentOrange, fontWeight = FontWeight.Bold)
+                                            Button(onClick = onResumeAlerts, modifier = Modifier.padding(top = 8.dp)) {
+                                                Text("Resume alerts")
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // User message
+                            state.userMessage?.takeIf { !it.startsWith("Paper ", true) && !it.startsWith("PAPER ", true) }?.let { msg ->
+                                item {
+                                    Text(msg, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+                                }
+                            }
+                            
+                            // This Window Card (Enhanced)
+                            item {
+                                ThisWindowCard(
+                                    market = best?.first,
+                                    decision = best?.second,
+                                    nowMs = nowMs,
+                                    scorecard = state.scorecardSummary,
+                                    onOpenScorecard = onOpenScorecard
+                                )
+                            }
+                            
+                            // Enhanced Market Cards
+                            items(coinCards, key = { it.series }) { card ->
+                                val market = card.market
+                                if (market == null) {
+                                    NextWindowLoadingCard(card.series)
+                                } else {
+                                    val call = decisions[market.ticker] ?: BetCall.decide(market, ctx)
+                                    EnhancedMarketCard(
+                                        market = market,
+                                        decision = call,
+                                        settings = state.settings,
+                                        paperTradingEnabled = state.settings.paperTradingEnabled,
+                                        nowMs = nowMs,
+                                        onBuyYes = { onBuyMarket(market, "YES") },
+                                        onBuyNo = { onBuyMarket(market, "NO") },
+                                        onPaperUp = { onPaperSide(market, "YES") },
+                                        onPaperDown = { onPaperSide(market, "NO") },
+                                        paperPosition = HomeCopy.paperPositionLine(state.paper, market.ticker),
+                                        onSell = state.positions.firstOrNull { it.ticker == market.ticker }?.let {
+                                            { onSellMarket(market) }
+                                        },
+                                        onOpenChart = { onOpenChart(market) }
+                                    )
+                                }
+                            }
+                            
+                            // Signal History Link
+                            item {
+                                Text(
+                                    HomeCopy.SIGNAL_HISTORY,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = colors.textSecondary,
+                                    modifier = Modifier
+                                        .padding(top = 4.dp, bottom = 4.dp)
+                                        .clickable(onClick = onOpenSignalHistory)
+                                )
+                            }
+                        }
+                        
+                        // Trade Tickets Section
+                        TradeTicketsSection(
+                            tickets = state.tickets,
+                            credentialsConfigured = hasKey,
+                            paperTradingEnabled = state.settings.paperTradingEnabled,
+                            homeMode = true,
+                            listVisible = false,
+                            onReview = onReviewTicket,
+                            onDismiss = onDismissTicket,
+                            onApprove = onApproveTicket,
+                            onApproveSell = onApproveSellTicket,
+                            onPaper = onPaperTicket,
+                            onPaperSell = onPaperSellTicket,
+                            onCancelApprove = onCancelApprove,
+                            onCancelOrder = onCancelOrder
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PnlHeader(
+    pnl: Float,
+    winRate: Double?,
+    settledCount: Int?,
+    modifier: Modifier = Modifier
+) {
+    val colors = DipTheme.colors
+    val isPositive = pnl >= 0
+    
+    val gradientColors = if (isPositive) {
+        listOf(Color(0xFF00C853), Color(0xFF4CAF50))
+    } else {
+        listOf(Color(0xFFFF5722), Color(0xFFE91E63))
+    }
+    
+    Box(
+        modifier = modifier
+            .background(
+                Brush.horizontalGradient(colors = gradientColors),
+                RoundedCornerShape(16.dp)
+            )
+            .padding(16.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = "Paper P&L",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                )
+                Text(
+                    text = if (isPositive) "+${String.format("$%.2f", pnl)}" else "${String.format("$%.2f", pnl)}",
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.surface,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                winRate?.let {
+                    Text(
+                        text = "Win Rate: ${String.format("%.1f", it * 100)}%",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.surface
+                    )
+                }
+                settledCount?.let {
+                    Text(
+                        text = "Settled: $it",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                    )
+                }
+            }
+        }
+    }
+}

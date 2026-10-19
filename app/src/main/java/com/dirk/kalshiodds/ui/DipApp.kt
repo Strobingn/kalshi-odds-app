@@ -19,6 +19,7 @@ fun DipApp(
     sheetOpen: Boolean,
     onCancelSheet: () -> Unit,
     home: @Composable () -> Unit,
+    enhancedHome: @Composable () -> Unit,
     settings: @Composable () -> Unit,
     scorecard: @Composable () -> Unit,
     data: @Composable () -> Unit,
@@ -39,6 +40,7 @@ fun DipApp(
         AppRoutes.HISTORY -> history()
         AppRoutes.SIGNAL_HISTORY -> signalHistory()
         AppRoutes.CHART -> chart()
+        AppRoutes.ENHANCED_HOME -> enhancedHome()
         else -> home()
     }
 }
