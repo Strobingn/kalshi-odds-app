@@ -1,0 +1,208 @@
+package com.dirk.kalshiodds.llm
+
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+
+/** 1.0.12 watcher prefs: follow toggle (default on), call interval, optional daily budget, prices, usage, adjustment log. */
+data class AiWatchConfig(
+    val followsWindow: Boolean = true,
+    val intervalMs: Long = DEFAULT_INTERVAL_MS,
+    val budgetUsd: Double? = null
+) {
+    /** Blank / 0 / negative means the budget is off. A positive amount pauses the watcher once today's estimate reaches it. */
+    fun budgetOrNull(): Double? = budgetUsd?.takeIf { it.isFinite() && it > 0.0 }
+
+    companion object {
+        const val DEFAULT_INTERVAL_MS = 60_000L
+        const val MIN_INTERVAL_MS = 15_000L
+        const val MAX_INTERVAL_MS = 600_000L
+    }
+}
+
+/**
+ * Local AI-follow state. Not a secret store — API keys stay in [LlmSettings].
+ * Cost is recomputed from stored token counts whenever the price table changes.
+ */
+class AiWatchStore(private val file: File? = null) {
+    private val lock = Any()
+    private var follows = true
+    private var intervalMs = AiWatchConfig.DEFAULT_INTERVAL_MS
+    private var budgetUsd: Double? = null
+    private var priceTable: List<ModelPrice>? = null
+    private val usage = ArrayList<UsageBucket>()
+    private val log = ArrayList<AiAdjustment>()
+    private val manualUntil = HashMap<String, Long>()
+
+    private val _config = MutableStateFlow(AiWatchConfig())
+    val config: StateFlow<AiWatchConfig> = _config
+    private val _summary = MutableStateFlow(UsageSummary())
+    val summary: StateFlow<UsageSummary> = _summary
+    private val _adjustments = MutableStateFlow<List<AiAdjustment>>(emptyList())
+    val adjustments: StateFlow<List<AiAdjustment>> = _adjustments
+    private val _notice = MutableStateFlow("")
+    val notice: StateFlow<String> = _notice
+
+    init { load() }
+
+    fun prices(): List<ModelPrice> = synchronized(lock) { priceTable ?: LlmPrices.DEFAULTS }
+
+    fun setFollows(on: Boolean) = synchronized(lock) { follows = on; publishConfig(); persist() }
+
+    fun setIntervalMs(ms: Long) = synchronized(lock) {
+        intervalMs = ms.coerceIn(AiWatchConfig.MIN_INTERVAL_MS, AiWatchConfig.MAX_INTERVAL_MS)
+        publishConfig(); persist()
+    }
+
+    fun setBudgetUsd(usd: Double?) = synchronized(lock) {
+        budgetUsd = usd?.takeIf { it.isFinite() && it > 0.0 }
+        publishConfig(); persist()
+    }
+
+    fun setPrices(table: List<ModelPrice>) = synchronized(lock) {
+        priceTable = table.mapNotNull { row ->
+            val name = row.model.trim()
+            if (name.isEmpty()) return@mapNotNull null
+            val inn = row.inputPerMillion.takeIf { it.isFinite() && it >= 0.0 } ?: 0.0
+            val out = row.outputPerMillion.takeIf { it.isFinite() && it >= 0.0 } ?: 0.0
+            ModelPrice(name, inn, out)
+        }
+        publishSummary(); persist()
+    }
+
+    fun setNotice(text: String) { _notice.value = text }
+
+    fun noteManual(key: String, untilMs: Long) = synchronized(lock) {
+        val k = key.trim()
+        if (k.isEmpty()) return@synchronized
+        manualUntil[k] = maxOf(manualUntil[k] ?: 0L, untilMs)
+        persist()
+    }
+
+    fun manualBlocks(key: String, nowMs: Long): Boolean = synchronized(lock) { nowMs < (manualUntil[key] ?: Long.MIN_VALUE) }
+
+    fun budgetPaused(nowMs: Long): Boolean = synchronized(lock) {
+        val cap = AiWatchConfig(follows, intervalMs, budgetUsd).budgetOrNull() ?: return@synchronized false
+        todaySpendLocked(nowMs) + 1e-9 >= cap
+    }
+
+    fun todaySpend(nowMs: Long): Double = synchronized(lock) { todaySpendLocked(nowMs) }
+
+    fun summaryAt(nowMs: Long): UsageSummary = synchronized(lock) {
+        LlmPrices.summarize(usage.toList(), priceTable ?: LlmPrices.DEFAULTS, nowMs)
+    }
+
+    fun record(source: String, provider: String, model: String, promptTokens: Long, completionTokens: Long, atMs: Long) = synchronized(lock) {
+        val day = LlmPrices.dayKey(atMs)
+        val src = source.ifBlank { LlmSources.WATCHER }
+        val prov = provider.ifBlank { LlmProviders.XAI }
+        val id = model.ifBlank { "unknown" }
+        val i = usage.indexOfFirst { it.day == day && it.source == src && it.provider == prov && it.model == id }
+        val addCalls = 1
+        val p = promptTokens.coerceAtLeast(0)
+        val c = completionTokens.coerceAtLeast(0)
+        if (i < 0) usage += UsageBucket(day, src, prov, id, addCalls, p, c)
+        else {
+            val b = usage[i]
+            usage[i] = b.copy(calls = b.calls + addCalls, promptTokens = b.promptTokens + p, completionTokens = b.completionTokens + c)
+        }
+        publishSummary(); persist()
+    }
+
+    fun addAdjustment(a: AiAdjustment) = synchronized(lock) {
+        log += a
+        while (log.size > AiAdjustmentLog.MAX) log.removeAt(0)
+        _adjustments.value = log.asReversed()
+        persist()
+    }
+
+    private fun todaySpendLocked(nowMs: Long): Double {
+        val day = LlmPrices.dayKey(nowMs)
+        val prices = priceTable ?: LlmPrices.DEFAULTS
+        return usage.filter { it.day == day }.sumOf { LlmPrices.costUsd(it.promptTokens, it.completionTokens, LlmPrices.priceFor(it.model, prices)) }
+    }
+
+    private fun publishConfig() { _config.value = AiWatchConfig(follows, intervalMs, budgetUsd) }
+
+    private fun publishSummary() {
+        _summary.value = LlmPrices.summarize(usage.toList(), priceTable ?: LlmPrices.DEFAULTS, System.currentTimeMillis())
+        _adjustments.value = log.asReversed()
+    }
+
+    private fun load() {
+        val f = file ?: return
+        val text = runCatching { if (f.isFile) f.readText() else return }.getOrNull() ?: return
+        val js = runCatching { JSONObject(text) }.getOrNull() ?: return
+        synchronized(lock) {
+            follows = js.optBoolean("followsWindow", true)
+            intervalMs = js.optLong("intervalMs", AiWatchConfig.DEFAULT_INTERVAL_MS)
+                .coerceIn(AiWatchConfig.MIN_INTERVAL_MS, AiWatchConfig.MAX_INTERVAL_MS)
+            budgetUsd = if (js.has("budgetUsd") && !js.isNull("budgetUsd")) js.optDouble("budgetUsd").takeIf { it.isFinite() && it > 0.0 } else null
+            priceTable = if (!js.has("prices") || js.isNull("prices")) null else readPrices(js.optJSONArray("prices"))
+            usage.clear()
+            js.optJSONArray("usage")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    usage += UsageBucket(o.optString("day"), o.optString("source"), o.optString("provider"), o.optString("model"),
+                        o.optInt("calls"), o.optLong("prompt"), o.optLong("completion"))
+                }
+            }
+            log.clear()
+            js.optJSONArray("adjustments")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    log += AiAdjustment(o.optLong("atMs"), o.optString("scalper"), o.optString("setting"), o.optString("old"), o.optString("new"), o.optString("reason"))
+                }
+            }
+            while (log.size > AiAdjustmentLog.MAX) log.removeAt(0)
+            manualUntil.clear()
+            js.optJSONArray("manual")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    val k = o.optString("key")
+                    if (k.isNotBlank()) manualUntil[k] = o.optLong("untilMs")
+                }
+            }
+            publishConfig(); publishSummary()
+        }
+    }
+
+    private fun persist() {
+        val f = file ?: return
+        val js = JSONObject()
+            .put("followsWindow", follows)
+            .put("intervalMs", intervalMs)
+            .put("budgetUsd", budgetUsd ?: JSONObject.NULL)
+        if (priceTable == null) js.put("prices", JSONObject.NULL) else js.put("prices", JSONArray().apply {
+            priceTable.orEmpty().forEach { put(JSONObject().put("model", it.model).put("input", it.inputPerMillion).put("output", it.outputPerMillion)) }
+        })
+        js.put("usage", JSONArray().apply {
+            usage.forEach { put(JSONObject().put("day", it.day).put("source", it.source).put("provider", it.provider).put("model", it.model)
+                .put("calls", it.calls).put("prompt", it.promptTokens).put("completion", it.completionTokens)) }
+        })
+        js.put("adjustments", JSONArray().apply {
+            log.forEach { put(JSONObject().put("atMs", it.atMs).put("scalper", it.scalper).put("setting", it.setting).put("old", it.oldValue).put("new", it.newValue).put("reason", it.reason)) }
+        })
+        js.put("manual", JSONArray().apply {
+            manualUntil.forEach { (k, u) -> put(JSONObject().put("key", k).put("untilMs", u)) }
+        })
+        runCatching {
+            f.parentFile?.mkdirs()
+            f.writeText(js.toString())
+        }
+    }
+
+    private fun readPrices(arr: JSONArray?): List<ModelPrice> {
+        if (arr == null) return LlmPrices.DEFAULTS
+        val out = ArrayList<ModelPrice>()
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            val name = o.optString("model").trim()
+            if (name.isEmpty()) continue
+            out += ModelPrice(name, o.optDouble("input").takeIf { it.isFinite() && it >= 0 } ?: 0.0, o.optDouble("output").takeIf { it.isFinite() && it >= 0 } ?: 0.0)
+        }
+        return out
+    }
+}

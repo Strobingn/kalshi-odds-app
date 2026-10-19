@@ -120,6 +120,16 @@ object SettingTools {
         return Result.Proposal(key, old, newValue)
     }
 
+    /**
+     * 1.0.12 window watcher: same re-validation as [apply], then the write, without [ScalpStrategySettings.manual].
+     * manual() is the user-confirm path (it restarts "AI learns"). The watcher is not a user edit.
+     */
+    fun applyAutomatic(c: ScalpControls, p: Result.Proposal): ScalpControls {
+        val again = propose(c, p.key, p.newValue)
+        require(again is Result.Proposal) { (again as Result.Rejected).reason }
+        return set(c, p.key, p.newValue).let { it.copy(research = it.research.normalized()) }.normalized()
+    }
+
     /** Applies a proposal confirmed by Dirk. Re-validated against the current controls first. */
     fun apply(c: ScalpControls, p: Result.Proposal): ScalpControls {
         val again = propose(c, p.key, p.newValue)

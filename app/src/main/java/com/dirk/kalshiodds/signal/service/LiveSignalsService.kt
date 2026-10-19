@@ -47,6 +47,7 @@ class LiveSignalsService : Service() {
     private var pipelineJob: Job? = null
     private var metadataJob: Job? = null
     private var rolloverJob: Job? = null
+    private var aiWatchJob: Job? = null
     @Volatile private var rolloverBound = false
     private var wakeLock: PowerManager.WakeLock? = null
     @Volatile private var explicitStop = false
@@ -102,6 +103,12 @@ class LiveSignalsService : Service() {
                 runCatching {
                     KalshiOddsApp.from(this@LiveSignalsService).container.rollover.start(this)
                 }
+            }
+        }
+        // 1.0.12: AI window follower shares this service's lifecycle (screen off, process sticky).
+        if (aiWatchJob?.isActive != true) {
+            aiWatchJob = scope.launch {
+                runCatching { KalshiOddsApp.from(this@LiveSignalsService).container.aiWatcher.followWindows() }
             }
         }
         return START_STICKY
@@ -450,6 +457,8 @@ class LiveSignalsService : Service() {
     }
 
     private fun tearDownPipeline() {
+        aiWatchJob?.cancel()
+        aiWatchJob = null
         runCatching { client?.stop() }
         client = null
         pipelineJob?.cancel()

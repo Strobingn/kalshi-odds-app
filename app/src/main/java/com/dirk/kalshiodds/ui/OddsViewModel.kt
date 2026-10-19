@@ -359,11 +359,20 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     fun saveScalpStrategySettings(code: String, settings: com.dirk.kalshiodds.decision.ScalpStrategySettings) {
         if (!code.startsWith("v2-")) return
         val current = container.scalpControls.state.value
-        container.scalpControls.save(current.copy(strategySettings = current.strategySettings + (code to settings.normalized())))
+        val next = current.copy(strategySettings = current.strategySettings + (code to settings.normalized()))
+        notePaperEdit(current, next)
+        container.scalpControls.save(next)
     }
     fun enableScalpStrategy(code: String, enabled: Boolean) {
         val current = container.scalpControls.state.value
-        container.scalpControls.save(current.copy(disabledStrategies = if (enabled) current.disabledStrategies - code else current.disabledStrategies + code))
+        val next = current.copy(disabledStrategies = if (enabled) current.disabledStrategies - code else current.disabledStrategies + code)
+        notePaperEdit(current, next)
+        container.scalpControls.save(next)
+    }
+
+    /** 1.0.12: a slider Dirk just moved wins for the rest of this KXBTC15M window. */
+    private fun notePaperEdit(before: com.dirk.kalshiodds.decision.ScalpControls, after: com.dirk.kalshiodds.decision.ScalpControls) {
+        runCatching { container.aiWatcher.noteControls(before, after) }
     }
 
     /** 1.0.11: Auto (null) / Force trade ("ACTIVE") / Force bench ("BENCHED") for one scalper. */

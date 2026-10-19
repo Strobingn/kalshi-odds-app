@@ -73,19 +73,43 @@ class AppContainer(context: Context) {
     }
     /** 0.3.38 paper scalps (scalp_trades in the results DB). Never places orders. */
     val scalpControls = com.dirk.kalshiodds.decision.SavedScalpControls(app)
+    /** 1.0.12: usage, prices, budget, and the AI-adjustments log. API keys stay in [llmSettings]. */
+    val aiWatch = com.dirk.kalshiodds.llm.AiWatchStore(File(app.filesDir, "ai-watch.json"))
     val llmSettings by lazy { com.dirk.kalshiodds.llm.LlmSettings(app) }
     val llmClient by lazy { com.dirk.kalshiodds.llm.LlmClient(llmSettings) }
-    val llmStrategy by lazy { com.dirk.kalshiodds.llm.LlmPaperStrategy(scalp, llmSettings, llmClient) }
+    val llmStrategy by lazy {
+        com.dirk.kalshiodds.llm.LlmPaperStrategy(scalp, llmSettings, llmClient) { reply ->
+            recordLlm(com.dirk.kalshiodds.llm.LlmSources.STRATEGY, com.dirk.kalshiodds.llm.LlmProviders.XAI, reply.model.ifBlank { llmSettings.model }, reply.promptTokens, reply.completionTokens)
+        }
+    }
+    /** 1.0.12: follows the live window while the scalping service is up. Paper settings only. */
+    val aiWatcher by lazy {
+        com.dirk.kalshiodds.llm.AiWindowWatcher(
+            controls = scalpControls,
+            store = aiWatch,
+            snapshot = { watchSnapshot() },
+            ask = { ep, msgs -> llmClient.chatReply(msgs, 1200, ep) },
+            endpoint = { llmSettings.chatEndpoint() },
+            scalpersRunning = { scalpServiceRunning() },
+            now = { clock.nowMs() }
+        )
+    }
     /** 1.0.4 AI tab: persistent chat + confirm-gated PAPER settings tool. No path to real-money orders. */
     val aiChat by lazy {
         com.dirk.kalshiodds.llm.AiChatController(
             store = com.dirk.kalshiodds.llm.ChatHistoryStore(File(app.filesDir, com.dirk.kalshiodds.llm.ChatHistoryStore.FILE_NAME)),
             controls = scalpControls,
-            ask = { msgs -> llmClient.chatReply(msgs, 4000).let { it.model to it.text } },
-            hasKey = { llmSettings.hasKey },
-            modelName = { llmSettings.model },
+            ask = { msgs ->
+                val ep = llmSettings.chatEndpoint()
+                val reply = llmClient.chatReply(msgs, 4000, ep)
+                recordLlm(com.dirk.kalshiodds.llm.LlmSources.CHAT, ep.provider, reply.model.ifBlank { ep.model }, reply.promptTokens, reply.completionTokens)
+                reply.model to reply.text
+            },
+            hasKey = { llmSettings.chatReady },
+            modelName = { llmSettings.chatEndpoint().model },
             scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO + com.dirk.kalshiodds.crash.SafeScopes.handler("ai-chat")),
-            liveContext = { liveChatWindow() }
+            liveContext = { liveChatWindow() },
+            onApplied = { key -> aiWatcher.noteKey(key) }
         )
     }
 
@@ -104,6 +128,59 @@ class AppContainer(context: Context) {
         return com.dirk.kalshiodds.llm.ChatPrompt.liveWindow(
             com.dirk.kalshiodds.llm.ChatPrompt.LiveWindow(now, quotes, scalp.snapshot(), atOpen, up)
         )
+    }
+
+    private fun recordLlm(source: String, provider: String, model: String, prompt: Long, completion: Long) {
+        runCatching { aiWatch.record(source, provider, model, prompt, completion, clock.nowMs()) }
+    }
+
+    private fun scalpServiceRunning(): Boolean {
+        val s = hub.settings
+        return com.dirk.kalshiodds.signal.paper.AlwaysOnAutopilot.autopilotWanted(s.paperTradingEnabled, s.aiPaperAutopilotEnabled)
+    }
+
+    /** 1.0.12: chat live window plus each scalper's bench, recent results, and current paper settings. */
+    private fun watchSnapshot(): com.dirk.kalshiodds.llm.WindowSnapshot {
+        val now = clock.nowMs()
+        val quotes = scalp.marks.value.values.toList()
+        val strikes = com.dirk.kalshiodds.llm.ChatPrompt.currentStrikes(quotes, now)
+        val live = liveChatWindow()
+        if (strikes.isEmpty()) return com.dirk.kalshiodds.llm.WindowSnapshot("", 0L, live, "none")
+        val closeMs = strikes.first().closeMs
+        val key = com.dirk.kalshiodds.domain.MarketLifecycle.windowKey(strikes.first().ticker) ?: strikes.first().ticker
+        val spot = com.dirk.kalshiodds.llm.ChatPrompt.liveSpot(strikes)
+        val atm = com.dirk.kalshiodds.llm.ChatPrompt.atm(strikes, spot)
+        val dm = atm?.let { q -> runCatching { scalp.dm60Snapshot(q.ticker.uppercase(), now) }.getOrDefault(0.0) } ?: 0.0
+        val up = com.dirk.kalshiodds.llm.ChatPrompt.modelUp(atm, dm)
+        val controls = scalpControls.state.value
+        val bench = com.dirk.kalshiodds.decision.insights.BenchRegistry.decisions.value
+        val open = scalp.snapshot()
+        val scalpers = com.dirk.kalshiodds.decision.ScalpModels.ALL.map { m ->
+            val b = bench[m.code]
+            val fb = scalpControls.feedback(m.code)
+            val fields = com.dirk.kalshiodds.llm.SettingTools.fieldsFor(m.code).joinToString(",") { f ->
+                "$f=${com.dirk.kalshiodds.llm.SettingTools.get(controls, "strategy.${m.code}.$f")}"
+            }
+            val opens = open.count { t ->
+                com.dirk.kalshiodds.decision.ScalpModels.modelOf(t)?.code == m.code &&
+                    t.state != com.dirk.kalshiodds.decision.ScalpState.CLOSED &&
+                    t.state != com.dirk.kalshiodds.decision.ScalpState.NO_FILL
+            }
+            com.dirk.kalshiodds.llm.AiWindowContext.Scalper(
+                m.code, b?.status?.name ?: "ACTIVE", fb.trades, b?.netUsd ?: fb.meanNetPerContract, fields, opens
+            )
+        }
+        val positions = open.filter { t ->
+            t.state != com.dirk.kalshiodds.decision.ScalpState.CLOSED && t.state != com.dirk.kalshiodds.decision.ScalpState.NO_FILL
+        }.joinToString(",") { "${it.variantId}:${it.side}:${it.state}" }
+        val market = com.dirk.kalshiodds.llm.AiWindowContext.Market(
+            key, spot, atm?.yesBid, atm?.yesAsk, atm?.bid("NO"), atm?.ask("NO"), up, positions
+        )
+        val lines = scalpers.map { s ->
+            val label = com.dirk.kalshiodds.decision.ScalpModels.modelByCode(s.code)?.label ?: s.code
+            "$label [${s.code}] bench=${s.bench} trades=${s.trades} net=${s.netUsd} open=${s.open} settings=${s.settings}"
+        }
+        return com.dirk.kalshiodds.llm.WindowSnapshot(key, closeMs, com.dirk.kalshiodds.llm.AiWindowContext.compose(live, lines), com.dirk.kalshiodds.llm.AiWindowContext.fingerprint(market, scalpers))
     }
     val scalp = com.dirk.kalshiodds.decision.ScalpBook(
         (resultsImpl as? com.dirk.kalshiodds.decision.ScalpPersistence)

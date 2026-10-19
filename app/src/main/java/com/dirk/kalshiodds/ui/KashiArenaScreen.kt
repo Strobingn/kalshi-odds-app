@@ -25,7 +25,8 @@ internal enum class KashiArenaTab(val label: String) { OVERVIEW("Overview"), STR
 /** Claude's Arena layout, backed by Kashi's existing primary strategy ledger. */
 @Composable
 internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) -> Unit = {}, onSettings: () -> Unit = {},
-    onHistory: () -> Unit = {}, onLadder: () -> Unit = {}, initialTab: KashiArenaTab = KashiArenaTab.OVERVIEW) {
+    onHistory: () -> Unit = {}, onLadder: () -> Unit = {}, initialTab: KashiArenaTab = KashiArenaTab.OVERVIEW,
+    aiPanel: AiWatchPanelModel? = null, onAiFollows: (Boolean) -> Unit = {}) {
     val c = DipTheme.colors
     val openAi = LocalOpenAiTab.current
     var tabName by rememberSaveable { mutableStateOf(initialTab.name) }
@@ -39,6 +40,7 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
     val liveTrades = st.arenaChart.trades.filter { ScalpModels.modelOf(it) in models && it.isPrimary }
     val curve = remember(st.windows, v2, st.updatedAtMs) { KashiArenaData.curve(st.windows, st.updatedAtMs, models) }
     LazyColumn(Modifier.fillMaxSize().background(c.bg), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (aiPanel != null) item(key = "ai-watch") { AiWatchPanel(aiPanel, onAiFollows) }
         item(key = "arena-header") {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {

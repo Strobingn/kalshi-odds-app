@@ -89,7 +89,12 @@ fun SettingsScreen(
         onExportKeys = { exportKeys.launch("diphunter-kalshi-key.dhcred") },
         onImportKeys = { importKeys.launch(arrayOf("*/*")) },
         onOpenScalpSettings = { scalpSettings = true },
-        onCheckUpdate = { viewModel.checkForKashiUpdate() }
+        onCheckUpdate = { viewModel.checkForKashiUpdate() },
+        belowScalping = {
+            val app = LocalContext.current.applicationContext as? com.dirk.kalshiodds.KalshiOddsApp
+            val container = app?.let { runCatching { it.container }.getOrNull() }
+            if (container != null) AiUsageSettingsCard(container.aiWatch, container.llmSettings)
+        }
     )
 }
 
@@ -104,7 +109,8 @@ fun SettingsContent(
     onExportKeys: () -> Unit = {},
     onImportKeys: () -> Unit = {},
     onCheckUpdate: () -> Unit = {},
-    onOpenScalpSettings: () -> Unit = {}
+    onOpenScalpSettings: () -> Unit = {},
+    belowScalping: @Composable () -> Unit = {}
 ) {
     val colors = DipTheme.colors
     val s = state.settings
@@ -151,6 +157,7 @@ fun SettingsContent(
             )
             Section("Scalping")
             OutlinedButton(onClick = onOpenScalpSettings, modifier = Modifier.fillMaxWidth().height(52.dp)) { Text("Scalping settings · V2 paper strategies") }
+            belowScalping()
             Section("App update")
             Text(
                 "Checks GitHub for the newest v0.3.*-debug release and downloads DipHunter-debug.apk. Tags like gtp-*, grokbot, and v1.x are ignored. The package id and debug cert are checked before the installer opens.",
