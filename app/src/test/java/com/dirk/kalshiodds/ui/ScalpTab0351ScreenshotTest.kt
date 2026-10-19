@@ -56,7 +56,7 @@ object ScalpTabFixtures {
 
     fun board(seed: Int): List<ScalpModels.Row> = listOf(
         row(ScalpModels.Model.EXTREME_REVERSION, -2.84 + seed, 11, 0.45),
-        row(ScalpModels.Model.MAKER_DIP, 0.0, 0, null),
+        row(ScalpModels.Model.FORECAST_RIDE, 0.0, 0, null),
         row(ScalpModels.Model.FAIR_GAP, -3.86, 9, 0.33),
         row(ScalpModels.Model.CF_REPRICE, -14.52, 14, 0.29),
         row(ScalpModels.Model.MOMENTUM, -68.30, 30, 0.20),

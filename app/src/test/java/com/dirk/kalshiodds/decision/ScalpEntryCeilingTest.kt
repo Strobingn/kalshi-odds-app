@@ -54,9 +54,8 @@ class ScalpEntryCeilingTest {
     }
 
     @Test fun oldMakerAndForecastLimitsAboveFiftyAreCancelledInsteadOfFilled() {
-        val maker = ScalpModels.MAKER_DIP_PARAMS.id
         val cf = ScalpParams.STRATEGY_SEEDS.getValue(ScalpStrategy.CF_REPRICE).id
-        for (variant in listOf(maker, cf, ForecastScalp.variantId(true, 60))) {
+        for (variant in listOf(cf, ForecastScalp.variantId(true, 60))) { // 1.0.10: mkdip removed
             val t = pending(variant, price = .60).copy(restingLimit = .60, queueAhead = 10.0, levelSize = 10.0)
             val book = book(t)
             if (ForecastScalp.isForecast(t)) book.onForecastQuote(q(at + 1_000, .49), 100.0, 100.0, false)
