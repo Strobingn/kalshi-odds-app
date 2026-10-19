@@ -7,6 +7,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -16,6 +17,13 @@ import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.decision.*
 import com.dirk.kalshiodds.ui.theme.DipTheme
 import kotlin.math.roundToInt
+
+/** Status under the Auto / Force trade / Force bench chips. */
+internal fun benchStatusLine(override: String?, autoBenched: Boolean): String = when (override) {
+    "ACTIVE" -> "Bench · forced trading"
+    "BENCHED" -> "Bench · forced benched"
+    else -> if (autoBenched) "Bench · auto · BENCHED (shadow only)" else "Bench · auto"
+}
 
 /** Same label/value sliders as Claude's per-strategy settings. Saves on release, not on every drag frame. */
 @Composable
@@ -65,13 +73,15 @@ internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: Sc
                 Switch(checked = enabled, onCheckedChange = onEnabled, modifier = Modifier.testTag("STRATEGY_ENABLED"))
             }
             if (!controls.enabled || controls.killSwitch) Text("Global entries are paused. Existing protective exits keep running.", color = c.spot, style = MaterialTheme.typography.bodySmall)
-            // 1.0.9 manual bench override (Auto · Force trade · Force bench).
+            // 1.0.9 manual bench override (Auto · Force trade · Force bench). Observed, so a tap updates the line.
             val ov = controls.benchOverrides[model.code]
-            val benchedNow = model.code in com.dirk.kalshiodds.decision.insights.BenchRegistry.benched.value
-            Text("Bench · " + when (ov) { "ACTIVE" -> "forced trading"; "BENCHED" -> "forced benched"; else -> if (benchedNow) "auto · BENCHED (shadow only)" else "auto" }, color = if (benchedNow || ov == "BENCHED") c.spot else c.textPrimary, fontWeight = FontWeight.SemiBold)
+            val benched by com.dirk.kalshiodds.decision.insights.BenchRegistry.benched.collectAsState()
+            val benchedNow = model.code in benched
+            Text(benchStatusLine(ov, benchedNow), color = if (benchedNow || ov == "BENCHED") c.spot else c.textPrimary, fontWeight = FontWeight.SemiBold, modifier = Modifier.testTag("BENCH_STATUS"))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(null to "Auto", "ACTIVE" to "Force trade", "BENCHED" to "Force bench").forEach { (v, label) ->
-                    FilterChip(selected = ov == v, onClick = { onBenchOverride(v) }, label = { Text(label) })
+                    FilterChip(selected = ov == v, onClick = { onBenchOverride(v) }, label = { Text(label) },
+                        modifier = Modifier.testTag(if (v == null) "BENCH_AUTO" else "BENCH_$v"))
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {

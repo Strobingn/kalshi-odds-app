@@ -84,7 +84,25 @@ class AppContainer(context: Context) {
             ask = { msgs -> llmClient.chatReply(msgs, 4000).let { it.model to it.text } },
             hasKey = { llmSettings.hasKey },
             modelName = { llmSettings.model },
-            scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO + com.dirk.kalshiodds.crash.SafeScopes.handler("ai-chat"))
+            scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO + com.dirk.kalshiodds.crash.SafeScopes.handler("ai-chat")),
+            liveContext = { liveChatWindow() }
+        )
+    }
+
+    /** 1.0.11: current KXBTC15M window from live marks, the spot ring, and open paper scalps. Called on each chat send. */
+    private fun liveChatWindow(): String {
+        val now = clock.nowMs()
+        val quotes = scalp.marks.value.values.toList()
+        val strikes = com.dirk.kalshiodds.llm.ChatPrompt.currentStrikes(quotes, now)
+        val openMs = strikes.firstOrNull()?.closeMs?.minus(com.dirk.kalshiodds.domain.MarketLifecycle.WINDOW_MS)
+        val atOpen = openMs?.let { scalp.spotAt("BTC", it) }
+        val atm = com.dirk.kalshiodds.llm.ChatPrompt.atm(strikes, com.dirk.kalshiodds.llm.ChatPrompt.liveSpot(strikes))
+        val up = atm?.let { q ->
+            val dm = runCatching { scalp.dm60Snapshot(q.ticker.uppercase(), now) }.getOrDefault(0.0)
+            com.dirk.kalshiodds.llm.ChatPrompt.modelUp(q, dm)
+        }
+        return com.dirk.kalshiodds.llm.ChatPrompt.liveWindow(
+            com.dirk.kalshiodds.llm.ChatPrompt.LiveWindow(now, quotes, scalp.snapshot(), atOpen, up)
         )
     }
     val scalp = com.dirk.kalshiodds.decision.ScalpBook(

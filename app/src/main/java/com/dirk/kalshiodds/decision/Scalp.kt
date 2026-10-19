@@ -777,6 +777,9 @@ class ScalpBook(
         if (spot != null && spot.isFinite() && spot > 0.0) sfSpot.getOrPut(coin) { ShockFav.SpotRing() }.put(nowMs / 1000L, spot)
     }
 
+    /** 1.0.11: spot at [atMs] from the live 1 s ring (within 3 s). Null if that moment was not observed. */
+    fun spotAt(coin: String, atMs: Long): Double? = synchronized(lock) { sfSpot[coin]?.at(atMs / 1000L) }
+
     /**
      * One conflated quote → all twenty sf57 variants (paper). Called from the paper lane (never Main). Cheap: one scan
      * of this ticker's active sf trades, O(1) spot-ring lookups per variant (multi-shock: ≤ 30).

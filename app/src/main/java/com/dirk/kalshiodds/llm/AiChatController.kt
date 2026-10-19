@@ -1,10 +1,19 @@
 package com.dirk.kalshiodds.llm
 
+import com.dirk.kalshiodds.decision.GbmModel
 import com.dirk.kalshiodds.decision.ScalpControlsRepository
+import com.dirk.kalshiodds.decision.ScalpRule
+import com.dirk.kalshiodds.decision.ScalpState
+import com.dirk.kalshiodds.decision.ScalpTrade
+import com.dirk.kalshiodds.domain.MarketLifecycle
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 /**
  * 1.0.4 AI tab state: persistent history, a busy flag, and the confirm-gated set_setting tool.
@@ -18,7 +27,9 @@ class AiChatController(
     private val hasKey: () -> Boolean,
     private val modelName: () -> String,
     private val scope: CoroutineScope,
-    private val now: () -> Long = System::currentTimeMillis
+    private val now: () -> Long = System::currentTimeMillis,
+    /** Read at the moment each message is built. Empty for tests that pass their own context string. */
+    private val liveContext: () -> String = { "" }
 ) {
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages
@@ -81,7 +92,10 @@ class AiChatController(
                 // History before this question, alternating roles; the question itself goes last as the user turn.
                 val history = llmHistory(_messages.value.dropLast(1).takeLast(24)).let { h -> if (h.lastOrNull()?.first == "user") h.dropLast(1) else h }.takeLast(16)
                     .let { h -> h.dropWhile { it.first != "user" } }
-                val msgs = ChatPrompt.build(q, history, SettingTools.describe(controls.state.value), context)
+                // 1.0.11: the KXBTC15M window is read here, when the request is built — not from a snapshot taken when the chat opened.
+                val live = runCatching { liveContext() }.getOrElse { ChatPrompt.LIVE_HEADER + "\nunavailable (" + rootCauseMessage(it) + ")" }
+                val ctx = listOf(live, context).filter { it.isNotBlank() }.joinToString("\n")
+                val msgs = ChatPrompt.build(q, history, SettingTools.describe(controls.state.value), ctx)
                 val (model, text) = runCatching { ask(msgs) }
                     .getOrElse { e -> if (e is kotlinx.coroutines.CancellationException) throw e
                         add(ChatMessage.ERROR, "Error (${modelName()}, no fallback model): ${e.message ?: e.javaClass.simpleName}", gen = gen); return@launch }
@@ -146,13 +160,29 @@ internal fun rootCauseMessage(e: Throwable): String {
 /**
  * 1.0.8: the AI tab's conversational prompt. User chat messages ALWAYS go through this (a general assistant that
  * answers any question), never through [LlmPaperStrategy]'s one-line YES/NO/SKIP trade prompt.
+ * 1.0.11: [liveWindow] is the current KXBTC15M window, rebuilt from live quotes at each send.
  */
 object ChatPrompt {
     const val MARKER = "You are a helpful general-purpose assistant"
+    const val LIVE_HEADER = "Current KXBTC15M window (live at this message):"
+    private val ET = ZoneId.of("America/New_York")
+    private val ET_FMT = DateTimeFormatter.ofPattern("MMM d, h:mm:ss a 'ET'", Locale.US).withZone(ET)
+
+    /** Quotes, open paper positions, and the BTC print at the window open. Read at send time. */
+    data class LiveWindow(
+        val nowMs: Long,
+        val quotes: List<ScalpRule.Quote>,
+        val positions: List<ScalpTrade> = emptyList(),
+        val btcAtOpen: Double? = null,
+        /** On-phone model P(UP), 0–1. Null when the model has no call. */
+        val modelUp: Double? = null
+    )
+
     fun system(settingsDesc: String, context: String): String =
         "$MARKER inside Dirk's Kalshi Scalper app. Answer EVERY question directly in plain language, on any topic " +
         "(general knowledge, math, coding, markets, small talk) — never refuse for being off-topic. If a message is unclear (e.g. 'Huh'), " +
         "briefly say what you meant last or ask what they'd like to know. Use the trading context below only when relevant. " +
+        "The KXBTC15M block is the current 15-minute window as of this message; when it rolls over, the next message has the new window. " +
         "For BTC price questions at a strike/time with no matching 15-minute market, give your best estimate from the current BTC price, " +
         "the on-phone model forecast and time remaining, and say clearly that it is an estimate. " +
         "Never reply with a trade decision line like YES/NO/SKIP or 'No prediction'; the paper strategy runs separately and its status is not your answer. " +
@@ -161,4 +191,91 @@ object ChatPrompt {
 
     fun build(question: String, history: List<Pair<String, String>>, settingsDesc: String, context: String): List<Pair<String, String>> =
         listOf("system" to system(settingsDesc, context)) + history + ("user" to question)
+
+    fun isBtc15m(ticker: String) = ticker.uppercase().startsWith("KXBTC15M-")
+
+    /** Soonest-closing open KXBTC15M strikes. The next window (later close) is not included. */
+    fun currentStrikes(quotes: List<ScalpRule.Quote>, nowMs: Long): List<ScalpRule.Quote> {
+        val open = quotes.filter { isBtc15m(it.ticker) && it.closeMs > nowMs }
+        val close = open.minOfOrNull { it.closeMs } ?: return emptyList()
+        return open.filter { it.closeMs == close }.sortedWith(compareBy({ it.strike ?: Double.MAX_VALUE }, { it.ticker }))
+    }
+
+    fun liveSpot(quotes: List<ScalpRule.Quote>): Double? {
+        var best: ScalpRule.Quote? = null
+        for (q in quotes) {
+            val s = q.spot
+            if (s == null || !s.isFinite() || s <= 0.0) continue
+            if (best == null || q.bookAtMs >= best.bookAtMs) best = q
+        }
+        return best?.spot
+    }
+
+    /** At-the-money strike in this window (nearest the live spot). */
+    fun atm(strikes: List<ScalpRule.Quote>, spot: Double?): ScalpRule.Quote? =
+        strikes.minWithOrNull(compareBy<ScalpRule.Quote> { q ->
+            val k = q.strike
+            if (spot != null && k != null && k.isFinite()) kotlin.math.abs(spot - k) else Double.MAX_VALUE
+        }.thenBy { it.ticker })
+
+    /** GBM P(YES) when the asset is loaded, otherwise the spot-implied fair. */
+    fun modelUp(q: ScalpRule.Quote?, dm60: Double): Double? {
+        if (q == null) return null
+        return GbmModel.pSide(q, "YES", dm60) ?: q.fair("YES")
+    }
+
+    fun liveWindow(w: LiveWindow): String {
+        val strikes = currentStrikes(w.quotes, w.nowMs)
+        if (strikes.isEmpty()) return "$LIVE_HEADER\n(no open KXBTC15M window)"
+        val closeMs = strikes.first().closeMs
+        val openMs = closeMs - MarketLifecycle.WINDOW_MS
+        val key = MarketLifecycle.windowKey(strikes.first().ticker) ?: strikes.first().ticker.substringAfter('-').substringBefore('-')
+        val spot = liveSpot(strikes)
+        val atm = atm(strikes, spot)
+        val leftS = ((closeMs - w.nowMs).coerceAtLeast(0L)) / 1000L
+        val move = moveSinceOpen(spot, w.btcAtOpen)
+        val up = w.modelUp?.takeIf { it.isFinite() }?.let { String.format(Locale.US, "%.2f", it.coerceIn(0.0, 1.0)) } ?: "unavailable"
+        val strikeLines = strikes.joinToString("\n") { q -> strikeLine(q, q.ticker == atm?.ticker) }
+        val tickers = strikes.map { it.ticker.uppercase() }.toSet()
+        val positions = w.positions.filter { p ->
+            p.state != ScalpState.CLOSED && p.state != ScalpState.NO_FILL && isBtc15m(p.ticker) &&
+                (p.ticker.uppercase() in tickers || p.windowKey.equals(key, true))
+        }
+        val posLines = if (positions.isEmpty()) "(none)" else positions.joinToString("\n") { p ->
+            val px = p.entryPrice ?: p.signalAsk
+            "${p.state} ${p.side} ${p.contracts} @ ${String.format(Locale.US, "%.2f", px)} ${p.ticker}"
+        }
+        return buildString {
+            appendLine(LIVE_HEADER)
+            appendLine("ticker: KXBTC15M-$key")
+            appendLine("at the money: ${atm?.ticker ?: "unknown"}")
+            appendLine("open: ${ET_FMT.format(Instant.ofEpochMilli(openMs))}")
+            appendLine("close: ${ET_FMT.format(Instant.ofEpochMilli(closeMs))}")
+            appendLine(String.format(Locale.US, "time remaining: %d:%02d (%ds)", leftS / 60, leftS % 60, leftS))
+            appendLine("BTC price: ${spot?.let { money(it) } ?: "unknown"}")
+            appendLine("move since window opened: $move")
+            appendLine("model P(UP): $up")
+            appendLine("open strikes:")
+            appendLine(strikeLines)
+            appendLine("open scalper positions in this window:")
+            append(posLines)
+        }
+    }
+
+    private fun strikeLine(q: ScalpRule.Quote, atm: Boolean): String {
+        val strike = q.strike?.takeIf { it.isFinite() && it > 0.0 }?.let { money(it) } ?: "unknown"
+        val mark = if (atm) " (at the money)" else ""
+        return "${q.ticker}$mark strike $strike YES bid/ask ${px(q.yesBid)}/${px(q.yesAsk)} NO bid/ask ${px(q.bid("NO"))}/${px(q.ask("NO"))}"
+    }
+
+    private fun moveSinceOpen(spot: Double?, atOpen: Double?): String {
+        if (spot == null || atOpen == null || !atOpen.isFinite() || atOpen <= 0.0 || !spot.isFinite()) return "unknown"
+        val d = spot - atOpen
+        val pct = d / atOpen * 100.0
+        return String.format(Locale.US, "%s (%+.2f%%) from %s at the open", signedMoney(d), pct, money(atOpen))
+    }
+
+    private fun money(v: Double) = "$" + String.format(Locale.US, "%,.2f", v)
+    private fun signedMoney(v: Double) = (if (v < 0) "-" else "+") + money(kotlin.math.abs(v))
+    private fun px(v: Double?) = v?.let { String.format(Locale.US, "%.2f", it) } ?: "-"
 }
