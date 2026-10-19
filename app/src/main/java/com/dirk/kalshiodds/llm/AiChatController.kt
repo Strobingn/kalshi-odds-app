@@ -29,7 +29,9 @@ class AiChatController(
     private val scope: CoroutineScope,
     private val now: () -> Long = System::currentTimeMillis,
     /** Read at the moment each message is built. Empty for tests that pass their own context string. */
-    private val liveContext: () -> String = { "" }
+    private val liveContext: () -> String = { "" },
+    /** Fired after a user taps Apply. The window watcher treats that key as a manual edit for the rest of the window. */
+    private val onApplied: (String) -> Unit = {}
 ) {
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages
@@ -138,6 +140,7 @@ class AiChatController(
             .onSuccess { saved ->
                 replace(m.copy(status = ChatMessage.APPLIED), gen)
                 add(ChatMessage.CHANGE, "Applied: $key $before → ${SettingTools.get(saved, key)}", key, before, new, ChatMessage.APPLIED, gen)
+                runCatching { onApplied(key) }
             }
             .onFailure { replace(m.copy(status = "rejected"), gen); add(ChatMessage.ERROR, "Could not apply $key = $new: ${it.message}", gen = gen) }
     }

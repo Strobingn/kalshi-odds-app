@@ -28,6 +28,43 @@ class LlmSettings(context: Context) {
         set(v) { prefs?.edit()?.putString("model", v.trim())?.apply() }
     val hasKey: Boolean get() = apiKey.isNotBlank()
 
+    /** 1.0.12: chat + window watcher. The paper strategy keeps using [apiKey] / [model] / [baseUrl] (the xAI slot). */
+    var providerId: String
+        get() {
+            val id = prefs?.getString("provider", LlmProviders.XAI).orEmpty().ifBlank { LlmProviders.XAI }
+            return if (LlmProviders.ALL.any { it.id == id }) id else LlmProviders.XAI
+        }
+        set(v) { prefs?.edit()?.putString("provider", v)?.apply() }
+
+    fun readSlot(id: String): LlmEndpoint {
+        if (id == LlmProviders.XAI) return LlmProviders.resolve(id, apiKey, model, baseUrl)
+        val k = prefs?.getString("key.$id", "").orEmpty()
+        val m = prefs?.getString("model.$id", "").orEmpty()
+        val b = prefs?.getString("base.$id", "").orEmpty()
+        return LlmProviders.resolve(id, k, m, b)
+    }
+
+    fun chatEndpoint(): LlmEndpoint = readSlot(providerId)
+
+    val chatReady: Boolean get() = chatEndpoint().usable
+
+    /** Switching the provider here is what the next chat or watcher call reads. xAI writes stay on the legacy key fields. */
+    fun saveSlot(id: String, key: String, model: String, base: String) {
+        val spec = LlmProviders.spec(id)
+        providerId = spec.id
+        if (spec.id == LlmProviders.XAI) {
+            apiKey = key
+            this.model = model
+            baseUrl = base.ifBlank { DEFAULT_BASE }
+            return
+        }
+        prefs?.edit()
+            ?.putString("key.${spec.id}", key.trim())
+            ?.putString("model.${spec.id}", model.trim())
+            ?.putString("base.${spec.id}", base.trim())
+            ?.apply()
+    }
+
     companion object {
         const val DEFAULT_BASE = "https://api.x.ai/v1"
         /** 1.0.8: Grok 4.7 (xAI's public API id; the "Fast" serving tier has no separate public API id). */

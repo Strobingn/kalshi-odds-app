@@ -31,13 +31,15 @@ fun SwarmScalpSettingsDialog(onClose: () -> Unit) {
     var selected by remember { mutableStateOf<ScalpModels.Model?>(null) }
     var global by remember { mutableStateOf(false) }
     fun back() { if (selected != null) selected = null else if (global) global = false else onClose() }
+    val app = ctx.applicationContext as? com.dirk.kalshiodds.KalshiOddsApp
+    fun note(before: ScalpControls, after: ScalpControls) { runCatching { app?.container?.aiWatcher?.noteControls(before, after) } }
     Dialog(onDismissRequest = ::back, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         val model = selected
         if (model != null) ScalpStrategySettingsContent(model, saved, onBack = { selected = null },
-            onChange = { store.save(store.state.value.copy(strategySettings = store.state.value.strategySettings + (model.code to it))) },
-            onEnabled = { enabled -> val current = store.state.value; store.save(current.copy(disabledStrategies = if (enabled) current.disabledStrategies - model.code else current.disabledStrategies + model.code)) },
+            onChange = { next -> val current = store.state.value; val savedNext = current.copy(strategySettings = current.strategySettings + (model.code to next)); note(current, savedNext); store.save(savedNext) },
+            onEnabled = { enabled -> val current = store.state.value; val savedNext = current.copy(disabledStrategies = if (enabled) current.disabledStrategies - model.code else current.disabledStrategies + model.code); note(current, savedNext); store.save(savedNext) },
             onBenchOverride = { v -> val cur = store.state.value; store.save(cur.copy(benchOverrides = if (v == null) cur.benchOverrides - model.code else cur.benchOverrides + (model.code to v))) })
-        else if (global) SwarmScalpSettingsContent(saved, onBack = { global = false }) { store.save(it); global = false }
+        else if (global) SwarmScalpSettingsContent(saved, onBack = { global = false }) { next -> val current = store.state.value; note(current, next); store.save(next); global = false }
         else ScalpSettingsChooser(onClose, { global = true }, { selected = it })
     }
 }

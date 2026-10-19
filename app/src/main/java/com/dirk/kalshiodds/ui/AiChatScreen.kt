@@ -47,7 +47,8 @@ fun AiChatScreen(viewModel: OddsViewModel) {
     val busy = chat?.busy?.collectAsStateWithLifecycle()?.value ?: false
     val status = container?.llmStrategy?.status?.collectAsStateWithLifecycle()?.value ?: "unavailable"
     val settings = container?.llmSettings
-    var hasKey by remember { mutableStateOf(settings?.hasKey == true) }
+    val ready = settings?.chatReady == true
+    val providerLabel = settings?.let { com.dirk.kalshiodds.llm.LlmProviders.spec(it.providerId).label }.orEmpty()
     val onSend: (String) -> Unit = { q ->
             val rows = KashiArenaData.rows(st, true, KashiArenaData.Sort.NET) + KashiArenaData.rows(st, false, KashiArenaData.Sort.NET)
             val board = rows.sortedByDescending { it.netUsd }.take(25).joinToString("\n") {
@@ -62,10 +63,11 @@ fun AiChatScreen(viewModel: OddsViewModel) {
     androidx.compose.runtime.LaunchedEffect(pendingAsk, chat, busy) {
         if (pendingAsk != null && chat != null && !busy) com.dirk.kalshiodds.decision.insights.AskAiWhy.take()?.let(onSend)
     }
+    val endpoint = settings?.chatEndpoint()
     AiChatContent(
-        messages = messages, busy = busy, strategyStatus = status, hasKey = hasKey,
-        initialKey = settings?.apiKey.orEmpty(), initialModel = settings?.model.orEmpty(), initialBase = settings?.baseUrl.orEmpty(),
-        onSaveKey = { k, m, b -> settings?.apiKey = k; settings?.model = m; settings?.baseUrl = b; hasKey = settings?.hasKey == true },
+        messages = messages, busy = busy, strategyStatus = status, hasKey = ready, providerLabel = providerLabel,
+        initialKey = endpoint?.apiKey.orEmpty(), initialModel = endpoint?.model.orEmpty(), initialBase = endpoint?.baseUrl.orEmpty(),
+        onSaveKey = { k, m, b -> settings?.saveSlot(settings.providerId, k, m, b) },
         onSend = onSend,
         onApply = { chat?.applyProposal(it) }, onCancel = { chat?.cancelProposal(it) }, onClear = { chat?.clear() },
         unavailable = chat == null
@@ -77,6 +79,7 @@ fun AiChatScreen(viewModel: OddsViewModel) {
 fun AiChatContent(
     messages: List<ChatMessage>, busy: Boolean, strategyStatus: String, hasKey: Boolean,
     initialKey: String = "", initialModel: String = "", initialBase: String = "",
+    providerLabel: String = "",
     onSaveKey: (String, String, String) -> Unit = { _, _, _ -> }, onSend: (String) -> Unit = {},
     onApply: (Long) -> Unit = {}, onCancel: (Long) -> Unit = {}, onClear: () -> Unit = {}, unavailable: Boolean = false
 ) {
@@ -109,7 +112,7 @@ fun AiChatContent(
         }
         Text("Paper strategy: $strategyStatus", color = c.textSecondary, style = MaterialTheme.typography.bodySmall, maxLines = 2,
             modifier = Modifier.padding(horizontal = 16.dp))
-        if (showKey) KeyFields(initialKey, initialModel, initialBase) { k, m, b -> onSaveKey(k, m, b); showKey = false }
+        if (showKey) KeyFields(initialKey, initialModel, initialBase, providerLabel) { k, m, b -> onSaveKey(k, m, b); showKey = false }
 
         LazyColumn(state = list, modifier = Modifier.weight(1f).fillMaxWidth().testTag("AI_MESSAGES"),
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -140,9 +143,11 @@ fun AiChatContent(
 }
 
 @Composable
-private fun KeyFields(k0: String, m0: String, b0: String, onSave: (String, String, String) -> Unit) {
+private fun KeyFields(k0: String, m0: String, b0: String, providerLabel: String = "", onSave: (String, String, String) -> Unit) {
     var key by remember { mutableStateOf(k0) }; var model by remember { mutableStateOf(m0) }; var base by remember { mutableStateOf(b0) }
+    val c = DipTheme.colors
     Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (providerLabel.isNotBlank()) Text("Chat and window watcher: $providerLabel. Change provider in Settings.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
         OutlinedTextField(key, { key = it }, label = { Text("LLM API key (stored encrypted on this phone)") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(model, { model = it }, label = { Text("Model") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(base, { base = it }, label = { Text("API base URL (OpenAI-compatible)") }, singleLine = true, modifier = Modifier.fillMaxWidth())

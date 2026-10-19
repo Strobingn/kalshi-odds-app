@@ -18,7 +18,12 @@ import java.util.Locale
  * + the V2 lane: ask ≤ 55¢, window start only, 3¢ trail below peak bid, no hold to close unless > 95% confidence).
  * Output only ever creates a paper ScalpTrade — there is no path from here to the real-order client.
  */
-class LlmPaperStrategy(private val book: ScalpBook, private val settings: LlmSettings, private val client: LlmClient = LlmClient(settings)) {
+class LlmPaperStrategy(
+    private val book: ScalpBook,
+    private val settings: LlmSettings,
+    private val client: LlmClient = LlmClient(settings),
+    private val onUsage: (LlmClient.Reply) -> Unit = {}
+) {
     private val _status = MutableStateFlow("needs key")
     val status: StateFlow<String> = _status
     private var lastWindow: String? = null
@@ -43,6 +48,7 @@ class LlmPaperStrategy(private val book: ScalpBook, private val settings: LlmSet
             q.ticker, q.strike ?: 0.0, q.spot ?: 0.0, q.tauS / 60, q.yesBid?.let { "%.2f".format(Locale.US, it) } ?: "-", q.yesAsk?.let { "%.2f".format(Locale.US, it) } ?: "-",
             q.fair("YES")?.let { "%.2f".format(Locale.US, it) } ?: "-")
         val r = withContext(Dispatchers.IO) { client.chatReply(listOf("system" to "You are a cautious BTC scalping assistant.", "user" to prompt), 20) }
+        runCatching { onUsage(r) }
         val reply = r.text
         val d = parse(reply)
         d?.let { (side, conf) -> runCatching { onCall?.invoke(q.ticker, if (side.equals("YES", true)) "UP" else "DOWN", conf) } }
