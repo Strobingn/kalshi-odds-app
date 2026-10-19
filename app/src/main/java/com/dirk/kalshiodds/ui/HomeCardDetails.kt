@@ -191,8 +191,11 @@ object HomeCardDetails {
     fun aiNoLabel(market: MarketUiModel): String =
         if (market.calibrated) "FV NO" else "AI NO"
 
-    fun percentLabel(pp: Double?): String =
-        pp?.takeIf { it.isFinite() }?.let { String.format(Locale.US, "%.1f%%", it) } ?: "—"
+    fun percentLabel(pp: Double?): String {
+        val v = pp?.takeIf { it.isFinite() } ?: return "—"
+        if (v <= 1e-9 || v >= 100.0 - 1e-9) return com.dirk.kalshiodds.signal.feedback.ScorecardPickGuard.NO_DATA_YET
+        return String.format(Locale.US, "%.1f%%", v)
+    }
 
     fun reasonsLine(market: MarketUiModel): String? =
         sanitizePickLanguage(market.aiNote, market) ?: market.aiNote?.trim()?.takeIf { it.isNotEmpty() }

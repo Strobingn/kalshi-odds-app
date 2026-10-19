@@ -391,7 +391,7 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
         while (true) {
             var n = 0
             db.readableDatabase.rawQuery(
-                "SELECT rowid, fill_id, ticker, limit_price, stake_usd, pnl_usd, outcome FROM $table " +
+                "SELECT rowid, fill_id, ticker, limit_price, stake_usd, pnl_usd, outcome, won, market_pct FROM $table " +
                     "WHERE settled = 1 AND pnl_usd IS NOT NULL AND rowid > ? ORDER BY rowid LIMIT 2000",
                 arrayOf(last.toString())
             ).use { c ->
@@ -402,10 +402,24 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
                     if (outcome.equals("void", true)) continue
                     val price = c.getDouble(3)
                     if (price <= 0.0) continue
+                    val stake = c.getDouble(4)
+                    val pnl = c.getDouble(5)
+                    val wonFlag = if (c.isNull(7)) pnl > 1e-9 else c.getInt(7) == 1
+                    val marketPct = if (c.isNull(8)) null else c.getDouble(8)
+                    if (com.dirk.kalshiodds.signal.feedback.ScorecardPickGuard.isFakeSettled(
+                            entryAsk = price,
+                            stakeUsd = stake,
+                            won = wonFlag,
+                            marketUnit = null,
+                            marketPct = marketPct
+                        )
+                    ) {
+                        continue
+                    }
                     out += c.getString(1) to com.dirk.kalshiodds.decision.HonestScorecard.Row(
                         ask = price,
-                        pnlUsd = c.getDouble(5),
-                        stakeUsd = c.getDouble(4),
+                        pnlUsd = pnl,
+                        stakeUsd = stake,
                         market = c.getString(2).uppercase()
                     )
                 }
@@ -413,6 +427,21 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
             if (n < 2000) break
         }
         return out
+    }
+
+    override fun deleteFakePaperFills(): Int {
+        val table = com.dirk.kalshiodds.data.local.paper.PaperFillSchema.TABLE
+        return runCatching {
+            db.writableDatabase.delete(
+                table,
+                """
+                (limit_price IS NULL OR limit_price < ? OR limit_price > ?)
+                OR (won = 1 AND (stake_usd IS NULL OR stake_usd <= ?))
+                OR (market_pct IS NOT NULL AND (market_pct <= ? OR market_pct >= ?))
+                """.trimIndent(),
+                arrayOf("0.02", "0.98", "0.000000001", "0.000001", "99.999")
+            )
+        }.getOrDefault(0)
     }
 
     override fun upsertPaperFills(rows: List<com.dirk.kalshiodds.signal.paper.PaperFill>) {

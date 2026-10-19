@@ -20,7 +20,7 @@ import java.util.Locale
  */
 object ScorecardCopy {
     const val TITLE = "Scorecard"
-    const val SUBTITLE = "Post-settlement paper record from stored settled KXBTC15M rows. Voids are excluded from W-L. Paper dollars are settled fills in the current book only. A log row with no fill counts in W-L at $0."
+    const val SUBTITLE = "Post-settlement paper record from stored settled KXBTC15M rows. Voids are excluded from W-L. Picks with no entry, a $0 win, or a market captured at 0% or 100% are not counted."
     const val ARCHIVE_TITLE = "Pre-reset archive (paper fills before the last bankroll reset)"
     const val RECONCILE_WARN = "Paper P&L does not match the bankroll (off by more than 1¢)."
     const val HYPOTHETICAL_LABEL = "Hypothetical (per 1 contract)"
@@ -294,7 +294,9 @@ object ScorecardCopy {
         d3Picks = d3Picks,
         paperBankrollUsd = paper.paperBankrollUsd,
         startingUsd = paper.startingUsd,
-        archivedFills = paper.archivedFills(),
+        archivedFills = paper.archivedFills().filterNot {
+            com.dirk.kalshiodds.signal.feedback.ScorecardPickGuard.hideFill(it)
+        },
         shadow = shadow,
         resetMarker = resetMarkerLine(paper, zoneId)
     )
@@ -313,14 +315,15 @@ object ScorecardCopy {
         shadow: com.dirk.kalshiodds.signal.paper.ShadowBookState? = null,
         resetMarker: String? = null
     ): View {
-        val ledger = ScorecardLedger.of(entries, fills, windows, zoneId)
+        val cleanFills = fills.filterNot { com.dirk.kalshiodds.signal.feedback.ScorecardPickGuard.hideFill(it) }
+        val ledger = ScorecardLedger.of(entries, cleanFills, windows, zoneId)
         val lastMinute = lastMinuteSection(lastMinutePicks)
         val d3 = d3Section(d3Picks)
         val summary = HomeScorecardSummary(
             wins = ledger.combined.wins,
             losses = ledger.combined.losses,
             hitRate = ledger.combined.hitRate,
-            paperPnlUsd = if (fills.isEmpty()) paperPnlUsd else ledger.combined.money.pnlUsd,
+            paperPnlUsd = if (cleanFills.isEmpty()) paperPnlUsd else ledger.combined.money.pnlUsd,
             settledCount = ledger.combined.settledCount
         )
         return View(
@@ -334,7 +337,7 @@ object ScorecardCopy {
             bySource = mergeSourceBuckets(ledger.bySource.map { toBucket(it) }, lastMinute),
             lastMinute = lastMinute,
             d3 = d3,
-            autopilot = autopilotSection(fills, entries, paperBankrollUsd, shadow),
+            autopilot = autopilotSection(cleanFills, entries, paperBankrollUsd, shadow),
             paperBankrollUsd = paperBankrollUsd,
             reconcileWarning = reconcileWarning(ledger.combined.money.pnlUsd, paperBankrollUsd, startingUsd),
             hypotheticalLine = hypotheticalLine(ledger.hypotheticalPerContractUsd, ledger.hypotheticalPicks),

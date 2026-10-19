@@ -199,6 +199,10 @@ class PaperAutopilotGuardsTest {
             timestampMs = 1L,
             closeTimeMs = 2L,
             outcome = outcome,
-            predictedSide = predictedSide
+            predictedSide = predictedSide,
+            entryAsk = 0.40,
+            contracts = 10,
+            stakeUsd = 4.0,
+            feeUsd = 0.20
         )
 }

@@ -136,17 +136,26 @@ fun HomeDailySummaryCard(
                 loading -> Text(HomeSummaryCopy.LOADING, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
                 failed || summary == null -> Text(HomeSummaryCopy.FAILED, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
                 else -> {
-                    Text(
-                        ScalpTabCopy.money(summary.netUsd),
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = pnlColor(summary.netUsd, colors.up, colors.down, colors.textSecondary),
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        "${HomeSummaryCopy.tradeCount(summary.trades)} · ${ScalpTabCopy.pct(summary.winRate)} win",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.textPrimary
-                    )
+                    if (summary.trades == 0) {
+                        Text(
+                            com.dirk.kalshiodds.signal.feedback.ScorecardPickGuard.NO_DATA_YET,
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = colors.textSecondary,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    } else {
+                        Text(
+                            ScalpTabCopy.money(summary.netUsd),
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = pnlColor(summary.netUsd, colors.up, colors.down, colors.textSecondary),
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            "${HomeSummaryCopy.tradeCount(summary.trades)} · ${ScalpTabCopy.pct(summary.winRate)} win",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.textPrimary
+                        )
+                    }
                     ScalperExtreme("Best", summary.best)
                     ScalperExtreme("Worst", summary.worst)
                     Text(

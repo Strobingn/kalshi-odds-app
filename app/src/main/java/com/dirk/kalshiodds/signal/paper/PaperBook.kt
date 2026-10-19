@@ -480,6 +480,7 @@ class PaperBook(
      * row we already have, or inserts a fill this phone has not seen.
      */
     fun upsertFromSync(incoming: PaperFill) {
+        if (com.dirk.kalshiodds.signal.feedback.ScorecardPickGuard.hideFill(incoming)) return
         synchronized(lock) {
             val cur = _state.value
             if (incoming.id in cur.archivedFillIds()) return
@@ -512,6 +513,51 @@ class PaperBook(
             }
             val (kept, tail) = retainLedger(cur, listOf(incoming) + cur.fills)
             publish(cur.copy(fills = kept, syncTail = tail))
+        }
+    }
+
+    /**
+     * Drop local fills that are not real picks. Cash and lifetime P&L move
+     * with the removed rows. Nothing is sent to Supabase.
+     */
+    fun purgeFakeFills(): Int {
+        synchronized(lock) {
+            val cur = _state.value
+            val live = (cur.fills + cur.postResetFills)
+                .groupBy { it.id }
+                .map { (_, rows) -> rows.maxBy { it.syncAtMs() } }
+                .filter { com.dirk.kalshiodds.signal.feedback.ScorecardPickGuard.hideFill(it) }
+            val archivedRemoved = cur.archived.sumOf { arc ->
+                arc.fills.count { com.dirk.kalshiodds.signal.feedback.ScorecardPickGuard.hideFill(it) }
+            }
+            val tailRemoved = cur.syncTail.count {
+                com.dirk.kalshiodds.signal.feedback.ScorecardPickGuard.hideFill(it) && live.none { row -> row.id == it.id }
+            }
+            if (live.isEmpty() && archivedRemoved == 0 && tailRemoved == 0) return 0
+            var cash = cur.cashUsd
+            var lifetime = cur.lifetimeRealizedPnlUsd ?: cur.fills.mapNotNull { it.pnlUsd }.sum()
+            for (fill in live) {
+                if (fill.settled) {
+                    val pnl = fill.pnlUsd ?: 0.0
+                    cash -= pnl
+                    lifetime -= pnl
+                } else {
+                    cash += fill.stakeUsd
+                }
+            }
+            fun keep(rows: List<PaperFill>) =
+                rows.filterNot { com.dirk.kalshiodds.signal.feedback.ScorecardPickGuard.hideFill(it) }
+            publish(
+                cur.copy(
+                    cashUsd = cash,
+                    lifetimeRealizedPnlUsd = lifetime,
+                    fills = keep(cur.fills),
+                    syncTail = keep(cur.syncTail),
+                    postResetFills = keep(cur.postResetFills),
+                    archived = cur.archived.map { arc -> arc.copy(fills = keep(arc.fills)) }
+                )
+            )
+            return live.size + archivedRemoved + tailRemoved
         }
     }
 
@@ -1096,6 +1142,12 @@ class PaperBook(
         capFullKelly: Boolean = true
     ): PaperFill? {
         if (CryptoMarkets.isRetiredTicker(ticker)) return null
+        if (com.dirk.kalshiodds.signal.feedback.ScorecardPickGuard.isSettlementMarketPct(meta.marketPct) ||
+            com.dirk.kalshiodds.signal.feedback.ScorecardPickGuard.isSettlementMarketUnit(limitPrice)
+        ) {
+            rememberMessage("Paper skip $ticker — market was already settled")
+            return null
+        }
         val want = if (side.equals("NO", true)) "NO" else "YES"
         val px = KalshiPrice.usable(limitPrice) ?: return null
         val p = winChance ?: meta.aiPct?.let { if (it <= 1.0 + 1e-9) it else it / 100.0 }

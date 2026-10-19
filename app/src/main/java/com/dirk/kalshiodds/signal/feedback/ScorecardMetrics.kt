@@ -104,9 +104,10 @@ object ScorecardMetrics {
         settledWindows: List<SettledWindowRow> = emptyList()
     ): Snapshot {
         val btc = entries.filter { ScorecardLedger.isScorecardTicker(it.ticker) }
-        val settled = settledScoredPicks(btc)
+        val visible = btc.filterNot { ScorecardPickGuard.hideLog(it) }
+        val settled = settledScoredPicks(visible)
         val voids = btc.count { it.outcome.equals("void", true) }
-        val open = btc.count { it.outcome == null }
+        val open = visible.count { it.outcome == null }
         val dayStart = startOfLocalDayMs(nowMs, zoneId)
         val rollingStart = nowMs - SignalConstants.SCORECARD_ROLLING_DAYS * 86_400_000L
         val ledger = ScorecardLedger.of(btc, fills, settledWindows, zoneId)
@@ -128,7 +129,7 @@ object ScorecardMetrics {
             calibrationSamples = calibration.sampleCount,
             honest = honest(settled, zoneId),
             policy = PolicyEval.evaluate(
-                entries = btc,
+                entries = visible,
                 stakeUsd = policyStakeUsd,
                 edgeThresholdPp = edgeThresholdPp,
                 minConfidence = minConfidence,
@@ -154,7 +155,8 @@ object ScorecardMetrics {
         entries.filter {
             ScorecardLedger.isScorecardTicker(it.ticker) &&
                 (it.outcome.equals("yes", true) || it.outcome.equals("no", true)) &&
-                ForecastUnits.isScoredPick(it)
+                ForecastUnits.isScoredPick(it) &&
+                !ScorecardPickGuard.hideLog(it)
         }
 
     fun honest(
@@ -162,7 +164,9 @@ object ScorecardMetrics {
         zoneId: ZoneId = ZoneId.of("America/New_York")
     ): Honest {
         val scored = rows.filter {
-            ScorecardLedger.isScorecardTicker(it.ticker) && ForecastUnits.isScoredPick(it)
+            ScorecardLedger.isScorecardTicker(it.ticker) &&
+                ForecastUnits.isScoredPick(it) &&
+                !ScorecardPickGuard.hideLog(it)
         }
         if (scored.isEmpty()) {
             return Honest(0, null, null, null, null, null, false, emptyList())
@@ -264,7 +268,7 @@ object ScorecardMetrics {
         rows: List<PredictionLogEntry>,
         ledger: ScorecardLedger.Snapshot? = null
     ): WindowStats {
-        val scored = rows.filter { ForecastUnits.isScoredPick(it) }
+        val scored = rows.filter { ForecastUnits.isScoredPick(it) && !ScorecardPickGuard.hideLog(it) }
         if (scored.isEmpty()) return WindowStats()
         val hits = scored.count { ForecastUnits.hit(it) }
         val sideBriers = scored.map { ForecastUnits.sideBrier(it) }

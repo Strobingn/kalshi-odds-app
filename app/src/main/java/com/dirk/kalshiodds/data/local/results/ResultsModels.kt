@@ -88,4 +88,7 @@ interface ResultsStore {
     fun recentTickets(limit: Int = 40): List<TicketAttemptRow>
     fun recentOddsMids(limit: Int = 800): List<OddsMidRow>
     fun exportBundle(limit: Int = 400): ResultsBundle
+
+    /** Local mirror only. Does not delete the Supabase copy. */
+    fun deleteFakePaperFills(): Int = 0
 }

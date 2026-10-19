@@ -214,7 +214,11 @@ class ScorecardMetricsTest {
         brier = brier,
         predictedSide = if (pYes >= 0.5) "YES" else "NO",
         edgePp = edge,
-        settledAtMs = ts
+        settledAtMs = ts,
+        entryAsk = 0.40,
+        contracts = 10,
+        stakeUsd = 4.0,
+        feeUsd = 0.20
     )
 }
 
