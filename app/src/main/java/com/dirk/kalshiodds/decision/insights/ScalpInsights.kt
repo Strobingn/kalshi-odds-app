@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.decision.insights
 
+import com.dirk.kalshiodds.decision.PaperTape
 import com.dirk.kalshiodds.decision.ScalpBook
 import com.dirk.kalshiodds.decision.ScalpControls
 import com.dirk.kalshiodds.decision.ScalpControlsRepository
@@ -97,10 +98,33 @@ class ScalpInsights(
                 }
             }
         }
-        // 1.0.14: freeze losers on top of auto-bench (see ScalpFreeze); manual overrides win.
-        val next = ScalpFreeze.apply(benchNext, synchronized(lock) { real.mapValues { it.value.toList() } }, c.benchOverrides)
+        val realLists = synchronized(lock) { real.mapValues { it.value.toList() } }
+        val shadowLists = synchronized(lock) { shadow.mapValues { it.value.toList() } }
+        // One freeze: default losers, the deep-loss rule, and the AI >$1 rule. Force trade / Force bench are left alone.
+        val next = ScalpFreeze.apply(benchNext, realLists, c.benchOverrides, shadowLists, decisions)
         decisions = next
         book.benched = next.values.filter { !it.trading }.map { it.scalperId }.toSet()
         BenchRegistry.publish(next)
+    }
+
+    /** Recent settled nets for the AI watcher. Real history is the seeded window; shadow history is in memory. */
+    fun tapes(stats: List<com.dirk.kalshiodds.decision.ScalpStat>): List<PaperTape> = synchronized(lock) {
+        val byId = stats.associateBy { it.scalperId }
+        ScalpModels.ALL.map { m ->
+            val st = byId[m.code]
+            val realNets = real[m.code]?.mapNotNull { it.netUsd?.takeIf { n -> n.isFinite() } }.orEmpty()
+            val sh = shadow[m.code]?.mapNotNull { it.netUsd?.takeIf { n -> n.isFinite() } }.orEmpty()
+            val wins = st?.wins ?: realNets.count { it > 0.0 }
+            val n = st?.n ?: realNets.size
+            PaperTape(
+                code = m.code,
+                trades = n,
+                wins = wins,
+                netUsd = st?.netUsd ?: realNets.sum(),
+                winRate = if (n == 0) null else wins.toDouble() / n,
+                recentReal = realNets,
+                shadow = sh
+            )
+        }
     }
 }

@@ -95,8 +95,9 @@ class AiChatController(
                 val history = llmHistory(_messages.value.dropLast(1).takeLast(24)).let { h -> if (h.lastOrNull()?.first == "user") h.dropLast(1) else h }.takeLast(16)
                     .let { h -> h.dropWhile { it.first != "user" } }
                 // 1.0.11: the KXBTC15M window is read here, when the request is built — not from a snapshot taken when the chat opened.
+                val asOf = now()
                 val live = runCatching { liveContext() }.getOrElse { ChatPrompt.LIVE_HEADER + "\nunavailable (" + rootCauseMessage(it) + ")" }
-                val ctx = listOf(live, context).filter { it.isNotBlank() }.joinToString("\n")
+                val ctx = listOf("snapshotAsOfMs=$asOf", live, context).filter { it.isNotBlank() }.joinToString("\n")
                 val msgs = ChatPrompt.build(q, history, SettingTools.describe(controls.state.value), ctx)
                 val (model, text) = runCatching { ask(msgs) }
                     .getOrElse { e -> if (e is kotlinx.coroutines.CancellationException) throw e
@@ -145,6 +146,13 @@ class AiChatController(
             .onFailure { replace(m.copy(status = "rejected"), gen); add(ChatMessage.ERROR, "Could not apply $key = $new: ${it.message}", gen = gen) }
     }
 
+    /** A live-feed post. Does not wait on the user and does not place an order. */
+    fun postLive(text: String) {
+        val line = text.trim()
+        if (line.isEmpty()) return
+        scope.launch { add(ChatMessage.AI, line) }
+    }
+
     fun clear() {
         synchronized(lock) { loaded = true; generation++; job?.cancel(); job = null; _messages.value = emptyList(); _busy.value = false }
         scope.launch { synchronized(lock) { if (_messages.value.isEmpty()) store.clear() else store.saveAll(_messages.value) } }
@@ -168,6 +176,8 @@ internal fun rootCauseMessage(e: Throwable): String {
 object ChatPrompt {
     const val MARKER = "You are a helpful general-purpose assistant"
     const val LIVE_HEADER = "Current KXBTC15M window (live at this message):"
+    /** The model is told it already has a continuous feed. It must not claim it only sees the window when messaged. */
+    const val LIVE_FEED = "You are following the live KXBTC15M window continuously through the app's live feed and the window watcher. You have the latest live data on each Kalshi tick. Never say you can only see the window when the user sends a message."
     private val ET = ZoneId.of("America/New_York")
     private val ET_FMT = DateTimeFormatter.ofPattern("MMM d, h:mm:ss a 'ET'", Locale.US).withZone(ET)
 
@@ -189,7 +199,8 @@ object ChatPrompt {
         "For BTC price questions at a strike/time with no matching 15-minute market, give your best estimate from the current BTC price, " +
         "the on-phone model forecast and time remaining, and say clearly that it is an estimate. " +
         "Never reply with a trade decision line like YES/NO/SKIP or 'No prediction'; the paper strategy runs separately and its status is not your answer. " +
-        "You cannot place orders and can never touch real money; settings changes are paper-only and need the user's Apply tap.\n" +
+        "You cannot place orders and can never touch real money; settings changes are paper-only and need the user's Apply tap. " +
+        LIVE_FEED + " The snapshot below is rebuilt at send time from the latest Kalshi tick, not from a cached copy.\n" +
         settingsDesc + "\nTrading context (live, may be partial):\n" + context
 
     fun build(question: String, history: List<Pair<String, String>>, settingsDesc: String, context: String): List<Pair<String, String>> =

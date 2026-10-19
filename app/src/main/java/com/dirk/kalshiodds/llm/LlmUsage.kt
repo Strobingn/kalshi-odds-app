@@ -12,7 +12,11 @@ object LlmSources {
     const val WATCHER = "watcher"
     const val CHAT = "chat"
     const val STRATEGY = "strategy"
-    val ALL = listOf(WATCHER, CHAT, STRATEGY)
+    /** 1.0.14 decision loop. Chart stacks use these names. */
+    const val LIVE_TICK = "live tick"
+    const val WINDOW = "window"
+    const val BIG_MOVE = "big move"
+    val ALL = listOf(WATCHER, CHAT, STRATEGY, LIVE_TICK, WINDOW, BIG_MOVE)
 }
 
 data class ModelPrice(val model: String, val inputPerMillion: Double, val outputPerMillion: Double)
@@ -36,6 +40,17 @@ data class UsageBucket(
     val day: String,
     val source: String,
     val provider: String,
+    val model: String,
+    val calls: Int,
+    val promptTokens: Long,
+    val completionTokens: Long
+)
+
+/** One hour (ET) of real recorded calls. Empty hours are not invented. */
+data class UsageHour(
+    val day: String,
+    val hour: Int,
+    val source: String,
     val model: String,
     val calls: Int,
     val promptTokens: Long,
@@ -67,6 +82,8 @@ object LlmPrices {
     )
 
     fun dayKey(ms: Long, zone: ZoneId = ET): String = Instant.ofEpochMilli(ms).atZone(zone).toLocalDate().toString()
+    fun hourOf(ms: Long, zone: ZoneId = ET): Int = Instant.ofEpochMilli(ms).atZone(zone).hour
+    fun minuteOf(ms: Long, zone: ZoneId = ET): Int = Instant.ofEpochMilli(ms).atZone(zone).minute
 
     /** Longest price-table key that is the same model or a dated snapshot of it. */
     fun priceFor(model: String, table: List<ModelPrice>): ModelPrice? {

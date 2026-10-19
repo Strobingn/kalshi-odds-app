@@ -82,6 +82,8 @@ class AppContainer(context: Context) {
             recordLlm(com.dirk.kalshiodds.llm.LlmSources.STRATEGY, com.dirk.kalshiodds.llm.LlmProviders.XAI, reply.model.ifBlank { llmSettings.model }, reply.promptTokens, reply.completionTokens)
         }
     }
+    private val aiScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
+    private val livePost = java.util.concurrent.atomic.AtomicReference<(String) -> Unit> { }
     /** 1.0.12: follows the live window while the scalping service is up. Paper settings only. */
     val aiWatcher by lazy {
         com.dirk.kalshiodds.llm.AiWindowWatcher(
@@ -91,8 +93,13 @@ class AppContainer(context: Context) {
             ask = { ep, msgs -> llmClient.chatReply(msgs, 1200, ep) },
             endpoint = { llmSettings.chatEndpoint() },
             scalpersRunning = { scalpServiceRunning() },
-            now = { clock.nowMs() }
-        )
+            now = { clock.nowMs() },
+            paper = { scalpInsights.tapes(scalp.stats.value) },
+            onBenched = { runCatching { scalpInsights.recompute() } }
+        ).also { watcher ->
+            watcher.onLivePost = { text -> livePost.get().invoke(text) }
+            watcher.onWake = { aiScope.launch { runCatching { watcher.tick() } } }
+        }
     }
     /** 1.0.4 AI tab: persistent chat + confirm-gated PAPER settings tool. No path to real-money orders. */
     val aiChat by lazy {
@@ -110,7 +117,7 @@ class AppContainer(context: Context) {
             scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO + com.dirk.kalshiodds.crash.SafeScopes.handler("ai-chat")),
             liveContext = { liveChatWindow() },
             onApplied = { key -> aiWatcher.noteKey(key) }
-        )
+        ).also { chat -> livePost.set { text -> chat.postLive(text) } }
     }
 
     /** 1.0.11: current KXBTC15M window from live marks, the spot ring, and open paper scalps. Called on each chat send. */
@@ -155,9 +162,11 @@ class AppContainer(context: Context) {
         val controls = scalpControls.state.value
         val bench = com.dirk.kalshiodds.decision.insights.BenchRegistry.decisions.value
         val open = scalp.snapshot()
+        val tapes = runCatching { scalpInsights.tapes(scalp.stats.value) }.getOrDefault(emptyList()).associateBy { it.code }
         val scalpers = com.dirk.kalshiodds.decision.ScalpModels.ALL.map { m ->
             val b = bench[m.code]
             val fb = scalpControls.feedback(m.code)
+            val tape = tapes[m.code]
             val fields = com.dirk.kalshiodds.llm.SettingTools.fieldsFor(m.code).joinToString(",") { f ->
                 "$f=${com.dirk.kalshiodds.llm.SettingTools.get(controls, "strategy.${m.code}.$f")}"
             }
@@ -166,8 +175,18 @@ class AppContainer(context: Context) {
                     t.state != com.dirk.kalshiodds.decision.ScalpState.CLOSED &&
                     t.state != com.dirk.kalshiodds.decision.ScalpState.NO_FILL
             }
+            val last20 = tape?.recentReal?.takeLast(20)?.joinToString(",") { n ->
+                String.format(java.util.Locale.US, "%+.2f", n)
+            }.orEmpty()
+            val benchName = when {
+                controls.benchOverrides[m.code] == "ACTIVE" -> "FORCED_ACTIVE"
+                controls.benchOverrides[m.code] == "BENCHED" -> "FORCED_BENCHED"
+                m.code in controls.aiBench -> "BENCHED"
+                else -> b?.status?.name ?: "ACTIVE"
+            }
             com.dirk.kalshiodds.llm.AiWindowContext.Scalper(
-                m.code, b?.status?.name ?: "ACTIVE", fb.trades, b?.netUsd ?: fb.meanNetPerContract, fields, opens
+                m.code, benchName, tape?.trades ?: fb.trades, tape?.netUsd ?: b?.netUsd ?: fb.meanNetPerContract, fields, opens,
+                winRate = tape?.winRate, last20 = last20, algo = com.dirk.kalshiodds.decision.StrategyAlgo.describe(controls, m.code)
             )
         }
         val positions = open.filter { t ->
@@ -178,7 +197,7 @@ class AppContainer(context: Context) {
         )
         val lines = scalpers.map { s ->
             val label = com.dirk.kalshiodds.decision.ScalpModels.modelByCode(s.code)?.label ?: s.code
-            "$label [${s.code}] bench=${s.bench} trades=${s.trades} net=${s.netUsd} open=${s.open} settings=${s.settings}"
+            com.dirk.kalshiodds.llm.AiWindowContext.line(label, s)
         }
         return com.dirk.kalshiodds.llm.WindowSnapshot(key, closeMs, com.dirk.kalshiodds.llm.AiWindowContext.compose(live, lines), com.dirk.kalshiodds.llm.AiWindowContext.fingerprint(market, scalpers))
     }

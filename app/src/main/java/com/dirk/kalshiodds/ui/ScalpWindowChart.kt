@@ -20,6 +20,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.dirk.kalshiodds.ui.charts.ChartShapes
+import com.dirk.kalshiodds.ui.charts.WindowTimeline
 import com.dirk.kalshiodds.ui.theme.DipTheme
 import java.time.Instant
 import java.time.ZoneId
@@ -42,9 +44,8 @@ internal fun markerName(kind: ScalpWindowChartData.Kind): String = when (kind) {
 internal fun ScalpWindowChart(d: ScalpAlgoDetail, onWindow: (String) -> Unit = {}, onLive: () -> Unit = {}, title: String = "Live strategy window · 15 minutes", onTrade: (String) -> Unit = {}) {
     val c = DipTheme.colors
     val data = d.chart
-    var side by remember(d.model) { mutableStateOf("YES") }
-    var selected by remember(data.ticker, side) { mutableStateOf<String?>(null) }
-    val markers = remember(data.trades, data.ticker, side) { data.markers(side) }
+    var selected by remember(data.ticker) { mutableStateOf<String?>(null) }
+    val markers = remember(data.trades, data.ticker) { data.allMarkers() }
     val selectedMarker = markers.firstOrNull { it.id == selected }
     SwarmCard(title) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -63,16 +64,14 @@ internal fun ScalpWindowChart(d: ScalpAlgoDetail, onWindow: (String) -> Unit = {
             }
         }
         Text(data.ticker.ifEmpty { "Chart and trade markers appear here when a window is available." }, color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(selected = side == "YES", onClick = { side = "YES" }, label = { Text("UP / YES") })
-            FilterChip(selected = side == "NO", onClick = { side = "NO" }, label = { Text("DOWN / NO") })
-            Spacer(Modifier.weight(1f))
-            Text("Bid ${ScalpTabCopy.cents(data.bid(side))}", color = c.textPrimary, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 16.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Text("UP ${ScalpTabCopy.cents(data.bid("YES"))}", color = c.up, fontWeight = FontWeight.Bold)
+            Text("50¢", color = c.accentOrange, style = MaterialTheme.typography.labelMedium)
+            Text("DOWN ${ScalpTabCopy.cents(data.bid("NO"))}", color = c.down, fontWeight = FontWeight.Bold)
         }
         if (data.closeMs > 0) {
-            val lineColor = if (side == "YES") c.up else c.down
             Canvas(Modifier.fillMaxWidth().height(230.dp)
-                .semantics { contentDescription = "$side bid chart for ${data.ticker}. ${markers.count { it.kind == ScalpWindowChartData.Kind.BUY }} buys and ${markers.count { it.kind == ScalpWindowChartData.Kind.SELL }} sells. Fill details are below." }
+                .semantics { contentDescription = "UP and DOWN bid chart for ${data.ticker}. ${markers.count { it.kind == ScalpWindowChartData.Kind.BUY }} buys and ${markers.count { it.kind == ScalpWindowChartData.Kind.SELL }} sells. Fill details are below." }
                 .pointerInput(markers, data.startMs, data.closeMs) {
                     detectTapGestures { tap ->
                         val left = 36.dp.toPx(); val bottom = 24.dp.toPx()
@@ -102,26 +101,43 @@ internal fun ScalpWindowChart(d: ScalpAlgoDetail, onWindow: (String) -> Unit = {
                     drawContext.canvas.nativeCanvas.drawText("${minute}m", xx, size.height - 2.dp.toPx(), paint)
                 }
                 drawLine(c.accentOrange.copy(alpha = .65f), Offset(left, y(.50)), Offset(left + w, y(.50)), 1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 5.dp.toPx())))
-                var previous: Pair<Long, Offset>? = null
-                data.points.filter { it.tMs in data.startMs..minOf(data.nowMs, data.closeMs) }.forEach { point ->
-                    val bid = if (side == "YES") point.upBidCents else point.downBidCents
-                    if (bid == null || !bid.isFinite() || bid !in 0f..100f) previous = null
-                    else {
-                        val next = Offset(x(point.tMs), y(bid / 100.0))
-                        previous?.takeIf { point.tMs - it.first in 0..15_000 }?.let { drawLine(lineColor, it.second, next, 2.dp.toPx()) }
-                        drawCircle(lineColor, 1.5.dp.toPx(), next)
-                        previous = point.tMs to next
+                val endLabel = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 11.dp.toPx(); textAlign = Paint.Align.RIGHT }
+                fun drawBids(up: Boolean) {
+                    val color = if (up) c.upButton else c.downButton
+                    var previous: Pair<Long, Offset>? = null
+                    var last: Offset? = null
+                    var lastBid: Float? = null
+                    data.points.filter { it.tMs in data.startMs..minOf(data.nowMs, data.closeMs) }.forEach { point ->
+                        val bid = if (up) point.upBidCents else point.downBidCents
+                        if (bid == null || !bid.isFinite() || bid !in 0f..100f) previous = null
+                        else {
+                            val next = Offset(x(point.tMs), y(bid / 100.0))
+                            previous?.takeIf { point.tMs - it.first in 0..15_000 }?.let { drawLine(color, it.second, next, 2.5.dp.toPx()) }
+                            previous = point.tMs to next
+                            last = next
+                            lastBid = bid
+                        }
+                    }
+                    val tip = last
+                    val cents = lastBid
+                    if (tip != null && cents != null) {
+                        drawCircle(color, 3.5.dp.toPx(), tip)
+                        endLabel.color = color.toArgb()
+                        drawContext.canvas.nativeCanvas.drawText("${kotlin.math.round(cents).toInt()}¢", tip.x - 6.dp.toPx(), tip.y - 6.dp.toPx(), endLabel)
                     }
                 }
+                drawBids(true)
+                drawBids(false)
                 if (data.nowMs in data.startMs..data.closeMs) drawLine(c.textSecondary.copy(alpha = .4f), Offset(x(data.nowMs), top), Offset(x(data.nowMs), top + h), 1.dp.toPx())
                 markers.forEach { m ->
                     val center = Offset(x(m.atMs), y(m.price)); val r = if (m.id == selected) 8.dp.toPx() else 5.dp.toPx()
+                    val sideColor = if (m.side == "NO") c.downButton else c.upButton
                     when (m.kind) {
-                        ScalpWindowChartData.Kind.SIGNAL -> drawCircle(c.textSecondary, 2.dp.toPx(), center)
-                        ScalpWindowChartData.Kind.ORDER -> drawCircle(c.up, r, center, style = Stroke(1.5.dp.toPx()))
-                        ScalpWindowChartData.Kind.BUY -> drawPath(Path().apply { moveTo(center.x, center.y - r); lineTo(center.x - r, center.y + r); lineTo(center.x + r, center.y + r); close() }, c.up)
-                        ScalpWindowChartData.Kind.SELL -> drawRect(c.accentOrange, center - Offset(r, r), androidx.compose.ui.geometry.Size(2*r, 2*r))
-                        else -> drawCircle(c.textSecondary, r, center)
+                        ScalpWindowChartData.Kind.SIGNAL -> drawCircle(sideColor, 2.dp.toPx(), center)
+                        ScalpWindowChartData.Kind.ORDER -> drawCircle(sideColor, r, center, style = Stroke(1.5.dp.toPx()))
+                        ScalpWindowChartData.Kind.BUY -> drawPath(Path().apply { moveTo(center.x, center.y - r); lineTo(center.x - r, center.y + r); lineTo(center.x + r, center.y + r); close() }, sideColor)
+                        ScalpWindowChartData.Kind.SELL -> drawRect(sideColor, center - Offset(r, r), androidx.compose.ui.geometry.Size(2*r, 2*r))
+                        else -> drawCircle(sideColor, r, center)
                     }
                     if (m.id == selected) drawCircle(c.textPrimary, r + 3.dp.toPx(), center, style = Stroke(1.5.dp.toPx()))
                 }
@@ -131,10 +147,41 @@ internal fun ScalpWindowChart(d: ScalpAlgoDetail, onWindow: (String) -> Unit = {
                 Text(windowTime(data.closeMs) + " ET", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
             }
             Text("○ Buy order   ▲ Buy fill   ■ Sell fill   · Signal", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
-            Text("Dashed 50¢ buy ceiling · tap a marker for price and time", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
-            if (data.points.none { (if (side == "YES") it.upBidCents else it.downBidCents) != null }) Text("No recorded bids for this side yet. Missing history is left blank.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
-            selectedMarker?.let { m -> Text("${markerName(m.kind)} · ${m.qty.takeIf { it > 0 }?.let { "$it ct · " }.orEmpty()}${ScalpTabCopy.cents(m.price)} · ${windowTime(m.recordedAtMs)} ET", color = c.textPrimary, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall) }
+            Text("Green UP · red DOWN · both sides. Dashed 50¢ buy ceiling · tap a marker for price and time", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
+            run {
+                val upAny = data.points.any { it.upBidCents != null }
+                val downAny = data.points.any { it.downBidCents != null }
+                val blank = when {
+                    !upAny && !downAny -> "No recorded bids yet. Missing history is left blank."
+                    !upAny || !downAny -> "A side with no recorded bids is left blank."
+                    else -> null
+                }
+                blank?.let { Text(it, color = c.textSecondary, style = MaterialTheme.typography.bodySmall) }
+            }
+            selectedMarker?.let { m ->
+                val sideName = if (m.side == "NO") "DOWN" else "UP"
+                Text("$sideName · ${markerName(m.kind)} · ${m.qty.takeIf { it > 0 }?.let { "$it ct · " }.orEmpty()}${ScalpTabCopy.cents(m.price)} · ${windowTime(m.recordedAtMs)} ET", color = c.textPrimary, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall)
+            }
             data.error?.let { Text(it, color = c.down, style = MaterialTheme.typography.bodySmall) }
+            WindowTimeline(
+                data.startMs,
+                data.closeMs,
+                markers.map { m ->
+                    ChartShapes.WindowEvent(
+                        m.atMs,
+                        when (m.kind) {
+                            ScalpWindowChartData.Kind.BUY -> "entry"
+                            ScalpWindowChartData.Kind.SELL, ScalpWindowChartData.Kind.LEGACY_EXIT -> "exit"
+                            ScalpWindowChartData.Kind.SETTLEMENT -> "settle"
+                            ScalpWindowChartData.Kind.ORDER -> "order"
+                            ScalpWindowChartData.Kind.SIGNAL -> "signal"
+                        },
+                        m.side != "NO",
+                        m.price,
+                        markerName(m.kind)
+                    )
+                }
+            )
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Column { Text("Window realized", color = c.textSecondary, style = MaterialTheme.typography.labelSmall); Text(ScalpTabCopy.money(data.windowNet()), color = c.textPrimary, fontWeight = FontWeight.Bold) }

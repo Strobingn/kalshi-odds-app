@@ -243,6 +243,7 @@ fun ScorecardScreen(
                     item { RecordCard(ScorecardCopy.NO_BET_TITLE, ledger.noBetWouldHave, money = false) }
                 }
                 item { CumulativePnlCard(ledger.cumulativePnl) }
+                item { ScorecardDetailCharts(ledger.picks) }
                 item { SectionCard(ScorecardCopy.SIDE_TITLE) { view.bySide.forEach { BucketRow(it) } } }
                 item { SectionCard(ScorecardCopy.PRICE_TITLE) { view.byPrice.forEach { BucketRow(it) } } }
                 item { SectionCard(ScorecardCopy.TIME_TITLE) { view.timeOfDay.forEach { BucketRow(it) } } }

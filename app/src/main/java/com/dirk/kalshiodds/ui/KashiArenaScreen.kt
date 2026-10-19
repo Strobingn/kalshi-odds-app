@@ -20,6 +20,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.decision.*
 import com.dirk.kalshiodds.ui.charts.ChartSeries
+import com.dirk.kalshiodds.ui.charts.ChartShapes
 import com.dirk.kalshiodds.ui.charts.DailyNetBars
 import com.dirk.kalshiodds.ui.charts.NetBar
 import com.dirk.kalshiodds.ui.charts.PnlSparkline
@@ -122,6 +123,26 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
                     Text("All time · first eight in selected sort", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
                     ArenaBars(rows, fees = true)
                 } }
+                item(key = "insight-charts") {
+                    ArenaCard {
+                        ScalpWindowInsightCharts(
+                            windows = st.windows,
+                            nowMs = st.updatedAtMs,
+                            models = rows.map { it.model },
+                            pnlBars = rows.filter { it.roundTrips > 0 }.map { NetBar(it.model.label, it.netUsd) },
+                            gauges = rows.filter { it.roundTrips > 0 }.map { Triple(it.model.label, it.winRate, it.roundTrips) },
+                            tweaks = rows.mapNotNull { r -> ChartShapes.tweakMark(r.model.label, st.controls.settings(r.model.code).aiNote) }
+                        )
+                    }
+                }
+                item(key = "live-trade-charts") {
+                    val live = remember(st.arenaChart.trades, st.activeScalps) {
+                        (st.arenaChart.trades + st.activeScalps).distinctBy { it.id }
+                    }
+                    ArenaCard {
+                        ScalpTradeInsightCharts(live, "Live window and open positions. All-time curves are above.")
+                    }
+                }
                 item(key = "analysis-data") { OutlinedButton(onClick = onHistory, modifier = Modifier.fillMaxWidth()) { Text("Detailed results & comparison") } }
             }
             KashiArenaTab.CHAT -> item(key = "chat") { LlmChatPanel(rows) }
@@ -168,7 +189,7 @@ internal fun ArenaStrategyRow(row: ScalpModels.Row, st: ScalpTabState, onOpen: (
                     Text("Reality check: after est. slippage ${ScalpTabCopy.money(r.netAfterSlippageUsd)} (−$${String.format(java.util.Locale.US, "%.2f", r.slippageUsd)} @ ${st.controls.slipCents}¢/ct/leg)", color = pnlColor(r.netAfterSlippageUsd), style = MaterialTheme.typography.labelSmall)
                 }
                 val bench = com.dirk.kalshiodds.decision.insights.BenchRegistry.decisions.collectAsState().value[row.model.code]
-                // 1.0.14: frozen losers stay listed with their history and a FROZEN badge (Force trade unfreezes).
+                // One FROZEN badge. Plain auto-bench keeps its own line. Force trade shows the override instead.
                 if (com.dirk.kalshiodds.decision.insights.ScalpFreeze.isFrozen(bench)) Text(bench!!.reason.replaceFirst(com.dirk.kalshiodds.decision.insights.ScalpFreeze.BADGE, com.dirk.kalshiodds.decision.insights.ScalpFreeze.BADGE + " · no new paper trades"), color = c.down, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, maxLines = 2, modifier = Modifier.testTag("FROZEN_BADGE_" + row.model.code))
                 else if (bench != null && !bench.trading) Text("BENCHED · shadow only · " + bench.reason, color = c.down, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, maxLines = 2)
                 else if (bench?.status == com.dirk.kalshiodds.decision.insights.BenchStatus.FORCED_ACTIVE) Text("Bench override · forced trading", color = c.spot, style = MaterialTheme.typography.labelSmall)

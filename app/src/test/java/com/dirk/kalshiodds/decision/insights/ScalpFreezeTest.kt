@@ -79,6 +79,25 @@ class ScalpFreezeTest {
         assertNull(ScalpFreeze.autoFreeze(List(30) { closed("sf41", it, -2.0) } + List(30) { closed("sf41", 100 + it, 0.5) }))
     }
 
+    @Test fun dollarLossAndDeepLossShareOneFrozenBadge() {
+        val mild = List(30) { closed("sf41", it, -0.20) } // net -6: AI rule, not the -10 rule
+        assertNull(ScalpFreeze.autoFreeze(mild))
+        val why = ScalpFreeze.reason("sf41", mild)!!
+        assertTrue(why.startsWith(ScalpFreeze.BADGE))
+        assertNull(ScalpFreeze.reason("sf41", List(30) { closed("sf41", it, -0.02) }))
+        val deep = List(30) { closed("sf41", it, -0.50) }
+        assertTrue(ScalpFreeze.reason("sf41", deep)!!.contains("last 30 trades"))
+        val shadow = List(30) { closed("sf41", 200 + it, 0.40) }
+        assertNull("shadow improvement unfreezes a numeric freeze", ScalpFreeze.reason("sf41", deep, shadow, wasFrozen = true))
+        assertTrue(ScalpFreeze.reason("dip", deep, shadow, wasFrozen = true)!!.startsWith(ScalpFreeze.BADGE))
+        val forced = ScalpFreeze.apply(
+            mapOf("sf41" to BenchDecision("sf41", BenchStatus.FORCED_ACTIVE, 0, 0.0, 0.0, "forced active")),
+            mapOf("sf41" to mild),
+            mapOf("sf41" to "ACTIVE")
+        )
+        assertEquals(BenchStatus.FORCED_ACTIVE, forced.getValue("sf41").status)
+    }
+
     @Test fun autoFreezeAppliesThroughInsightsAndForceTradeWins() {
         val controls = MemoryScalpControls()
         val book = ScalpBook()

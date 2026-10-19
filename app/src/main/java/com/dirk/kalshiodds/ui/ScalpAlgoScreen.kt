@@ -88,12 +88,13 @@ fun ScalpAlgoScreen(viewModel: OddsViewModel, onBack: () -> Unit) {
             onEnabled = { viewModel.enableScalpStrategy(model.code, it) },
             onBenchOverride = { viewModel.setScalpBenchOverride(model.code, it) })
     } else ScalpAlgoContent(d, onBack, paged, viewModel::selectScalpChartWindow, viewModel::followScalpChartLive,
-        onSettings = if (model != null) ({ settingsOpen = true }) else null)
+        onSettings = if (model != null) ({ settingsOpen = true }) else null,
+        aiNote = model?.let { controls.settings(it.code).aiNote }.orEmpty())
 }
 
 @Composable
 fun ScalpAlgoContent(d: ScalpAlgoDetail, onBack: () -> Unit = {}, paged: androidx.paging.compose.LazyPagingItems<ScalpTrade>? = null,
-    onWindow: (String) -> Unit = {}, onLive: () -> Unit = {}, onSettings: (() -> Unit)? = null) {
+    onWindow: (String) -> Unit = {}, onLive: () -> Unit = {}, onSettings: (() -> Unit)? = null, aiNote: String = "") {
     val c = DipTheme.colors
     var selectedTrade by androidx.compose.runtime.remember(d.chart.ticker) { androidx.compose.runtime.mutableStateOf<String?>(null) }
     var showHistory by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
@@ -116,6 +117,13 @@ fun ScalpAlgoContent(d: ScalpAlgoDetail, onBack: () -> Unit = {}, paged: android
         if (d.chart.trades.isEmpty()) item { Text("No entries from this strategy in this window yet. The live price chart keeps updating.", color = c.textSecondary) }
         items(d.chart.trades.sortedByDescending { it.signalAtMs }, key = { "window-${it.id}" }) { t ->
             ScalpWindowTrade(t, selectedTrade == t.id, d.chart.bid(t.side))
+        }
+        item(key = "strategy-charts") {
+            ScalpTradeInsightCharts(
+                d.trades,
+                "This strategy · trades loaded for this screen.",
+                tweaks = listOfNotNull(com.dirk.kalshiodds.ui.charts.ChartShapes.tweakMark(d.model?.label ?: "Strategy", aiNote))
+            )
         }
         item(key = "profit") {
             ArenaCard {

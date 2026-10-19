@@ -128,13 +128,13 @@ object ShockFav {
     fun o50VariantId(p: Params, side: String): String = if (side == "NO" && (p.o50 == O50.BOTH || p.o50 == O50.MAKER)) p.code + "n" else p.code
     fun o50InEntryWindow(tauS: Double): Boolean = (900.0 - tauS) in 5.0..30.0
     /** Open 50 exit (no stop): trailing drop below peak, net TP, AI drop, max hold, τ < 30 s. */
-    fun o50Exit(p: Params, entry: Double, peakBid: Double, bid: Double, heldS: Double, tauS: Double, aiPred: Double? = null, clip: Int = CLIP): String? {
+    fun o50Exit(p: Params, entry: Double, peakBid: Double, bid: Double, heldS: Double, tauS: Double, aiPred: Double? = null, clip: Int = CLIP, maxHoldS: Double = O50_MAX_HOLD_S): String? {
         val net = (bid - entry) - (ScalpRule.orderFee(clip, bid) + ScalpRule.orderFee(clip, entry)) / clip
         return when {
             p.tpNetO50 != null && net >= p.tpNetO50 - 1e-9 -> "net take profit +${Math.round(p.tpNetO50 * 100)}¢"
             p.trail != null && bid <= peakBid - p.trail + 1e-9 -> "trail ${Math.round(p.trail * 100)}¢ below peak"
             aiPred != null && aiPred < -0.01 -> "model predicts drop"
-            heldS >= O50_MAX_HOLD_S -> "max hold 3 min"
+            heldS >= maxHoldS -> "max hold ${Math.round(maxHoldS / 60.0)} min"
             tauS < 30.0 -> "τ < 30 s"
             else -> null
         }
