@@ -123,6 +123,8 @@ object ScalpV2 {
     fun spec(variantId: String): Spec = BY_ID[variantId] ?: Spec(variantId, variantId.removePrefix(PREFIX), maxAsk = MAX_ASK - 0.01 * Math.floorMod(variantId.hashCode(), 6), openMin = 2.0 + Math.floorMod(variantId.hashCode() / 7, 4))
     /** Extra (non-plain) v2 copies to spawn for one original signal. */
     fun extrasFor(originalVariantId: String): List<Spec> = EXTRA_SPECS.filter { it.base == originalVariantId }
+    /** 1.0.14 fix: v2 copies of Simple-dip sf41–sf44 get the same 4-min history allowance as their original. */
+    fun entryOpenMin(s: Spec): Double = if (s.base.take(4) in SIMPLE_BASES) s.openMin + ShockFav.SIMPLE_MIN_HISTORY_MS / 60_000.0 else s.openMin
     fun isExtra(variantId: String): Boolean = EXTRA_SPECS.any { it.id == variantId }
     fun baseOf(variantId: String): String = spec(variantId).base
 

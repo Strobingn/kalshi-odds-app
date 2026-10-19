@@ -103,7 +103,7 @@ class ReleaseGate0340MultiStrategyTest {
         // 0.3.50: the sixth model (maker-first dip) also runs as a primary; check the taker models here.
         val open = b.snapshot().filter { it.state == ScalpState.OPEN && !it.isMaker && !it.variantId.endsWith("-h60") && !it.variantId.contains("-t99-") }
         assertEquals(setOf(ScalpStrategy.FAIR_GAP, ScalpStrategy.DIP_HUNTER), open.map { it.strategy }.toSet())
-        assertEquals(2, b.snapshot().count { !it.isMaker && !it.variantId.endsWith("-h60") && !it.variantId.contains("-t99-") }) // 0.3.61: dip-hold sibling also fires
+        assertEquals(2, b.snapshot().count { !it.isMaker && !it.variantId.endsWith("-h60") && !it.variantId.contains("-t99-") && it.variantId !in com.dirk.kalshiodds.decision.ScalpParams.FAIR_TWEAKS.map { t -> t.id } }) // 0.3.61: dip-hold sibling also fires
         open.groupBy { it.strategy to it.side }.values.forEach { assertEquals(1, it.size) }
         assertTrue(open.all { it.isPrimary })
     }
@@ -116,11 +116,11 @@ class ReleaseGate0340MultiStrategyTest {
         val tiny = book(bankroll = 5.0)
         tiny.onQuote(q(t, 0.44, 0.45), true)
         tiny.onQuote(q(t + 30_000L, 0.34, 0.35), true)
-        assertEquals(1, tiny.snapshot().size) // 0.3.54: shared bankroll — $5 free cash covers exactly one $3.66 clip
+        assertEquals(1, tiny.snapshot().count { it.variantId !in com.dirk.kalshiodds.decision.ScalpParams.FAIR_TWEAKS.map { t -> t.id } }) // 0.3.54: shared bankroll — $5 free cash covers exactly one $3.66 clip
         val broke = book(bankroll = 3.0)
         broke.onQuote(q(t, 0.44, 0.45), true)
         broke.onQuote(q(t + 30_000L, 0.34, 0.35), true)
-        assertEquals(0, broke.snapshot().size) // free cash can't cover a clip → skipped
+        assertEquals(0, broke.snapshot().count { it.variantId !in com.dirk.kalshiodds.decision.ScalpParams.FAIR_TWEAKS.map { t -> t.id } }) // free cash can't cover a clip → skipped
         val b = book(bankroll = 40.0)
         b.onQuote(q(t, 0.44, 0.45), true)
         b.onQuote(q(t + 30_000L, 0.34, 0.35), true)
@@ -130,7 +130,7 @@ class ReleaseGate0340MultiStrategyTest {
         val roomy = book(bankroll = 1_000.0)
         roomy.onQuote(q(t, 0.44, 0.45), true)
         roomy.onQuote(q(t + 30_000L, 0.34, 0.35), true)
-        assertEquals(2, roomy.snapshot().count { !it.isMaker && !it.variantId.endsWith("-h60") && !it.variantId.contains("-t99-") })
+        assertEquals(2, roomy.snapshot().count { !it.isMaker && !it.variantId.endsWith("-h60") && !it.variantId.contains("-t99-") && it.variantId !in com.dirk.kalshiodds.decision.ScalpParams.FAIR_TWEAKS.map { t -> t.id } })
     }
 
     private fun closed(window: Int, variant: ScalpParams, cents: Double, i: Int): ScalpTrade {

@@ -253,6 +253,8 @@ object StrategyAlgo {
 
     private fun originalParams(code: String): ScalpParams? = when (code) {
         "fair" -> ScalpParams.seedFor("BTC")
+        "fair-t1" -> ScalpParams.FAIR_TWEAKS[0]
+        "fair-t2" -> ScalpParams.FAIR_TWEAKS[1]
         "fairh60" -> ScalpParams.seedFor("BTC").copy(hold60 = true)
         "dip" -> ScalpParams.seedFor("BTC", ScalpStrategy.DIP_HUNTER)
         "momo" -> ScalpParams.seedFor("BTC", ScalpStrategy.MOMENTUM)
