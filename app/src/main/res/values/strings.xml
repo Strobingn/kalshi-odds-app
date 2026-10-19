@@ -18,12 +18,12 @@
     <string name="live_signals_fg_text">Watching crypto ticker + orderbook WebSocket. Alerts never auto-place; Approve is required per ticket.</string>
     <string name="live_signals_stop">Stop</string>
     <string name="live_signals_allow_background">Allow background</string>
-    <string name="signal_alert_title">DipHunter Enhanced  %1$s</string>
+    <string name="signal_alert_title">DipHunter Enhanced - %1$s</string>
     <string name="scorecard">Scorecard</string>
     <string name="opportunity_channel_name">Long-shot and hunter cards</string>
-    <string name="opportunity_channel_desc">Fires when a Long-shot or hunter ticket appears. Tapping opens the ticket. Approve is still required  never auto-placed.</string>
-    <string name="opportunity_longshot_title">Long-shot  %1$s</string>
-    <string name="opportunity_hunter_title">Hunter  %1$s</string>
-    <string name="opportunity_wintarget_title">Ticket  %1$s</string>
-    <string name="opportunity_body">%1$s  %2$d ct  $%3$s stake. Tap to open the ticket. Approve still required.</string>
+    <string name="opportunity_channel_desc">Fires when a Long-shot or hunter ticket appears. Tapping opens the ticket. Approve is still required - never auto-placed.</string>
+    <string name="opportunity_longshot_title">Long-shot - %1$s</string>
+    <string name="opportunity_hunter_title">Hunter - %1$s</string>
+    <string name="opportunity_wintarget_title">Ticket - %1$s</string>
+    <string name="opportunity_body">%1$s - %2$d ct - $%3$s stake. Tap to open the ticket. Approve still required.</string>
 </resources>
