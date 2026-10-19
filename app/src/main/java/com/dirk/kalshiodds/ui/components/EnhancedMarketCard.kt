@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -46,7 +45,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.dirk.kalshiodds.domain.MarketQuoteView
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.config.SignalSettings
@@ -109,7 +107,7 @@ fun EnhancedMarketCard(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Header with coin name and time
+            // Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -136,7 +134,6 @@ fun EnhancedMarketCard(
                 TimeLeftLabel(market.closeTimeEpochMs, compact = true, nowMs = nowMs)
             }
 
-            // Probability Gauge Row
             ProbabilityGaugeRow(
                 aiYesPercent = market.aiYesPercent,
                 aiNoPercent = market.aiNoPercent,
@@ -144,14 +141,12 @@ fun EnhancedMarketCard(
                 modifier = Modifier.fillMaxWidth()
             )
 
-            // Edge vs Market Comparison
             EdgeComparisonBar(
                 edgePp = market.edgePp ?: 0.0,
                 marketMid = market.yesProbabilityPercent,
                 modifier = Modifier.fillMaxWidth()
             )
 
-            // Target and Spot Delta
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -163,7 +158,6 @@ fun EnhancedMarketCard(
                 HomeSpotDelta(market)
             }
 
-            // Price Tiles with Enhanced Styling
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -194,7 +188,6 @@ fun EnhancedMarketCard(
                 )
             }
 
-            // Enhanced Sparkline with Gradient
             EnhancedOddsSparkline(
                 points = com.dirk.kalshiodds.chart.ChartSeriesBuilder.sparklineMidsPp(market.oddsHistory),
                 modifier = Modifier.fillMaxWidth().height(64.dp),
@@ -202,7 +195,6 @@ fun EnhancedMarketCard(
                 marketMid = market.yesProbabilityPercent
             )
 
-            // Decision Label with Icon
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -235,7 +227,6 @@ fun EnhancedMarketCard(
                 )
             }
 
-            // Model vs Market Text
             val disagreement = DisagreementLabel.of(market)
             if (disagreement != null && call.headline != BetCall.Headline.NO_BET) {
                 DisagreementWarningPublic(disagreement)
@@ -247,7 +238,6 @@ fun EnhancedMarketCard(
                 )
             }
 
-            // Action Buttons
             if (call.isActionable) {
                 HomeCopy.allInProfit(call)?.let {
                     Text(
@@ -432,7 +422,8 @@ fun DonutChart(
     val strokeWidthPx = with(LocalDensity.current) { strokeWidth.toPx() }
 
     Canvas(modifier = modifier) {
-        val center = Offset(size.width / 2f, size.height / 2f)
+        val centerX = size.width / 2f
+        val centerY = size.height / 2f
         val radius = (size.minDimension - strokeWidthPx) / 2f
 
         drawArc(
@@ -440,7 +431,7 @@ fun DonutChart(
             startAngle = 0f,
             sweepAngle = noSweep,
             useCenter = false,
-            topLeft = Offset(center.x - radius, center.y - radius),
+            topLeft = Offset(centerX - radius, centerY - radius),
             size = androidx.compose.ui.geometry.Size(radius * 2f, radius * 2f),
             style = Stroke(width = strokeWidthPx)
         )
@@ -450,7 +441,7 @@ fun DonutChart(
             startAngle = noSweep,
             sweepAngle = yesSweep,
             useCenter = false,
-            topLeft = Offset(center.x - radius, center.y - radius),
+            topLeft = Offset(centerX - radius, centerY - radius),
             size = androidx.compose.ui.geometry.Size(radius * 2f, radius * 2f),
             style = Stroke(width = strokeWidthPx, cap = StrokeCap.Butt)
         )
@@ -458,7 +449,7 @@ fun DonutChart(
         drawCircle(
             color = MaterialTheme.colorScheme.surface,
             radius = radius - strokeWidthPx / 2f,
-            center = center
+            center = Offset(centerX, centerY)
         )
 
         val text = String.format(Locale.US, "%.0f%%", yesPercent)
@@ -469,7 +460,7 @@ fun DonutChart(
             setTypeface(android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD))
         }
         drawContext.canvas.nativeCanvas.drawText(
-            text, center.x, center.y + paint.textSize / 3f, paint
+            text, centerX, centerY + paint.textSize / 3f, paint
         )
     }
 }
@@ -483,6 +474,7 @@ fun EdgeComparisonBar(
     val colors = DipTheme.colors
     val mid = marketMid ?: 50.0
     val edge = edgePp
+    val density = LocalDensity.current
 
     Column(
         modifier = modifier,
@@ -527,10 +519,10 @@ fun EdgeComparisonBar(
             )
 
             val arrowPosition = (mid / 100.0f).coerceIn(0f, 1f)
-            val density = LocalDensity.current
+            val arrowX = with(density) { (size.width * arrowPosition).toDp() }
             Box(
                 modifier = Modifier
-                    .padding(start = with(density) { (size.width * arrowPosition).toDp() })
+                    .padding(start = arrowX)
                     .size(20.dp)
                     .background(
                         color = if (edge > 0.0) colors.up else colors.down,
@@ -637,6 +629,7 @@ fun EnhancedOddsSparkline(
 ) {
     val colors = DipTheme.colors
     val mid = marketMid ?: 50.0
+    val density = LocalDensity.current
 
     if (points.size < 2) {
         Box(
@@ -655,7 +648,6 @@ fun EnhancedOddsSparkline(
     }
 
     Canvas(modifier = modifier) {
-        val density = LocalDensity.current
         val width = size.width
         val height = size.height
         val padding = with(density) { 8.dp.toPx() }
