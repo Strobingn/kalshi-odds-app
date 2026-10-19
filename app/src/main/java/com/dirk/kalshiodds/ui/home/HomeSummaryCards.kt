@@ -106,6 +106,7 @@ fun HomeBestScalperCard(
             Text(HomeSummaryCopy.PAPER, style = MaterialTheme.typography.labelSmall, color = colors.textSecondary)
             WindowBlock("Last 24h", best24, loading, failed)
             WindowBlock("Last 7d", best7, loading, failed)
+            if (!loading && !failed) HomeBestScalperChart(best24, best7)
         }
     }
 }
@@ -158,6 +159,7 @@ fun HomeDailySummaryCard(
                     }
                     ScalperExtreme("Best", summary.best)
                     ScalperExtreme("Worst", summary.worst)
+                    HomeTodayCharts(summary)
                     Text(
                         HomeSummaryCopy.settingsHeadline(summary),
                         style = MaterialTheme.typography.bodySmall,

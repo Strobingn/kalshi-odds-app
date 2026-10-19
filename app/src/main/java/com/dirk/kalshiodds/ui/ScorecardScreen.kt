@@ -1,6 +1,5 @@
 package com.dirk.kalshiodds.ui
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -33,10 +32,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -48,6 +43,10 @@ import com.dirk.kalshiodds.signal.feedback.ScorecardTargets
 import com.dirk.kalshiodds.ui.theme.DipTheme
 import java.util.Locale
 import kotlin.math.roundToInt
+import com.dirk.kalshiodds.ui.charts.PnlLineChart
+import com.dirk.kalshiodds.ui.charts.WinLossBars
+import com.dirk.kalshiodds.ui.charts.WinLossRow
+import com.dirk.kalshiodds.ui.charts.WinRateGauge
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -203,7 +202,7 @@ fun ScorecardScreen(
                     )
                 }
             } else {
-                item { RecordCard(ScorecardCopy.COMBINED_TITLE, ledger.combined) }
+                item { RecordCard(ScorecardCopy.COMBINED_TITLE, ledger.combined, gauge = true) }
                 view.hypotheticalLine?.let { line ->
                     item {
                         Text(
@@ -243,14 +242,18 @@ fun ScorecardScreen(
                 if (ledger.noBetWouldHave.settledCount > 0) {
                     item { RecordCard(ScorecardCopy.NO_BET_TITLE, ledger.noBetWouldHave, money = false) }
                 }
-                if (ledger.cumulativePnl.size >= 2) {
-                    item { CumulativePnlCard(ledger.cumulativePnl) }
-                }
+                item { CumulativePnlCard(ledger.cumulativePnl) }
                 item { SectionCard(ScorecardCopy.SIDE_TITLE) { view.bySide.forEach { BucketRow(it) } } }
                 item { SectionCard(ScorecardCopy.PRICE_TITLE) { view.byPrice.forEach { BucketRow(it) } } }
                 item { SectionCard(ScorecardCopy.TIME_TITLE) { view.timeOfDay.forEach { BucketRow(it) } } }
                 item { SectionCard(ScorecardCopy.CONF_TITLE) { view.byConfidence.forEach { BucketRow(it) } } }
-                item { SectionCard(ScorecardCopy.SOURCE_TITLE) { view.bySource.forEach { BucketRow(it) } } }
+                item {
+                    SectionCard(ScorecardCopy.SOURCE_TITLE) {
+                        WinLossBars(view.bySource.map { WinLossRow(it.label, it.wins, it.losses) }, Modifier.fillMaxWidth())
+                        Spacer(Modifier.height(8.dp))
+                        view.bySource.forEach { BucketRow(it) }
+                    }
+                }
                 item {
                     Text(
                         ScorecardCopy.PICKS_TITLE,
@@ -489,7 +492,7 @@ internal fun PreResetArchiveCard(section: ScorecardCopy.ArchiveSection) {
 }
 
 @Composable
-private fun RecordCard(title: String, record: ScorecardLedger.Record, money: Boolean = true) {
+private fun RecordCard(title: String, record: ScorecardLedger.Record, money: Boolean = true, gauge: Boolean = false) {
     val colors = DipTheme.colors
     Column(
         modifier = Modifier
@@ -498,12 +501,16 @@ private fun RecordCard(title: String, record: ScorecardLedger.Record, money: Boo
             .padding(16.dp)
     ) {
         Text(title, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
-        Text(
-            if (record.settledCount <= 0) ScorecardCopy.EM_DASH else "${record.wins}-${record.losses}",
-            fontSize = 28.sp,
-            fontWeight = FontWeight.Bold,
-            color = colors.textPrimary
-        )
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                if (record.settledCount <= 0) ScorecardCopy.EM_DASH else "${record.wins}-${record.losses}",
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Bold,
+                color = colors.textPrimary,
+                modifier = Modifier.weight(1f)
+            )
+            if (gauge) WinRateGauge(record.hitRate, record.settledCount, size = 96.dp)
+        }
         Spacer(Modifier.height(8.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             NeutralStat("Win rate", ScorecardCopy.percentOrDash(record.hitRate))
@@ -700,7 +707,6 @@ private fun SettledPickRow(pick: ScorecardCopy.RecentPick) {
 @Composable
 private fun CumulativePnlCard(points: List<Pair<Long, Double>>) {
     val colors = DipTheme.colors
-    val last = points.last().second
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -708,30 +714,9 @@ private fun CumulativePnlCard(points: List<Pair<Long, Double>>) {
             .padding(16.dp)
     ) {
         Text(ScorecardCopy.PNL_TITLE, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
-        Text(
-            ScorecardLedger.signedUsd(last),
-            fontWeight = FontWeight.Bold,
-            color = if (last >= 0) colors.up else colors.down
-        )
-        Canvas(Modifier.fillMaxWidth().height(96.dp).padding(top = 8.dp)) {
-            val ys = points.map { it.second }
-            val minY = (ys.minOrNull() ?: 0.0) - 1.0
-            val maxY = (ys.maxOrNull() ?: 0.0) + 1.0
-            val spanY = (maxY - minY).coerceAtLeast(1.0)
-            val path = Path()
-            points.forEachIndexed { i, p ->
-                val x = size.width * i / (points.size - 1).coerceAtLeast(1).toFloat()
-                val y = size.height * (1f - ((p.second - minY) / spanY).toFloat()).coerceIn(0f, 1f)
-                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
-            }
-            drawPath(
-                path,
-                if (last >= 0) colors.upButton else colors.downButton,
-                style = Stroke(width = 3f, cap = StrokeCap.Round)
-            )
-            val zero = size.height * (1f - ((0.0 - minY) / spanY).toFloat()).coerceIn(0f, 1f)
-            drawLine(colors.textSecondary.copy(alpha = 0.25f), Offset(0f, zero), Offset(size.width, zero), strokeWidth = 1f)
-        }
+        Spacer(Modifier.height(8.dp))
+        // Start at $0 so the first settled pick already draws a segment.
+        PnlLineChart(if (points.isEmpty()) emptyList() else listOf(0.0) + points.map { it.second }, Modifier.fillMaxWidth(), height = 120.dp)
     }
 }
 
