@@ -155,7 +155,15 @@ object ScalpModels {
     }
 
     const val V2_BLURB = "v2 paper: new trades default to a 3¢ bid-peak trail active from entry and independent 20% fill-price stop. Existing trades retain saved exits. Preserve positive/inconclusive entry settings; bounded adjustments for sustained losses. Every trade has a protective stop. Exit in the final minute unless fresh CF fair ≥ 97%, bid ≥ 90¢ and holding beats selling. Decisions are estimates, never guaranteed wins. Actual stop/trail and adaptation evidence are in the trade note."
-    val ALL: List<Model> = Model.values().toList()
+    /**
+     * 1.0.10: loser strategies removed from the Scalper registry — they no longer run or show. Their enum entries stay
+     * only so saved trades/stats with these ids still decode (history is kept, never deleted); lookups return null.
+     * sf30/sf32 = Book imbalance; mkdip/diph60/dipnotp = Dip-hunter dip-g05 maker / hold / no-target; r-kelly = Fair-gap Kelly.
+     */
+    val REMOVED_CODES: Set<String> = setOf("sf30", "sf32", "mkdip", "diph60", "dipnotp", "r-kelly")
+    fun isRemoved(code: String?): Boolean = code != null && code in REMOVED_CODES
+    private val RAW_ALL: List<Model> = Model.values().toList()
+    val ALL: List<Model> = RAW_ALL.filter { it.code !in REMOVED_CODES }
     /** 0.3.65: v2 copy of an original model (null when none, e.g. sf29 or a v2 itself). */
     fun v2Of(m: Model): Model? = V2_BY_ORIG[m]
     fun originalOf(v2: Model): Model? = ORIG_BY_CODE[ScalpV2.baseOf(v2.code)]?.takeIf { isV2(v2) }
@@ -168,7 +176,7 @@ object ScalpModels {
     private val BY_CODE: Map<String, Model> by lazy { ALL.associateBy { it.code } }
     /** Build a Row from the incremental stats (+ exit counts). No trade scan, no bootstrap. */
     fun rowFromStat(st: ScalpStat, openN: Int = st.openN, exits: List<ScalpExitAgg> = emptyList(), unrealizedUsd: Double = 0.0): Row {
-        val m = modelByCode(st.scalperId) ?: Model.FAIR_GAP
+        val m = modelByCode(st.scalperId) ?: Model.FAIR_GAP // leaderboardFromStats only passes registry ids
         val ci = st.perTradeCi()
         return Row(
             model = m, netUsd = st.netUsd, roundTrips = st.n, wins = st.wins,
@@ -191,10 +199,10 @@ object ScalpModels {
         }.sortedWith(compareByDescending<Row> { it.netUsd + it.unrealizedUsd }.thenByDescending { it.roundTrips })
     }
     val V2_MODELS: List<Model> get() = ALL.filter { isV2(it) }
-    private val ORIG_BY_CODE: Map<String, Model> by lazy { ALL.filter { !isV2(it) }.associateBy { it.code } }
+    private val ORIG_BY_CODE: Map<String, Model> by lazy { RAW_ALL.filter { !isV2(it) }.associateBy { it.code } }
     private val V2_BY_ORIG: Map<Model, Model> by lazy { ALL.filter { isV2(it) && !ScalpV2.isExtra(it.code) }.mapNotNull { v -> ORIG_BY_CODE[v.code.removePrefix(ScalpV2.PREFIX)]?.let { it to v } }.toMap() }
     val COUNT: Int get() = ALL.size
-    private val SF_BY_CODE: Map<String, Model> by lazy { ALL.filter { it.code.startsWith(ShockFav.PREFIX) }.associateBy { it.code } }
+    private val SF_BY_CODE: Map<String, Model> by lazy { RAW_ALL.filter { it.code.startsWith(ShockFav.PREFIX) }.associateBy { it.code } }
     val SF_MODELS: List<Model> get() = ALL.filter { it.code.startsWith(ShockFav.PREFIX) }
     /** 0.3.59: true for sf variants with no positive BTC 2 s-delay test CI. */
     fun noEdge2s(m: Model): Boolean = ShockFav.byVariantId(m.code)?.noEdge2s == true
@@ -229,13 +237,14 @@ object ScalpModels {
     fun modelOf(t: ScalpTrade): Model? {
         if (!t.isPrimary) return null
         // 0.3.66: no per-trade copy for v2 rows (was t.copy() per trade per board pass); cached per variant id.
-        return MODEL_BY_VARIANT.getOrPut(t.variantId) { modelOfVariant(t.variantId) ?: NONE } as? Model
+        // 1.0.10: saved trades of removed strategies resolve to no model (kept in history, not shown/attributed).
+        return MODEL_BY_VARIANT.getOrPut(t.variantId) { modelOfVariant(t.variantId)?.takeIf { it.code !in REMOVED_CODES } ?: NONE } as? Model
     }
     private val NONE = Any()
     private val MODEL_BY_VARIANT = java.util.concurrent.ConcurrentHashMap<String, Any>()
     private fun modelOfVariant(vid: String): Model? {
         if (vid == "v2-llm") return Model.V2_LLM
-        if (Research.isResearch(vid)) return BY_CODE[vid]
+        if (Research.isResearch(vid)) return RAW_ALL.firstOrNull { it.code == vid }
         if (ScalpV2.isExtra(vid)) return ALL.firstOrNull { it.code == vid }
         if (ScalpV2.isV2(vid)) return modelOfVariant(vid.removePrefix(ScalpV2.PREFIX))?.let { v2Of(it) }
         if (vid.startsWith(ForecastScalp.RIDE_PREFIX)) return Model.FORECAST_RIDE

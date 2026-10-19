@@ -569,7 +569,8 @@ class ScalpBook(
         val coin = ScalpParams.coinOf(q.ticker)
         val primary = paramsFor(coin)
         // 0.3.50: six paper models = five strategy primaries + maker-first dip (buy the dip at the bid, sell the rebound at the ask).
-        val primaries = ScalpStrategy.values().map { paramsFor(coin, it) } + ScalpModels.MAKER_DIP_PARAMS + ScalpParams.HOLD60_SIBLINGS + ScalpParams.QUEUED_COPIES
+        // 1.0.10: Dip-hunter maker / hold / no-TP copies removed (ScalpModels.REMOVED_CODES).
+        val primaries = ScalpStrategy.values().map { paramsFor(coin, it) } + (ScalpParams.HOLD60_SIBLINGS + ScalpParams.QUEUED_COPIES).filter { !ScalpModels.isRemoved(ScalpModels.modelOf(it).code) }
         val primaryIds = primaries.map { it.id }.toSet()
         val key = q.ticker.uppercase()
         val hist = history.getOrPut(key) { ArrayDeque() }
@@ -1003,6 +1004,7 @@ class ScalpBook(
             val bankroll = bankrollUsd()
             var brtiFair: Double? = null
             for (p in ShockFav.VARIANTS) {
+                if (ScalpModels.isRemoved(p.code)) continue // 1.0.10: Book imbalance sf30/sf32 removed
                 if (p.kind == ShockFav.Kind.OPEN50) {
                     if (p.o50 != ShockFav.O50.AI) continue // 0.3.65: handled in o50PriceEntries
                     // 0.3.64 Open 50: one shot per market per side, only 5–30 s after the open.

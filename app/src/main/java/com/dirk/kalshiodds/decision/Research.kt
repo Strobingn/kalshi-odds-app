@@ -13,7 +13,8 @@ import kotlin.math.sqrt
 object Research {
     const val PREFIX = "r-"
     const val LATE = "r-late"; const val HOLD = "r-hold"; const val MAKER = "r-maker"; const val KELLY = "r-kelly"
-    val IDS = listOf(LATE, HOLD, MAKER, KELLY)
+    /** 1.0.10: r-kelly removed from the registry (KELLY kept so old saved trades still close/decode). */
+    val IDS = listOf(LATE, HOLD, MAKER)
     fun isResearch(variantId: String) = variantId.startsWith(PREFIX)
 
     /** Frozen research parameters (sliders). */
