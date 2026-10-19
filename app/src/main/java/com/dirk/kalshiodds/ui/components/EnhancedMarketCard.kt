@@ -459,19 +459,19 @@ fun DonutChart(
 
         drawCircle(
             color = MaterialTheme.colorScheme.surface,
-            radius = radius - strokeWidthPx / 2,
+            radius = radius - strokeWidthPx / 2.0f,
             center = center
         )
 
-        drawContext.canvas.nativeCanvas.apply {
+        with(drawContext.canvas.nativeCanvas) {
             val text = String.format("%.0f%%", yesPercent)
             val paint = android.graphics.Paint().apply {
-                textSize = 14.sp.toPx()
+                textSize = with(LocalDensity.current) { 14.sp.toPx() }
                 textAlign = android.graphics.Paint.Align.CENTER
                 color = android.graphics.Color.WHITE
                 setTypeface(android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD))
             }
-            nativeCanvas.drawText(text, center.x, center.y + paint.textSize / 3, paint)
+            drawText(text, center.x, center.y + paint.textSize / 3f, paint)
         }
     }
 }
@@ -507,34 +507,34 @@ fun EdgeComparisonBar(
         ) {
             Box(
                 modifier = Modifier
-                    .fillMaxWidth(((mid / 100f).coerceIn(0f, 1f)))
+                    .fillMaxWidth(((mid / 100.0f).coerceIn(0.0f, 1.0f)))
                     .fillMaxHeight()
                     .background(
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
-                        shape = RoundedCornerShape(4.dp)
+                        shape = RoundedCornerShape(4.0f.dp)
                     )
             )
 
-            val aiPosition = (mid + edge) / 100f
+            val aiPosition = (mid + edge) / 100.0f
             Box(
                 modifier = Modifier
-                    .fillMaxWidth((aiPosition.coerceIn(0f, 1f)))
+                    .fillMaxWidth((aiPosition.coerceIn(0.0f, 1.0f)))
                     .fillMaxHeight()
                     .background(
                         Brush.horizontalGradient(
                             colors = listOf(colors.up, colors.down)
                         ),
-                        shape = RoundedCornerShape(4.dp)
+                        shape = RoundedCornerShape(4.0f.dp)
                     )
             )
 
-            val arrowPosition = (mid / 100f).coerceIn(0f, 1f)
+            val arrowPosition = (mid / 100.0f).coerceIn(0.0f, 1.0f)
             Box(
                 modifier = Modifier
                     .padding(start = (size.width * arrowPosition))
-                    .size(20.dp)
+                    .size(20.0f.dp)
                     .background(
-                        color = if (edge > 0) colors.up else colors.down,
+                        color = if (edge > 0.0) colors.up else colors.down,
                         shape = CircleShape
                     )
             ) {
@@ -707,7 +707,7 @@ fun EnhancedOddsSparkline(
             path = path,
             color = color,
             style = Stroke(
-                width = 2.5.dp.toPx(),
+                width = 2.5f.dp.toPx(),
                 cap = StrokeCap.Round,
                 join = androidx.compose.ui.graphics.PathEffect.Join.Round
             )
@@ -739,7 +739,7 @@ fun EnhancedOddsSparkline(
         val lastY = padding + drawHeight * (1.0f - ((points.last() - minY) / range).coerceIn(0.0f, 1.0f))
         drawCircle(
             color = color,
-            radius = 4.dp.toPx(),
+            radius = 4.0f.dp.toPx(),
             center = Offset(lastX, lastY)
         )
     }

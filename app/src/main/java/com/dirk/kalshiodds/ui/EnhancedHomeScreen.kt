@@ -139,7 +139,7 @@ fun EnhancedHomeScreen(
             state.scorecardSummary?.let { summary ->
                 PnlHeader(
                     pnl = summary.paperPnlUsd.toFloat(),
-                    winRate = summary.winRate?.toDouble(),
+                    winRate = summary.hitRate,
                     settledCount = summary.settledCount,
                     modifier = Modifier
                         .fillMaxWidth()
