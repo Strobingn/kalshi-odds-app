@@ -116,6 +116,13 @@ class KalshiOddsApp : Application() {
             runCatching { container.preferences.applyPaperBankrollReset0340IfNeeded(container.paper.book) }
             runCatching { container.preferences.applyPaperBankrollReset0328IfNeeded(container.paper.book) }
             runCatching { container.preferences.applyPaperBankrollReset0346IfNeeded(container.paper.book) }
+            runCatching {
+                container.preferences.applyFakeScorecardPurgeIfNeeded(
+                    log = container.logStore,
+                    book = container.paper.book,
+                    deleteMirroredPaperRows = { container.resultsStore.deleteFakePaperFills() }
+                )
+            }
             runCatching { container.preferences.applyLastMinuteStakeIfNeeded() }
             runCatching { restorePersistedHistory() }
             runCatching { firstLaunchSync() }

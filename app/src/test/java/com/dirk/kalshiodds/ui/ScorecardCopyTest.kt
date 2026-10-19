@@ -32,11 +32,11 @@ class ScorecardCopyTest {
             honest = ScorecardMetrics.honest(ScorecardCopy.settledPicks(entries))
         )
         assertTrue("per-series empty does not hide the BTC scorecard", contradiction.perSeries.isEmpty())
-        assertEquals(18, contradiction.sampleCount)
-        assertEquals(18, contradiction.honest.n)
-        assertEquals(18, view.settledCount)
+        assertEquals(17, contradiction.sampleCount)
+        assertEquals(17, contradiction.honest.n)
+        assertEquals(17, view.settledCount)
         assertEquals(12, view.summary.wins)
-        assertEquals(6, view.summary.losses)
+        assertEquals(5, view.summary.losses)
         assertFalse(view.showsEmptyState)
         assertNull(view.emptyState())
         assertFalse(view.allLines().any { it.contains("No settled samples") })
@@ -65,15 +65,16 @@ class ScorecardCopyTest {
         assertTrue(entries.any { it.ticker.startsWith("KXETH15M") })
         assertTrue(entries.any { it.ticker.startsWith("KXSOL15M") })
         val settled = ScorecardCopy.settledPicks(entries)
-        assertEquals(18, settled.size)
+        assertEquals(17, settled.size)
         assertTrue(settled.all { it.ticker.startsWith("KXBTC15M") })
+        assertTrue(settled.none { it.entryAsk == null })
         assertTrue(settled.none { it.ticker.startsWith("KXETH") || it.ticker.startsWith("KXSOL") })
         val view = ScorecardCopy.of(entries, 12.40)
-        assertEquals(18, view.settledCount)
-        assertEquals("12-6", ScorecardCopy.recordLine(view.summary))
-        assertEquals("67%", ScorecardCopy.winRateLine(view.summary))
+        assertEquals(17, view.settledCount)
+        assertEquals("12-5", ScorecardCopy.recordLine(view.summary))
+        assertEquals("71%", ScorecardCopy.winRateLine(view.summary))
         assertEquals("paper +$12.40", ScorecardCopy.paperPnlLine(view.summary))
-        assertEquals("18 settled", ScorecardCopy.settledCountLine(view.summary))
+        assertEquals("17 settled", ScorecardCopy.settledCountLine(view.summary))
         assertTrue(view.recent.none { it.ticker.startsWith("KXETH") || it.ticker.startsWith("KXSOL") })
         assertTrue(view.timeOfDay.any { it.settledCount > 0 })
         assertEquals("SOL  —", ScorecardCopy.bucketLine("SOL", 0, 0, 0, null))
@@ -100,7 +101,11 @@ class ScorecardCopyTest {
                 closeTimeMs = 10_000L + i,
                 outcome = "yes",
                 predictedSide = "YES",
-                settledAtMs = 10_000L + i
+                settledAtMs = 10_000L + i,
+                entryAsk = 0.40,
+                contracts = 10,
+                stakeUsd = 4.0,
+                feeUsd = 0.20
             )
         }
         val entries = HomeFixtures.sampleSettledEntries() + extra + PredictionLogEntry(
@@ -115,7 +120,7 @@ class ScorecardCopyTest {
             predictedSide = "NO_BET"
         )
         val view = ScorecardCopy.of(entries, 12.40)
-        assertEquals(48, view.recent.size)
+        assertEquals(47, view.recent.size)
         assertTrue(view.recent.none { it.ticker.contains("NOBET") })
         val first = view.recent.first()
         assertTrue(first.line.contains(first.coin) || first.line.contains(first.side))
@@ -181,7 +186,7 @@ class ScorecardCopyTest {
         val fills = HomeFixtures.sampleSettledFills()
         val snap = ScorecardMetrics.compute(entries, fills = fills)
         val ledger = ScorecardLedger.of(entries, fills)
-        assertEquals(18, snap.allTime.total)
+        assertEquals(17, snap.allTime.total)
         assertEquals(12, snap.allTime.hits)
         assertNotNull(snap.allTime.pnlUsd)
         assertEquals(ledger.ai.money.pnlUsd, snap.allTime.pnlUsd!!, 1e-6)
@@ -220,14 +225,16 @@ class ScorecardCopyTest {
         assertEquals(40, stats.hits)
         assertEquals(48, stats.total)
         assertEquals("Picked side: 40/48 correct (83%)", HomeCopy.pickedSideLine(stats.hits, stats.total))
-        assertEquals(0.0, stats.pnlUsd!!, 1e-9)
+        assertEquals(-0.80, stats.pnlUsd!!, 1e-6)
         val view = ScorecardCopy.of(entries, 0.0)
-        assertEquals(0.0, view.ledger.ai.money.pnlUsd, 1e-9)
-        assertNull(ScorecardCopy.breakEvenWinRateLine(view.ledger.ai.money))
-        assertEquals(48, view.ledger.hypotheticalPicks)
-        assertEquals(-0.80, view.ledger.hypotheticalPerContractUsd, 1e-9)
-        assertTrue(view.hypotheticalLine!!.contains(ScorecardCopy.HYPOTHETICAL_LABEL))
-        assertTrue(view.allLines().contains(view.hypotheticalLine))
+        assertEquals(-0.80, view.ledger.ai.money.pnlUsd, 1e-6)
+        assertEquals(
+            "Break-even win rate at your avg win/loss: 85%",
+            ScorecardCopy.breakEvenWinRateLine(view.ledger.ai.money)
+        )
+        assertEquals(0, view.ledger.hypotheticalPicks)
+        assertNull(view.hypotheticalLine)
+        assertTrue(view.allLines().any { it.contains("−$0.80") || it.contains("-$0.80") })
     }
 
     @Test
@@ -246,8 +253,8 @@ class ScorecardCopyTest {
             settledAtMs = 2_000L
         )
         val stats = ScorecardMetrics.window(listOf(entry))
-        assertEquals(1, stats.total)
-        assertEquals(1, stats.hits)
+        assertEquals(0, stats.total)
+        assertEquals(0, stats.hits)
         assertNull(stats.pnlUsd)
         assertNull(ScorecardCopy.windowRealPnlLine(stats.pnlUsd))
     }
@@ -282,10 +289,8 @@ class ScorecardCopyTest {
     fun pickLineShowsEntryNotRecordedAndPopulatedSize() {
         val legacy = HomeFixtures.sampleSettledEntries().single { it.entryAsk == null }
         val view = ScorecardCopy.of(HomeFixtures.sampleSettledEntries(), HomeFixtures.sampleSettledFills(), 0.0)
-        val missing = view.recent.single { it.ticker == legacy.ticker }
-        assertTrue(missing.line.contains(ScorecardLedger.ENTRY_NOT_RECORDED))
-        assertTrue(missing.line.contains(ScorecardCopy.LOST) || missing.line.contains(ScorecardCopy.WON))
-        val populated = view.recent.filter { it.ticker != legacy.ticker }
+        assertTrue(view.recent.none { it.ticker == legacy.ticker })
+        val populated = view.recent
         assertTrue(populated.isNotEmpty())
         assertTrue(populated.all { !it.line.contains(ScorecardLedger.ENTRY_NOT_RECORDED) })
         assertTrue(populated.all { it.line.contains("ct") && it.line.contains("stake") && it.line.contains("fee") })

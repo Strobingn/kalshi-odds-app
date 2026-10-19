@@ -31,7 +31,11 @@ class ScorecardBrierDiagnosisTest {
                 score = 0,
                 brier = (0.945 - 1.0) * (0.945 - 1.0),
                 predictedSide = "NO",
-                edgePp = -1.5
+                edgePp = -1.5,
+                entryAsk = 0.40,
+                contracts = 10,
+                stakeUsd = 4.0,
+                feeUsd = 0.20
             )
         }
         val w = ScorecardMetrics.window(rows)

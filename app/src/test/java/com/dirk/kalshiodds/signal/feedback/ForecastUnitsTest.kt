@@ -185,6 +185,10 @@ class ForecastUnitsTest {
         score = score,
         brier = brier,
         predictedSide = predictedSide,
-        edgePp = -8.0
+        edgePp = -8.0,
+        entryAsk = 0.40,
+        contracts = 10,
+        stakeUsd = 4.0,
+        feeUsd = 0.20
     )
 }

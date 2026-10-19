@@ -122,6 +122,13 @@ private fun LiveDecisionStatus(cfLines: List<String>, decisionLines: List<String
         cfLines.forEach {
             androidx.compose.material3.Text(it, style = androidx.compose.material3.MaterialTheme.typography.labelSmall, color = colors.textSecondary)
         }
+        if (decisionLines.isEmpty()) {
+            androidx.compose.material3.Text(
+                com.dirk.kalshiodds.signal.feedback.ScorecardPickGuard.NO_DATA_YET,
+                style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                color = colors.textSecondary
+            )
+        }
         decisionLines.take(6).forEach { line ->
             androidx.compose.material3.Text(
                 line,

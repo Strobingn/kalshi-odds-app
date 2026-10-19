@@ -19,7 +19,9 @@ object ScalpAggUi {
         val all = ScalpStat("all", n = n, wins = wins, netUsd = net, sumSq = sumSq, costSum = cost,
             sumWin = st.sumOf { it.sumWin }, sumLoss = st.sumOf { it.sumLoss }, nLoss = st.sumOf { it.nLoss }, noFills = st.sumOf { it.noFills })
         val ci = all.perTradeCi()
-        val stats = listOf(
+        val stats = if (n == 0 && open.isEmpty() && all.noFills == 0 && kotlin.math.abs(net) < 1e-9) {
+            listOf(com.dirk.kalshiodds.signal.feedback.ScorecardPickGuard.NO_DATA_YET)
+        } else listOf(
             String.format(Locale.US, "%d round trips · %d open · %d no-fills", n, open.size, all.noFills),
             String.format(Locale.US, "Net after both fees: %+.2f USD", net),
             "Win rate: " + (all.winRate?.let { String.format(Locale.US, "%.0f%%", it * 100) } ?: "—"),

@@ -123,6 +123,13 @@ class InMemoryResultsStore(
     fun paperFill(id: String): com.dirk.kalshiodds.signal.paper.PaperFill? = paperFills[id]
 
     @Synchronized
+    override fun deleteFakePaperFills(): Int {
+        val drop = paperFills.filterValues { com.dirk.kalshiodds.signal.feedback.ScorecardPickGuard.hideFill(it) }.keys
+        drop.forEach { paperFills.remove(it) }
+        return drop.size
+    }
+
+    @Synchronized
     override fun insertBidSnapshots(rows: List<OddsMidRow>) = insertOddsMids(rows)
 
     @Synchronized

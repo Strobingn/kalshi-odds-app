@@ -455,6 +455,26 @@ class SignalPreferences(
         }
     }
 
+    /**
+     * One-time local cleanup of scorecard rows that were never real picks
+     * (no entry, $0 wins, market captured at 0% or 100%). Does not delete
+     * anything in Supabase.
+     */
+    suspend fun applyFakeScorecardPurgeIfNeeded(
+        log: com.dirk.kalshiodds.prediction.PredictionLogStore,
+        book: com.dirk.kalshiodds.signal.paper.PaperBook,
+        deleteMirroredPaperRows: () -> Int = { 0 }
+    ) {
+        val prefs = app.signalDataStore.data.first()
+        if (prefs[KEY_FAKE_SCORECARD_PURGE] == true) return
+        val logResult = runCatching { log.purgeFakePicks() }
+        val bookResult = runCatching { book.purgeFakeFills() }
+        val sqlResult = runCatching { deleteMirroredPaperRows() }
+        if (logResult.isSuccess && bookResult.isSuccess && sqlResult.isSuccess) {
+            edit { it[KEY_FAKE_SCORECARD_PURGE] = true }
+        }
+    }
+
     private suspend fun edit(block: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
         app.signalDataStore.edit(block)
     }
@@ -633,6 +653,7 @@ class SignalPreferences(
         private val KEY_PAPER_RESET_0328 = booleanPreferencesKey("paper_bankroll_reset_v0328")
         private val KEY_PAPER_RESET_0340 = booleanPreferencesKey("paper_bankroll_reset_v0340")
         private val KEY_PAPER_RESET_0346 = booleanPreferencesKey("paper_bankroll_reset_v0346")
+        private val KEY_FAKE_SCORECARD_PURGE = booleanPreferencesKey("fake_scorecard_purge_v1013")
         private val KEY_STAKE_V0316 = booleanPreferencesKey("last_minute_stake_v0316")
 
         fun parseTickerList(text: String): List<String> =
