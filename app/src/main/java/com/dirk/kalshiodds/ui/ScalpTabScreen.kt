@@ -372,7 +372,10 @@ private fun CombinedBoard(rows: List<ScalpModels.Row>) {
         Text("Leaderboard · BTC 15m · all-time on this phone", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
         // 0.3.68: totals from the scalp_stats rows behind this board (was 0 / 0 / $0 after 0.3.67 moved history to SQLite).
         val tn = rows.sumOf { it.roundTrips }; val tw = rows.sumOf { it.wins }; val tl = rows.sumOf { it.losses }; val tnet = rows.sumOf { it.netUsd }
-        Text("$tn round trips · $tw wins / $tl losses · net ${ScalpTabCopy.money(tnet)} after fees", style = MaterialTheme.typography.labelMedium,
+        Text(
+            if (tn == 0) com.dirk.kalshiodds.signal.feedback.ScorecardPickGuard.NO_DATA_YET
+            else "$tn round trips · $tw wins / $tl losses · net ${ScalpTabCopy.money(tnet)} after fees",
+            style = MaterialTheme.typography.labelMedium,
             fontFamily = FontFamily.Monospace, color = if (tn == 0) c.textSecondary else if (tnet >= 0) c.up else c.down)
         Spacer(Modifier.height(6.dp))
         rows.forEachIndexed { i, r ->

@@ -22,7 +22,11 @@ class HonestScorecardTest {
                 score = 1,
                 brier = 0.16,
                 predictedSide = "YES",
-                edgePp = 5.0
+                edgePp = 5.0,
+                entryAsk = 0.40,
+                contracts = 10,
+                stakeUsd = 4.0,
+                feeUsd = 0.20
             )
         }
         val h = ScorecardMetrics.honest(rows)
@@ -49,7 +53,11 @@ class HonestScorecardTest {
                 closeTimeMs = i.toLong(),
                 outcome = if (i % 2 == 0) "yes" else "no",
                 predictedSide = "YES",
-                edgePp = 4.0
+                edgePp = 4.0,
+                entryAsk = 0.40,
+                contracts = 10,
+                stakeUsd = 4.0,
+                feeUsd = 0.20
             )
         }
         val eth = (0 until 50).map { i ->
@@ -63,7 +71,11 @@ class HonestScorecardTest {
                 closeTimeMs = i.toLong(),
                 outcome = if (i % 2 == 0) "yes" else "no",
                 predictedSide = "YES",
-                edgePp = 4.0
+                edgePp = 4.0,
+                entryAsk = 0.40,
+                contracts = 10,
+                stakeUsd = 4.0,
+                feeUsd = 0.20
             )
         }
         val mixed = ScorecardMetrics.honest(btc + eth)

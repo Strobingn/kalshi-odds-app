@@ -103,8 +103,10 @@ class PredictionLogFreezeTest {
             snapshot = SignalSnapshot(predictedSide = "NO", entryAsk = null)
         )
         val flipped = store.readAll().last { it.ticker == "KXBTC15M-STALE-FREEZE" && it.outcome == null }
-        assertEquals("NO", flipped.predictedSide)
-        assertNull(flipped.entryAsk)
+        assertEquals("YES", flipped.predictedSide)
+        assertEquals(0.40, flipped.entryAsk!!, 1e-9)
+        assertEquals(0.70, flipped.predictedYes, 1e-9)
+        assertEquals(0.40, flipped.marketMid, 1e-9)
 
         val now = staleClose + OpenPredictionMerge.STALE_OPEN_GRACE_MS + 1_000L
         store.upsertOpenPrediction(
@@ -121,5 +123,77 @@ class PredictionLogFreezeTest {
         val left = store.readAll()
         assertTrue(left.none { it.ticker == "KXBTC15M-STALE-FREEZE" && it.outcome == null })
         assertTrue(left.any { it.ticker == "KXBTC15M-FRESH-FREEZE" && it.outcome == null })
+    }
+
+    @Test
+    fun settlementQuoteAndPostCloseCreateAreNotPicks() = runBlocking {
+        val ctx = ApplicationProvider.getApplicationContext<Context>()
+        val store = PredictionLogStore(ctx)
+        val close = 5_000_000L
+        store.upsertOpenPrediction(
+            ticker = "KXBTC15M-PICK",
+            series = "KXBTC15M",
+            predictedYes = 0.62,
+            predictedNo = 0.38,
+            marketMid = 0.41,
+            timestampMs = close - 60_000L,
+            closeTimeMs = close,
+            throttleMs = 0L,
+            snapshot = SignalSnapshot(predictedSide = "YES", entryAsk = 0.41)
+        )
+        val captured = store.readAll().single { it.ticker == "KXBTC15M-PICK" }
+        assertEquals(0.41, captured.entryAsk!!, 1e-9)
+        assertEquals(0.41, captured.marketMid, 1e-9)
+        assertTrue((captured.stakeUsd ?: 0.0) > 0.0)
+        assertTrue((captured.contracts ?: 0) > 0)
+
+        store.upsertOpenPrediction(
+            ticker = "KXBTC15M-PICK",
+            series = "KXBTC15M",
+            predictedYes = 0.99,
+            predictedNo = 0.01,
+            marketMid = 1.0,
+            timestampMs = close - 1_000L,
+            closeTimeMs = close,
+            throttleMs = 0L,
+            snapshot = SignalSnapshot(predictedSide = "YES", entryAsk = null)
+        )
+        store.upsertOpenPrediction(
+            ticker = "KXBTC15M-AFTER",
+            series = "KXBTC15M",
+            predictedYes = 0.99,
+            predictedNo = 0.01,
+            marketMid = 1.0,
+            timestampMs = close + 5_000L,
+            closeTimeMs = close,
+            throttleMs = 0L,
+            snapshot = SignalSnapshot(predictedSide = "YES")
+        )
+        val kept = store.readAll().single { it.ticker == "KXBTC15M-PICK" && it.outcome == null }
+        assertEquals(0.62, kept.predictedYes, 1e-9)
+        assertEquals(0.41, kept.marketMid, 1e-9)
+        assertEquals(0.41, kept.entryAsk!!, 1e-9)
+        assertTrue(store.readAll().none { it.ticker == "KXBTC15M-AFTER" })
+
+        store.applySettlement("KXBTC15M-PICK", "yes", close + 10_000L)
+        val settled = store.readAll().single { it.ticker == "KXBTC15M-PICK" }
+        assertEquals("yes", settled.outcome)
+        assertEquals(1, settled.score)
+
+        store.upsertOpenPrediction(
+            ticker = "KXBTC15M-EMPTY",
+            series = "KXBTC15M",
+            predictedYes = 0.97,
+            predictedNo = 0.03,
+            marketMid = 0.55,
+            timestampMs = close - 1_000L,
+            closeTimeMs = close,
+            throttleMs = 0L,
+            snapshot = SignalSnapshot(predictedSide = "YES")
+        )
+        store.applySettlement("KXBTC15M-EMPTY", "yes", close + 20_000L)
+        assertTrue(store.readAll().none { it.ticker == "KXBTC15M-EMPTY" })
+        val removed = store.purgeFakePicks()
+        assertTrue(removed >= 0)
     }
 }

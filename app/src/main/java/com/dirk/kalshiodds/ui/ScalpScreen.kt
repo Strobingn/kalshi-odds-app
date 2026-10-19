@@ -79,7 +79,11 @@ object ScalpCopy {
         return listOf(head) + coins + t.notes
     }
 
-    fun statsLines(s: ScalpStats.Summary): List<String> = listOf(
+    fun statsLines(s: ScalpStats.Summary): List<String> {
+        if (s.roundTrips == 0 && s.open == 0 && s.noFills == 0 && kotlin.math.abs(s.netUsd) < 1e-9) {
+            return listOf(com.dirk.kalshiodds.signal.feedback.ScorecardPickGuard.NO_DATA_YET)
+        }
+        return listOf(
         String.format(Locale.US, "%d round trips · %d open · %d no-fills", s.roundTrips, s.open, s.noFills),
         String.format(Locale.US, "Net after both fees: %+.2f USD", s.netUsd),
         "Win rate: " + (s.winRate?.let { String.format(Locale.US, "%.0f%%", it * 100) } ?: "—"),
@@ -87,7 +91,8 @@ object ScalpCopy {
         "Avg hold: " + (s.avgHoldS?.let { String.format(Locale.US, "%.0f s", it) } ?: "—"),
         "95% window-clustered CI (per contract): " +
             (s.ci?.let { String.format(Locale.US, "[%+.2f¢, %+.2f¢] over %d windows", it.lo * 100, it.hi * 100, it.clusters) } ?: "—")
-    )
+        )
+    }
 }
 
 @Composable

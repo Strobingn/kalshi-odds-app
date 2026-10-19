@@ -337,6 +337,15 @@ private fun StatsCard(state: DataUiState) {
             .padding(16.dp)
     ) {
         Text("DATA STATS", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary, fontWeight = FontWeight.Bold)
+        if (s.settledCount == 0 && s.fills == 0 && s.pathPoints == 0 && s.spotCandles == 0) {
+            Text(
+                com.dirk.kalshiodds.signal.feedback.ScorecardPickGuard.NO_DATA_YET,
+                fontSize = 26.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+            return@Column
+        }
         Text(
             "${s.settledCount} settled windows",
             fontSize = 26.sp,

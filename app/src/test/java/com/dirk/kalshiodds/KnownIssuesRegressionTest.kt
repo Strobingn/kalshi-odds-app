@@ -975,14 +975,15 @@ class KnownIssuesRegressionTest {
             predictedSide = "YES",
             score = null
         ).copy(outcome = null)
-        val summary = HomeScorecardSummary.of(wins + losses + noBet + unsettled, 12.40)
+        val recorded = (wins + losses).map { it.copy(entryAsk = 0.40, contracts = 10, stakeUsd = 4.0, feeUsd = 0.20) }
+        val summary = HomeScorecardSummary.of(recorded + noBet + unsettled, 12.40)
         assertEquals(12, summary.wins)
         assertEquals(6, summary.losses)
         assertEquals(18, summary.settledCount)
         assertEquals("12-6 · 67% · lifetime paper +$12.40 · EV side 12-6 · 67%", summary.line())
         assertEquals(
             "12-6 · 67% · lifetime paper +$12.40 · EV side 12-6 · 67%",
-            HomeCopy.scorecardSummaryLine(wins + losses + noBet + unsettled, 12.40)
+            HomeCopy.scorecardSummaryLine(recorded + noBet + unsettled, 12.40)
         )
         assertEquals(HomeScorecardSummary.NO_SETTLED, HomeScorecardSummary.of(emptyList(), 99.0).line())
         assertEquals(HomeScorecardSummary.NO_SETTLED, HomeScorecardSummary.of(listOf(noBet), 1.0).line())
@@ -1426,7 +1427,7 @@ class KnownIssuesRegressionTest {
     fun fullScorecardEmptyStateUsesSettledPicksNotPerSeriesOrCalibration() {
         val entries = HomeFixtures.sampleSettledEntries()
         val settled = ScorecardCopy.settledPicks(entries)
-        assertEquals(18, settled.size)
+        assertEquals(17, settled.size)
         val window = ScorecardMetrics.window(settled)
         val snap = ScorecardMetrics.Snapshot(
             daily = window,
@@ -1442,13 +1443,13 @@ class KnownIssuesRegressionTest {
             honest = ScorecardMetrics.honest(settled)
         )
         assertTrue(snap.perSeries.isEmpty())
-        assertEquals(18, snap.sampleCount)
-        assertEquals(18, snap.honest.n)
+        assertEquals(17, snap.sampleCount)
+        assertEquals(17, snap.honest.n)
 
         val present = ScorecardCopy.of(entries, 12.40)
-        assertEquals(18, present.settledCount)
+        assertEquals(17, present.settledCount)
         assertEquals(12, present.summary.wins)
-        assertEquals(6, present.summary.losses)
+        assertEquals(5, present.summary.losses)
         assertFalse(present.showsEmptyState)
         assertNull(present.emptyState())
         assertFalse(present.allLines().any { it.contains("No settled samples") })
@@ -1726,7 +1727,11 @@ class KnownIssuesRegressionTest {
         score = score,
         brier = brier,
         predictedSide = predictedSide,
-        edgePp = -8.0
+        edgePp = -8.0,
+        entryAsk = 0.40,
+        contracts = 10,
+        stakeUsd = 4.0,
+        feeUsd = 0.20
     )
 
     private fun sample(

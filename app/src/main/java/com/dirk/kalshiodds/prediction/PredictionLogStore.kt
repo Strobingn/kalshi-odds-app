@@ -165,6 +165,13 @@ internal object OpenPredictionMerge {
         if (close <= 0L) return false
         return nowMs >= close + graceMs
     }
+
+    /** A quote at or after the window close is the settlement print, not a pick. */
+    fun isAtOrAfterClose(nowMs: Long, closeTimeMs: Long?): Boolean {
+        val close = closeTimeMs ?: return false
+        if (close <= 0L) return false
+        return nowMs >= close
+    }
 }
 
 class PredictionLogStore(private val context: Context) {
@@ -207,11 +214,15 @@ class PredictionLogStore(private val context: Context) {
                 return@edit
             }
             val existingIdx = list.indexOfLast { it.ticker == ticker && it.outcome == null }
-            val rawYes = snapshot?.rawPredictedYes
-            val tteSec = snapshot?.tteSeconds
+            val snap = sizedSnapshot(snapshot)
+            val rawYes = snap?.rawPredictedYes
+            val tteSec = snap?.tteSeconds
             val bucket = com.dirk.kalshiodds.signal.feedback.Calibrator.TteBucket.of(tteSec)
+            val quoteIsSettlement = com.dirk.kalshiodds.signal.feedback.ScorecardPickGuard
+                .isSettlementMarketUnit(marketMid)
             if (existingIdx >= 0) {
                 val prev = list[existingIdx]
+                val close = closeTimeMs ?: prev.closeTimeMs
                 val age = timestampMs - prev.timestampMs
                 val moved = kotlin.math.abs(prev.marketMid - marketMid) > midMoveThreshold
                 val samples = prev.calSamples.toMutableList()
@@ -226,17 +237,32 @@ class PredictionLogStore(private val context: Context) {
                     if (sweptAny) prefs[key] = json.encodeToString(list)
                     return@edit
                 }
+                // After the close, or once the book is the 0/100 settlement print,
+                // keep the pre-close pick. Do not replace it with a no-entry row.
+                if (OpenPredictionMerge.isAtOrAfterClose(timestampMs, close) || quoteIsSettlement) {
+                    if (sweptAny) prefs[key] = json.encodeToString(list)
+                    return@edit
+                }
+                val prevHasEntry = com.dirk.kalshiodds.signal.feedback.ScorecardLedger.scoreAsk(prev.entryAsk) != null
+                val nextHasEntry = com.dirk.kalshiodds.signal.feedback.ScorecardLedger.scoreAsk(snap?.entryAsk) != null
+                val flipping = OpenPredictionMerge.sideChanged(prev.predictedSide, snap?.predictedSide)
+                if (prevHasEntry && !(flipping && nextHasEntry)) {
+                    list[existingIdx] = prev.copy(closeTimeMs = close, calSamples = samples)
+                    while (list.size > maxEntries) list.removeAt(0)
+                    prefs[key] = json.encodeToString(list)
+                    return@edit
+                }
                 val frozen = OpenPredictionMerge.freeze(
                     prevSide = prev.predictedSide,
                     prevAsk = prev.entryAsk,
                     prevContracts = prev.contracts,
                     prevStake = prev.stakeUsd,
                     prevFee = prev.feeUsd,
-                    snapSide = snapshot?.predictedSide,
-                    snapAsk = snapshot?.entryAsk,
-                    snapContracts = snapshot?.contracts,
-                    snapStake = snapshot?.stakeUsd,
-                    snapFee = snapshot?.feeUsd
+                    snapSide = snap?.predictedSide,
+                    snapAsk = snap?.entryAsk,
+                    snapContracts = snap?.contracts,
+                    snapStake = snap?.stakeUsd,
+                    snapFee = snap?.feeUsd
                 )
                 list[existingIdx] = prev.copy(
                     predictedYes = predictedYes,
@@ -270,6 +296,10 @@ class PredictionLogStore(private val context: Context) {
                     calSamples = samples
                 )
             } else {
+                if (OpenPredictionMerge.isAtOrAfterClose(timestampMs, closeTimeMs) || quoteIsSettlement) {
+                    if (sweptAny) prefs[key] = json.encodeToString(list)
+                    return@edit
+                }
                 val first = if (rawYes != null && rawYes.isFinite() && tteSec != null) {
                     listOf(CalSample(rawYes, tteSec, bucket.key))
                 } else {
@@ -284,28 +314,28 @@ class PredictionLogStore(private val context: Context) {
                         marketMid = marketMid,
                         timestampMs = timestampMs,
                         closeTimeMs = closeTimeMs,
-                        predictedSide = snapshot?.predictedSide,
-                        edgePp = snapshot?.edgePp,
-                        confidence = snapshot?.confidence,
-                        regime = snapshot?.regime,
-                        tteBucket = snapshot?.tteBucket,
-                        fairValuePp = snapshot?.fairValuePp,
-                        calibrated = snapshot?.calibrated,
-                        featureDevs = snapshot?.featureDevs ?: emptyMap(),
-                        uncertainty = snapshot?.uncertainty,
-                        timeToMoveSec = snapshot?.timeToMoveSec,
-                        midVolPp = snapshot?.midVolPp,
-                        pFill = snapshot?.pFill,
-                        wouldAlert = snapshot?.wouldAlert,
-                        mlpYes = snapshot?.mlpYes,
-                        cnnYes = snapshot?.cnnYes,
-                        gbmYes = snapshot?.gbmYes,
-                        entryAsk = snapshot?.entryAsk,
-                        contracts = snapshot?.contracts,
-                        stakeUsd = snapshot?.stakeUsd,
-                        feeUsd = snapshot?.feeUsd,
+                        predictedSide = snap?.predictedSide,
+                        edgePp = snap?.edgePp,
+                        confidence = snap?.confidence,
+                        regime = snap?.regime,
+                        tteBucket = snap?.tteBucket,
+                        fairValuePp = snap?.fairValuePp,
+                        calibrated = snap?.calibrated,
+                        featureDevs = snap?.featureDevs ?: emptyMap(),
+                        uncertainty = snap?.uncertainty,
+                        timeToMoveSec = snap?.timeToMoveSec,
+                        midVolPp = snap?.midVolPp,
+                        pFill = snap?.pFill,
+                        wouldAlert = snap?.wouldAlert,
+                        mlpYes = snap?.mlpYes,
+                        cnnYes = snap?.cnnYes,
+                        gbmYes = snap?.gbmYes,
+                        entryAsk = snap?.entryAsk,
+                        contracts = snap?.contracts,
+                        stakeUsd = snap?.stakeUsd,
+                        feeUsd = snap?.feeUsd,
                         rawPredictedYes = rawYes,
-                        displayedYes = snapshot?.displayedYes,
+                        displayedYes = snap?.displayedYes,
                         tteSeconds = tteSec,
                         calSamples = first
                     )
@@ -322,24 +352,60 @@ class PredictionLogStore(private val context: Context) {
         context.predictionLogStore.edit { prefs ->
             val list = decode(prefs[key]).toMutableList()
             var changed = false
-            for (i in list.indices) {
+            for (i in list.indices.reversed()) {
                 val e = list[i]
-                if (e.ticker == ticker && e.outcome == null) {
-                    if (normalized == "void") {
-                        list[i] = e.copy(outcome = "void", score = null, brier = null, settledAtMs = settledAtMs)
-                    } else {
-                        val next = e.copy(outcome = normalized, settledAtMs = settledAtMs)
-                        val hit = com.dirk.kalshiodds.signal.feedback.ForecastUnits.hit(next)
-                        list[i] = next.copy(
-                            score = if (hit) 1 else 0,
-                            brier = com.dirk.kalshiodds.signal.feedback.ForecastUnits.sideBrier(next)
-                        )
-                    }
+                if (e.ticker != ticker || e.outcome != null) continue
+                if (normalized != "void" &&
+                    com.dirk.kalshiodds.signal.feedback.ScorecardPickGuard.shouldDropOnSettlement(e, normalized)
+                ) {
+                    list.removeAt(i)
                     changed = true
+                    continue
                 }
+                if (normalized == "void") {
+                    list[i] = e.copy(outcome = "void", score = null, brier = null, settledAtMs = settledAtMs)
+                } else {
+                    val next = e.copy(outcome = normalized, settledAtMs = settledAtMs)
+                    val hit = com.dirk.kalshiodds.signal.feedback.ForecastUnits.hit(next)
+                    list[i] = next.copy(
+                        score = if (hit) 1 else 0,
+                        brier = com.dirk.kalshiodds.signal.feedback.ForecastUnits.sideBrier(next)
+                    )
+                }
+                changed = true
             }
             if (changed) prefs[key] = json.encodeToString(list)
         }
+    }
+
+    /** One-time local cleanup. Does not talk to Supabase. */
+    suspend fun purgeFakePicks(): Int {
+        var removed = 0
+        context.predictionLogStore.edit { prefs ->
+            val list = decode(prefs[key])
+            val kept = list.filterNot { com.dirk.kalshiodds.signal.feedback.ScorecardPickGuard.hideLog(it) }
+            removed = list.size - kept.size
+            if (removed > 0) prefs[key] = json.encodeToString(kept)
+        }
+        return removed
+    }
+
+    /**
+     * Stamp the $10 paper clip the moment a usable ask is known.
+     * A missing ask stays missing — never borrow the other side's price.
+     */
+    private fun sizedSnapshot(snapshot: SignalSnapshot?): SignalSnapshot? {
+        if (snapshot == null) return null
+        val sized = com.dirk.kalshiodds.signal.feedback.ScorecardLedger.paperStake(snapshot.entryAsk ?: return snapshot)
+            ?: return snapshot.copy(entryAsk = null, contracts = null, stakeUsd = null, feeUsd = null)
+        val already = (snapshot.stakeUsd ?: 0.0) > 1e-9 && (snapshot.contracts ?: 0) > 0
+        if (already) return snapshot.copy(entryAsk = sized.entryAsk)
+        return snapshot.copy(
+            entryAsk = sized.entryAsk,
+            contracts = sized.contracts,
+            stakeUsd = sized.stakeUsd,
+            feeUsd = sized.feeUsd
+        )
     }
 
     data class ScoreSummary(val correct: Int, val total: Int, val meanBrier: Double?)

@@ -56,6 +56,10 @@ class ScorecardTargetsTest {
         edgePp = 8.0,
         confidence = 0.60,
         wouldAlert = true,
-        settledAtMs = if (outcome == null) null else 2L
+        settledAtMs = if (outcome == null) null else 2L,
+        entryAsk = 0.40,
+        contracts = 10,
+        stakeUsd = 4.0,
+        feeUsd = 0.20
     )
 }

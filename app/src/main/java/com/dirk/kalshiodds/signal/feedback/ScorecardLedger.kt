@@ -30,12 +30,12 @@ import kotlin.math.abs
  * Bitcoin-only: [isScorecardTicker] / [CryptoMarkets.isLiveTicker]
  * (KXBTC15M). Stored ETH/SOL rows are ignored.
  *
- * Paper P&L, Won, Lost, avg win/loss, and biggest win/loss come only
- * from real settled fills in the current (post-reset) book. A
- * prediction-log row with no fill still counts in W-L and win rate,
- * at $0. Asks outside 2–98¢ ([ProbabilityClamp.LO]/[ProbabilityClamp.HI])
- * are an unknown price, not a $10 clip — a 0.1¢ ask used to size
- * thousands of contracts and invent a four-figure "win".
+ * Paper P&L, Won, Lost, avg win/loss, and biggest win/loss come from
+ * the pick rows: a matched fill, or the paper clip stored when the
+ * pick was made. A row with no usable entry, a win stored at $0 stake,
+ * or a market of 0% or 100% (the settlement print) is left out of W-L,
+ * win rate, and dollars. Asks outside 2–98¢
+ * ([ProbabilityClamp.LO]/[ProbabilityClamp.HI]) are not an entry.
  *
  * 0.3.29 does not wipe the device. The inflated number was a display
  * mix of the pre-reset archive and those hypothetical clips. After
@@ -185,6 +185,7 @@ object ScorecardLedger {
         zoneId: ZoneId = ET_ZONE
     ): Snapshot {
         val uniqueFills = fills
+            .filterNot { ScorecardPickGuard.hideFill(it) }
             .groupBy { it.id }
             .map { (_, rows) -> rows.maxBy { it.syncAtMs() } }
         val btcEntries = entries.filter { isScorecardTicker(it.ticker) }
@@ -206,9 +207,13 @@ object ScorecardLedger {
         val windowByTicker = windows.associateBy { it.ticker.uppercase(Locale.US) }
 
         val unusedAiFills = aiFills.toMutableList()
-        val aiRows = scored.map { entry ->
+        val aiRows = scored.mapNotNull { entry ->
             val match = takeMatchingFill(unusedAiFills, entry)
-            pickFromEntry(entry, match, windowByTicker[entry.ticker.uppercase(Locale.US)], zoneId, Kind.AI)
+            if (match == null && ScorecardPickGuard.hideLog(entry)) {
+                null
+            } else {
+                pickFromEntry(entry, match, windowByTicker[entry.ticker.uppercase(Locale.US)], zoneId, Kind.AI)
+            }
         }
         val leftoverAiRows = unusedAiFills.map { fill ->
             pickFromFill(fill, scored, windowByTicker[fill.ticker.uppercase(Locale.US)], zoneId, Kind.AI)
@@ -234,15 +239,15 @@ object ScorecardLedger {
         val allMoneyRows = aiPicks + manualRows
         val displayPicks = (allMoneyRows + noBetRows).sortedByDescending { it.settledAtMs }
 
-        val ai = record(aiPicks).copy(money = moneyOf(aiFills))
-        val manual = record(manualRows).copy(money = moneyOf(manualFills))
+        val ai = record(aiPicks)
+        val manual = record(manualRows)
         val combined = Record(
             wins = ai.wins + manual.wins,
             losses = ai.losses + manual.losses,
             settledCount = ai.settledCount + manual.settledCount,
             hitRate = rate(ai.wins + manual.wins, ai.settledCount + manual.settledCount),
             streak = streakOf(allMoneyRows.sortedByDescending { it.settledAtMs }),
-            money = moneyOf(settledFills)
+            money = moneyOfRows(allMoneyRows)
         )
         return Snapshot(
             ai = ai,
@@ -359,7 +364,23 @@ object ScorecardLedger {
             scoreAsk(noAsk) ?: yesBid?.let { scoreAsk(1.0 - it) }
         }
         if (ask == null) return StoredEntry(null, null, null, null)
-        return StoredEntry(entryAsk = ask, contracts = null, stakeUsd = null, feeUsd = null)
+        return paperStake(ask) ?: StoredEntry(entryAsk = ask, contracts = null, stakeUsd = null, feeUsd = null)
+    }
+
+    /**
+     * Paper clip captured with the entry ask. Display-time [paperClipFromAsk]
+     * stays empty so an old 0.1¢ row cannot invent a stake later.
+     */
+    fun paperStake(ask: Double?): StoredEntry? {
+        val px = scoreAsk(ask) ?: return null
+        val clip = LiveOrderSizer.size(px, PAPER_STAKE_USD)
+        if (!clip.ok) return StoredEntry(entryAsk = px, contracts = null, stakeUsd = null, feeUsd = null)
+        return StoredEntry(
+            entryAsk = px,
+            contracts = clip.count,
+            stakeUsd = clip.allInUsd,
+            feeUsd = clip.feeUsd
+        )
     }
 
     fun moneyOf(fills: List<PaperFill>): Money {
@@ -471,7 +492,8 @@ object ScorecardLedger {
         val at = entry.settledAtMs ?: entry.closeTimeMs ?: entry.timestampMs
         val sized = sizePick(entry, fill, won)
         val entryAi = ForecastUnits.sideProbability01(entry) * 100.0
-        val entryMkt = ForecastUnits.probability01(entry.marketMid) * 100.0
+        val entryMkt = ForecastUnits.probability01(entry.marketMid).times(100.0)
+            .takeUnless { ScorecardPickGuard.isSettlementMarketPct(it) }
         val aiPct = fill?.aiPct ?: entryAi
         return PickRow(
             kind = kind,
@@ -517,8 +539,11 @@ object ScorecardLedger {
         val storedAi = fill.aiPct
         val lookupAi = entry?.let { ForecastUnits.sideProbability01(it) * 100.0 }
         val aiPct = storedAi ?: lookupAi
-        val storedMkt = fill.marketPct
-        val lookupMkt = entry?.let { ForecastUnits.probability01(it.marketMid) * 100.0 }
+        val storedMkt = fill.marketPct?.takeUnless { ScorecardPickGuard.isSettlementMarketPct(it) }
+        val lookupMkt = entry?.let {
+            ForecastUnits.probability01(it.marketMid).times(100.0)
+                .takeUnless { pct -> ScorecardPickGuard.isSettlementMarketPct(pct) }
+        }
         val sourceKind = PaperPickSource.of(fill)
         return PickRow(
             kind = kind,
@@ -570,12 +595,21 @@ object ScorecardLedger {
     ): SizedPick {
         if (fill == null) {
             val ask = scoreAsk(entry.entryAsk)
+            val contracts = entry.contracts?.takeIf { it > 0 }
+            val stake = entry.stakeUsd?.takeIf { it.isFinite() && it > 1e-9 }
+            val fee = entry.feeUsd?.takeIf { it.isFinite() }
+            val pnl = if (ask != null && stake != null && contracts != null) {
+                if (won) contracts * com.dirk.kalshiodds.signal.config.SignalConstants.CONTRACT_SETTLEMENT_USD - stake
+                else -stake
+            } else {
+                0.0
+            }
             return SizedPick(
                 entryAsk = ask,
-                contracts = null,
-                stakeUsd = null,
-                feeUsd = null,
-                pnlUsd = 0.0,
+                contracts = contracts,
+                stakeUsd = stake,
+                feeUsd = fee,
+                pnlUsd = pnl,
                 entryNotRecorded = ask == null
             )
         }
@@ -599,6 +633,7 @@ object ScorecardLedger {
         var n = 0
         for (entry in entries) {
             if (takeMatchingFill(pool, entry) != null) continue
+            if ((entry.stakeUsd ?: 0.0) > 1e-9 && (entry.contracts ?: 0) > 0) continue
             val ask = scoreAsk(entry.entryAsk) ?: continue
             sum += hypotheticalPerContract(ForecastUnits.hit(entry), ask)
             n += 1
