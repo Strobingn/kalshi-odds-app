@@ -13,9 +13,9 @@ on:
         options: [cloud, phone, both]
         default: cloud
       mode:
-        description: "replay = every strategy on its defaults; sweep = small tweaks to the strategies still running"
+        description: "replay = every strategy on its defaults; sweep = small tweaks and the phone's rules; phone = the phone's rules only"
         type: choice
-        options: [replay, sweep]
+        options: [replay, sweep, phone]
         default: replay
   push:
     branches: [Claude]
@@ -64,8 +64,9 @@ jobs:
           ARENA_REPLAY_OUT: ${{ github.workspace }}/arena_replay.md
           ARENA_CLEAR_LEAD_OUT: ${{ github.workspace }}/clear_lead.md
           TEST_MAX_HEAP: 6g
-          ARENA_SWEEP: ${{ inputs.mode == 'sweep' && '1' || '' }}
-        run: ./gradlew :app:testDebugUnitTest --tests 'com.dirk.kalshiodds.signal.scalper.ArenaReplayTest' --no-daemon --stacktrace
+          ARENA_SWEEP: ${{ (inputs.mode == 'sweep' || inputs.mode == 'phone') && '1' || '' }}
+          TESTS: ${{ inputs.mode == 'phone' && 'com.dirk.kalshiodds.signal.scalper.ArenaReplayTest.sweepClearLead' || 'com.dirk.kalshiodds.signal.scalper.ArenaReplayTest' }}
+        run: ./gradlew :app:testDebugUnitTest --tests "$TESTS" --no-daemon --stacktrace
 
       - name: Report
         if: always()

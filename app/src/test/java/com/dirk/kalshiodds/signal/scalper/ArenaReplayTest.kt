@@ -376,10 +376,21 @@ class ArenaReplayTest {
             "minutes 12–14.5, 85–97¢" to ClearLeadRule.Band(30L, 180L, 0.85, 0.97),
             "last 90 s, 90–97¢" to ClearLeadRule.Band(20L, 90L, 0.90, 0.97)
         )
+        val comeback = com.dirk.kalshiodds.signal.trend.LateComebackRule.DEFAULT_BAND
+        val comebacks = listOf(
+            "defaults (minutes 10–13, 20–40¢, up 4¢ in 30 s)" to comeback,
+            "up 3¢" to comeback.copy(riseDollars = 0.03),
+            "up 5¢" to comeback.copy(riseDollars = 0.05),
+            "15–45¢" to comeback.copy(minAsk = 0.15, maxAsk = 0.45),
+            "minutes 9–13" to comeback.copy(maxTte = 360L),
+            "up 4¢ in 20 s" to comeback.copy(lookbackSeconds = 20)
+        )
+        val tape = com.dirk.kalshiodds.signal.trend.MidTape()
         class Bet(val ticker: String, val side: String, val sized: com.dirk.kalshiodds.signal.latefav.LateFavoriteRule.Sized, val ms: Long) {
             var pnl: Double? = null
         }
         val bets = bands.map { HashMap<String, Bet>() }
+        val comebackBets = comebacks.map { HashMap<String, Bet>() }
         val info = replay(
             File(dirName!!),
             onBook = { tk, ts, top ->
@@ -396,10 +407,21 @@ class ArenaReplayTest {
                         val d = ClearLeadRule.decide(tk, ts, sig, yesAsk, noAsk) ?: continue
                         bets[k][tk] = Bet(tk, d.side, d.sized, ts)
                     }
+                    val yb = top.yesBid
+                    val ya = top.yesAsk
+                    val mid = if (yb != null && ya != null && yb < ya) (yb + ya) / 2.0 else null
+                    tape.note(tk, ts, mid)
+                    for ((k, b) in comebacks.withIndex()) {
+                        if (tk in comebackBets[k]) continue
+                        val then = tape.midAgo(tk, ts, b.second.lookbackSeconds)
+                        val sig = com.dirk.kalshiodds.signal.trend.LateComebackRule.signal(tte, yesAsk, noAsk, mid, then, b.second) ?: continue
+                        val d = com.dirk.kalshiodds.signal.trend.LateComebackRule.decide(tk, ts, sig, yesAsk, noAsk) ?: continue
+                        comebackBets[k][tk] = Bet(tk, d.side, d.sized, ts)
+                    }
                 }
             },
             onSettle = { tk, result ->
-                for (m in bets) m[tk]?.let { b ->
+                for (m in bets + comebackBets) m[tk]?.let { b ->
                     if (b.pnl == null) b.pnl = com.dirk.kalshiodds.signal.latefav.LateFavoriteRule.pnl(b.sized, b.side.equals(result, true))
                 }
             }
@@ -413,31 +435,43 @@ class ArenaReplayTest {
         sb.append("Recorded days: ${info.days.first()} → ${info.days.last()} (${info.days.size}) · ${info.settled} settled windows. ")
         sb.append("$5 all-in at the recorded ask, exact taker fee, once a window, held to the settlement. ")
         sb.append("Better = 10%+ more bets, net at least the defaults', up in both the first 60% and last 40% of days (split $split).\n\n")
-        sb.append("| Band | Bets | Won | Net $ | $ a bet | First | Last | $/day 95% CI | Better |\n|---|---:|---:|---:|---:|---:|---:|---|---|\n")
-        val base = bets[0].values.filter { it.pnl != null }
-        val baseNet = base.sumOf { it.pnl!! }
-        var pick: Pair<String, Double>? = null
-        for ((k, b) in bands.withIndex()) {
-            val done = bets[k].values.filter { it.pnl != null }
-            val net = done.sumOf { it.pnl!! }
-            val first = done.filter { dayOf(it.ms) < split }.sumOf { it.pnl!! }
-            val last = done.filter { dayOf(it.ms) >= split }.sumOf { it.pnl!! }
-            val byDay = info.days.map { d -> done.filter { dayOf(it.ms) == d }.sumOf { it.pnl!! } }
-            val rnd = Random(7)
-            val boots = DoubleArray(2_000) { byDay.indices.sumOf { byDay[rnd.nextInt(byDay.size)] } / byDay.size }.also { it.sort() }
-            val better = k > 0 && done.size >= base.size * 1.1 && net >= baseNet - 1e-9 && first > 0 && last > 0
-            if (better && (pick == null || net > pick!!.second)) pick = b.first to net
-            sb.append(
-                String.format(
-                    Locale.US, "| %s | %d | %.0f%% | %+.2f | %+.3f | %+.2f | %+.2f | [%+.2f, %+.2f] | %s |\n",
-                    b.first, done.size, if (done.isEmpty()) 0.0 else done.count { it.pnl!! > 0 } * 100.0 / done.size,
-                    net, if (done.isEmpty()) 0.0 else net / done.size, first, last,
-                    boots[(0.025 * boots.size).toInt()], boots[(0.975 * boots.size).toInt().coerceAtMost(boots.size - 1)],
-                    if (better) "yes" else ""
+        var baseVerdict = ""
+        fun table(names: List<String>, books: List<HashMap<String, Bet>>): String? {
+            sb.append("| Band | Bets | Won | Net $ | $ a bet | First | Last | $/day 95% CI | Better |\n|---|---:|---:|---:|---:|---:|---:|---|---|\n")
+            val base = books[0].values.filter { it.pnl != null }
+            val baseNet = base.sumOf { it.pnl!! }
+            var pick: Pair<String, Double>? = null
+            for ((k, name) in names.withIndex()) {
+                val done = books[k].values.filter { it.pnl != null }
+                val net = done.sumOf { it.pnl!! }
+                val first = done.filter { dayOf(it.ms) < split }.sumOf { it.pnl!! }
+                val last = done.filter { dayOf(it.ms) >= split }.sumOf { it.pnl!! }
+                val byDay = info.days.map { d -> done.filter { dayOf(it.ms) == d }.sumOf { it.pnl!! } }
+                val rnd = Random(7)
+                val boots = DoubleArray(2_000) { byDay.indices.sumOf { byDay[rnd.nextInt(byDay.size)] } / byDay.size }.also { it.sort() }
+                val better = k > 0 && done.size >= base.size * 1.1 && net >= baseNet - 1e-9 && first > 0 && last > 0
+                if (better && (pick == null || net > pick!!.second)) pick = name to net
+                sb.append(
+                    String.format(
+                        Locale.US, "| %s | %d | %.0f%% | %+.2f | %+.3f | %+.2f | %+.2f | [%+.2f, %+.2f] | %s |\n",
+                        name, done.size, if (done.isEmpty()) 0.0 else done.count { it.pnl!! > 0 } * 100.0 / done.size,
+                        net, if (done.isEmpty()) 0.0 else net / done.size, first, last,
+                        boots[(0.025 * boots.size).toInt()], boots[(0.975 * boots.size).toInt().coerceAtMost(boots.size - 1)],
+                        if (better) "yes" else ""
+                    )
                 )
-            )
+                if (k == 0) {
+                    baseVerdict = if (net > 0 && first > 0 && last > 0) "MADE_MONEY_BOTH_PARTS" else if (net > 0) "MADE_MONEY" else "LOST"
+                }
+            }
+            return pick?.first
         }
-        sb.append("\nCLEAR_LEAD_PICK ${pick?.first ?: "keep defaults"}\n")
+        val clearPick = table(bands.map { it.first }, bets)
+        val clearVerdict = baseVerdict
+        sb.append("\nCLEAR_LEAD_PICK ${clearPick ?: "keep defaults"} · defaults $clearVerdict\n")
+        sb.append("\n## Late comeback, the phone's copy (book mid, $5 all-in)\n\n")
+        val comebackPick = table(comebacks.map { it.first }, comebackBets)
+        sb.append("\nPHONE_COMEBACK_PICK ${comebackPick ?: "keep defaults"} · defaults $baseVerdict\n")
         outFile.parentFile?.mkdirs()
         outFile.writeText(sb.toString())
         println(outFile.readText())
