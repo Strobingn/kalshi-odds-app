@@ -160,6 +160,7 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
                         ScalpTradeInsightCharts(live, "Live window and open positions. All-time curves are above.")
                     }
                 }
+                // After the existing analysis cards, so the race, profit bars and fees stay on top.
                 item(key = "analysis-gallery") {
                     AnalysisGallery(galleryTrades, leaders, sparks, st.windows, st.updatedAtMs, rows.map { it.model })
                 }
