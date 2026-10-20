@@ -844,6 +844,7 @@ private fun LedgerCard(
         }
         Spacer(Modifier.height(8.dp))
         Text("Calibration: said → happened (calls)", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+        CalibrationChart(report.modelBuckets, report.marketBuckets)
         val market = report.marketBuckets.associateBy { it.lowPct }
         report.modelBuckets.forEach { b ->
             val m = market[b.lowPct]

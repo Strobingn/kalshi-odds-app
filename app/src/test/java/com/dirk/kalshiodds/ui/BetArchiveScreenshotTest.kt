@@ -24,7 +24,7 @@ class BetArchiveScreenshotTest {
     @get:Rule
     val paparazzi = Paparazzi(
         deviceConfig = DeviceConfig.PIXEL_6.copy(
-            softButtons = false, screenWidth = 411, screenHeight = 1000, xdpi = 160, ydpi = 160,
+            softButtons = false, screenWidth = 411, screenHeight = 1900, xdpi = 160, ydpi = 160,
             density = com.android.resources.Density.MEDIUM
         ),
         theme = "android:Theme.Material3.DayNight.NoActionBar",
@@ -53,6 +53,10 @@ class BetArchiveScreenshotTest {
         entries(60).map { BetRows.ofTracker(BetRows.CLEAR_LEAD, it) } +
             entries(25).mapIndexed { i, e -> BetRows.ofTracker(BetRows.CENT_BETTER, e.copy(ticker = "KXBTC15M-C$i")) }
 
+    private fun bucket(b: Int, n: Int, actual: Double) = com.dirk.kalshiodds.prediction.ledger.LedgerReport.Bucket(
+        lowPct = b * 10, highPct = b * 10 + 10, n = n, meanForecast = (b * 10 + 5) / 100.0, actualYes = actual.coerceIn(0.0, 1.0)
+    )
+
     private fun snap(name: String, dark: Boolean) {
         val state = LateFavoriteState(entries = entries(40))
         paparazzi.snapshot(name = name) {
@@ -60,6 +64,10 @@ class BetArchiveScreenshotTest {
                 Column(Modifier.background(DipTheme.colors.bg).padding(16.dp)) {
                     BetArchiveCard(rows())
                     FlowFadeCard(state, summary = com.dirk.kalshiodds.signal.trend.ClearLeadSummary.of(state))
+                    CalibrationChart(
+                        (0 until 10).map { b -> bucket(b, 40 + b * 7, (b * 10 + 5) / 100.0 + (b - 5) * 0.012) },
+                        (0 until 10).map { b -> bucket(b, 60 - b * 3, (b * 10 + 5) / 100.0) }
+                    )
                 }
             }
         }
