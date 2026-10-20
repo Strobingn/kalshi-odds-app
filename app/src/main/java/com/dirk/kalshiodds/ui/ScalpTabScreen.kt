@@ -137,13 +137,15 @@ fun ScalpTabScreen(viewModel: OddsViewModel, onOpenScalpData: () -> Unit, onOpen
     val aiStore = app?.let { runCatching { it.container.aiWatch }.getOrNull() }
     val aiPanel = rememberAiWatchPanel(aiStore)
     val book = st.arenaChart.ticker.takeIf { it.isNotBlank() }?.let { viewModel.orderBook(it) }
-    val paper = viewModel.state.collectAsStateWithLifecycle().value.paper
+    val odds = viewModel.state.collectAsStateWithLifecycle().value
+    val strike = odds.snapshot?.allMarkets?.firstOrNull { it.ticker.equals(st.arenaChart.ticker, true) }?.floorStrike
     val extras = LiveWindowExtras(
         bookYes = book?.yes.orEmpty(),
         bookNo = book?.no.orEmpty(),
-        calibration = paperCalibration(paper.postResetFills.ifEmpty { paper.fills }),
+        calibration = paperCalibration(odds.paper.postResetFills.ifEmpty { odds.paper.fills }),
         dayFees = com.dirk.kalshiodds.ui.charts.ChartGallery.dayLeg(st.algoToday.values),
-        knobs = rememberKnobTicks()
+        knobs = rememberKnobTicks(),
+        strikeUsd = strike
     )
     var settings by remember { mutableStateOf(false) }
     if (settings) SwarmScalpSettingsDialog { settings = false }

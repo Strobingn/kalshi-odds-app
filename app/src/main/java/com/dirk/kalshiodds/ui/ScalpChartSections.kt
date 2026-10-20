@@ -32,7 +32,8 @@ data class LiveWindowExtras(
     val bookNo: List<Pair<Double, Double>> = emptyList(),
     val calibration: List<Pair<Double, Boolean>> = emptyList(),
     val dayFees: ChartGallery.FeeLeg? = null,
-    val knobs: List<ChartGallery.KnobTick> = emptyList()
+    val knobs: List<ChartGallery.KnobTick> = emptyList(),
+    val strikeUsd: Double? = null
 )
 
 /** Recorded tuner changes. Reads the existing adjustment log and does not call a provider. */

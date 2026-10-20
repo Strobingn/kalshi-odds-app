@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.ui.charts
 
+import com.dirk.kalshiodds.chart.BidPoint
 import com.dirk.kalshiodds.decision.ScalpModels
 import com.dirk.kalshiodds.decision.ScalpState
 import com.dirk.kalshiodds.decision.ScalpTrade
@@ -200,6 +201,21 @@ class ChartGalleryTest {
         assertEquals(listOf(100L, 200L), ticks.map { it.atMs })
         assertEquals("48", ticks[0].to)
         assertTrue(ChartGallery.knobTicks(emptyList()).isEmpty())
+    }
+
+    @Test fun distanceToStrikeSubtractsTheStrike() {
+        val points = listOf(
+            BidPoint(2, 41f, 59f, 130.0),
+            BidPoint(1, 40f, 60f, 100.0),
+            BidPoint(3, null, null, null),
+            BidPoint(4, 40f, 60f, -5.0)
+        )
+        val line = ChartGallery.distanceToStrike(points, 110.0)
+        assertEquals(listOf(1L, 2L), line.map { it.tMs })
+        assertEquals(listOf(-10.0, 20.0), line.map { it.value })
+        assertTrue(ChartGallery.distanceToStrike(points, null).isEmpty())
+        assertTrue(ChartGallery.distanceToStrike(emptyList(), 110.0).isEmpty())
+        assertTrue(ChartGallery.distanceToStrike(points, Double.NaN).isEmpty())
     }
 
     private fun trade(id: String, side: String, rule: String, net: Double) = ScalpTrade(

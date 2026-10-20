@@ -33,6 +33,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.ui.theme.DipTheme
+import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -42,6 +43,31 @@ private fun heatColor(rate: Double?, n: Int, up: Color, down: Color, empty: Colo
     val dist = (abs(rate - 0.5) / 0.5).toFloat().coerceIn(0f, 1f)
     val alpha = 0.35f + 0.65f * dist
     return if (rate >= 0.5) up.copy(alpha = alpha) else down.copy(alpha = alpha)
+}
+
+/** Bitcoin spot minus the window strike. Above the strike is green, below is red. */
+@Composable
+fun DistanceToStrikeChart(samples: List<ChartShapes.Sample>, modifier: Modifier = Modifier) {
+    val c = DipTheme.colors
+    val last = samples.lastOrNull { it.value.isFinite() }?.value ?: 0.0
+    Column(
+        modifier.fillMaxWidth().testTag("chart_distance")
+            .semantics { contentDescription = "BTC distance to strike over the window" },
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text("Distance to strike", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
+        Text("Bitcoin spot minus the strike, in dollars. Above the strike is green. The dashed line is the strike.", style = MaterialTheme.typography.bodySmall, color = c.textSecondary)
+        MultiLineChart(
+            if (samples.isEmpty()) emptyList() else listOf(
+                LineSeries("BTC − strike", if (last >= 0.0) c.upButton else c.downButton, samples)
+            ),
+            yFormat = { String.format(Locale.US, "%+,.0f", it) },
+            includeZero = true,
+            guideY = 0.0,
+            guideLabel = "Strike",
+            contentLabel = "BTC distance to strike"
+        )
+    }
 }
 
 /** Tuner changes on a time axis. Every strategy's knobs share the line. */

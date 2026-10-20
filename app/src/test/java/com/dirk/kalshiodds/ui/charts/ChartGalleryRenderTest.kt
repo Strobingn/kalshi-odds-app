@@ -67,6 +67,24 @@ class ChartGalleryRenderTest {
         compose.onAllNodesWithText("No data yet").assertCountEquals(0)
     }
 
+    @Test fun distanceEmpty() {
+        show { DistanceToStrikeChart(emptyList()) }
+        compose.onNodeWithTag("chart_distance").assertExists()
+        compose.onNodeWithText("Distance to strike").assertExists()
+        compose.onNodeWithText("No data yet").assertExists()
+    }
+
+    @Test fun distanceSample() {
+        show {
+            DistanceToStrikeChart(
+                listOf(ChartShapes.Sample(1_700_000_000_000, -40.0), ChartShapes.Sample(1_700_000_060_000, 120.0))
+            )
+        }
+        compose.onNodeWithText("BTC − strike").assertExists()
+        compose.onNodeWithText("Strike").assertExists()
+        compose.onAllNodesWithText("No data yet").assertCountEquals(0)
+    }
+
     @Test fun knobsEmpty() {
         show { KnobTimeline(emptyList()) }
         compose.onNodeWithTag("chart_knobs").assertExists()

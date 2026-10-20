@@ -67,7 +67,7 @@ object ScalpAlgoCopy {
 fun ScalpAlgoScreen(viewModel: OddsViewModel, onBack: () -> Unit) {
     val d by viewModel.scalpAlgo.collectAsStateWithLifecycle()
     val controls by viewModel.scalpStrategyControls.collectAsStateWithLifecycle()
-    val paper = viewModel.state.collectAsStateWithLifecycle().value.paper
+    val odds = viewModel.state.collectAsStateWithLifecycle().value
     val scalpTab = viewModel.scalpTab.collectAsStateWithLifecycle().value
     val knobTicks = rememberKnobTicks()
     var settingsOpen by androidx.compose.runtime.remember(d.model) { androidx.compose.runtime.mutableStateOf(false) }
@@ -92,15 +92,17 @@ fun ScalpAlgoScreen(viewModel: OddsViewModel, onBack: () -> Unit) {
             onBenchOverride = { viewModel.setScalpBenchOverride(model.code, it) })
     } else {
         val book = d.chart.ticker.takeIf { it.isNotBlank() }?.let { viewModel.orderBook(it) }
+        val strike = odds.snapshot?.allMarkets?.firstOrNull { it.ticker.equals(d.chart.ticker, true) }?.floorStrike
         ScalpAlgoContent(d, onBack, paged, viewModel::selectScalpChartWindow, viewModel::followScalpChartLive,
             onSettings = if (model != null) ({ settingsOpen = true }) else null,
             aiNote = model?.let { controls.settings(it.code).aiNote }.orEmpty(),
             extras = LiveWindowExtras(
                 bookYes = book?.yes.orEmpty(),
                 bookNo = book?.no.orEmpty(),
-                calibration = paperCalibration(paper.postResetFills.ifEmpty { paper.fills }),
+                calibration = paperCalibration(odds.paper.postResetFills.ifEmpty { odds.paper.fills }),
                 dayFees = com.dirk.kalshiodds.ui.charts.ChartGallery.dayLeg(scalpTab.algoToday.values),
-                knobs = knobTicks
+                knobs = knobTicks,
+                strikeUsd = strike
             ))
     }
 }

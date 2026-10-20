@@ -35,6 +35,7 @@ import com.dirk.kalshiodds.ui.charts.ChartBlock
 import com.dirk.kalshiodds.ui.charts.ChartGallery
 import com.dirk.kalshiodds.ui.charts.ChartShapes
 import com.dirk.kalshiodds.ui.charts.CumulativeDepthChart
+import com.dirk.kalshiodds.ui.charts.DistanceToStrikeChart
 import com.dirk.kalshiodds.ui.charts.FeeWaterfall
 import com.dirk.kalshiodds.ui.charts.KnobTimeline
 import com.dirk.kalshiodds.ui.charts.LineSeries
@@ -192,6 +193,7 @@ fun ChartDetailScreen(
             CalibrationPlot(ChartGallery.calibration(calibration))
             FeeWaterfall(windowFees, dayFees)
             KnobTimeline(knobs)
+            DistanceToStrikeChart(ChartGallery.distanceToStrike(points, market.floorStrike))
             UpDownBuyButtons(
                 market = market,
                 onBuyYes = { onBuyYes(market) },

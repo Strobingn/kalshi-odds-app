@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.ui.charts
 
+import com.dirk.kalshiodds.chart.BidPoint
 import com.dirk.kalshiodds.decision.ScalpModels
 import com.dirk.kalshiodds.decision.ScalpState
 import com.dirk.kalshiodds.decision.ScalpTrade
@@ -147,6 +148,15 @@ object ChartGallery {
         val exit = t.proceedsUsd / sold
         if (!exit.isFinite() || exit !in 0.0..1.0) return@mapNotNull null
         ScatterDot(entry * 100.0, exit * 100.0, (t.netUsd ?: 0.0) > 0.0)
+    }
+
+    /** Spot minus strike, in dollars. Empty when the strike or the prints are missing. */
+    fun distanceToStrike(points: List<BidPoint>, strike: Double?): List<ChartShapes.Sample> {
+        val strikeUsd = strike?.takeIf { it.isFinite() && it > 0.0 } ?: return emptyList()
+        return points.mapNotNull { point ->
+            val spot = point.spotUsd?.takeIf { it.isFinite() && it > 0.0 } ?: return@mapNotNull null
+            ChartShapes.Sample(point.tMs, spot - strikeUsd)
+        }.sortedBy { it.tMs }
     }
 
     data class KnobTick(val atMs: Long, val who: String, val knob: String, val from: String, val to: String)

@@ -24,6 +24,7 @@ import com.dirk.kalshiodds.ui.charts.CalibrationPlot
 import com.dirk.kalshiodds.ui.charts.ChartGallery
 import com.dirk.kalshiodds.ui.charts.ChartShapes
 import com.dirk.kalshiodds.ui.charts.CumulativeDepthChart
+import com.dirk.kalshiodds.ui.charts.DistanceToStrikeChart
 import com.dirk.kalshiodds.ui.charts.FeeWaterfall
 import com.dirk.kalshiodds.ui.charts.KnobTimeline
 import com.dirk.kalshiodds.ui.charts.WindowTimeline
@@ -197,5 +198,6 @@ internal fun ScalpWindowChart(d: ScalpAlgoDetail, onWindow: (String) -> Unit = {
         CalibrationPlot(ChartGallery.calibration(extras.calibration))
         FeeWaterfall(ChartGallery.feeLegFromTrades("Window", data.trades), extras.dayFees)
         KnobTimeline(extras.knobs)
+        DistanceToStrikeChart(ChartGallery.distanceToStrike(data.points, extras.strikeUsd))
     }
 }
