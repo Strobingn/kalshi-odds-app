@@ -210,10 +210,16 @@ fun MarketCard(
                 )
             }
 
+            Text(
+                "YES mid",
+                style = MaterialTheme.typography.labelMedium,
+                color = labelColor,
+                fontWeight = FontWeight.Bold
+            )
             OddsSparkline(
                 points = com.dirk.kalshiodds.chart.ChartSeriesBuilder.sparklineMidsPp(market.oddsHistory),
                 modifier = Modifier.fillMaxWidth(),
-                color = colors.textSecondary
+                color = colors.accentBlue
             )
 
             Text(
@@ -613,13 +619,13 @@ private fun DetailsBlock(
             modifier = Modifier
                 .fillMaxWidth()
                 .then(if (onOpenChart != null) Modifier.clickable(onClick = onOpenChart) else Modifier),
-            heightDp = if (compact) 56 else 72,
+            heightDp = if (compact) 88 else 140,
             windowStartMs = market.closeTimeEpochMs?.minus(900_000L),
             windowEndMs = market.closeTimeEpochMs,
             strikeLabel = market.floorStrike?.let { String.format(Locale.US, "Strike $%,.0f", it) },
             spotUsd = market.spotUsd,
             strikeUsd = market.floorStrike,
-            spotHeightDp = if (compact) 40 else 48,
+            spotHeightDp = if (compact) 64 else 96,
             liveUpLabel = quotes.upChartLabel,
             liveDownLabel = quotes.downChartLabel
         )

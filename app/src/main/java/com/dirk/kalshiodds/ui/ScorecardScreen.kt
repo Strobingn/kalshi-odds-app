@@ -1,6 +1,5 @@
 package com.dirk.kalshiodds.ui
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -29,17 +28,17 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.dirk.kalshiodds.chart.ScorecardTrend
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.feedback.ScorecardLedger
 import com.dirk.kalshiodds.signal.feedback.ScorecardMetrics
+import com.dirk.kalshiodds.ui.components.OutcomeStrip
+import com.dirk.kalshiodds.ui.components.RunningSeriesChart
+import com.dirk.kalshiodds.ui.components.WinLossBar
 import com.dirk.kalshiodds.ui.theme.DipTheme
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -180,8 +179,8 @@ fun ScorecardScreen(
                 if (ledger.noBetWouldHave.settledCount > 0) {
                     item { RecordCard(ScorecardCopy.NO_BET_TITLE, ledger.noBetWouldHave, money = false) }
                 }
-                if (ledger.cumulativePnl.size >= 2) {
-                    item { CumulativePnlCard(ledger.cumulativePnl) }
+                if (ledger.cumulativePnl.size >= 2 || view.recent.isNotEmpty()) {
+                    item { CumulativePnlCard(ledger.cumulativePnl, view.recent) }
                 }
                 item { SectionCard(ScorecardCopy.SIDE_TITLE) { view.bySide.forEach { BucketRow(it) } } }
                 item { SectionCard(ScorecardCopy.PRICE_TITLE) { view.byPrice.forEach { BucketRow(it) } } }
@@ -295,6 +294,13 @@ private fun BucketRow(bucket: ScorecardCopy.Bucket) {
             color = colors.textPrimary
         )
     }
+    if (bucket.wins + bucket.losses > 0) {
+        WinLossBar(
+            wins = bucket.wins,
+            losses = bucket.losses,
+            modifier = Modifier.padding(bottom = 6.dp)
+        )
+    }
 }
 
 @Composable
@@ -391,39 +397,51 @@ private fun SettledPickRow(pick: ScorecardCopy.RecentPick) {
 }
 
 @Composable
-private fun CumulativePnlCard(points: List<Pair<Long, Double>>) {
+private fun CumulativePnlCard(
+    points: List<Pair<Long, Double>>,
+    recent: List<ScorecardCopy.RecentPick>
+) {
     val colors = DipTheme.colors
-    val last = points.last().second
+    val last = points.lastOrNull()?.second
+    val ordered = recent.sortedBy { it.settledAtMs }
+    val outcomes = ordered.map { it.won }
+    val hitRate = ScorecardTrend.rollingHitRate(outcomes)
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(colors.surface, RoundedCornerShape(16.dp))
-            .padding(16.dp)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text(ScorecardCopy.PNL_TITLE, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
-        Text(
-            ScorecardLedger.signedUsd(last),
-            fontWeight = FontWeight.Bold,
-            color = if (last >= 0) colors.up else colors.down
-        )
-        Canvas(Modifier.fillMaxWidth().height(96.dp).padding(top = 8.dp)) {
-            val ys = points.map { it.second }
-            val minY = (ys.minOrNull() ?: 0.0) - 1.0
-            val maxY = (ys.maxOrNull() ?: 0.0) + 1.0
-            val spanY = (maxY - minY).coerceAtLeast(1.0)
-            val path = Path()
-            points.forEachIndexed { i, p ->
-                val x = size.width * i / (points.size - 1).coerceAtLeast(1).toFloat()
-                val y = size.height * (1f - ((p.second - minY) / spanY).toFloat()).coerceIn(0f, 1f)
-                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
-            }
-            drawPath(
-                path,
-                if (last >= 0) colors.up else colors.down,
-                style = Stroke(width = 3f, cap = StrokeCap.Round)
+        if (last != null && points.size >= 2) {
+            Text(ScorecardCopy.PNL_TITLE, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+            Text(
+                ScorecardLedger.signedUsd(last),
+                fontWeight = FontWeight.Bold,
+                color = if (last >= 0) colors.up else colors.down
             )
-            val zero = size.height * (1f - ((0.0 - minY) / spanY).toFloat()).coerceIn(0f, 1f)
-            drawLine(colors.textSecondary.copy(alpha = 0.25f), Offset(0f, zero), Offset(size.width, zero), strokeWidth = 1f)
+            RunningSeriesChart(points = points, baseline = 0.0, heightDp = 120)
+        }
+        OutcomeStrip(outcomes)
+        if (hitRate.size >= 2) {
+            Text(
+                "Rolling hit rate (last ${ScorecardTrend.DEFAULT_WINDOW})",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+            Text(
+                String.format(Locale.US, "%.0f%%", hitRate.last() * 100.0),
+                fontWeight = FontWeight.Bold,
+                color = colors.textPrimary
+            )
+            RunningSeriesChart(
+                points = ordered.mapIndexed { i, pick -> pick.settledAtMs to hitRate[i] },
+                baseline = 0.5,
+                heightDp = 88,
+                positive = colors.accentBlue,
+                negative = colors.accentOrange,
+                showDelta = false
+            )
         }
     }
 }

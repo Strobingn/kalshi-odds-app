@@ -1,6 +1,5 @@
 package com.dirk.kalshiodds.ui
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -36,10 +35,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -48,6 +43,8 @@ import com.dirk.kalshiodds.data.local.history.HistoryAssembler
 import com.dirk.kalshiodds.data.local.history.HistoryBet
 import com.dirk.kalshiodds.data.local.history.HistorySession
 import com.dirk.kalshiodds.data.local.history.SettingsChange
+import com.dirk.kalshiodds.ui.components.OutcomeStrip
+import com.dirk.kalshiodds.ui.components.RunningSeriesChart
 import com.dirk.kalshiodds.ui.components.SignalSummaryCard
 import com.dirk.kalshiodds.domain.MarketUiModel
 import java.text.SimpleDateFormat
@@ -107,8 +104,8 @@ fun HistoryScreen(
                     0 -> {
                         item { BetFilters(state, viewModel) }
                         item { TotalsCard(state.totals) }
-                        if (state.pnl.size >= 2) {
-                            item { CumulativePnlChart(state.pnl) }
+                        if (state.pnl.size >= 2 || state.bets.any { it.result.equals("won", true) || it.result.equals("lost", true) }) {
+                            item { CumulativePnlChart(state.pnl, state.bets) }
                         }
                         items(state.bets, key = { it.id }) { BetRow(it) }
                     }
@@ -229,26 +226,24 @@ private fun TotalsCard(t: HistoryAssembler.Totals) {
 }
 
 @Composable
-private fun CumulativePnlChart(points: List<Pair<Long, Double>>) {
+private fun CumulativePnlChart(points: List<Pair<Long, Double>>, bets: List<HistoryBet>) {
     val colors = DipTheme.colors
-    val color = colors.textPrimary
-    Column(Modifier.fillMaxWidth()) {
+    val outcomes = bets
+        .filter { it.result.equals("won", true) || it.result.equals("lost", true) }
+        .sortedBy { it.createdAtMs }
+        .map { it.result.equals("won", true) }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(colors.surfaceAlt, RoundedCornerShape(12.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
         Text("Cumulative P&L", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
-        Canvas(Modifier.fillMaxWidth().height(96.dp).padding(top = 4.dp)) {
-            val ys = points.map { it.second }
-            val minY = (ys.minOrNull() ?: 0.0) - 1.0
-            val maxY = (ys.maxOrNull() ?: 0.0) + 1.0
-            val spanY = (maxY - minY).coerceAtLeast(1.0)
-            val path = Path()
-            points.forEachIndexed { i, p ->
-                val x = size.width * i / (points.size - 1).coerceAtLeast(1).toFloat()
-                val y = size.height * (1f - ((p.second - minY) / spanY).toFloat()).coerceIn(0f, 1f)
-                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
-            }
-            drawPath(path, color, style = Stroke(width = 3f, cap = StrokeCap.Round))
-            val zero = size.height * (1f - ((0.0 - minY) / spanY).toFloat()).coerceIn(0f, 1f)
-            drawLine(color.copy(alpha = 0.25f), Offset(0f, zero), Offset(size.width, zero), strokeWidth = 1f)
+        if (points.size >= 2) {
+            RunningSeriesChart(points = points, baseline = 0.0, heightDp = 120)
         }
+        OutcomeStrip(outcomes)
     }
 }
 

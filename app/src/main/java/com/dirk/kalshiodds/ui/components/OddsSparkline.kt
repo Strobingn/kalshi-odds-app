@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
@@ -38,21 +39,42 @@ fun OddsSparkline(
         }
         return
     }
-    Canvas(modifier.height(36.dp).fillMaxSize()) {
+    Canvas(modifier.height(72.dp).fillMaxSize()) {
         val min = points.min()
         val max = points.max()
         val span = (max - min).coerceAtLeast(0.4f)
-        val stroke = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
+        val stroke = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round)
+        fun yOf(v: Float) = size.height * (1f - ((v - min) / span).coerceIn(0f, 1f))
         val path = Path()
+        val area = Path()
         val last = points.lastIndex
         points.forEachIndexed { i, v ->
             val x = if (last == 0) 0f else size.width * i / last
-            val y = size.height * (1f - ((v - min) / span).coerceIn(0f, 1f))
-            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+            val y = yOf(v)
+            if (i == 0) {
+                path.moveTo(x, y)
+                area.moveTo(x, y)
+            } else {
+                path.lineTo(x, y)
+                area.lineTo(x, y)
+            }
+        }
+        area.lineTo(size.width, size.height)
+        area.lineTo(0f, size.height)
+        area.close()
+        drawPath(area, color.copy(alpha = 0.16f))
+        if (50f in min..max) {
+            val y50 = yOf(50f)
+            drawLine(
+                color.copy(alpha = 0.45f),
+                Offset(0f, y50),
+                Offset(size.width, y50),
+                strokeWidth = 1.5f,
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 8f), 0f)
+            )
         }
         drawPath(path = path, color = color, style = stroke)
-        val lastX = size.width
-        val lastY = size.height * (1f - ((points.last() - min) / span).coerceIn(0f, 1f))
-        drawCircle(color = color, radius = 3.dp.toPx(), center = Offset(lastX, lastY))
+        val lastY = yOf(points.last())
+        drawCircle(color = color, radius = 3.5.dp.toPx(), center = Offset(size.width, lastY))
     }
 }

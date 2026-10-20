@@ -32,12 +32,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.dirk.kalshiodds.chart.PaperEquity
 import com.dirk.kalshiodds.domain.MarketUiModel
+import com.dirk.kalshiodds.signal.paper.PaperBookState
 import com.dirk.kalshiodds.signal.trade.BetCall
 import com.dirk.kalshiodds.ui.HomeCopy
 import com.dirk.kalshiodds.ui.HomeScorecardSummary
 import com.dirk.kalshiodds.ui.SideColor
 import com.dirk.kalshiodds.ui.theme.DipTheme
+import java.util.Locale
 
 @Composable
 fun TradeModeChip(label: String, modifier: Modifier = Modifier) {
@@ -60,12 +63,16 @@ fun ThisWindowCard(
     decision: BetCall.Decision?,
     nowMs: Long,
     scorecard: HomeScorecardSummary = HomeScorecardSummary.EMPTY,
+    paper: PaperBookState = PaperBookState(),
     onOpenScorecard: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val colors = DipTheme.colors
     val headline = HomeCopy.thisWindowHeadline(decision, market, nowMs)
     val accent = SideColor.of(decision?.headline ?: BetCall.Headline.NO_BET, colors)
+    val equity = remember(paper.fills, paper.startingUsd) {
+        PaperEquity.curve(paper.fills, paper.startingUsd)
+    }
     Column(
         modifier
             .fillMaxWidth()
@@ -85,6 +92,26 @@ fun ThisWindowCard(
             color = accent,
             fontWeight = FontWeight.SemiBold
         )
+        if (equity.size >= 2) {
+            val last = equity.last()
+            Text(
+                "Paper equity",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                String.format(Locale.US, "$%.2f", last.equityUsd),
+                style = MaterialTheme.typography.titleMedium,
+                color = if (last.pnlUsd >= 0.0) colors.up else colors.down,
+                fontWeight = FontWeight.Bold
+            )
+            RunningSeriesChart(
+                points = equity.map { it.tMs to it.equityUsd },
+                baseline = paper.startingUsd,
+                heightDp = 96
+            )
+        }
         HomeScorecardLine(summary = scorecard, onOpenScorecard = onOpenScorecard)
     }
 }

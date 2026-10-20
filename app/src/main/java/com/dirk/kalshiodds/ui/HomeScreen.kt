@@ -200,6 +200,7 @@ fun HomeScreen(
                                 decision = best?.second,
                                 nowMs = nowMs,
                                 scorecard = state.scorecardSummary,
+                                paper = state.paper,
                                 onOpenScorecard = onOpenScorecard
                             )
                         }

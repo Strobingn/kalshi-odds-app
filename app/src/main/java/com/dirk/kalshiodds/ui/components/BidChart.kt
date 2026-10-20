@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -119,9 +120,28 @@ fun BidChart(
                 axisColor = axisColor
             )
         }
+        val bidYs = downsampled.flatMap {
+            listOfNotNull(
+                com.dirk.kalshiodds.chart.ChartSeriesBuilder.chartableBidCents(it.upBidCents),
+                com.dirk.kalshiodds.chart.ChartSeriesBuilder.chartableBidCents(it.downBidCents)
+            )
+        }
+        val minY = (bidYs.minOrNull() ?: 0f) - 1f
+        val maxY = (bidYs.maxOrNull() ?: 100f) + 1f
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            if (heightDp >= 120 && bidYs.isNotEmpty()) {
+                Column(
+                    Modifier.height(heightDp.dp).padding(end = 4.dp),
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(fmtCents(maxY), color = axisColor, style = MaterialTheme.typography.labelMedium)
+                    Text(fmtCents((minY + maxY) / 2f), color = axisColor, style = MaterialTheme.typography.labelMedium)
+                    Text(fmtCents(minY), color = axisColor, style = MaterialTheme.typography.labelMedium)
+                }
+            }
         Canvas(
             Modifier
-                .fillMaxWidth()
+                .weight(1f)
                 .height(heightDp.dp)
                 .then(
                     if (scrub) {
@@ -139,14 +159,6 @@ fun BidChart(
                     } else Modifier
                 )
         ) {
-            val ys = downsampled.flatMap {
-                listOfNotNull(
-                    com.dirk.kalshiodds.chart.ChartSeriesBuilder.chartableBidCents(it.upBidCents),
-                    com.dirk.kalshiodds.chart.ChartSeriesBuilder.chartableBidCents(it.downBidCents)
-                )
-            }
-            val minY = (ys.minOrNull() ?: 0f) - 1f
-            val maxY = (ys.maxOrNull() ?: 100f) + 1f
             val spanY = (maxY - minY).coerceAtLeast(2f)
             val t0 = windowStartMs ?: downsampled.first().tMs
             val t1 = windowEndMs ?: downsampled.last().tMs
@@ -158,21 +170,42 @@ fun BidChart(
                 val y = size.height * i / 4f
                 drawLine(grid, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
             }
+            if (50f in minY..maxY) {
+                val y50 = yOf(50f)
+                drawLine(
+                    axisColor.copy(alpha = 0.55f),
+                    Offset(0f, y50),
+                    Offset(size.width, y50),
+                    strokeWidth = 1.5f,
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 8f), 0f)
+                )
+            }
             fun line(sel: (BidPoint) -> Float?, color: androidx.compose.ui.graphics.Color) {
                 val path = Path()
+                val area = Path()
                 var started = false
+                var firstX = 0f
+                var lastX = 0f
                 downsampled.forEach { p ->
                     val v = com.dirk.kalshiodds.chart.ChartSeriesBuilder.chartableBidCents(sel(p)) ?: return@forEach
                     val x = xOf(p.tMs)
                     val y = yOf(v)
                     if (!started) {
                         path.moveTo(x, y)
+                        area.moveTo(x, y)
+                        firstX = x
                         started = true
                     } else {
                         path.lineTo(x, y)
+                        area.lineTo(x, y)
                     }
+                    lastX = x
                 }
                 if (started) {
+                    area.lineTo(lastX, size.height)
+                    area.lineTo(firstX, size.height)
+                    area.close()
+                    drawPath(area, color.copy(alpha = 0.16f))
                     drawPath(path, color, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
                 }
             }
@@ -187,6 +220,7 @@ fun BidChart(
                 pick.upBidCents?.let { drawCircle(colors.up, 3.dp.toPx(), Offset(xOf(pick.tMs), yOf(it))) }
                 pick.downBidCents?.let { drawCircle(colors.down, 3.dp.toPx(), Offset(xOf(pick.tMs), yOf(it))) }
             }
+        }
         }
         Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(

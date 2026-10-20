@@ -103,7 +103,7 @@ fun ChartDetailScreen(
                 liveDownLabel = quotes.downChartLabel
             )
             Text(
-                "Orange = Coinbase/Binance spot with dashed TARGET. Green/red = UP/DOWN best bids. Drag to scrub.",
+                "Orange = Coinbase/Binance spot with dashed TARGET. Green/red = UP/DOWN best bids with a dashed 50¢ line. Drag to scrub.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary,
                 modifier = Modifier.padding(top = 12.dp)
