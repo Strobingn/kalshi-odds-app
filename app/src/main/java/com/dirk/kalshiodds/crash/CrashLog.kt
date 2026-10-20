@@ -97,6 +97,6 @@ object CrashLog {
 
     fun clear() { dir?.listFiles()?.forEach { it.delete() } }
 
-    fun stamp(ms: Long): String = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z")
-        .format(Instant.ofEpochMilli(ms).atZone(ZoneId.of("America/New_York")))
+    /** "Oct 20, 2026, 1:52:07 PM ET" style through the shared ET formatter. */
+    fun stamp(ms: Long): String = com.dirk.kalshiodds.domain.EtTime.fullDateClockSec(ms)
 }

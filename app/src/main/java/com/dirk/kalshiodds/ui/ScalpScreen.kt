@@ -63,8 +63,7 @@ object ScalpCopy {
         val head = String.format(
             Locale.US, "%s · walk-forward tuner · %d trials logged · %s",
             t.versionLabel, t.trials,
-            if (t.lastRunAtMs > 0) "last run " + java.time.Instant.ofEpochMilli(t.lastRunAtMs)
-                .atZone(java.time.ZoneId.of("America/New_York")).toLocalDateTime().toString().replace('T', ' ').take(16) + " ET"
+            if (t.lastRunAtMs > 0) "last run " + com.dirk.kalshiodds.domain.EtTime.dateClock(t.lastRunAtMs)
             else "not run yet (needs ${com.dirk.kalshiodds.decision.ScalpTuner.RETUNE_EVERY} closed paper round trips)"
         )
         val coins = com.dirk.kalshiodds.decision.ScalpStrategy.values().flatMap { st ->

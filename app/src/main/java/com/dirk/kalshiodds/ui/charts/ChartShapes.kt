@@ -50,11 +50,7 @@ object ChartShapes {
         return ((x / width).coerceIn(0f, 1f) * (n - 1)).toInt().coerceIn(0, n - 1)
     }
 
-    fun hourLabel(hour: Int): String {
-        val h = hour.coerceIn(0, 23)
-        val hr = when (val x = h % 12) { 0 -> 12; else -> x }
-        return "$hr${if (h < 12) "a" else "p"}"
-    }
+    fun hourLabel(hour: Int): String = com.dirk.kalshiodds.domain.EtTime.hourTick(hour)
 
     fun cumulative(events: List<Pair<Long, Double>>): List<Sample> {
         val clean = events.filter { it.second.isFinite() }.sortedBy { it.first }

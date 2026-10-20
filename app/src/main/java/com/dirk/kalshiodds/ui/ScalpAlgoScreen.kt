@@ -45,7 +45,8 @@ import java.util.Locale
 /** 0.3.52 copy for one algorithm's page (pure, tested). */
 object ScalpAlgoCopy {
     private val TIME = DateTimeFormatter.ofPattern("MMM d h:mm:ss a", Locale.US).withZone(ZoneId.of("America/New_York"))
-    fun time(ms: Long): String = TIME.format(Instant.ofEpochMilli(ms))
+    /** Bare "Oct 20, 1:52:07 PM"; callers add the "ET" label. */
+    fun time(ms: Long): String = com.dirk.kalshiodds.domain.EtTime.dateClockSec(ms).removeSuffix(" ET")
     fun state(t: ScalpTrade): String = when (t.state) {
         ScalpState.PENDING_ENTRY -> "Entry pending"
         ScalpState.OPEN -> "Holding"

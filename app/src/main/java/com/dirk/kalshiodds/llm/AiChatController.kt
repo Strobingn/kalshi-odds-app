@@ -194,7 +194,6 @@ object ChatPrompt {
     /** Continuous feed. Must not use per-message or one-shot wording. */
     const val LIVE_FEED = "You are continuously following the live 15-minute Bitcoin window through the app's live feed, which updates on every Kalshi tick, and through the window watcher. The live block below is that feed, including the tick series since the window opened, feed events, your recent live posts, and paper tweaks. Never tell the user to ping or message again for fresh data. Never say you cannot watch continuously."
     private val ET = ZoneId.of("America/New_York")
-    private val ET_FMT = DateTimeFormatter.ofPattern("MMM d, h:mm:ss a 'ET'", Locale.US).withZone(ET)
 
     /** Quotes, open paper positions, and the BTC print at the window open. Read at send time. */
     data class LiveWindow(
@@ -274,8 +273,8 @@ object ChatPrompt {
             appendLine(LIVE_HEADER)
             appendLine("ticker: KXBTC15M-$key")
             appendLine("at the money: ${atm?.ticker ?: "unknown"}")
-            appendLine("open: ${ET_FMT.format(Instant.ofEpochMilli(openMs))}")
-            appendLine("close: ${ET_FMT.format(Instant.ofEpochMilli(closeMs))}")
+            appendLine("open: ${com.dirk.kalshiodds.domain.EtTime.dateClockSec(openMs)}")
+            appendLine("close: ${com.dirk.kalshiodds.domain.EtTime.dateClockSec(closeMs)}")
             appendLine(String.format(Locale.US, "time remaining: %d:%02d (%ds)", leftS / 60, leftS % 60, leftS))
             appendLine("BTC price: ${spot?.let { money(it) } ?: "unknown"}")
             appendLine("move since window opened: $move")
@@ -346,7 +345,7 @@ object ChatPrompt {
         val series = if (rows.isEmpty()) "(no ticks yet)" else rows.joinToString("\n") { tickRow(it) }
         val events = feedEvents(live, openMs)
         val tweakLines = tweaks.takeLast(8).joinToString("\n") { t ->
-            "${ET_FMT.format(Instant.ofEpochMilli(t.atMs))} ${t.scalper} ${t.setting} ${t.oldValue} → ${t.newValue}"
+            "${com.dirk.kalshiodds.domain.EtTime.dateClockSec(t.atMs)} ${t.scalper} ${t.setting} ${t.oldValue} → ${t.newValue}"
         }.ifBlank { "(none)" }
         val postLines = posts.map { withoutSnapshotClaims(it) }.filter { it.isNotBlank() }.takeLast(6).joinToString("\n").ifBlank { "(none)" }
         return buildString {
@@ -364,7 +363,7 @@ object ChatPrompt {
     private fun tickRow(p: AiLivePoint): String {
         val dist = if (p.btc != null && p.strike != null && p.btc.isFinite() && p.strike.isFinite()) p.btc - p.strike else null
         return listOf(
-            ET_FMT.format(Instant.ofEpochMilli(p.atMs)),
+            com.dirk.kalshiodds.domain.EtTime.dateClockSec(p.atMs),
             "BTC ${p.btc?.let { money(it) } ?: "—"}",
             "dist ${dist?.let { signedMoney(it) } ?: "—"}",
             "UP ${AiLiveFeed.centsLabel(p.up)}/${AiLiveFeed.centsLabel(p.upAsk)}",
@@ -377,7 +376,7 @@ object ChatPrompt {
         val pts = live.points.sortedBy { it.atMs }
         if (pts.isEmpty()) return "(none)"
         val lines = ArrayList<String>()
-        lines += "window open ${ET_FMT.format(Instant.ofEpochMilli(openMs))} ${tickRow(pts.first())}"
+        lines += "window open ${com.dirk.kalshiodds.domain.EtTime.dateClockSec(openMs)} ${tickRow(pts.first())}"
         var lastEvent = pts.first().atMs
         for (i in 1 until pts.size) {
             val a = pts[i - 1]
@@ -390,7 +389,7 @@ object ChatPrompt {
                 lastEvent = b.atMs
             }
         }
-        if (live.closeMs > 0L && live.atMs >= live.closeMs) lines += "window close ${ET_FMT.format(Instant.ofEpochMilli(live.closeMs))}"
+        if (live.closeMs > 0L && live.atMs >= live.closeMs) lines += "window close ${com.dirk.kalshiodds.domain.EtTime.dateClockSec(live.closeMs)}"
         return lines.joinToString("\n")
     }
 }

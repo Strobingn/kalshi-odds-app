@@ -67,7 +67,7 @@ object PriceDebugLog {
     }
 
     fun line(e: Entry): String {
-        val t = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date(e.wallMs))
+        val t = com.dirk.kalshiodds.domain.EtTime.clockMillis(e.wallMs)
         val v = e.value?.let { "%.4f".format(java.util.Locale.US, it) } ?: "—"
         val meta = listOfNotNull(e.kalshiTsMs?.let { "ts=$it" }, e.sid?.let { "sid=$it" }, e.seq?.let { "seq=$it" }).joinToString(" ")
         return "$t ${e.source} ${e.ticker} ${e.field}=$v $meta ${e.verdict}".trim()

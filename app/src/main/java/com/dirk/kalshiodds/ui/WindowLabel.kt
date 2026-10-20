@@ -39,8 +39,7 @@ object WindowLabel {
         return "$coin · $clock window"
     }
 
-    fun formatEt(epochMs: Long): String =
-        TIME.format(ZonedDateTime.ofInstant(Instant.ofEpochMilli(epochMs), ET))
+    fun formatEt(epochMs: Long): String = com.dirk.kalshiodds.domain.EtTime.clockBare(epochMs)
 
     fun parseTickerClock(ticker: String): String? {
         val key = ticker.split("-").getOrNull(1) ?: return null
@@ -53,6 +52,6 @@ object WindowLabel {
         val minute = hhmm % 100
         if (hour !in 0..23 || minute !in 0..59 || day !in 1..31) return null
         val zdt = ZonedDateTime.of(year, month, day, hour, minute, 0, 0, ET)
-        return TIME.format(zdt)
+        return com.dirk.kalshiodds.domain.EtTime.clockBare(zdt)
     }
 }

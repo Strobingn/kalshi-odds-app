@@ -679,7 +679,7 @@ object ScorecardLedger {
         val defs = (0 until 6).map { i ->
             val start = i * 4
             val key = "%02d-%02d".format(start, start + 4)
-            val label = "%d–%d ET".format(start, start + 4)
+            val label = com.dirk.kalshiodds.domain.EtTime.hourRange(start, start + 4)
             key to label
         }
         val groups = rows.groupBy { timeBucketKey(it.settledAtMs, zoneId) }

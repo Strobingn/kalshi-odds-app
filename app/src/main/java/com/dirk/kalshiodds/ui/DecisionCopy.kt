@@ -17,7 +17,7 @@ object DecisionCopy {
 
     fun calibrationHeader(model: RegimeCalibration.Model, ledgerRows: Long?): List<String> {
         val fitted = if (model.fittedAtMs > 0L) {
-            java.text.SimpleDateFormat("MMM d HH:mm", Locale.US).format(java.util.Date(model.fittedAtMs))
+            com.dirk.kalshiodds.domain.EtTime.dateClock(model.fittedAtMs)
         } else {
             "not yet"
         }

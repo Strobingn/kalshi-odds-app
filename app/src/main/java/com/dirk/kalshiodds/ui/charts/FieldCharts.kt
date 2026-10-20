@@ -65,11 +65,10 @@ data class LineSeries(
     val maxGapMs: Long? = null
 )
 
-private val CLOCK: DateTimeFormatter = DateTimeFormatter.ofPattern("h:mm a", Locale.US).withZone(ChartShapes.ET)
-private val DAY_CLOCK: DateTimeFormatter = DateTimeFormatter.ofPattern("M/d h:mm a", Locale.US).withZone(ChartShapes.ET)
 
-fun chartClock(ms: Long): String = CLOCK.format(Instant.ofEpochMilli(ms))
-fun chartDayClock(ms: Long): String = DAY_CLOCK.format(Instant.ofEpochMilli(ms))
+/** Bare "1:52 PM" for axis ticks; the axis and tooltips carry the "ET" label. */
+fun chartClock(ms: Long): String = com.dirk.kalshiodds.domain.EtTime.clockBare(ms)
+fun chartDayClock(ms: Long): String = com.dirk.kalshiodds.domain.EtTime.shortDateClockBare(ms)
 
 @Composable
 fun ChartBlock(title: String, subtitle: String, content: @Composable () -> Unit) {
@@ -344,7 +343,7 @@ fun HourHeatmap(
     val pick = ordered.getOrNull(scrub)
     Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(
-            pick?.let { "${ChartShapes.hourLabel(it.hour)} ET · ${chartMoney(it.net)} · ${it.trades} windows" }
+            pick?.let { "${com.dirk.kalshiodds.domain.EtTime.hour(it.hour)} ET · ${chartMoney(it.net)} · ${it.trades} windows" }
                 ?: "Drag an hour · green gain, red loss",
             style = MaterialTheme.typography.labelMedium,
             color = c.textPrimary

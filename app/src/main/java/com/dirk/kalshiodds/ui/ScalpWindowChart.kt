@@ -35,8 +35,8 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.abs
 
-internal fun windowTime(at: Long): String = DateTimeFormatter.ofPattern("h:mm:ss a", Locale.US)
-    .withZone(ZoneId.of("America/New_York")).format(Instant.ofEpochMilli(at))
+/** Bare "1:52:07 PM"; callers add the "ET" label. */
+internal fun windowTime(at: Long): String = com.dirk.kalshiodds.domain.EtTime.clockSecBare(at)
 internal fun markerName(kind: ScalpWindowChartData.Kind): String = when (kind) {
     ScalpWindowChartData.Kind.SIGNAL -> "Signal observed"
     ScalpWindowChartData.Kind.ORDER -> "BUY limit posted"

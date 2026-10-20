@@ -67,12 +67,12 @@ class SupabaseSyncNamespaceTest {
     fun lastSyncedLineUsesLocalTimeAndKeepsTheError() {
         val zone = ZoneId.of("America/New_York")
         val at = ZonedDateTime.of(2026, 10, 3, 13, 14, 0, 0, zone).toInstant().toEpochMilli()
-        assertEquals("Last synced: Oct 3, 2026, 1:14 PM", CloudSyncStatus.lastSynced(at, zone))
+        assertEquals("Last synced: Oct 3, 2026, 1:14 PM ET", CloudSyncStatus.lastSynced(at, zone))
         val line = CloudSyncStatus.line(
             hub.copy(lastSyncAtMs = at, lastSyncMessage = "401 bad key"),
             zone
         )
-        assertTrue(line.contains("Last synced: Oct 3, 2026, 1:14 PM"))
+        assertTrue(line.contains("Last synced: Oct 3, 2026, 1:14 PM ET"))
         assertTrue(line.contains("401 bad key"))
         assertTrue(CloudSyncStatus.isError("401 bad key"))
         assertTrue(CloudSyncStatus.isError("404 table missing"))
