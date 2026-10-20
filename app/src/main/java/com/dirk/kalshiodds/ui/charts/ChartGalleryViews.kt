@@ -44,6 +44,73 @@ private fun heatColor(rate: Double?, n: Int, up: Color, down: Color, empty: Colo
     return if (rate >= 0.5) up.copy(alpha = alpha) else down.copy(alpha = alpha)
 }
 
+/** Gross, fees, and net for the window and the day on one chart. */
+@Composable
+fun FeeWaterfall(window: ChartGallery.FeeLeg?, day: ChartGallery.FeeLeg?, modifier: Modifier = Modifier) {
+    val c = DipTheme.colors
+    val legs = listOfNotNull(window, day)
+    Column(
+        modifier.fillMaxWidth().testTag("chart_waterfall")
+            .semantics { contentDescription = "Fee waterfall for the window and the day" },
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text("Fees", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
+        Text("Gross, fees, and net. Window and day together.", style = MaterialTheme.typography.bodySmall, color = c.textSecondary)
+        if (legs.isEmpty()) {
+            ChartEmptyState(height = 140.dp)
+            return
+        }
+        listOf("Window" to window, "Day" to day).forEach { (name, leg) ->
+            Text(
+                if (leg == null) "$name · No data yet" else "$name gross ${chartMoney(leg.gross)} · fees ${chartMoney(-leg.fees)} · net ${chartMoney(leg.net)}",
+                color = c.textPrimary,
+                style = MaterialTheme.typography.labelMedium
+            )
+        }
+        Canvas(Modifier.fillMaxWidth().height(160.dp)) {
+            val left = 8.dp.toPx()
+            val top = 8.dp.toPx()
+            val bottom = 22.dp.toPx()
+            val plotW = (size.width - left - 8.dp.toPx()).coerceAtLeast(1f)
+            val plotH = (size.height - top - bottom).coerceAtLeast(1f)
+            var lo = 0.0
+            var hi = 0.0
+            legs.forEach { leg ->
+                lo = minOf(lo, leg.gross, leg.net, leg.gross - leg.fees)
+                hi = maxOf(hi, leg.gross, leg.net, leg.gross - leg.fees)
+            }
+            if (hi - lo < 1e-6) { lo -= 1.0; hi += 1.0 }
+            val pad = (hi - lo) * 0.1
+            lo -= pad
+            hi += pad
+            fun y(v: Double) = top + plotH * (1f - ((v - lo) / (hi - lo)).toFloat())
+            val groupW = plotW / legs.size.toFloat()
+            legs.forEachIndexed { g, leg ->
+                val spans = listOf(0.0 to leg.gross, leg.gross to (leg.gross - leg.fees), 0.0 to leg.net)
+                val colors = listOf(
+                    if (leg.gross >= 0) c.upButton else c.downButton,
+                    c.downButton,
+                    if (leg.net >= 0) c.upButton else c.downButton
+                )
+                val slot = groupW / 3f
+                spans.forEachIndexed { i, (a, b) ->
+                    val topY = y(maxOf(a, b))
+                    val botY = y(minOf(a, b))
+                    val h = (botY - topY).coerceAtLeast(1f)
+                    drawRoundRect(
+                        colors[i],
+                        Offset(left + g * groupW + i * slot + slot * 0.18f, topY),
+                        Size(slot * 0.64f, h),
+                        CornerRadius(3.dp.toPx())
+                    )
+                }
+            }
+            drawLine(c.textSecondary.copy(alpha = 0.5f), Offset(left, y(0.0)), Offset(left + plotW, y(0.0)), 1.dp.toPx())
+        }
+        Text("Gross · fees · net", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
+    }
+}
+
 /** Predicted AI UP chance against the share of buckets that settled UP. */
 @Composable
 fun CalibrationPlot(points: List<ChartGallery.CalPoint>, modifier: Modifier = Modifier) {

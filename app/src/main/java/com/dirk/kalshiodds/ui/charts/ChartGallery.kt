@@ -149,6 +149,33 @@ object ChartGallery {
         ScatterDot(entry * 100.0, exit * 100.0, (t.netUsd ?: 0.0) > 0.0)
     }
 
+    data class FeeLeg(val scope: String, val gross: Double, val fees: Double, val net: Double)
+
+    /** Gross, fee cost, and net. A flat zero leg is omitted. Fees are stored as a positive cost. */
+    fun feeLeg(scope: String, gross: Double, fees: Double, net: Double): FeeLeg? {
+        if (!gross.isFinite() || !fees.isFinite() || !net.isFinite()) return null
+        if (abs(gross) < 1e-9 && abs(fees) < 1e-9 && abs(net) < 1e-9) return null
+        return FeeLeg(scope, gross, abs(fees), net)
+    }
+
+    fun feeLegFromTrades(scope: String, trades: List<ScalpTrade>): FeeLeg? {
+        val closed = trades.filter { it.state == ScalpState.CLOSED && it.netUsd?.isFinite() == true }
+        if (closed.isEmpty()) return null
+        val net = closed.sumOf { it.netUsd!! }
+        val fees = closed.sumOf {
+            val cost = it.entryFeeUsd + it.exitFeeUsd
+            if (cost.isFinite()) cost else 0.0
+        }
+        return feeLeg(scope, net + fees, fees, net)
+    }
+
+    fun dayLeg(rows: Collection<ScalpModels.Row>): FeeLeg? {
+        if (rows.sumOf { it.roundTrips } <= 0) return null
+        val net = rows.sumOf { it.netUsd }
+        val fees = rows.sumOf { it.feesUsd }
+        return feeLeg("Day", net + fees, fees, net)
+    }
+
     data class CalPoint(val label: String, val predicted: Double, val actual: Double, val n: Int)
 
     /** AI UP chance (0–100 or 0–1) versus whether UP settled. Ten-point buckets that have samples. */

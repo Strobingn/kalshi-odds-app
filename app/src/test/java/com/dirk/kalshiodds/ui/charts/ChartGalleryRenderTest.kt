@@ -67,6 +67,25 @@ class ChartGalleryRenderTest {
         compose.onAllNodesWithText("No data yet").assertCountEquals(0)
     }
 
+    @Test fun waterfallEmpty() {
+        show { FeeWaterfall(null, null) }
+        compose.onNodeWithTag("chart_waterfall").assertExists()
+        compose.onNodeWithText("Fees").assertExists()
+        compose.onNodeWithText("No data yet").assertExists()
+    }
+
+    @Test fun waterfallSample() {
+        show {
+            FeeWaterfall(
+                ChartGallery.FeeLeg("Window", 4.0, 0.40, 3.60),
+                ChartGallery.FeeLeg("Day", -1.0, 0.25, -1.25)
+            )
+        }
+        compose.onNodeWithText("Window gross +$4.00 · fees −$0.40 · net +$3.60").assertExists()
+        compose.onNodeWithText("Day gross −$1.00 · fees −$0.25 · net −$1.25").assertExists()
+        compose.onAllNodesWithText("No data yet").assertCountEquals(0)
+    }
+
     @Test fun calibrationEmpty() {
         show { CalibrationPlot(emptyList()) }
         compose.onNodeWithTag("chart_calibration").assertExists()

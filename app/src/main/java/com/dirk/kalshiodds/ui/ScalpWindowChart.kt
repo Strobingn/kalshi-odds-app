@@ -24,6 +24,7 @@ import com.dirk.kalshiodds.ui.charts.CalibrationPlot
 import com.dirk.kalshiodds.ui.charts.ChartGallery
 import com.dirk.kalshiodds.ui.charts.ChartShapes
 import com.dirk.kalshiodds.ui.charts.CumulativeDepthChart
+import com.dirk.kalshiodds.ui.charts.FeeWaterfall
 import com.dirk.kalshiodds.ui.charts.WindowTimeline
 import com.dirk.kalshiodds.ui.theme.DipTheme
 import java.time.Instant
@@ -193,5 +194,6 @@ internal fun ScalpWindowChart(d: ScalpAlgoDetail, onWindow: (String) -> Unit = {
         }
         CumulativeDepthChart(ChartGallery.cumulativeDepth(extras.bookYes, extras.bookNo))
         CalibrationPlot(ChartGallery.calibration(extras.calibration))
+        FeeWaterfall(ChartGallery.feeLegFromTrades("Window", data.trades), extras.dayFees)
     }
 }

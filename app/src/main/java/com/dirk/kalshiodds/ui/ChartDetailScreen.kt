@@ -35,6 +35,7 @@ import com.dirk.kalshiodds.ui.charts.ChartBlock
 import com.dirk.kalshiodds.ui.charts.ChartGallery
 import com.dirk.kalshiodds.ui.charts.ChartShapes
 import com.dirk.kalshiodds.ui.charts.CumulativeDepthChart
+import com.dirk.kalshiodds.ui.charts.FeeWaterfall
 import com.dirk.kalshiodds.ui.charts.LineSeries
 import com.dirk.kalshiodds.ui.charts.MultiLineChart
 import java.util.Locale
@@ -58,7 +59,9 @@ fun ChartDetailScreen(
     onBuyYes: (MarketUiModel) -> Unit,
     onBuyNo: (MarketUiModel) -> Unit,
     book: com.dirk.kalshiodds.signal.engine.BookLevelSnapshot? = null,
-    calibration: List<Pair<Double, Boolean>> = emptyList()
+    calibration: List<Pair<Double, Boolean>> = emptyList(),
+    windowFees: ChartGallery.FeeLeg? = null,
+    dayFees: ChartGallery.FeeLeg? = null
 ) {
     val colors = DipTheme.colors
     Scaffold(
@@ -185,6 +188,7 @@ fun ChartDetailScreen(
             OrderBookCard(book)
             CumulativeDepthChart(ChartGallery.cumulativeDepth(book?.yes.orEmpty(), book?.no.orEmpty()))
             CalibrationPlot(ChartGallery.calibration(calibration))
+            FeeWaterfall(windowFees, dayFees)
             UpDownBuyButtons(
                 market = market,
                 onBuyYes = { onBuyYes(market) },

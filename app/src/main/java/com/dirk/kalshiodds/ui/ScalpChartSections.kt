@@ -26,7 +26,8 @@ import com.dirk.kalshiodds.ui.charts.WinRateHeatmap
 data class LiveWindowExtras(
     val bookYes: List<Pair<Double, Double>> = emptyList(),
     val bookNo: List<Pair<Double, Double>> = emptyList(),
-    val calibration: List<Pair<Double, Boolean>> = emptyList()
+    val calibration: List<Pair<Double, Boolean>> = emptyList(),
+    val dayFees: ChartGallery.FeeLeg? = null
 )
 
 /** Settled paper fills → (AI UP chance 0–100, whether UP settled). */

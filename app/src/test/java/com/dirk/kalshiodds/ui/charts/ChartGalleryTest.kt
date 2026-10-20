@@ -176,6 +176,17 @@ class ChartGalleryTest {
         assertTrue(ChartGallery.calibration(listOf(Double.NaN to true)).isEmpty())
     }
 
+    @Test fun feeLegSplitsGrossFeesAndNet() {
+        val closed = trade("w", "YES", "v|v2-fair|P", 1.0).copy(entryFeeUsd = 0.20, exitFeeUsd = 0.10)
+        val leg = ChartGallery.feeLegFromTrades("Window", listOf(closed, closed.copy(id = "open", state = ScalpState.OPEN, netUsd = null)))!!
+        assertEquals(1.3, leg.gross, 1e-9)
+        assertEquals(0.3, leg.fees, 1e-9)
+        assertEquals(1.0, leg.net, 1e-9)
+        assertNull(ChartGallery.feeLegFromTrades("Window", emptyList()))
+        assertNull(ChartGallery.feeLeg("Day", 0.0, 0.0, 0.0))
+        assertNull(ChartGallery.dayLeg(emptyList()))
+    }
+
     private fun trade(id: String, side: String, rule: String, net: Double) = ScalpTrade(
         id = id,
         ticker = "KXBTC15M-26OCT181500-00",
