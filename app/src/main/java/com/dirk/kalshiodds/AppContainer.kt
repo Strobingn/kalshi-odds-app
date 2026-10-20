@@ -127,7 +127,7 @@ class AppContainer(context: Context) {
         val strikes = com.dirk.kalshiodds.llm.ChatPrompt.currentStrikes(quotes, now)
         val openMs = strikes.firstOrNull()?.closeMs?.minus(com.dirk.kalshiodds.domain.MarketLifecycle.WINDOW_MS)
         val atOpen = openMs?.let { scalp.spotAt("BTC", it) }
-        val atm = com.dirk.kalshiodds.llm.ChatPrompt.atm(strikes, com.dirk.kalshiodds.llm.ChatPrompt.liveSpot(strikes))
+        val atm = com.dirk.kalshiodds.llm.ChatPrompt.atm(strikes, com.dirk.kalshiodds.llm.ChatPrompt.liveSpot(strikes), atOpen)
         val up = atm?.let { q ->
             val dm = runCatching { scalp.dm60Snapshot(q.ticker.uppercase(), now) }.getOrDefault(0.0)
             com.dirk.kalshiodds.llm.ChatPrompt.modelUp(q, dm)
@@ -160,7 +160,8 @@ class AppContainer(context: Context) {
         val closeMs = strikes.first().closeMs
         val key = com.dirk.kalshiodds.domain.MarketLifecycle.windowKey(strikes.first().ticker) ?: strikes.first().ticker
         val spot = com.dirk.kalshiodds.llm.ChatPrompt.liveSpot(strikes)
-        val atm = com.dirk.kalshiodds.llm.ChatPrompt.atm(strikes, spot)
+        val openMs = strikes.first().closeMs - com.dirk.kalshiodds.domain.MarketLifecycle.WINDOW_MS
+        val atm = com.dirk.kalshiodds.llm.ChatPrompt.atm(strikes, spot, scalp.spotAt("BTC", openMs))
         val dm = atm?.let { q -> runCatching { scalp.dm60Snapshot(q.ticker.uppercase(), now) }.getOrDefault(0.0) } ?: 0.0
         val up = com.dirk.kalshiodds.llm.ChatPrompt.modelUp(atm, dm)
         val controls = scalpControls.state.value

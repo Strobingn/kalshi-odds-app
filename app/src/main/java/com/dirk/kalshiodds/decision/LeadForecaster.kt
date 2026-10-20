@@ -28,8 +28,8 @@ object LeadForecaster {
         "BTC|120" to doubleArrayOf(-0.009314, -0.039498, 0.013005, 0.022195, 0.02262, -0.009791, 0.018366, 0.032127, 0.008204, -0.000504, 0.039154),
         "BTC|180" to doubleArrayOf(-0.014161, -0.029253, 0.016166, 0.029337, 0.02493, -0.015245, 0.026102, 0.033645, 0.013621, 0.011909, 0.040016),
         "BTC|300" to doubleArrayOf(-0.021349, -0.026267, 0.019999, 0.022184, 0.033998, -0.011815, 0.035664, 0.032001, 0.011252, 0.014873, 0.028044),
-        // 1.0.11: intercept neutralized (was -0.141787, which forced ride=DOWN / fade=UP). Set to -w[6]/2 so it only
-        // centers the always-positive tau/900 term: with no directional inputs at mid-window (tau=450 s) the forecast is 0.
+        // 1.0.11 set the intercept to -w[6]/2, which is 0 only at mid-window. 1.0.16 predict() subtracts the
+        // no-signal forecast (intercept + tau/900) at the current time left, so a flat book is 0 for the whole window.
         "BTC|600" to doubleArrayOf(-0.0876175, -0.08058, 0.034031, -0.078185, 0.003501, 0.114401, 0.175235, 0.023896, 0.014426, -0.00128, 0.06228),
         "BTC|-1" to doubleArrayOf(-0.017298, -0.059513, 0.018171, 0.033889, -0.021904, -0.007383, 0.013355, 0.045474, 0.026059, 0.017262, 0.069037),
         "ETH|30" to doubleArrayOf(-0.001022, -0.016397, 0.008335, 0.002781, 0.012327, 0.002003, 0.002223, 0.028667, 0.005747, -0.001622, 0.021024),
@@ -50,6 +50,7 @@ object LeadForecaster {
     fun weights(coin: String, h: Int): DoubleArray? = W["$coin|$h"]
 
     private fun phiCdf(x: Double): Double {
+        if (x == 0.0) return 0.5
         // Abramowitz-Stegun 7.1.26 erf
         val z = x / sqrt(2.0); val s = if (z < 0) -1.0 else 1.0; val a = kotlin.math.abs(z)
         val t = 1.0 / (1.0 + 0.3275911 * a)
@@ -75,10 +76,18 @@ object LeadForecaster {
         return x
     }
 
+    /**
+     * Directional forecast with the no-signal piece removed. Intercept and the time-left term are on for every
+     * book; subtracting them (at this entry's tau, which is x[6]) makes a flat book forecast 0. Exact 0 is neutral.
+     */
     fun predict(coin: String, h: Int, x: DoubleArray): Double? {
         val w = weights(coin, h) ?: return null
-        var s = 0.0; for (i in x.indices) s += w[i] * x[i]
-        return s.takeIf { it.isFinite() }
+        var centered = 0.0
+        for (i in x.indices) {
+            if (i == 0 || i == 6 || i >= w.size) continue
+            centered += w[i] * x[i]
+        }
+        return centered.takeIf { it.isFinite() }
     }
 
     fun note(): String = ScalpParams.COINS.joinToString(" · ") { c ->

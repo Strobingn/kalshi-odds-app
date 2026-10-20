@@ -278,10 +278,32 @@ object FavouritePolicy {
             y == null && n == null -> null
             y == null -> if (n!! >= 0.5) "NO" else "YES"
             n == null -> if (y >= 0.5) "YES" else "NO"
-            y >= n -> "YES"
-            else -> "NO"
+            y > n -> "YES"
+            n > y -> "NO"
+            else -> null // equal asks: no favourite; the caller compares expected net
         }
     }
 
     fun isLongshot(ask: Double?): Boolean = ask != null && ask <= TradeEligibility.LONGSHOT_ASK + 1e-12
+}
+
+/** Unique maximum. An exact score tie returns null so neither UP nor DOWN is preferred. */
+object SidePick {
+    fun <T> onlyMaxBy(items: List<T>, score: (T) -> Double): T? {
+        var best: T? = null
+        var bestScore = 0.0
+        var n = 0
+        for (item in items) {
+            val s = score(item)
+            if (!s.isFinite()) continue
+            if (n == 0 || s > bestScore) {
+                best = item
+                bestScore = s
+                n = 1
+            } else if (s == bestScore) {
+                n++
+            }
+        }
+        return if (n == 1) best else null
+    }
 }

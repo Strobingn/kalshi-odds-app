@@ -545,6 +545,13 @@ object ForecastScalp {
     fun isForecast(t: ScalpTrade): Boolean = t.variantId.startsWith(RIDE_PREFIX) || t.variantId.startsWith(FADE_PREFIX)
     fun variantId(ride: Boolean, horizonS: Int) = (if (ride) RIDE_PREFIX else FADE_PREFIX) + "-h" + (if (horizonS < 0) "close" else horizonS.toString())
 
+    /** Exact 0 is neutral: neither ride nor fade. Positive rides YES, negative rides NO. */
+    fun sideOf(forecast: Double): String? = when {
+        forecast > 0.0 -> "YES"
+        forecast < 0.0 -> "NO"
+        else -> null
+    }
+
     /** Entry: band, spread, edge > spread + entry fee + exit fee (1-ct rounded) + 0.5¢. */
     /** 0.3.54: predicted move must beat the full round trip (spread + entry fee + exit fee) by [marginUsd]. */
     fun wantsEntry(mid: Double, spread: Double, ask: Double, move: Double, tauS: Double, marginUsd: Double = SAFETY): Boolean =

@@ -120,6 +120,7 @@ object ScalpRule {
     }
 
     fun normCdf(x: Double): Double {
+        if (x == 0.0) return 0.5
         if (!x.isFinite()) return if (x > 0) 1.0 else 0.0
         val ax = kotlin.math.abs(x) / sqrt(2.0)
         val t = 1.0 / (1.0 + 0.3275911 * ax)
@@ -221,12 +222,14 @@ object ScalpRule {
         val ya = q.yesAsk ?: return null to "no ask"
         val spread = ya - yb
         if (spread > MAX_SPREAD + 1e-9) return null to "spread over 2¢"
-        val best = sides.mapNotNull { side ->
+        val cands = sides.mapNotNull { side ->
             val ask = q.ask(side) ?: return@mapNotNull null
             val fair = q.fair(side) ?: return@mapNotNull null
             if (ask < ENTRY_LO - 1e-9 || !buyPriceOk(if (p.maker) q.bid(side) else ask)) return@mapNotNull null
             Entry(side, ask, fair, fair - ask - feePerContract(CONTRACTS, ask))
-        }.maxByOrNull { it.gapAfterFee } ?: return null to "no spot fair value"
+        }
+        val best = SidePick.onlyMaxBy(cands) { it.gapAfterFee }
+            ?: return null to if (cands.isEmpty()) "no spot fair value" else "exact tie"
         if (best.gapAfterFee + 1e-9 < p.minGap) {
             return null to String.format(Locale.US, "gap %.1f¢ under %.0f¢", best.gapAfterFee * 100, p.minGap * 100)
         }
@@ -302,7 +305,8 @@ object ScalpRule {
             val cost = spread + feePerContract(CONTRACTS, ask) + feePerContract(CONTRACTS, (ask + move).coerceIn(0.01, 0.99))
             Cand(Entry(side, ask, fair, move - cost), move, cost)
         }
-        val best = cands.maxByOrNull { it.e.gapAfterFee } ?: return null to "no ${p.strategy.label} trigger"
+        val best = SidePick.onlyMaxBy(cands) { it.e.gapAfterFee }
+            ?: return null to if (cands.isEmpty()) "no ${p.strategy.label} trigger" else "exact tie"
         if (best.move <= best.cost + 1e-9) {
             return null to String.format(Locale.US, "expected move %.1f¢ ≤ spread + both fees %.1f¢", best.move * 100, best.cost * 100)
         }
@@ -325,13 +329,15 @@ object ScalpRule {
         val ya = q.yesAsk ?: return null to "no ask"
         val spread = ya - yb
         if (spread > MAX_SPREAD + 1e-9) return null to "spread over 2¢"
-        val best = sides.mapNotNull { side ->
+        val cands = sides.mapNotNull { side ->
             val ask = q.ask(side) ?: return@mapNotNull null
             if (ask < ENTRY_LO - 1e-9 || !buyPriceOk(if (p.maker) q.bid(side) else ask)) return@mapNotNull null
             val fair = q.cfFair(side) ?: return@mapNotNull null
             val entryFee = feePerContract(CONTRACTS, ask)
             Entry(side, ask, fair, fair - ask - entryFee)
-        }.maxByOrNull { it.gapAfterFee } ?: return null to "no CF fair value"
+        }
+        val best = SidePick.onlyMaxBy(cands) { it.gapAfterFee }
+            ?: return null to if (cands.isEmpty()) "no CF fair value" else "exact tie"
         if (best.gapAfterFee + 1e-9 < p.minGap) {
             return null to String.format(Locale.US, "CF gap %.1f¢ under %.0f¢", best.gapAfterFee * 100, p.minGap * 100)
         }
@@ -710,7 +716,7 @@ class ScalpBook(
                 continue
             }
             if (!enabledNow || q.nowMs >= q.closeMs || !q.fresh()) continue
-            val side = if (f > 0) "YES" else "NO"
+            val side = ForecastScalp.sideOf(f) ?: continue
             val ask = q.ask(side) ?: continue
             if (!ForecastScalp.wantsEntry(mid, ya - yb, ask, kotlin.math.abs(f), q.tauS, cfg.marginUsd)) continue
             val model = if (ride) ScalpModels.Model.FORECAST_RIDE else ScalpModels.Model.FORECAST_FADE
@@ -879,15 +885,26 @@ class ScalpBook(
         if (simpleHist.size > ScalpMemory.MAX_TICKERS) simpleHist.keys.filter { it != key && (ScalpTicker.closeMs(it) ?: Long.MAX_VALUE) < q.nowMs }.forEach { simpleHist.remove(it) }
         val ring = sfSpot.getOrPut(coin) { ShockFav.SpotRing() }
         q.spot?.takeIf { it > 0.0 && it.isFinite() }?.let { ring.put(sec, it) }
-        // 0.3.58: same fair as bt58 — 900 s 1 s-return σ from the ring, open basis to strike, raw τ.
+        // 0.3.58 fair, 1.0.16 basis: index gap applied to spot only. This contract's strike stays in fairYes.
         val strike = q.strike?.takeIf { it > 0.0 && it.isFinite() } ?: return@synchronized emptyList()
         val sNow = ring.at(sec) ?: return@synchronized emptyList()
         val sig = ring.sigma900(sec) ?: return@synchronized emptyList()
-        val basis = sfBasis.getOrPut(key) {
+        val basisKey = "$coin|${q.closeMs}"
+        val basis = sfBasis[basisKey] ?: run {
             val osec = (q.closeMs - 900_000L) / 1000L
-            ring.at(osec)?.let { kotlin.math.ln(it / strike) } ?: 0.0
+            val openSpot = ring.at(osec)
+            val index = q.cfSpot?.takeIf { q.cfFresh() && it > 0.0 && it.isFinite() }
+            val atOpen = sec >= osec && sec - osec <= 3L
+            when {
+                atOpen && openSpot != null && index != null ->
+                    ShockFav.indexBasis(openSpot, index).also { sfBasis[basisKey] = it }
+                sec > osec + 3L -> 0.0.also { sfBasis[basisKey] = it }
+                else -> 0.0
+            }
         }
-        if (sfBasis.size > 200) sfBasis.keys.filter { (ScalpTicker.closeMs(it) ?: Long.MAX_VALUE) < q.nowMs }.forEach { sfBasis.remove(it) }
+        if (sfBasis.size > 200) sfBasis.keys.filter { k ->
+            (k.substringAfter('|', "").toLongOrNull() ?: Long.MAX_VALUE) < q.nowMs
+        }.forEach { sfBasis.remove(it) }
         val fairYes = ShockFav.fairYes(sNow, strike, sig, q.tauS, basis)
         stepShadows(q, fairYes)
         val mine = _trades.value.filter { it.ticker == key && ShockFav.isShockFav(it.variantId) }
@@ -1036,7 +1053,7 @@ class ScalpBook(
                             val x = o50Features(sd, q, sec, sNow, strike, basis, sig, openMid) ?: return@mapNotNull null
                             val net = Open50Model.predict(x) - (a - b) - (ScalpRule.orderFee(ShockFav.CLIP, a) + ScalpRule.orderFee(ShockFav.CLIP, b)) / ShockFav.CLIP
                             if (net > Open50Model.THRESHOLD) sd to net else null
-                        }.maxByOrNull { it.second }?.let { listOf(it.first) } ?: emptyList()
+                        }.let { nets -> SidePick.onlyMaxBy(nets) { it.second }?.let { listOf(it.first) } ?: emptyList() }
                         null -> emptyList()
                     }
                     if (p.o50 != ShockFav.O50.BOTH && p.o50 != ShockFav.O50.MAKER && mine.any { it.variantId.take(4) == p.code }) continue
@@ -1085,13 +1102,27 @@ class ScalpBook(
                             ShockFav.brtiFairYes(sNow * kotlin.math.exp(-basis), strike, sigma, q.tauS, obs.map { it * kotlin.math.exp(-basis) }).also { brtiFair = it }
                         }
                     } else fairYes
+                    val passing = ArrayList<Triple<String, Double, Double>>()
                     for (side in listOf("YES", "NO")) {
                         val f = if (side == "YES") fy else 1.0 - fy
                         val ask = q.ask(side) ?: continue
-                        if (favFg) { if (FairGapTune.entryBlock(q, side, ask, ShockFav.CLIP, entryView(p.favId.take(4)) ?: explicit(p.favId.take(4)), false, q.nowMs) != null) continue }
-                        else if (!ShockFav.favEntryOk(p, f, ask, q.tauS, coin, q.closeMs)) continue
-                        sfEnter(q, p, p.favId, side, ask, f, openCost, bankroll, "late fav")?.let { changed += it; if (!shadowEntry(it)) openCost += it.entryCostUsd }
-                        break
+                        val edge = if (favFg) {
+                            if (FairGapTune.entryBlock(q, side, ask, ShockFav.CLIP, entryView(p.favId.take(4)) ?: explicit(p.favId.take(4)), false, q.nowMs) != null) continue
+                            val rf = Research.fair(q) ?: continue
+                            val pf = if (side == "YES") rf.pYes else 1.0 - rf.pYes
+                            FairGapTune.gapAfterFee(pf, ask, ShockFav.CLIP)
+                        } else {
+                            if (!ShockFav.favEntryOk(p, f, ask, q.tauS, coin, q.closeMs)) continue
+                            f - ask
+                        }
+                        passing += Triple(side, edge, f)
+                    }
+                    val won = SidePick.onlyMaxBy(passing) { it.second }
+                    if (won != null) {
+                        val ask = q.ask(won.first)
+                        if (ask != null) sfEnter(q, p, p.favId, won.first, ask, won.third, openCost, bankroll, "late fav")?.let {
+                            changed += it; if (!shadowEntry(it)) openCost += it.entryCostUsd
+                        }
                     }
                 }
             }
@@ -1806,34 +1837,38 @@ class ScalpBook(
             val hi = if (late) Math.round(fgBand.hi * 100).toInt() else (s.maxEntryCents ?: 99)
             if (late && !Research.lateWindowOk(q.tauS, id, rp.lateMinS, rp.lateMaxS)) continue
             val clip = s.contracts ?: rp.clip
-            var placed: ScalpTrade? = null
+            val options = ArrayList<Triple<Double, Double, ScalpTrade>>()
             for (side in listOf("YES", "NO")) {
                 val ps = pOf(side); val ask = q.ask(side) ?: continue
                 if (id == Research.MAKER) {
                     val lim = kotlin.math.floor((ps - rp.makerEdgeCents / 100.0) * 100 + 1e-9) / 100.0
                     if (lim !in maxOf(0.05, lo / 100.0)..minOf(0.95, hi / 100.0) || lim >= ask - 0.005) continue
-                    if (!shadowCode(id) && exposure + clip * lim > rp.windowCapUsd + 1e-9) continue
-                    placed = ScalpTrade(id = idFactory(), ticker = q.ticker.uppercase(), side = side, state = ScalpState.PENDING_ENTRY, signalAtMs = q.nowMs,
+                    val reserve = clip * lim
+                    if (!shadowCode(id) && exposure + reserve > rp.windowCapUsd + 1e-9) continue
+                    options += Triple(ps - lim, if (shadowCode(id)) 0.0 else reserve, ScalpTrade(id = idFactory(), ticker = q.ticker.uppercase(), side = side, state = ScalpState.PENDING_ENTRY, signalAtMs = q.nowMs,
                         signalAsk = lim, fairAtSignal = ps, restingLimit = lim, restingSinceMs = q.nowMs,
                         note = String.format(Locale.US, "Research maker: resting bid %.0f¢ = fair %.1f¢ − %.1f¢ · rn=%d", lim * 100, ps * 100, rp.makerEdgeCents, clip),
-                        ruleVersion = "${ScalpRule.VERSION}|$id|P")
-                    if (!shadowCode(id)) exposure += clip * lim; break
+                        ruleVersion = "${ScalpRule.VERSION}|$id|P"))
+                    continue
                 }
                 if (ask < lo / 100.0 - 1e-9 || ask > hi / 100.0 + 1e-9) continue
                 val hold = late
                 val n = if (id == Research.KELLY) minOf(Research.kellyContracts(ps, ask, rp.kellyFraction, rp.kellyBankrollUsd, rp.windowCapUsd - exposure), 1000) else clip
                 if (n <= 0 || !Research.gateOk(ps, ask, n, hold, edge)) continue
-                if (late && (!f.brti || Research.edgeAfterCosts(ps, ask, n, true) > Research.lateMaxGapDollars(id) + 1e-9)) continue
+                val scored = Research.edgeAfterCosts(ps, ask, n, hold)
+                if (late && (!f.brti || scored > Research.lateMaxGapDollars(id) + 1e-9)) continue
                 val cost = n * ask + ScalpRule.orderFee(n, ask)
                 if (!shadowCode(id) && exposure + cost > rp.windowCapUsd + 1e-9) continue
-                placed = ScalpTrade(id = idFactory(), ticker = q.ticker.uppercase(), side = side, state = ScalpState.PENDING_ENTRY, signalAtMs = q.nowMs,
+                options += Triple(scored, if (shadowCode(id)) 0.0 else cost, ScalpTrade(id = idFactory(), ticker = q.ticker.uppercase(), side = side, state = ScalpState.PENDING_ENTRY, signalAtMs = q.nowMs,
                     signalAsk = ask, fairAtSignal = ps,
                     note = String.format(Locale.US, "Research %s: fair %.1f¢ vs ask %.0f¢ · edge after fees %.1f¢ (gate %.0f¢) · %s · rn=%d", id, ps * 100, ask * 100,
-                        Research.edgeAfterCosts(ps, ask, n, hold) * 100, edge, if (f.brti) "BRTI" else "spot fallback", n),
-                    ruleVersion = "${ScalpRule.VERSION}|$id|P")
-                if (!shadowCode(id)) exposure += cost; break
+                        scored * 100, edge, if (f.brti) "BRTI" else "spot fallback", n),
+                    ruleVersion = "${ScalpRule.VERSION}|$id|P"))
             }
-            placed?.let { out += it }
+            SidePick.onlyMaxBy(options) { it.first }?.let { best ->
+                exposure += best.second
+                out += best.third
+            }
         }
         return out
     }

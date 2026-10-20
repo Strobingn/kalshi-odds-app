@@ -1772,7 +1772,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             runCatching { container.scalp.onShockFavQuote(qq, enabled = s.paperTradingEnabled) }
             if (coin == "BTC") cardSnaps += liveSnap(market, qq, now)
         }
-        com.dirk.kalshiodds.llm.AiLiveFeed.atm(cardSnaps)?.let { atm ->
+        val openMs = cardSnaps.firstOrNull()?.closeMs?.minus(com.dirk.kalshiodds.domain.MarketLifecycle.WINDOW_MS)
+        com.dirk.kalshiodds.llm.AiLiveFeed.atm(cardSnaps, openMs?.let { container.scalp.spotAt("BTC", it) })?.let { atm ->
             runCatching { container.aiWatcher.noteKalshi(atm) }
         }
         // 0.3.67: batch SQLite+stats writes off the quote path (same paperLane worker, not Main).

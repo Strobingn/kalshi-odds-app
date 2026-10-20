@@ -59,6 +59,7 @@ object Research {
     fun fee(n: Int, p: Double): Double = ScalpRule.orderFee(n, p)
 
     private fun phi(x: Double): Double { // standard normal CDF (Abramowitz–Stegun 7.1.26 via erf)
+        if (x == 0.0) return 0.5
         val t = 1.0 / (1.0 + 0.3275911 * kotlin.math.abs(x) / sqrt(2.0))
         val y = 1.0 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * exp(-x * x / 2.0)
         return if (x >= 0) 0.5 * (1 + y) else 0.5 * (1 - y)

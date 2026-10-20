@@ -250,9 +250,23 @@ object ShockFav {
         companion object { const val N = 1024; const val MASK = 1023L }
     }
 
-    /** bt58 fair: Φ(ln(S·e^(−basis)/K) / (σ·√τ)), basis = ln(spot at window open / strike) when seen, else 0. */
+    /**
+     * Log gap between the exchange spot and the settlement index, ln(spot/index).
+     * The contract strike is not an input: folding it in here cancels K out of [fairYes].
+     * Unknown prices → 0, so the spot is used as-is.
+     */
+    fun indexBasis(spot: Double?, index: Double?): Double {
+        if (spot == null || index == null || !spot.isFinite() || !index.isFinite() || spot <= 0.0 || index <= 0.0) return 0.0
+        return ln(spot / index)
+    }
+
+    /**
+     * bt58 fair using this contract's strike: Φ(ln(spotAdj / strike) / (σ√τ)),
+     * spotAdj = spot · e^(−basis). The index basis adjusts the spot feed only.
+     */
     fun fairYes(spot: Double, strike: Double, sigma: Double, tauS: Double, basis: Double): Double {
-        val z = ln(spot * exp(-basis) / strike) / (sigma * sqrt(maxOf(tauS, 1.0)))
+        val spotAdj = spot * exp(-basis)
+        val z = ln(spotAdj / strike) / (sigma * sqrt(maxOf(tauS, 1.0)))
         return ScalpMath.phi(z.coerceIn(-8.0, 8.0))
     }
 
@@ -349,6 +363,7 @@ object ShockFav {
 
 internal object ScalpMath {
     fun phi(x: Double): Double {
+        if (x == 0.0) return 0.5
         // Abramowitz–Stegun 7.1.26 erf, |err| < 1.5e-7
         val z = x / sqrt(2.0); val t = 1.0 / (1.0 + 0.3275911 * abs(z))
         val y = 1.0 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * exp(-z * z)

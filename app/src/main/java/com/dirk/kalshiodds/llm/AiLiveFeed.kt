@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.llm
 
+import com.dirk.kalshiodds.decision.AtmStrike
 import java.util.Locale
 
 /** One point on the live card chart. Prices in dollars, odds in 0–1. */
@@ -104,14 +105,14 @@ object AiLiveFeed {
     fun prefer(current: LiveTrigger, next: LiveTrigger): LiveTrigger =
         if (current == LiveTrigger.NONE || next.ordinal < current.ordinal) next else current
 
-    /** Soonest open window, then the strike nearest the live BTC print. Same rule as the chat. */
-    fun atm(snaps: List<AiLiveSnapshot>): AiLiveSnapshot? {
+    /** Soonest open window, then the strike nearest the live BTC print. Same rule as the chat. Exact ties use the window open, then neither. */
+    fun atm(snaps: List<AiLiveSnapshot>, openPx: Double? = null): AiLiveSnapshot? {
         val open = snaps.filter { it.ticker.isNotBlank() && it.closeMs > it.atMs }
         if (open.isEmpty()) return null
         val close = open.minOf { it.closeMs }
-        return open.filter { it.closeMs == close }.minWithOrNull(compareBy<AiLiveSnapshot> { s ->
-            s.distanceUsd?.takeIf { it.isFinite() }?.let { kotlin.math.abs(it) } ?: Double.MAX_VALUE
-        }.thenBy { it.ticker })
+        return AtmStrike.pick(open.filter { it.closeMs == close },
+            { s -> s.distanceUsd?.takeIf { it.isFinite() }?.let { kotlin.math.abs(it) } ?: Double.POSITIVE_INFINITY },
+            { s -> AtmStrike.priceDistance(s.strike, openPx) })
     }
 
     /**
