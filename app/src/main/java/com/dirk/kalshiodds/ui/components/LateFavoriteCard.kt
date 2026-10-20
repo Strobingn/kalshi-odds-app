@@ -43,6 +43,7 @@ fun LateFavoriteCard(state: LateFavoriteState) {
         Text(s.pnlLine, style = MaterialTheme.typography.bodyMedium, color = colors.textPrimary)
         Text(s.worseLine, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
         Text(s.openLine, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
+        com.dirk.kalshiodds.ui.TrackerCurve(state.entries)
         Text(s.note, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
     }
 }

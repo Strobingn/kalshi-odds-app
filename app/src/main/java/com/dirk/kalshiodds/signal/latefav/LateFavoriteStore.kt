@@ -15,10 +15,16 @@ class LateFavoriteStore(context: Context) {
         encodeDefaults = true
     }
 
+    /** Every bet also goes to the permanent archive ([com.dirk.kalshiodds.signal.archive.BetArchiveStore]). */
+    private val archive = com.dirk.kalshiodds.signal.archive.BetArchiveStore.of(context)
+
     val ledger: LateFavoriteLedger = LateFavoriteLedger(
         initial = load(),
-        persist = { save(it) }
-    )
+        persist = {
+            save(it)
+            archive.tracker(com.dirk.kalshiodds.signal.archive.BetRows.LATE_FAVORITE, it)
+        }
+    ).also { archive.tracker(com.dirk.kalshiodds.signal.archive.BetRows.LATE_FAVORITE, it.snapshot()) }
 
     private fun load(): LateFavoriteState {
         val raw = prefs.getString(KEY, null) ?: return LateFavoriteState()

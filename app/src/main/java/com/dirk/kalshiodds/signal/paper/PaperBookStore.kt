@@ -14,10 +14,16 @@ class PaperBookStore(context: Context) {
         encodeDefaults = true
     }
 
+    /** Every fill also goes to the permanent archive ([com.dirk.kalshiodds.signal.archive.BetArchiveStore]). */
+    private val archive = com.dirk.kalshiodds.signal.archive.BetArchiveStore.of(context)
+
     val book: PaperBook = PaperBook(
         initial = load(),
-        persist = { save(it) }
-    )
+        persist = {
+            save(it)
+            archive.paper(it)
+        }
+    ).also { archive.paper(it.snapshot()) }
 
     private fun load(): PaperBookState {
         val raw = prefs.getString(KEY, null) ?: return PaperBookState()

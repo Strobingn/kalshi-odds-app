@@ -270,6 +270,9 @@ fun HomeScreen(
                                 )
                             }
                         }
+                        item(key = "bet_archive") {
+                            BetArchiveSection()
+                        }
                         item {
                             Text(
                                 HomeCopy.SIGNAL_HISTORY,

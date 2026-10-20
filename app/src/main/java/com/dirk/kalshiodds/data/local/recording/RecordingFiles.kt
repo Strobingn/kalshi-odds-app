@@ -189,7 +189,8 @@ class RecordingFiles(
             .sortedBy { it.day }
 
     companion object {
-        const val DEFAULT_MAX_BYTES = 300L * 1024L * 1024L
+        // About three months of BTC days (one day is ~10 MB).
+        const val DEFAULT_MAX_BYTES = 1024L * 1024L * 1024L
         const val DEFAULT_MEMBER_MAX_AGE_MS = 10L * 60_000L
         private const val BUFFER = 64 * 1024
     }

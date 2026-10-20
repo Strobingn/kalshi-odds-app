@@ -452,7 +452,7 @@ fun SettingsContent(
             }
             ToggleRow("Record market data (1s)", s.recordMarketData, { viewModel?.setRecordMarketData(it) })
             Text(
-                "While Live signals runs: BTC spot, KXBTC15M top of book, trades and settlements to daily files on this phone (capped at 300 MB, oldest days deleted). Export them from Data.",
+                "While Live signals runs: BTC spot, KXBTC15M top of book, trades and settlements to daily files on this phone (capped at 1 GB, about three months; oldest days deleted). Export them from Data.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )

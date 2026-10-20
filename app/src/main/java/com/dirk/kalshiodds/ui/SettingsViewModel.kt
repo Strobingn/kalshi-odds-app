@@ -478,7 +478,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                         settings = archive.recentSettingsChanges(400),
                         sessions = archive.recentSessions(200)
                     )
-                    val csv = ResultsExporter.csv(store.exportBundle()) + "\n# history json follows\n" + json
+                    val bets = com.dirk.kalshiodds.signal.archive.BetArchiveStore.of(getApplication()).all()
+                    val csv = ResultsExporter.csv(store.exportBundle()) +
+                        "\n# every archived bet follows\n" + com.dirk.kalshiodds.signal.archive.BetArchiveCsv.csv(bets) +
+                        "\n# history json follows\n" + json
                     ResultsFileExport.write(getApplication(), csv)
                 }.getOrElse {
                     com.dirk.kalshiodds.data.local.results.ExportResult(

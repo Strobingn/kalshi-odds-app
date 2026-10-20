@@ -71,7 +71,9 @@ class ScorecardViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    val csv = ResultsExporter.csv(container.resultsStore.exportBundle())
+                    val bets = com.dirk.kalshiodds.signal.archive.BetArchiveStore.of(getApplication()).all()
+                    val csv = ResultsExporter.csv(container.resultsStore.exportBundle()) +
+                        "\n# every archived bet follows\n" + com.dirk.kalshiodds.signal.archive.BetArchiveCsv.csv(bets)
                     ResultsFileExport.write(getApplication(), csv)
                 }.getOrElse {
                     com.dirk.kalshiodds.data.local.results.ExportResult(false, null, it.message ?: "Export failed")
