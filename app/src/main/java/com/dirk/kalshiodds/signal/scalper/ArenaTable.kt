@@ -82,10 +82,10 @@ object ArenaTable {
         else -> familyOf(row.strategy) == family
     }
 
-    /** One row per strategy, all of them, in their own order. */
-    fun rows(state: ScalperState, trades: List<ScalpTrade>): List<Row> {
+    /** One row per strategy still running ([ScalpStrategy.ACTIVE]), in their own order. */
+    fun rows(state: ScalperState, trades: List<ScalpTrade>, strategies: List<ScalpStrategy> = ScalpStrategy.ACTIVE): List<Row> {
         val perTrade = ArenaStats.strategyStats(trades).associateBy { it.strategy }
-        return ScalpStrategy.values().map { st ->
+        return strategies.map { st ->
             val s = state.stats(st.name)
             val t = perTrade[st]
             Row(

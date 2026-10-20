@@ -291,6 +291,25 @@ enum class ScalpStrategy(
     )
 
     companion object {
+        /**
+         * Strategies taken out of the arena on 2026-10-20: they lost money in a replay of
+         * the 11 recorded days (2026-10-03 → 10-16, ArenaReplayTest / arena-replay.yml) through
+         * this engine on their defaults. They no longer run or show; the enum keeps them so
+         * older paper records and trade files still read.
+         */
+        val RETIRED: Set<ScalpStrategy> by lazy {
+            setOf(
+                LATE_TIEBREAK, OPENING_DRIVE, HEAVY_FAVORITE, QUIET_MAKER, MOMENTUM_HOLD, EARLY_FAVORITE,
+                SQUEEZE_BREAKOUT, LATE_FAVORITE, LONG_SHOT, RANGE_FLOOR, IMPROVE_1C, OPENING_RIDE, BREAKOUT_50,
+                PENNY_SCALPER, FLOW_FOLLOW, BOUNCE, TREND_PULLBACK, STEADY_CLIMB, PANIC_FADE, EXTREME_REVERSION_REST,
+                BOOK_IMBALANCE, MOMENTUM_SNIPER_REST, ML_REST, DIP_HUNTER_REST, STRETCH_FADE, WHALE_FOLLOW,
+                EXTREME_REVERSION, MOMENTUM_SNIPER, DIP_HUNTER
+            )
+        }
+
+        /** The strategies the arena runs and shows: every one that made money in the replay. */
+        val ACTIVE: List<ScalpStrategy> by lazy { values().filter { it !in RETIRED } }
+
         /** Price move over 10 s that the dip-hunter and the momentum-sniper react to. */
         const val FAST_MOVE_DOLLARS = 0.02
 

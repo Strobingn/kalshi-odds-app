@@ -16,7 +16,7 @@ class OpeningRideLateEdgeTest {
 
     private fun runner(fair: () -> Double?) = PaperScalper(
         model = null, ledger = ScalperLedger(), topOfBook = { null }, bookLevels = { null },
-        closeMs = { 900_000L }, fairYes = { _, _ -> fair() }
+        closeMs = { 900_000L }, fairYes = { _, _ -> fair() }, strategies = ScalpStrategy.values().toList()
     )
 
     /** Seconds [from]..[to] of two-sided prints: takers sell YES at [bid] and buy YES at [ask]. */

@@ -23,7 +23,7 @@ class ArenaMoreStrategiesTest {
         ledger = ScalperLedger(),
         topOfBook = { top() },
         bookLevels = { null },
-        closeMs = { 900_000L }
+        closeMs = { 900_000L }, strategies = ScalpStrategy.values().toList()
     )
 
     /** One second of two-sided prints: takers sell YES at [bid] and buy YES at [ask]. */
@@ -41,7 +41,7 @@ class ArenaMoreStrategiesTest {
         assertEquals(37, ScalpStrategy.values().size)
         assertEquals("added after the first fifteen, so those keep their places", added, ScalpStrategy.values().drop(15).take(15))
         assertTrue(added.all { it.historyCents == null && it.origin == "Claude 1.9.4" })
-        val lines = ScalperSummary.of(ScalperState.fresh()).strategyLines
+        val lines = ScalperSummary.of(ScalperState.fresh(), shown = ScalpStrategy.values().toList()).strategyLines
         assertTrue(lines.contains("Whale follow · buy now: no scalps yet [new · Claude 1.9.4]"))
         // Holds have no exit; scalps have a target, a stop and a time-out.
         for (st in added) {

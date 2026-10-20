@@ -219,7 +219,7 @@ class ScalperEngineTest {
         assertEquals("DIP_HUNTER", s.recent.first().strategy)
         assertTrue("saved, but not on every scalp", saved.size in 1..3)
 
-        val copy = ScalperSummary.of(s, working = 2 to 1)
+        val copy = ScalperSummary.of(s, working = 2 to 1, shown = ScalpStrategy.values().toList())
         assertEquals(ScalperSummary.TITLE, copy.title)
         assertTrue(copy.totalLine, copy.totalLine.startsWith("All strategies: −$"))
         assertTrue(copy.totalLine, copy.totalLine.contains("3 scalps (33% won)"))
@@ -251,7 +251,7 @@ class ScalperEngineTest {
         ledger = ScalperLedger(),
         topOfBook = { fake.top },
         bookLevels = { fake.levels },
-        closeMs = { open + 900_000L }
+        closeMs = { open + 900_000L }, strategies = ScalpStrategy.values().toList()
     )
 
     /** A model that likes everything by [cents]. */

@@ -54,9 +54,10 @@ class PemNormalizerTest {
         kpg.initialize(2048)
         val pair = kpg.generateKeyPair()
         val pem = toPkcs1Pem(pair.private as RSAPrivateCrtKey)
-        val body = pem.lines().filter { !it.contains("BEGIN") && !it.contains("END") && it.isNotBlank() }
+        // Header lines start with dashes; base64 lines can themselves contain "END" or "BEGIN".
+        val body = pem.lines().filter { !it.trim().startsWith("-----") && it.isNotBlank() }
             .joinToString("")
-        assertFalse(body.contains("BEGIN"))
+        assertFalse(body.contains("-----"))
         assertTrue(PemNormalizer.looksLikePem(body))
         assertTrue(KalshiWsAuth.parsePrivateKey(body) is KalshiWsAuth.ParsedKey.Rsa)
     }

@@ -191,7 +191,7 @@ object ArenaEdge {
             val m = net.getOrPut(st) { HashMap() }
             m[t.ticker] = (m[t.ticker] ?: 0.0) + t.pnlUsd
         }
-        val rows = ScalpStrategy.values().filter { (net[it]?.size ?: 0) >= MIN_SHARED_WINDOWS }
+        val rows = ScalpStrategy.ACTIVE.filter { (net[it]?.size ?: 0) >= MIN_SHARED_WINDOWS }
         val cells = rows.map { a ->
             rows.map { b ->
                 if (a == b) return@map null

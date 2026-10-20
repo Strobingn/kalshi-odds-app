@@ -117,7 +117,7 @@ object ArenaStats {
             if (c !in columns.indices) continue
             acc.getOrPut(st to c) { ArrayList() } += t
         }
-        val rows = ScalpStrategy.values().filter { st -> columns.indices.any { (st to it) in acc } }
+        val rows = ScalpStrategy.ACTIVE.filter { st -> columns.indices.any { (st to it) in acc } }
         val cells = rows.map { st ->
             columns.indices.map { c ->
                 acc[st to c]?.let { list ->

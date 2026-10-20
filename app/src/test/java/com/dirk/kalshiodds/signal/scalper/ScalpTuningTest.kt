@@ -70,7 +70,7 @@ class ScalpTuningTest {
         tuning.set(ScalpStrategy.KASHI_FAV_97, ScalpKnobs(trigger = 99.0))
         val s = PaperScalper(
             model = null, ledger = ScalperLedger(), topOfBook = { null }, bookLevels = { null }, closeMs = { 900_000L },
-            engine = ScalperEngine(tuning = tuning), fairYes = { _, _ -> 0.98 }
+            engine = ScalperEngine(tuning = tuning), fairYes = { _, _ -> 0.98 }, strategies = ScalpStrategy.values().toList()
         )
         for (sec in 0..850) {
             s.onTrade(t, "no", 0.90, 20.0, sec * 1000L + 100L)
@@ -122,7 +122,7 @@ class ScalpTuningTest {
 
     private fun lateFavWindow(tuning: ScalpTuning, closeOf: (String) -> Long? = { 900_000L }, fair: Double = 0.98) = PaperScalper(
         model = null, ledger = ScalperLedger(), topOfBook = { null }, bookLevels = { null }, closeMs = closeOf,
-        engine = ScalperEngine(tuning = tuning), fairYes = { _, _ -> fair }
+        engine = ScalperEngine(tuning = tuning), fairYes = { _, _ -> fair }, strategies = ScalpStrategy.values().toList()
     )
 
     private fun runWindow(s: PaperScalper, ticker: String, openMs: Long) {

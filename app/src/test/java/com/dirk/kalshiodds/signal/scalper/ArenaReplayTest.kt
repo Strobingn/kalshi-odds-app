@@ -152,7 +152,7 @@ class ArenaReplayTest {
         val scalper = PaperScalper(
             model = model, ledger = ledger, topOfBook = { books[it] }, bookLevels = { null },
             closeMs = { closes[it] ?: TakerCost.closeEpochMs(it) },
-            engine = ScalperEngine(), fairYes = { t, now -> fair(t, now) }
+            engine = ScalperEngine(), fairYes = { t, now -> fair(t, now) }, strategies = ScalpStrategy.values().toList()
         )
         fun settleUpTo(now: Long) {
             while (nextSettle < pending.size && pending[nextSettle].second.first + 2_000L <= now) {

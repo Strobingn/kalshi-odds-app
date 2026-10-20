@@ -22,7 +22,7 @@ class KashiLateFavTest {
         topOfBook = { null },
         bookLevels = { null },
         closeMs = { open + 900_000L },
-        fairYes = { _, _ -> fair() }
+        fairYes = { _, _ -> fair() }, strategies = ScalpStrategy.values().toList()
     )
 
     /** Seconds [from]..[to] of two-sided prints: takers sell YES at [bid] and buy YES at [ask]. */

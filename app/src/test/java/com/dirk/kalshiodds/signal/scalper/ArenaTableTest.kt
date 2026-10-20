@@ -23,7 +23,7 @@ class ArenaTableTest {
 
     @Test
     fun everyStrategyHasARowAndAFamily() {
-        val rows = ArenaTable.rows(ScalperState.fresh(), emptyList())
+        val rows = ArenaTable.rows(ScalperState.fresh(), emptyList(), ScalpStrategy.values().toList())
         assertEquals(ScalpStrategy.values().toList(), rows.map { it.strategy })
         assertEquals(ArenaTable.Family.HOLD, ArenaTable.familyOf(ScalpStrategy.LATE_FAVORITE))
         assertEquals(ArenaTable.Family.HOLD, ArenaTable.familyOf(ScalpStrategy.FLOW_FADE))
@@ -43,7 +43,7 @@ class ArenaTableTest {
         val b = ScalpStrategy.BOUNCE
         val s = state(b to stats(closed = 4, wins = 3, net = 0.5, won = 0.9, lost = 0.4))
         val trades = listOf(trade(b, 1_000, 0.3), trade(b, 2_000, -0.4), trade(b, 3_000, 0.3), trade(b, 4_000, 0.3))
-        val r = ArenaTable.rows(s, trades).first { it.strategy == b }
+        val r = ArenaTable.rows(s, trades, ScalpStrategy.values().toList()).first { it.strategy == b }
         assertEquals(4, r.trades)
         assertEquals(0.75, r.winRate!!, 1e-12)
         assertEquals(0.9 / 0.4, r.profitFactor!!, 1e-12)
@@ -55,7 +55,7 @@ class ArenaTableTest {
         assertEquals("2.25", ArenaTable.format(r, ArenaTable.SortKey.PROFIT_FACTOR))
         assertEquals("75%", ArenaTable.format(r, ArenaTable.SortKey.WIN_RATE))
         assertEquals("20s", ArenaTable.format(r, ArenaTable.SortKey.HOLD_TIME))
-        val rest = ArenaTable.rows(state(ScalpStrategy.QUIET_MAKER to stats(2, 1, 0.0, 0.1, 0.1, posted = 8, filled = 2)), emptyList())
+        val rest = ArenaTable.rows(state(ScalpStrategy.QUIET_MAKER to stats(2, 1, 0.0, 0.1, 0.1, posted = 8, filled = 2)), emptyList(), ScalpStrategy.values().toList())
             .first { it.strategy == ScalpStrategy.QUIET_MAKER }
         assertEquals(0.25, rest.fillRate!!, 1e-12)
     }
@@ -67,7 +67,7 @@ class ArenaTableTest {
             ScalpStrategy.DIP_HUNTER to stats(9, 2, -1.0, 1.0, 2.0),
             ScalpStrategy.LONG_SHOT to stats(1, 1, 0.5, 0.5, 0.0)
         )
-        val rows = ArenaTable.rows(s, emptyList())
+        val rows = ArenaTable.rows(s, emptyList(), ScalpStrategy.values().toList())
         val net = ArenaTable.view(rows, ArenaTable.Family.ALL, ArenaTable.SortKey.NET)
         assertEquals(listOf(ScalpStrategy.BOUNCE, ScalpStrategy.LONG_SHOT, ScalpStrategy.DIP_HUNTER), net.take(3).map { it.strategy })
         assertEquals("all 37 still listed, the idle ones after", 37, net.size)

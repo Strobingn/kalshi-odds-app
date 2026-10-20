@@ -100,7 +100,7 @@ object ArenaExec {
 
     /** The resting strategies that have posted, in enum order. Buy-now orders always fill, so they are left out. */
     fun fillRates(state: ScalperState): List<FillRate> =
-        ScalpStrategy.values().filter { !it.taker }.mapNotNull { st ->
+        ScalpStrategy.ACTIVE.filter { !it.taker }.mapNotNull { st ->
             val s = state.stats(st.name)
             if (s.posted == 0) null else FillRate(st, s.posted, s.filled)
         }
@@ -212,12 +212,12 @@ object ArenaExec {
             }
             val order = run.keys.sortedWith(compareByDescending<ScalpStrategy> { run.getValue(it) }.thenBy { it.ordinal })
             val place = order.withIndex().associate { (i, st) -> st to i + 1 }
-            for (st in ScalpStrategy.values()) {
+            for (st in ScalpStrategy.ACTIVE) {
                 ranks.getOrPut(st) { ArrayList() } += place[st]
                 nets.getOrPut(st) { ArrayList() } += run[st]
             }
         }
-        val lines = ScalpStrategy.values()
+        val lines = ScalpStrategy.ACTIVE
             .filter { st -> ranks.getValue(st).any { it != null } }
             .map { RankLine(it, ranks.getValue(it), nets.getValue(it)) }
         return RankRace(labels, lines)

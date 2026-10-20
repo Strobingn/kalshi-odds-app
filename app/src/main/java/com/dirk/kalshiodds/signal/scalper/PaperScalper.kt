@@ -356,7 +356,9 @@ class PaperScalper(
     /** Called first by [reset]: the store archives the trade files; false when that did not complete. */
     private val onReset: () -> Boolean = { true },
     /** YES fair price from the live spot ([ScalpFair]) for Kashi's late favourites; null when unknown. */
-    private val fairYes: (ticker: String, nowMs: Long) -> Double? = { _, _ -> null }
+    private val fairYes: (ticker: String, nowMs: Long) -> Double? = { _, _ -> null },
+    /** What runs. The retired strategies ([ScalpStrategy.RETIRED]) open nothing; tests and the replay pass them all. */
+    private val strategies: List<ScalpStrategy> = ScalpStrategy.ACTIVE
 ) {
     private val grids = HashMap<String, PrintGrid>()
     private val lastDecision = HashMap<String, IntArray>()   // ticker -> last decision second per cadence slot
@@ -525,7 +527,7 @@ class PaperScalper(
         // everything else between minute 1 and minute 13.
         if (s < OPEN_FIRST_SECOND || s > LATE_LAST_SECOND) return emptyList()
         // Slot 0 is the last second looked at (dozens of prints share a second); then one slot per strategy.
-        val last = lastDecision.getOrPut(ticker) { IntArray(STRATEGIES.size + 1) { -1_000 } }
+        val last = lastDecision.getOrPut(ticker) { IntArray(ScalpStrategy.values().size + 1) { -1_000 } }
         if (last[0] == s) return emptyList()
         last[0] = s
         val tte = PrintGrid.SECONDS - s
@@ -538,7 +540,7 @@ class PaperScalper(
                 else -> s in PrintGrid.MIN_DECISION_SECOND..PrintGrid.MAX_DECISION_SECOND
             }
         }
-        val due0 = STRATEGIES.filter { st ->
+        val due0 = strategies.filter { st ->
             val t = tuning.tuned(st)
             t.enabled && s - last[st.ordinal + 1] >= t.cadenceSeconds && inWindow(st) && t.inMinutes(s) &&
                 (done == null || st !in done) && !pausedForLoss(st, t.dailyLossUsd, nowMs)
@@ -601,8 +603,8 @@ class PaperScalper(
                 bid = bid, ask = ask, bidQty = queue, askQty = askQty,
                 move10 = d10.takeIf { !it.isNaN() }, move30 = d30.takeIf { !it.isNaN() }, features = x
             )
-            val opened = ordersThisWindow.getOrPut(ticker) { IntArray(STRATEGIES.size) }
-            val lastOpen = lastOrderMs.getOrPut(ticker) { LongArray(STRATEGIES.size) { Long.MIN_VALUE / 2 } }
+            val opened = ordersThisWindow.getOrPut(ticker) { IntArray(ScalpStrategy.values().size) }
+            val lastOpen = lastOrderMs.getOrPut(ticker) { LongArray(ScalpStrategy.values().size) { Long.MIN_VALUE / 2 } }
             for (st in due) {
                 val tn = tuning.tuned(st)
                 // Your limits: one side only, the widest spread, orders per window, and a wait between orders.
@@ -793,7 +795,6 @@ class PaperScalper(
 
     companion object {
         private val SIDES = listOf("YES", "NO")
-        private val STRATEGIES = ScalpStrategy.values().toList()
         private const val EPS = 1e-9
 
         /** Last decision second: 5 s before the close, the end of the late-edge window. */
@@ -896,7 +897,7 @@ data class ScalperSummary(
     val note: String
 ) {
     companion object {
-        val TITLE = "Strategy arena · ${ScalpStrategy.values().size} at once · PAPER ONLY"
+        val TITLE = "Strategy arena · ${ScalpStrategy.ACTIVE.size} at once · PAPER ONLY"
 
         /** The queue-aware subset on the recorded order books: a short queue was a level about to break. */
         const val QUEUE_AWARE_HISTORY = "−1.73¢"
@@ -908,10 +909,14 @@ data class ScalperSummary(
                 "per contract on 7 days of recorded order books, real queue counted (\"new\" = added in 1.9.0 or later, " +
                 "no history yet). Needs Live signals on. Never sends an order."
 
-        fun of(state: ScalperState, working: Pair<Int, Int> = 0 to 0): ScalperSummary {
+        fun of(
+            state: ScalperState,
+            working: Pair<Int, Int> = 0 to 0,
+            shown: List<ScalpStrategy> = ScalpStrategy.ACTIVE
+        ): ScalperSummary {
             val all = state.stats(ScalperState.ALL)
             val total = "All strategies: ${money(all.pnlUsd)} · ${all.closed} scalps" + pct(all)
-            val strategies = ScalpStrategy.values()
+            val strategies = shown
                 .map { it to state.stats(it.name) }
                 // Strategies that have traded first, best P&L on top; idle ones after, in their own order.
                 .sortedWith(

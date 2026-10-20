@@ -368,7 +368,7 @@ internal fun ArenaSettingsPage(
                     }
                 }
             }
-            items(ScalpStrategy.values().toList(), key = { "set-${it.name}" }) { st ->
+            items(ScalpStrategy.ACTIVE, key = { "set-${it.name}" }) { st ->
                 val k = remember(rev, st) { tuning.knobs(st) }
                 Row(
                     Modifier

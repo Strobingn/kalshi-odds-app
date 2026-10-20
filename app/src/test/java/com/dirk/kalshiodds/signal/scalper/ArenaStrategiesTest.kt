@@ -23,7 +23,7 @@ class ArenaStrategiesTest {
         ledger = ScalperLedger(),
         topOfBook = { top() },
         bookLevels = { null },
-        closeMs = { 900_000L }
+        closeMs = { 900_000L }, strategies = ScalpStrategy.values().toList()
     )
 
     /** One second of two-sided prints: takers sell YES at [bid] and buy YES at [ask]. */
@@ -35,13 +35,13 @@ class ArenaStrategiesTest {
     @Test
     fun everyStrategyHasItsOwnRow() {
         assertEquals(37, ScalpStrategy.values().size)
-        val board = ScalperResults.leaderboard(ScalperState.fresh())
+        val board = ScalperResults.leaderboard(ScalperState.fresh(), ScalpStrategy.values().toList())
         assertEquals(37, board.size)
         assertEquals((1..37).toList(), board.map { it.rank })
         assertEquals("idle strategies keep their own order", ScalpStrategy.values().toList(), board.map { it.strategy })
         assertTrue(board.all { it.verdict == "no trades yet" })
         assertTrue(ScalperResults.leaderLine(ScalperState.fresh()).startsWith("No strategy has closed a trade yet"))
-        val copy = ScalperSummary.of(ScalperState.fresh())
+        val copy = ScalperSummary.of(ScalperState.fresh(), shown = ScalpStrategy.values().toList())
         assertEquals(37, copy.strategyLines.size)
         assertTrue(copy.strategyLines.any { it == "Bounce · buy now: no scalps yet [new · codex]" })
     }
@@ -94,7 +94,7 @@ class ArenaStrategiesTest {
         assertEquals((1.0 - 0.86) * 10 - KalshiFee.total(10, 0.86, fee), after.stats(ScalpStrategy.LATE_FAVORITE.name).pnlUsd, 1e-9)
         assertEquals(-(1.0 - 0.85) * 10 - KalshiFee.total(10, 0.15, fee), after.stats(ScalpStrategy.LONG_SHOT.name).pnlUsd, 1e-9)
         assertEquals(1, after.stats(ScalpStrategy.LATE_FAVORITE.name).wins)
-        assertEquals(ScalpStrategy.LATE_FAVORITE, ScalperResults.leaderboard(after).first().strategy)
+        assertEquals(ScalpStrategy.LATE_FAVORITE, ScalperResults.leaderboard(after, ScalpStrategy.values().toList()).first().strategy)
     }
 
     @Test
@@ -150,7 +150,7 @@ class ArenaStrategiesTest {
         var archiveOk = false
         val s = PaperScalper(
             model = null, ledger = ScalperLedger(), topOfBook = { null }, bookLevels = { null },
-            closeMs = { 900_000L }, onReset = { archiveOk }
+            closeMs = { 900_000L }, onReset = { archiveOk }, strategies = ScalpStrategy.values().toList()
         )
         for (sec in 0..69) second(s, sec, 0.60, 0.61)
         for (sec in 70..74) second(s, sec, 0.50, 0.51)

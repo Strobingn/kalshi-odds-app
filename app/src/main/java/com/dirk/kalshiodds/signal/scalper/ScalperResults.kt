@@ -59,8 +59,8 @@ object ScalperResults {
     }
 
     /** Strategies that have closed a scalp, best net first. */
-    fun byStrategy(state: ScalperState): List<Row> =
-        ScalpStrategy.values()
+    fun byStrategy(state: ScalperState, strategies: List<ScalpStrategy> = ScalpStrategy.ACTIVE): List<Row> =
+        strategies
             .map { Row(it.label, state.stats(it.name)) }
             .filter { it.stats.closed > 0 }
             .sortedByDescending { it.stats.pnlUsd }
@@ -102,8 +102,8 @@ object ScalperResults {
      * trade come first; the ones still waiting for their signal follow in
      * their own order.
      */
-    fun leaderboard(state: ScalperState): List<Standing> =
-        ScalpStrategy.values()
+    fun leaderboard(state: ScalperState, strategies: List<ScalpStrategy> = ScalpStrategy.ACTIVE): List<Standing> =
+        strategies
             .map { it to state.stats(it.name) }
             .sortedWith(
                 compareByDescending<Pair<ScalpStrategy, ScalpStats>> { it.second.closed > 0 }

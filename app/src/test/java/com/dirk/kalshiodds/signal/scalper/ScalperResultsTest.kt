@@ -73,7 +73,7 @@ class ScalperResultsTest {
         assertEquals(ScalperResults.START_BANKROLL_USD + h.netUsd, h.bankrollUsd, 1e-9)
         assertEquals(ScalperState.VERSION, s.version)
 
-        val strategies = ScalperResults.byStrategy(s)
+        val strategies = ScalperResults.byStrategy(s, ScalpStrategy.values().toList())
         assertEquals("only strategies with a closed scalp, best first", listOf("Dip-hunter · buy now", "ML scalper · resting"), strategies.map { it.label })
         assertEquals(2, strategies[1].stats.closed)
         val coins = ScalperResults.byCoin(s)

@@ -360,7 +360,7 @@ fun ScalperResultsScreen(
         chartTrades.filter { it.closedAtMs >= from }.sumOf { it.pnlUsd }
     }
     val onOpen: (ScalpStrategy) -> Unit = { st -> openName = st.name }
-    val n = ScalpStrategy.values().size
+    val n = ScalpStrategy.ACTIVE.size
     Scaffold(
         containerColor = colors.bg,
         topBar = {
