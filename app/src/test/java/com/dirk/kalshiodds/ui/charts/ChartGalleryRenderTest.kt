@@ -67,6 +67,65 @@ class ChartGalleryRenderTest {
         compose.onAllNodesWithText("No data yet").assertCountEquals(0)
     }
 
+    @Test fun rollingEmpty() {
+        show { RollingWinRateChart(emptyList()) }
+        compose.onNodeWithTag("chart_rolling").assertExists()
+        compose.onNodeWithText("Rolling 30-trade win rate").assertExists()
+        compose.onNodeWithText("No data yet").assertExists()
+    }
+
+    @Test fun rollingSample() {
+        show { RollingWinRateChart(listOf(ChartShapes.Sample(1_700_000_000_000, 40.0), ChartShapes.Sample(1_700_000_060_000, 63.0))) }
+        compose.onNodeWithText("Win rate").assertExists()
+        compose.onNodeWithText("50%").assertExists()
+        compose.onAllNodesWithText("No data yet").assertCountEquals(0)
+    }
+
+    @Test fun histogramEmpty() {
+        show { PnlHistogram(emptyList()) }
+        compose.onNodeWithTag("chart_pnl_hist").assertExists()
+        compose.onNodeWithText("P&L histogram").assertExists()
+        compose.onNodeWithText("No data yet").assertExists()
+    }
+
+    @Test fun histogramSample() {
+        show {
+            PnlHistogram(
+                listOf(
+                    ChartGallery.SignedBin("≤ −$2", 1, -1.0),
+                    ChartGallery.SignedBin("±25¢", 4, 0.0),
+                    ChartGallery.SignedBin("≥ $2", 2, 1.0)
+                )
+            )
+        }
+        compose.onNodeWithText("±25¢ · 4").assertExists()
+        compose.onNodeWithText("≤ −$2 · 1").assertExists()
+        compose.onNodeWithText("≥ $2 · 2").assertExists()
+        compose.onAllNodesWithText("No data yet").assertCountEquals(0)
+    }
+
+    @Test fun scatterEmpty() {
+        show { EntryExitScatter(emptyList()) }
+        compose.onNodeWithTag("chart_scatter").assertExists()
+        compose.onNodeWithText("Entry versus exit").assertExists()
+        compose.onNodeWithText("No data yet").assertExists()
+    }
+
+    @Test fun scatterSample() {
+        show {
+            EntryExitScatter(
+                listOf(
+                    ChartGallery.ScatterDot(40.0, 60.0, win = true),
+                    ChartGallery.ScatterDot(55.0, 20.0, win = false)
+                )
+            )
+        }
+        compose.onNodeWithText("1 win · 1 loss").assertExists()
+        compose.onNodeWithText("Win").assertExists()
+        compose.onNodeWithText("Loss").assertExists()
+        compose.onAllNodesWithText("No data yet").assertCountEquals(0)
+    }
+
     @Test fun correlationEmpty() {
         show { CorrelationHeatmap(null) }
         compose.onNodeWithTag("chart_corr").assertExists()

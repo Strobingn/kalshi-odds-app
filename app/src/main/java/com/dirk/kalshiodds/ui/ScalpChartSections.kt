@@ -11,7 +11,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.ui.charts.ChartGallery
 import com.dirk.kalshiodds.ui.charts.CorrelationHeatmap
+import com.dirk.kalshiodds.ui.charts.EntryExitScatter
 import com.dirk.kalshiodds.ui.charts.EquitySparkGrid
+import com.dirk.kalshiodds.ui.charts.PnlHistogram
+import com.dirk.kalshiodds.ui.charts.RollingWinRateChart
 import com.dirk.kalshiodds.ui.charts.StrategyLeaderboard
 import com.dirk.kalshiodds.ui.charts.StrategySideBars
 import com.dirk.kalshiodds.ui.charts.WinRateHeatmap
@@ -36,5 +39,18 @@ internal fun AnalysisGallery(
         ArenaCard { StrategyLeaderboard(board) }
         ArenaCard { EquitySparkGrid(sparks) }
         ArenaCard { CorrelationHeatmap(corr) }
+    }
+}
+
+/** Rolling win rate, P&L histogram, and entry/exit scatter for one strategy. */
+@Composable
+internal fun StrategyDetailCharts(trades: List<ScalpTrade>) {
+    val rolling = remember(trades) { ChartGallery.rollingWinRate(trades) }
+    val bins = remember(trades) { ChartGallery.pnlBins(trades) }
+    val dots = remember(trades) { ChartGallery.entryExit(trades) }
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        ArenaCard { RollingWinRateChart(rolling) }
+        ArenaCard { PnlHistogram(bins) }
+        ArenaCard { EntryExitScatter(dots) }
     }
 }

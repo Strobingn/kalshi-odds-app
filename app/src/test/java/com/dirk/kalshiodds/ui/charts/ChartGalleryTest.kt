@@ -96,6 +96,35 @@ class ChartGalleryTest {
         assertNull(ChartGallery.pearson(listOf(1.0, 1.0), listOf(2.0, 2.0)))
     }
 
+    @Test fun rollingHistogramAndScatter() {
+        val early = (0 until 29).map { i ->
+            trade("t$i", "YES", "v|v2-fair|P", if (i % 2 == 0) 1.0 else -1.0).copy(closedAtMs = 1_000L + i)
+        }
+        assertTrue(ChartGallery.rollingWinRate(early).isEmpty())
+        val line = ChartGallery.rollingWinRate(early + trade("last", "NO", "v|v2-fair|P", 1.0).copy(closedAtMs = 2_000))
+        assertEquals(1, line.size)
+        assertEquals(16.0 / 30.0 * 100.0, line[0].value, 1e-9)
+
+        val nets = listOf(-3.0, -1.5, -0.5, 0.0, 0.5, 1.5, 3.0).mapIndexed { i, net ->
+            trade("p$i", "YES", "v|v2-fair|P", net)
+        }
+        assertEquals(listOf(1, 1, 1, 1, 1, 1, 1), ChartGallery.pnlBins(nets).map { it.count })
+        assertTrue(ChartGallery.pnlBins(emptyList()).isEmpty())
+
+        val win = trade("w", "YES", "v|v2-fair|P", 1.2).copy(soldContracts = 10, proceedsUsd = 6.0)
+        val loss = trade("l", "NO", "v|v2-fair|P", -0.4).copy(entryPrice = 0.55, soldContracts = 10, proceedsUsd = 2.0)
+        val open = win.copy(id = "o", state = ScalpState.OPEN, soldContracts = 0, proceedsUsd = 0.0, netUsd = null)
+        val dots = ChartGallery.entryExit(listOf(win, loss, open))
+        assertEquals(2, dots.size)
+        assertEquals(40.0, dots[0].entryCents, 0.0)
+        assertEquals(60.0, dots[0].exitCents, 0.0)
+        assertTrue(dots[0].win)
+        assertEquals(20.0, dots[1].exitCents, 0.0)
+        assertTrue(!dots[1].win)
+        assertEquals("1 win · 1 loss", ChartGallery.winLossCaption(1, 1))
+        assertTrue(ChartGallery.entryExit(listOf(open)).isEmpty())
+    }
+
     private fun trade(id: String, side: String, rule: String, net: Double) = ScalpTrade(
         id = id,
         ticker = "KXBTC15M-26OCT181500-00",

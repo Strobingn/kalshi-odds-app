@@ -27,12 +27,127 @@ import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.ui.theme.DipTheme
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.roundToInt
 
 private fun heatColor(rate: Double?, n: Int, up: Color, down: Color, empty: Color): Color {
     if (n <= 0 || rate == null || !rate.isFinite()) return empty
     val dist = (abs(rate - 0.5) / 0.5).toFloat().coerceIn(0f, 1f)
     val alpha = 0.35f + 0.65f * dist
     return if (rate >= 0.5) up.copy(alpha = alpha) else down.copy(alpha = alpha)
+}
+
+/** Trailing win rate. The line is empty until 30 closed trades exist. */
+@Composable
+fun RollingWinRateChart(samples: List<ChartShapes.Sample>, modifier: Modifier = Modifier) {
+    val c = DipTheme.colors
+    Column(
+        modifier.fillMaxWidth().testTag("chart_rolling")
+            .semantics { contentDescription = "Rolling 30-trade win rate" },
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text("Rolling 30-trade win rate", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
+        Text("Share of the last 30 closed trades that finished above zero. UP and DOWN are in the same line.", style = MaterialTheme.typography.bodySmall, color = c.textSecondary)
+        MultiLineChart(
+            if (samples.isEmpty()) emptyList() else listOf(LineSeries("Win rate", c.upButton, samples)),
+            yFormat = { "${it.roundToInt()}%" },
+            xFormat = { chartDayClock(it) },
+            fixedRange = 0.0 to 100.0,
+            guideY = 50.0,
+            guideLabel = "50%",
+            contentLabel = "Rolling 30-trade win rate"
+        )
+    }
+}
+
+/** Closed-trade P&L. Loss bins are red, gain bins are green. */
+@Composable
+fun PnlHistogram(bins: List<ChartGallery.SignedBin>, modifier: Modifier = Modifier) {
+    val c = DipTheme.colors
+    Column(
+        modifier.fillMaxWidth().testTag("chart_pnl_hist")
+            .semantics { contentDescription = "P and L histogram" },
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text("P&L histogram", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
+        Text("Closed trades, both sides. Green bins gained, red bins lost.", style = MaterialTheme.typography.bodySmall, color = c.textSecondary)
+        if (bins.isEmpty()) {
+            ChartEmptyState(height = 120.dp)
+            return
+        }
+        val peak = bins.maxBy { it.count }
+        Text("${peak.label} · ${peak.count}", color = c.textPrimary, style = MaterialTheme.typography.labelMedium)
+        val max = bins.maxOf { it.count }.coerceAtLeast(1)
+        Canvas(Modifier.fillMaxWidth().height(140.dp)) {
+            val slot = size.width / bins.size.toFloat()
+            bins.forEachIndexed { i, bin ->
+                val color = when {
+                    bin.sign > 0 -> c.upButton
+                    bin.sign < 0 -> c.downButton
+                    else -> c.textSecondary
+                }
+                val h = (size.height - 4.dp.toPx()) * bin.count / max.toFloat()
+                if (h > 0f) {
+                    drawRoundRect(
+                        color,
+                        Offset(i * slot + slot * 0.15f, size.height - h),
+                        Size(slot * 0.7f, h),
+                        CornerRadius(3.dp.toPx())
+                    )
+                }
+            }
+        }
+        bins.forEach { bin ->
+            Text("${bin.label} · ${bin.count}", color = if (bin.sign < 0) c.down else if (bin.sign > 0) c.up else c.textSecondary, style = MaterialTheme.typography.labelSmall)
+        }
+    }
+}
+
+/** Entry price versus exit price, in cents. Green won, red lost. */
+@Composable
+fun EntryExitScatter(dots: List<ChartGallery.ScatterDot>, modifier: Modifier = Modifier) {
+    val c = DipTheme.colors
+    Column(
+        modifier.fillMaxWidth().testTag("chart_scatter")
+            .semantics { contentDescription = "Entry versus exit price, colored by win and loss" },
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text("Entry versus exit", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
+        Text("Cents. Green won, red lost. The dashed line is exit equal to entry.", style = MaterialTheme.typography.bodySmall, color = c.textSecondary)
+        if (dots.isEmpty()) {
+            ChartEmptyState(height = 160.dp)
+            return
+        }
+        val wins = dots.count { it.win }
+        Text(ChartGallery.winLossCaption(wins, dots.size - wins), color = c.textPrimary, style = MaterialTheme.typography.labelMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Win", color = c.up, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+            Text("Loss", color = c.down, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+        }
+        Canvas(
+            Modifier.fillMaxWidth().height(200.dp)
+                .semantics { contentDescription = "Entry exit scatter, ${dots.size} trades" }
+        ) {
+            val left = 28.dp.toPx()
+            val bottom = 20.dp.toPx()
+            val top = 8.dp.toPx()
+            val plotW = (size.width - left - 8.dp.toPx()).coerceAtLeast(1f)
+            val plotH = (size.height - top - bottom).coerceAtLeast(1f)
+            fun x(cents: Double) = left + plotW * (cents / 100.0).toFloat().coerceIn(0f, 1f)
+            fun y(cents: Double) = top + plotH * (1f - (cents / 100.0).toFloat().coerceIn(0f, 1f))
+            drawLine(c.border, Offset(left, top), Offset(left, top + plotH), 1.dp.toPx())
+            drawLine(c.border, Offset(left, top + plotH), Offset(left + plotW, top + plotH), 1.dp.toPx())
+            drawLine(
+                c.textSecondary.copy(alpha = 0.7f),
+                Offset(x(0.0), y(0.0)),
+                Offset(x(100.0), y(100.0)),
+                1.dp.toPx(),
+                pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(8.dp.toPx(), 6.dp.toPx()))
+            )
+            dots.forEach { dot ->
+                drawCircle(if (dot.win) c.upButton else c.downButton, 5.dp.toPx(), Offset(x(dot.entryCents), y(dot.exitCents)))
+            }
+        }
+    }
 }
 
 /** Grouped bars: UP and DOWN entry counts, then UP and DOWN net, one row per strategy. */

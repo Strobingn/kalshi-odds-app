@@ -99,6 +99,60 @@ object ChartGallery {
         return (num / sqrt(da * db)).coerceIn(-1.0, 1.0)
     }
 
+    data class SignedBin(val label: String, val count: Int, val sign: Double)
+    data class ScatterDot(val entryCents: Double, val exitCents: Double, val win: Boolean)
+
+    private val PNL_UPPERS = doubleArrayOf(-2.0, -1.0, -0.25, 0.25, 1.0, 2.0)
+    private val PNL_LABELS = listOf("≤ −$2", "−$2 to −$1", "−$1 to −25¢", "±25¢", "25¢ to $1", "$1 to $2", "≥ $2")
+    private val PNL_SIGNS = doubleArrayOf(-1.0, -1.0, -1.0, 0.0, 1.0, 1.0, 1.0)
+
+    /** Trailing win rate, in percent, once [window] closed trades exist. A win is net above zero. */
+    fun rollingWinRate(trades: List<ScalpTrade>, window: Int = 30): List<ChartShapes.Sample> {
+        val n = window.coerceAtLeast(1)
+        val closed = trades.filter { it.state == ScalpState.CLOSED && it.netUsd?.isFinite() == true }
+            .sortedBy { it.closedAtMs ?: it.entryAtMs ?: it.signalAtMs }
+        if (closed.size < n) return emptyList()
+        var wins = 0
+        val out = ArrayList<ChartShapes.Sample>(closed.size - n + 1)
+        for (i in closed.indices) {
+            if ((closed[i].netUsd ?: 0.0) > 0.0) wins++
+            if (i >= n && (closed[i - n].netUsd ?: 0.0) > 0.0) wins--
+            if (i + 1 >= n) {
+                val t = closed[i].closedAtMs ?: closed[i].entryAtMs ?: closed[i].signalAtMs
+                out += ChartShapes.Sample(t, wins * 100.0 / n)
+            }
+        }
+        return out
+    }
+
+    fun pnlBins(trades: List<ScalpTrade>): List<SignedBin> {
+        val nets = trades.mapNotNull { t -> t.netUsd?.takeIf { t.state == ScalpState.CLOSED && it.isFinite() } }
+        if (nets.isEmpty()) return emptyList()
+        val counts = IntArray(PNL_LABELS.size)
+        for (v in nets) {
+            var i = PNL_UPPERS.size
+            for (e in PNL_UPPERS.indices) if (v < PNL_UPPERS[e]) { i = e; break }
+            counts[i]++
+        }
+        return PNL_LABELS.mapIndexed { i, label -> SignedBin(label, counts[i], PNL_SIGNS[i]) }
+    }
+
+    /** Entry cents versus exit cents. Exit is proceeds divided by contracts sold. */
+    fun entryExit(trades: List<ScalpTrade>): List<ScatterDot> = trades.mapNotNull { t ->
+        if (t.state != ScalpState.CLOSED) return@mapNotNull null
+        val entry = t.entryPrice?.takeIf { it.isFinite() && it in 0.0..1.0 } ?: return@mapNotNull null
+        val sold = t.soldContracts
+        if (sold <= 0 || !t.proceedsUsd.isFinite()) return@mapNotNull null
+        val exit = t.proceedsUsd / sold
+        if (!exit.isFinite() || exit !in 0.0..1.0) return@mapNotNull null
+        ScatterDot(entry * 100.0, exit * 100.0, (t.netUsd ?: 0.0) > 0.0)
+    }
+
+    fun winLossCaption(wins: Int, losses: Int): String {
+        fun word(n: Int, one: String, many: String) = if (n == 1) "1 $one" else "$n $many"
+        return "${word(wins, "win", "wins")} · ${word(losses, "loss", "losses")}"
+    }
+
     fun corrText(r: Double): String {
         val body = String.format(Locale.US, "%.2f", abs(r))
         return when {

@@ -118,6 +118,7 @@ fun ScalpAlgoContent(d: ScalpAlgoDetail, onBack: () -> Unit = {}, paged: android
         items(d.chart.trades.sortedByDescending { it.signalAtMs }, key = { "window-${it.id}" }) { t ->
             ScalpWindowTrade(t, selectedTrade == t.id, d.chart.bid(t.side))
         }
+        item(key = "strategy-detail-charts") { StrategyDetailCharts(d.trades) }
         item(key = "strategy-charts") {
             ScalpTradeInsightCharts(
                 d.trades,
