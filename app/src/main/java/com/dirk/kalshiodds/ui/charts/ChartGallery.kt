@@ -2,6 +2,7 @@ package com.dirk.kalshiodds.ui.charts
 
 import com.dirk.kalshiodds.decision.ScalpState
 import com.dirk.kalshiodds.decision.ScalpTrade
+import java.time.Instant
 import java.time.ZoneId
 
 /**
@@ -42,6 +43,34 @@ object ChartGallery {
             SideGroup(label, upEntries, downEntries, upNet, downNet)
         }.sortedByDescending { it.upNet + it.downNet }
     }
+
+    data class HeatCell(val row: String, val column: String, val rate: Double?, val n: Int)
+    data class HeatGrid(val rows: List<String>, val columns: List<String>, val cells: List<List<HeatCell>>)
+
+    /** Closed-trade win rate. Rows are coins that traded; columns are all 24 Eastern hours. */
+    fun winRateByHourCoin(trades: List<ScalpTrade>, zone: ZoneId = ChartShapes.ET): HeatGrid? {
+        val closed = trades.filter { it.state == ScalpState.CLOSED && it.netUsd?.isFinite() == true }
+        if (closed.isEmpty()) return null
+        val preferred = listOf("BTC", "ETH", "SOL")
+        val coins = closed.map { coinOf(it) }.distinct().sortedWith(
+            compareBy<String> { preferred.indexOf(it).let { i -> if (i < 0) preferred.size else i } }.thenBy { it }
+        )
+        val columns = (0 until 24).map { ChartShapes.hourLabel(it) }
+        val cells = coins.map { coin ->
+            (0 until 24).map { hour ->
+                val rows = closed.filter { coinOf(it) == coin && hourOf(it, zone) == hour }
+                val n = rows.size
+                val rate = if (n == 0) null else rows.count { (it.netUsd ?: 0.0) > 0.0 } / n.toDouble()
+                HeatCell(coin, columns[hour], rate, n)
+            }
+        }
+        return HeatGrid(coins, columns, cells)
+    }
+
+    private fun coinOf(t: ScalpTrade): String = t.coin.ifBlank { "BTC" }
+
+    private fun hourOf(t: ScalpTrade, zone: ZoneId): Int =
+        Instant.ofEpochMilli(t.entryAtMs ?: t.closedAtMs ?: t.signalAtMs).atZone(zone).hour
 
     private fun entered(t: ScalpTrade): Boolean =
         t.state != ScalpState.NO_FILL && t.entryPrice != null && t.entryPrice.isFinite() &&

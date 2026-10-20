@@ -7,12 +7,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.testTag
@@ -24,6 +26,13 @@ import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.ui.theme.DipTheme
 import kotlin.math.abs
 import kotlin.math.max
+
+private fun heatColor(rate: Double?, n: Int, up: Color, down: Color, empty: Color): Color {
+    if (n <= 0 || rate == null || !rate.isFinite()) return empty
+    val dist = (abs(rate - 0.5) / 0.5).toFloat().coerceIn(0f, 1f)
+    val alpha = 0.35f + 0.65f * dist
+    return if (rate >= 0.5) up.copy(alpha = alpha) else down.copy(alpha = alpha)
+}
 
 /** Grouped bars: UP and DOWN entry counts, then UP and DOWN net, one row per strategy. */
 @Composable
@@ -79,6 +88,51 @@ fun StrategySideBars(groups: List<ChartGallery.SideGroup>, modifier: Modifier = 
                     netBar(true, g.upNet)
                     netBar(false, g.downNet)
                 }
+            }
+        }
+    }
+}
+
+/** Win rate for each coin across the 24 Eastern hours. UP and DOWN trades share the cells. */
+@Composable
+fun WinRateHeatmap(grid: ChartGallery.HeatGrid?, modifier: Modifier = Modifier) {
+    val c = DipTheme.colors
+    Column(
+        modifier.fillMaxWidth().testTag("chart_win_heat")
+            .semantics { contentDescription = "Win rate by hour of day and coin" },
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text("Win rate by hour and coin", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
+        Text("Closed trades by entry hour, Eastern. Green is at least half won, red is under half. Grey has no trades.", style = MaterialTheme.typography.bodySmall, color = c.textSecondary)
+        if (grid == null || grid.rows.isEmpty()) {
+            ChartEmptyState(height = 120.dp)
+            return
+        }
+        val busiest = grid.cells.flatten().filter { it.n > 0 }.maxByOrNull { it.n }
+        Text(
+            busiest?.let { "${it.row} ${it.column} · ${chartPct(it.rate ?: 0.0)} · ${it.n} trades" } ?: "No closed trades",
+            color = c.textPrimary,
+            style = MaterialTheme.typography.labelMedium
+        )
+        grid.rows.forEachIndexed { r, coin ->
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(coin, Modifier.width(36.dp), color = c.textPrimary, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                Canvas(Modifier.weight(1f).height(28.dp)) {
+                    val slot = size.width / 24f
+                    grid.cells[r].forEachIndexed { h, cell ->
+                        drawRoundRect(
+                            heatColor(cell.rate, cell.n, c.upButton, c.downButton, c.surfaceAlt),
+                            Offset(h * slot + 1.dp.toPx(), 2.dp.toPx()),
+                            Size((slot - 2.dp.toPx()).coerceAtLeast(1f), size.height - 4.dp.toPx()),
+                            CornerRadius(2.dp.toPx())
+                        )
+                    }
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(start = 42.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+            listOf(0, 6, 12, 18).forEach { h ->
+                Text(ChartShapes.hourLabel(h), color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
             }
         }
     }

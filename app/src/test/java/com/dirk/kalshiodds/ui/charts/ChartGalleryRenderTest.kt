@@ -44,6 +44,29 @@ class ChartGalleryRenderTest {
         compose.onAllNodesWithText("No data yet").assertCountEquals(0)
     }
 
+    @Test fun winHeatEmpty() {
+        show { WinRateHeatmap(null) }
+        compose.onNodeWithTag("chart_win_heat").assertExists()
+        compose.onNodeWithText("Win rate by hour and coin").assertExists()
+        compose.onNodeWithText("No data yet").assertExists()
+    }
+
+    @Test fun winHeatSample() {
+        val row = (0 until 24).map { h ->
+            ChartGallery.HeatCell("BTC", ChartShapes.hourLabel(h), if (h == 15) 0.75 else null, if (h == 15) 4 else 0)
+        }
+        val eth = (0 until 24).map { h ->
+            ChartGallery.HeatCell("ETH", ChartShapes.hourLabel(h), if (h == 15) 0.25 else null, if (h == 15) 4 else 0)
+        }
+        show { WinRateHeatmap(ChartGallery.HeatGrid(listOf("BTC", "ETH"), (0 until 24).map { ChartShapes.hourLabel(it) }, listOf(row, eth))) }
+        compose.onNodeWithText("BTC").assertExists()
+        compose.onNodeWithText("ETH").assertExists()
+        compose.onNodeWithText("BTC 3p · 75% · 4 trades").assertExists()
+        compose.onNodeWithText("12a").assertExists()
+        compose.onNodeWithText("12p").assertExists()
+        compose.onAllNodesWithText("No data yet").assertCountEquals(0)
+    }
+
     private fun show(content: @androidx.compose.runtime.Composable () -> Unit) {
         compose.setContent {
             KalshiOddsTheme(darkTheme = true, colorStyle = ColorStyles.FIELDOPS) {
