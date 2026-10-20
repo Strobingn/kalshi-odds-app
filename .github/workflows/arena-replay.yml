@@ -1,0 +1,62 @@
+name: Arena replay (Claude)
+
+# Replays the cloud recorder's days (scalper-data release) through the app's
+# own PaperScalper, every strategy on its defaults, and prints each
+# strategy's paper result (ArenaReplayTest). Read-only: no order, no key.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [Claude]
+    paths:
+      - "app/src/test/java/com/dirk/kalshiodds/signal/scalper/ArenaReplayTest.kt"
+      - ".github/workflows/arena-replay.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arena-replay
+  cancel-in-progress: true
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Download the recordings
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p rec
+          gh release download scalper-data -R "$GITHUB_REPOSITORY" -D rec -p 'trades_*' -p 'book_*' -p 'spot_*' -p 'settle_*'
+          ls -la rec
+
+      - name: Replay
+        env:
+          ARENA_REPLAY_DIR: ${{ github.workspace }}/rec
+          ARENA_REPLAY_OUT: ${{ github.workspace }}/arena_replay.md
+          TEST_MAX_HEAP: 6g
+        run: ./gradlew :app:testDebugUnitTest --tests 'com.dirk.kalshiodds.signal.scalper.ArenaReplayTest' --no-daemon --stacktrace
+
+      - name: Report
+        if: always()
+        run: |
+          echo "===== ARENA REPLAY ====="
+          cat arena_replay.md || echo "(no report)"
+          echo "===== END ARENA REPLAY ====="
+          cat arena_replay.md >> "$GITHUB_STEP_SUMMARY" || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: arena-replay
+          path: arena_replay.md
+          if-no-files-found: ignore

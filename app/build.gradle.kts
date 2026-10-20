@@ -94,6 +94,8 @@ android {
 
     testOptions {
         unitTests.isIncludeAndroidResources = true
+        // The arena replay (ArenaReplayTest, arena-replay.yml) holds a recorded day in memory.
+        unitTests.all { test -> System.getenv("TEST_MAX_HEAP")?.let { test.maxHeapSize = it } }
     }
 }
 
