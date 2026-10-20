@@ -6,7 +6,7 @@ import java.io.InterruptedIOException
 
 /**
  * Native Gemini generateContent. Not the OpenAI-compatible route.
- * A 45s timeout skips the call. A 404 that says the model is no longer available
+ * A 45s timeout skips the call. Any HTTP 404 or a NOT_FOUND / "not found" body
  * switches once to [LlmProviders.GEMINI_FALLBACK]. Calls must not overlap.
  */
 object GeminiApi {
@@ -35,8 +35,12 @@ object GeminiApi {
         return root.toString()
     }
 
-    fun retired(code: Int, body: String): Boolean =
-        code == 404 && body.contains("no longer available", ignoreCase = true)
+    /** Any 404, a NOT_FOUND status, or a "not found" / "no longer available" body. */
+    fun retired(code: Int, body: String): Boolean {
+        if (code == 404) return true
+        val b = body.lowercase()
+        return "not_found" in b || "not found" in b || "no longer available" in b
+    }
 
     /** Billing or an explicit paid tier. A 429 rate limit is not billing. */
     fun billing(code: Int, body: String): Boolean {
@@ -116,3 +120,9 @@ class LlmBillingRequired(val provider: String, message: String) : IllegalStateEx
 
 /** HTTP 429. [retryAfterMs] is how long this model should stay quiet. */
 class LlmRateLimited(val retryAfterMs: Long, message: String) : IllegalStateException(message)
+
+/**
+ * The model is not on this key's plan (Mistral 403, or 429 with a per-minute limit of 0).
+ * Switch models or providers. Do not back off as if the plan were merely busy.
+ */
+class LlmModelUnavailable(val provider: String, message: String) : IllegalStateException(message)

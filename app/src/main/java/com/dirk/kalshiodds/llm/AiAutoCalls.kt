@@ -47,13 +47,13 @@ object AiAutoCalls {
         onBilling: (String, String) -> Unit
     ): Pair<LlmEndpoint, LlmClient.Reply>? {
         if (!allowed(selected) || !LlmProviders.freeFamily(selected.provider, selected.model)) return null
-        val order = ArrayList<LlmEndpoint>()
-        order += selected
-        for (slot in slots) {
-            if (!slot.usable || slot.provider == selected.provider) continue
-            if (!LlmProviders.freeFamily(slot.provider, slot.model) || !allowed(slot)) continue
-            order += slot
-        }
+        val tail = slots.asSequence()
+            .filter { it.usable && it.provider != selected.provider }
+            .filter { LlmProviders.freeFamily(it.provider, it.model) && allowed(it) }
+            .distinctBy { it.provider }
+            .sortedBy { LlmProviders.freeFallbackRank(it.provider) }
+            .toList()
+        val order = listOf(selected) + tail
         val tokens = AiCompact.tokens(messages, reserveCompletion)
         for (ep in order) {
             if (!allowed(ep)) continue
@@ -69,6 +69,8 @@ object AiAutoCalls {
                 return null
             } catch (e: LlmRateLimited) {
                 pacer.note429(use.provider, model, e.retryAfterMs, nowMs)
+            } catch (e: LlmModelUnavailable) {
+                // The plan rejected every model on this provider. Try the next free provider. Do not back off.
             } catch (e: LlmBillingRequired) {
                 onBilling(e.provider.ifBlank { use.provider }, e.message ?: "billing")
             } catch (e: Exception) {
@@ -106,6 +108,9 @@ class FreeCallPacer {
     private data class Hit(val at: Long, val provider: String, val model: String, val tokens: Int)
     private val hits = ArrayDeque<Hit>()
     private val backoffUntil = HashMap<String, Long>()
+    private val backoffStrikes = HashMap<String, Int>()
+    /** Extra quiet time from a low x-ratelimit-remaining header. Cleared when the header is healthy again. */
+    private val adaptiveUntil = HashMap<String, Long>()
     private var cursor = 0
 
     fun allow(provider: String, models: List<String>, quota: FreeQuota, now: Long, tokens: Int): String? =
@@ -116,17 +121,59 @@ class FreeCallPacer {
 
     fun record(provider: String, model: String, now: Long, tokens: Int) {
         hits.addLast(Hit(now, provider, model, tokens.coerceAtLeast(0)))
+        backoffStrikes.remove("$provider|$model")
         prune(now)
     }
 
+    /**
+     * A real HTTP 429. Mistral doubles the wait on each consecutive 429 (30s, 60s, 120s, …, capped at 15 min)
+     * and a successful [record] resets the count. Other providers keep a single Retry-After wait.
+     */
     fun note429(provider: String, model: String, retryAfterMs: Long, now: Long) {
-        backoffUntil["$provider|$model"] = now + retryAfterMs.coerceAtLeast(1_000L)
+        val key = "$provider|$model"
+        val mistral = provider == LlmProviders.MISTRAL
+        val strikes = if (mistral) {
+            val n = (backoffStrikes[key] ?: 0) + 1
+            backoffStrikes[key] = n
+            n
+        } else 1
+        val base = if (mistral) maxOf(retryAfterMs, LlmProviders.MISTRAL_PACE_MS).coerceAtLeast(1_000L)
+        else retryAfterMs.coerceAtLeast(1_000L)
+        val factor = if (mistral) 1L shl (strikes - 1).coerceAtMost(4) else 1L
+        backoffUntil[key] = now + (base * factor).coerceAtMost(15 * 60_000L)
     }
 
+    /**
+     * Stretch the 30s floor when the remaining-request or remaining-token header is getting low.
+     * A healthy header keeps the provider's own pace. Zero remaining is a hard minute of quiet.
+     */
     fun noteRemaining(provider: String, model: String, remainingRequests: Int?, remainingTokens: Int?, now: Long) {
         if ((remainingRequests != null && remainingRequests <= 0) || (remainingTokens != null && remainingTokens <= 0)) {
             note429(provider, model, 60_000L, now)
+            return
         }
+        val key = "$provider|$model"
+        val stretch = stretchMs(remainingRequests, remainingTokens)
+        if (stretch > 0L) adaptiveUntil[key] = now + stretch else adaptiveUntil.remove(key)
+    }
+
+    fun stretchMs(remainingRequests: Int?, remainingTokens: Int?): Long {
+        var wait = 0L
+        if (remainingRequests != null) {
+            wait = maxOf(wait, when {
+                remainingRequests >= 40 -> 0L
+                remainingRequests >= 15 -> 45_000L
+                else -> 90_000L
+            })
+        }
+        if (remainingTokens != null) {
+            wait = maxOf(wait, when {
+                remainingTokens >= 50_000 -> 0L
+                remainingTokens >= 10_000 -> 45_000L
+                else -> 90_000L
+            })
+        }
+        return wait
     }
 
     fun hits(): List<Pair<Long, String>> = hits.map { it.at to it.model }
@@ -141,6 +188,7 @@ class FreeCallPacer {
         for (i in 0 until n) {
             val model = models[(cursor + i) % n]
             if (now < (backoffUntil["$provider|$model"] ?: Long.MIN_VALUE)) continue
+            if (now < (adaptiveUntil["$provider|$model"] ?: Long.MIN_VALUE)) continue
             if (!within(provider, model, quota, now, tokens)) continue
             if (advance) cursor = (cursor + i + 1) % n
             return model

@@ -45,11 +45,15 @@ class AiWatchStore(private val file: File? = null) {
     private val freeTier = HashMap<String, Boolean>()
     /** Optional daily auto-call budget. Missing means [LlmProviders.defaultDailyCap]. */
     private val dailyCaps = HashMap<String, Int>()
+    /** Optional monthly token cap per provider. Missing means no cap. */
+    private val monthlyCaps = HashMap<String, Long>()
     /** Provider reported billing or a paid tier. Automatic calls stay off until Dirk marks the key free again. */
     private val billingHold = HashMap<String, String>()
     private var priceTable: List<ModelPrice>? = null
     private val usage = ArrayList<UsageBucket>()
     private val hours = ArrayList<UsageHour>()
+    private val samples = ArrayList<UsageSample>()
+    private val switches = ArrayList<ModelSwitchEvent>()
     private val log = ArrayList<AiAdjustment>()
     private val manualUntil = HashMap<String, Long>()
 
@@ -109,6 +113,25 @@ class AiWatchStore(private val file: File? = null) {
         persist(); bump()
     }
 
+    /** Blank or a non-positive number clears the monthly token cap. Automatic calls stop once usage reaches it. */
+    fun setMonthlyTokenCap(provider: String, cap: Long?) = synchronized(lock) {
+        val id = provider.trim()
+        if (id.isEmpty()) return@synchronized
+        if (cap == null || cap <= 0L) monthlyCaps.remove(id) else monthlyCaps[id] = cap.coerceAtMost(10_000_000_000L)
+        publishMonthlyLocked(id, System.currentTimeMillis())
+        persist(); bump()
+    }
+
+    fun monthlyTokenCap(provider: String): Long? = synchronized(lock) { monthlyCaps[provider]?.takeIf { it > 0L } }
+
+    fun monthTokens(provider: String, nowMs: Long): Long = synchronized(lock) { monthTokensLocked(provider, nowMs) }
+
+    /** True when this provider may still spend automatic tokens. No cap means always true. Chat does not ask. */
+    fun monthlyRoom(provider: String, nowMs: Long): Boolean = synchronized(lock) {
+        val cap = monthlyCaps[provider] ?: return@synchronized true
+        monthTokensLocked(provider, nowMs) < cap
+    }
+
     fun markBilled(provider: String, detail: String) = synchronized(lock) {
         val id = provider.trim().ifBlank { return@synchronized }
         val label = LlmProviders.spec(id).label
@@ -135,6 +158,17 @@ class AiWatchStore(private val file: File? = null) {
     fun publishLive(s: AiLiveSnapshot) { _live.value = s }
 
     fun hourBuckets(): List<UsageHour> = synchronized(lock) { hours.toList() }
+
+    fun buckets(): List<UsageBucket> = synchronized(lock) { usage.toList() }
+
+    fun samples(): List<UsageSample> = synchronized(lock) { samples.toList() }
+
+    fun modelSwitches(): List<ModelSwitchEvent> = synchronized(lock) {
+        val before = switches.size
+        ingestSwitchesLocked()
+        if (switches.size != before) persist()
+        switches.toList()
+    }
 
     fun setIntervalMs(ms: Long) = synchronized(lock) {
         intervalMs = ms.coerceIn(AiWatchConfig.MIN_INTERVAL_MS, AiWatchConfig.MAX_INTERVAL_MS)
@@ -179,7 +213,16 @@ class AiWatchStore(private val file: File? = null) {
         LlmPrices.summarize(usage.toList(), LlmPrices.withDefaults(priceTable), nowMs)
     }
 
-    fun record(source: String, provider: String, model: String, promptTokens: Long, completionTokens: Long, atMs: Long) = synchronized(lock) {
+    fun record(
+        source: String,
+        provider: String,
+        model: String,
+        promptTokens: Long,
+        completionTokens: Long,
+        atMs: Long,
+        latencyMs: Long = -1,
+        automatic: Boolean? = null
+    ) = synchronized(lock) {
         val day = LlmPrices.dayKey(atMs)
         val src = source.ifBlank { LlmSources.WATCHER }
         val prov = provider.ifBlank { LlmProviders.XAI }
@@ -194,12 +237,19 @@ class AiWatchStore(private val file: File? = null) {
             usage[i] = b.copy(calls = b.calls + addCalls, promptTokens = b.promptTokens + p, completionTokens = b.completionTokens + c)
         }
         val hour = LlmPrices.hourOf(atMs)
-        val h = hours.indexOfFirst { it.day == day && it.hour == hour && it.source == src && it.model == id }
-        if (h < 0) hours += UsageHour(day, hour, src, id, addCalls, p, c)
+        val h = hours.indexOfFirst { it.day == day && it.hour == hour && it.source == src && it.model == id && it.provider == prov }
+        if (h < 0) hours += UsageHour(day, hour, src, id, addCalls, p, c, prov)
         else {
             val b = hours[h]
-            hours[h] = b.copy(calls = b.calls + addCalls, promptTokens = b.promptTokens + p, completionTokens = b.completionTokens + c)
+            hours[h] = b.copy(calls = b.calls + addCalls, promptTokens = b.promptTokens + p, completionTokens = b.completionTokens + c, provider = prov)
         }
+        val stamped = LlmCallClock.claim(prov, id, atMs)
+        val latency = if (latencyMs >= 0) latencyMs else stamped?.latencyMs ?: -1L
+        val auto = automatic ?: stamped?.automatic ?: (src != LlmSources.CHAT)
+        samples += UsageSample(atMs, prov, id, src, p, c, latency, auto)
+        while (samples.size > MAX_SAMPLES) samples.removeAt(0)
+        publishMonthlyLocked(prov, atMs)
+        ingestSwitchesLocked()
         publishSummary(); persist()
     }
 
@@ -214,6 +264,24 @@ class AiWatchStore(private val file: File? = null) {
         val day = LlmPrices.dayKey(nowMs)
         val prices = LlmPrices.withDefaults(priceTable)
         return usage.filter { it.day == day }.sumOf { LlmPrices.costUsd(it.promptTokens, it.completionTokens, LlmPrices.priceFor(it.model, prices)) }
+    }
+
+    private fun monthTokensLocked(provider: String, nowMs: Long): Long {
+        val month = LlmPrices.monthKey(nowMs)
+        return usage.filter { it.provider == provider && it.day.startsWith(month) }
+            .sumOf { it.promptTokens + it.completionTokens }
+    }
+
+    private fun publishMonthlyLocked(provider: String, nowMs: Long) {
+        if (provider.isBlank()) return
+        MonthlyTokenCaps.sync(provider, LlmPrices.monthKey(nowMs), monthTokensLocked(provider, nowMs), monthlyCaps[provider])
+    }
+
+    private fun ingestSwitchesLocked() {
+        val extra = LlmEvents.drain()
+        if (extra.isEmpty()) return
+        switches.addAll(extra)
+        while (switches.size > MAX_SWITCHES) switches.removeAt(0)
     }
 
     private fun publishConfig() { _config.value = AiWatchConfig(follows, intervalMs, budgetUsd, liveFeed, autoCalls) }
@@ -247,6 +315,15 @@ class AiWatchStore(private val file: File? = null) {
                     dailyCaps[k] = obj.optInt(k)
                 }
             }
+            monthlyCaps.clear()
+            js.optJSONObject("monthlyTokenCap")?.let { obj ->
+                val keys = obj.keys()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    val n = obj.optLong(k)
+                    if (n > 0L) monthlyCaps[k] = n
+                }
+            }
             billingHold.clear()
             js.optJSONObject("billingHold")?.let { obj ->
                 val keys = obj.keys()
@@ -273,7 +350,24 @@ class AiWatchStore(private val file: File? = null) {
                 for (i in 0 until arr.length()) {
                     val o = arr.optJSONObject(i) ?: continue
                     hours += UsageHour(o.optString("day"), o.optInt("hour"), o.optString("source"), o.optString("model"),
-                        o.optInt("calls"), o.optLong("prompt"), o.optLong("completion"))
+                        o.optInt("calls"), o.optLong("prompt"), o.optLong("completion"), o.optString("provider"))
+                }
+            }
+            samples.clear()
+            js.optJSONArray("samples")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    samples += UsageSample(
+                        o.optLong("atMs"), o.optString("provider"), o.optString("model"), o.optString("source"),
+                        o.optLong("prompt"), o.optLong("completion"), o.optLong("latencyMs", -1), o.optBoolean("automatic", true)
+                    )
+                }
+            }
+            switches.clear()
+            js.optJSONArray("switches")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    switches += ModelSwitchEvent(o.optLong("atMs"), o.optString("provider"), o.optString("from"), o.optString("to"), o.optString("reason"))
                 }
             }
             log.clear()
@@ -293,6 +387,8 @@ class AiWatchStore(private val file: File? = null) {
                 }
             }
             publishConfig(); publishSummary()
+            val now = System.currentTimeMillis()
+            (monthlyCaps.keys + usage.map { it.provider }).forEach { publishMonthlyLocked(it, now) }
         }
     }
 
@@ -306,6 +402,7 @@ class AiWatchStore(private val file: File? = null) {
             .put("budgetUsd", budgetUsd ?: JSONObject.NULL)
             .put("freeTier", JSONObject().apply { freeTier.forEach { (k, v) -> put(k, v) } })
             .put("dailyCap", JSONObject().apply { dailyCaps.forEach { (k, v) -> put(k, v) } })
+            .put("monthlyTokenCap", JSONObject().apply { monthlyCaps.forEach { (k, v) -> put(k, v) } })
             .put("billingHold", JSONObject().apply { billingHold.forEach { (k, v) -> put(k, v) } })
         if (priceTable == null) js.put("prices", JSONObject.NULL) else js.put("prices", JSONArray().apply {
             priceTable.orEmpty().forEach { put(JSONObject().put("model", it.model).put("input", it.inputPerMillion).put("output", it.outputPerMillion)) }
@@ -316,7 +413,14 @@ class AiWatchStore(private val file: File? = null) {
         })
         js.put("hours", JSONArray().apply {
             hours.forEach { put(JSONObject().put("day", it.day).put("hour", it.hour).put("source", it.source).put("model", it.model)
-                .put("calls", it.calls).put("prompt", it.promptTokens).put("completion", it.completionTokens)) }
+                .put("provider", it.provider).put("calls", it.calls).put("prompt", it.promptTokens).put("completion", it.completionTokens)) }
+        })
+        js.put("samples", JSONArray().apply {
+            samples.forEach { put(JSONObject().put("atMs", it.atMs).put("provider", it.provider).put("model", it.model).put("source", it.source)
+                .put("prompt", it.promptTokens).put("completion", it.completionTokens).put("latencyMs", it.latencyMs).put("automatic", it.automatic)) }
+        })
+        js.put("switches", JSONArray().apply {
+            switches.forEach { put(JSONObject().put("atMs", it.atMs).put("provider", it.provider).put("from", it.fromModel).put("to", it.toModel).put("reason", it.reason)) }
         })
         js.put("adjustments", JSONArray().apply {
             log.forEach { put(JSONObject().put("atMs", it.atMs).put("scalper", it.scalper).put("setting", it.setting).put("old", it.oldValue).put("new", it.newValue).put("reason", it.reason)) }
@@ -340,5 +444,35 @@ class AiWatchStore(private val file: File? = null) {
             out += ModelPrice(name, o.optDouble("input").takeIf { it.isFinite() && it >= 0 } ?: 0.0, o.optDouble("output").takeIf { it.isFinite() && it >= 0 } ?: 0.0)
         }
         return out
+    }
+
+    private companion object {
+        const val MAX_SAMPLES = 4_000
+        const val MAX_SWITCHES = 100
+    }
+}
+
+/**
+ * Last published monthly usage, so the paper loop can honor a cap without holding the watch store.
+ * [AiWatchStore] is the writer. No cap means the provider is allowed.
+ */
+object MonthlyTokenCaps {
+    private val lock = Any()
+    private val cap = HashMap<String, Long>()
+    private val used = HashMap<String, Long>()
+
+    fun sync(provider: String, month: String, tokens: Long, capOrNull: Long?) = synchronized(lock) {
+        used["$provider|$month"] = tokens.coerceAtLeast(0L)
+        if (capOrNull == null || capOrNull <= 0L) cap.remove(provider) else cap[provider] = capOrNull
+    }
+
+    fun room(provider: String, month: String): Boolean = synchronized(lock) {
+        val c = cap[provider] ?: return true
+        return (used["$provider|$month"] ?: 0L) < c
+    }
+
+    fun reset() = synchronized(lock) {
+        cap.clear()
+        used.clear()
     }
 }
