@@ -35,6 +35,8 @@ class MistralFreeTierTest {
         assertEquals("sk-free", ep.apiKey)
         assertTrue(ep.usable)
         assertTrue(LlmProviders.freeFamily(LlmProviders.MISTRAL, ""))
+        assertTrue(LlmProviders.freeFamily(LlmProviders.MISTRAL, LlmProviders.MISTRAL_DEFAULT))
+        assertFalse(LlmProviders.freeFamily(LlmProviders.MISTRAL, "mistral-large-latest"))
         assertTrue(LlmProviders.spec(LlmProviders.MISTRAL).free)
         assertEquals(
             listOf(LlmProviders.MISTRAL_DEFAULT, LlmProviders.MISTRAL_NEMO, LlmProviders.MISTRAL_3B),
@@ -366,6 +368,7 @@ class MistralFreeTierTest {
             assertTrue(e.message!!.contains("404"))
         }
         assertEquals(1, posts)
+        assertFalse(GeminiApi.retired(200, "the order was not found"))
     }
 
     private fun source(name: String): String = listOf(
