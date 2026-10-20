@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.ui.charts
 
+import com.dirk.kalshiodds.decision.ScalpModels
 import com.dirk.kalshiodds.decision.ScalpState
 import com.dirk.kalshiodds.decision.ScalpTrade
 import org.junit.Assert.assertEquals
@@ -60,6 +61,19 @@ class ChartGalleryTest {
         assertTrue(rows[1].frozen && rows[2].frozen)
         assertTrue(!rows[0].frozen)
         assertTrue(ChartGallery.leaderboard(emptyList()).isEmpty())
+    }
+
+    @Test fun sparksKeepACellForEveryStrategy() {
+        val m0 = ScalpModels.ALL[0]
+        val m1 = ScalpModels.ALL[1]
+        val day = ZonedDateTime.of(2026, 10, 18, 15, 30, 0, 0, ChartShapes.ET).toInstant().toEpochMilli()
+        val windows = listOf(ScalpModels.WindowRow("a", day, mapOf(m0 to 1.5), mapOf(m0 to 1), m0))
+        val lines = ChartGallery.equitySparks(windows, day + 1_000, listOf(m0 to false, m1 to true))
+        assertEquals(listOf(m0.label, m1.label), lines.map { it.label })
+        assertEquals(1.5, lines[0].values.last(), 1e-9)
+        assertTrue(lines[0].values.size >= 2)
+        assertTrue(lines[1].values.isEmpty() && lines[1].frozen)
+        assertTrue(ChartGallery.equitySparks(windows, day, emptyList()).isEmpty())
     }
 
     private fun trade(id: String, side: String, rule: String, net: Double) = ScalpTrade(

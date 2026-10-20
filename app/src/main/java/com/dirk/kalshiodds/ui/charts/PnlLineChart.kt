@@ -49,14 +49,14 @@ fun PnlLineChart(values: List<Double>, modifier: Modifier = Modifier, height: Dp
 
 /** Card-sized cumulative P&L line. No labels; "No data yet" under two points. */
 @Composable
-fun PnlSparkline(values: List<Double>, modifier: Modifier = Modifier, height: Dp = 32.dp) {
+fun PnlSparkline(values: List<Double>, modifier: Modifier = Modifier, height: Dp = 32.dp, color: Color? = null) {
     val c = DipTheme.colors
     val pts = values.filter { it.isFinite() }
     if (pts.size < 2) { ChartEmptyState(modifier, height); return }
-    val color = chartSignColor(pts.last())
+    val ink = color ?: chartSignColor(pts.last())
     Canvas(modifier.fillMaxWidth().height(height).semantics {
         contentDescription = "P&L trend, now ${chartMoney(pts.last())}"
-    }) { drawPnl(pts, color, c.border, dashedZero = false) }
+    }) { drawPnl(pts, ink, c.border, dashedZero = false) }
 }
 
 private fun DrawScope.drawPnl(pts: List<Double>, color: Color, zeroColor: Color, dashedZero: Boolean) {

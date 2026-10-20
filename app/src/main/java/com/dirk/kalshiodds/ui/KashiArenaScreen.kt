@@ -117,7 +117,15 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
                 }.filter { (row, frozen) -> row.roundTrips > 0 || frozen }.map { (row, frozen) ->
                     ChartGallery.LeaderRow(row.model.label, row.netUsd, frozen)
                 }
-                item(key = "analysis-gallery") { AnalysisGallery(galleryTrades, leaders) }
+                val sparks = ChartGallery.equitySparks(
+                    st.windows,
+                    st.updatedAtMs,
+                    rows.mapNotNull { row ->
+                        val frozen = com.dirk.kalshiodds.decision.insights.ScalpFreeze.isFrozen(bench[row.model.code])
+                        if (row.roundTrips > 0 || frozen) row.model to frozen else null
+                    }
+                )
+                item(key = "analysis-gallery") { AnalysisGallery(galleryTrades, leaders, sparks) }
                 item(key = "race") { ArenaCard {
                     Text("Strategy race", style = MaterialTheme.typography.titleMedium, color = c.textPrimary, fontWeight = FontWeight.SemiBold)
                     Text("Top four by all-time profit · recorded window results", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)

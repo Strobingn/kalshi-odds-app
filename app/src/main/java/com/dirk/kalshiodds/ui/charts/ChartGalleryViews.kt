@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -133,6 +134,46 @@ fun WinRateHeatmap(grid: ChartGallery.HeatGrid?, modifier: Modifier = Modifier) 
         Row(Modifier.fillMaxWidth().padding(start = 42.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             listOf(0, 6, 12, 18).forEach { h ->
                 Text(ChartShapes.hourLabel(h), color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
+            }
+        }
+    }
+}
+
+/** One sparkline per strategy. Fewer than two points is a placeholder in that cell. Frozen is grey. */
+@Composable
+fun EquitySparkGrid(lines: List<ChartGallery.SparkLine>, modifier: Modifier = Modifier) {
+    val c = DipTheme.colors
+    Column(
+        modifier.fillMaxWidth().testTag("chart_sparks")
+            .semantics { contentDescription = "Equity curve sparkline for each strategy" },
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text("Equity curves", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
+        Text("One line per strategy, from recorded window nets. Starts at $0.", style = MaterialTheme.typography.bodySmall, color = c.textSecondary)
+        if (lines.isEmpty()) {
+            ChartEmptyState(height = 120.dp)
+            return
+        }
+        lines.chunked(2).forEach { pair ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                pair.forEach { line ->
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            if (line.frozen) "${line.label} · FROZEN" else line.label,
+                            color = if (line.frozen) c.textSecondary else c.textPrimary,
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        PnlSparkline(
+                            line.values,
+                            Modifier.fillMaxWidth(),
+                            height = 36.dp,
+                            color = if (line.frozen) c.textSecondary else null
+                        )
+                    }
+                }
+                if (pair.size == 1) Spacer(Modifier.weight(1f))
             }
         }
     }

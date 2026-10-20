@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.ui.charts
 
+import com.dirk.kalshiodds.decision.ScalpModels
 import com.dirk.kalshiodds.decision.ScalpState
 import com.dirk.kalshiodds.decision.ScalpTrade
 import java.time.Instant
@@ -42,6 +43,25 @@ object ChartGallery {
             }
             SideGroup(label, upEntries, downEntries, upNet, downNet)
         }.sortedByDescending { it.upNet + it.downNet }
+    }
+
+    data class SparkLine(val label: String, val values: List<Double>, val frozen: Boolean = false)
+
+    /** One equity curve per strategy. A strategy with no recorded windows keeps an empty line. */
+    fun equitySparks(
+        windows: List<ScalpModels.WindowRow>,
+        nowMs: Long,
+        models: List<Pair<ScalpModels.Model, Boolean>>
+    ): List<SparkLine> {
+        if (models.isEmpty()) return emptyList()
+        val lines = ChartShapes.equityFromWindows(windows, nowMs, models.map { it.first }).associateBy { it.name }
+        return models.map { (model, frozen) ->
+            SparkLine(
+                model.label,
+                lines[model.label]?.points?.map { it.value }?.filter { it.isFinite() } ?: emptyList(),
+                frozen
+            )
+        }
     }
 
     data class LeaderRow(val label: String, val net: Double, val frozen: Boolean)

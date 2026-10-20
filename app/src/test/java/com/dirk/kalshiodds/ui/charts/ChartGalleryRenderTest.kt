@@ -67,6 +67,29 @@ class ChartGalleryRenderTest {
         compose.onAllNodesWithText("No data yet").assertCountEquals(0)
     }
 
+    @Test fun sparksEmpty() {
+        show { EquitySparkGrid(emptyList()) }
+        compose.onNodeWithTag("chart_sparks").assertExists()
+        compose.onNodeWithText("Equity curves").assertExists()
+        compose.onNodeWithText("No data yet").assertExists()
+    }
+
+    @Test fun sparksSample() {
+        show {
+            EquitySparkGrid(
+                listOf(
+                    ChartGallery.SparkLine("Peak ride", listOf(0.0, 1.2, 2.4), frozen = false),
+                    ChartGallery.SparkLine("Fade", listOf(0.0, -1.0, -0.4), frozen = true),
+                    ChartGallery.SparkLine("Flat", listOf(0.0), frozen = true)
+                )
+            )
+        }
+        compose.onNodeWithText("Peak ride").assertExists()
+        compose.onNodeWithText("Fade · FROZEN").assertExists()
+        compose.onNodeWithText("Flat · FROZEN").assertExists()
+        compose.onNodeWithText("No data yet").assertExists()
+    }
+
     @Test fun leaderboardEmpty() {
         show { StrategyLeaderboard(emptyList()) }
         compose.onNodeWithTag("chart_leaderboard").assertExists()
