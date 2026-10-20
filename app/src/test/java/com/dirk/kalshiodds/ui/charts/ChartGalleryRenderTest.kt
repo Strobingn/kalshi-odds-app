@@ -67,6 +67,28 @@ class ChartGalleryRenderTest {
         compose.onAllNodesWithText("No data yet").assertCountEquals(0)
     }
 
+    @Test fun correlationEmpty() {
+        show { CorrelationHeatmap(null) }
+        compose.onNodeWithTag("chart_corr").assertExists()
+        compose.onNodeWithText("Daily P&L correlation").assertExists()
+        compose.onNodeWithText("No data yet").assertExists()
+    }
+
+    @Test fun correlationSample() {
+        show {
+            CorrelationHeatmap(
+                ChartGallery.Correlation(
+                    listOf("Fair-gap", "Dip-hunter"),
+                    listOf(listOf(1.0, -1.0), listOf(-1.0, 1.0))
+                )
+            )
+        }
+        compose.onNodeWithText("Fair-gap").assertExists()
+        compose.onNodeWithText("Dip-hunter").assertExists()
+        compose.onNodeWithText("Fair-gap × Dip-hunter · −1.00").assertExists()
+        compose.onAllNodesWithText("No data yet").assertCountEquals(0)
+    }
+
     @Test fun sparksEmpty() {
         show { EquitySparkGrid(emptyList()) }
         compose.onNodeWithTag("chart_sparks").assertExists()

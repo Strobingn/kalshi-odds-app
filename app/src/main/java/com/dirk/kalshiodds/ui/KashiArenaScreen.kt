@@ -125,7 +125,9 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
                         if (row.roundTrips > 0 || frozen) row.model to frozen else null
                     }
                 )
-                item(key = "analysis-gallery") { AnalysisGallery(galleryTrades, leaders, sparks) }
+                item(key = "analysis-gallery") {
+                    AnalysisGallery(galleryTrades, leaders, sparks, st.windows, st.updatedAtMs, rows.map { it.model })
+                }
                 item(key = "race") { ArenaCard {
                     Text("Strategy race", style = MaterialTheme.typography.titleMedium, color = c.textPrimary, fontWeight = FontWeight.SemiBold)
                     Text("Top four by all-time profit · recorded window results", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)

@@ -139,6 +139,66 @@ fun WinRateHeatmap(grid: ChartGallery.HeatGrid?, modifier: Modifier = Modifier) 
     }
 }
 
+/** Pairwise daily-net correlation. Positive is green, negative is red, undefined is grey. */
+@Composable
+fun CorrelationHeatmap(corr: ChartGallery.Correlation?, modifier: Modifier = Modifier) {
+    val c = DipTheme.colors
+    Column(
+        modifier.fillMaxWidth().testTag("chart_corr")
+            .semantics { contentDescription = "Strategy daily P and L correlation" },
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text("Daily P&L correlation", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
+        Text("Pearson correlation of Eastern-day nets. Up to 12 strategies. Green moves together, red moves apart.", style = MaterialTheme.typography.bodySmall, color = c.textSecondary)
+        val labels = corr?.labels.orEmpty()
+        val matrix = corr?.matrix.orEmpty()
+        if (labels.size < 2 || matrix.size != labels.size) {
+            ChartEmptyState(height = 120.dp)
+            return
+        }
+        val pair = labels.indices.flatMap { i ->
+            ((i + 1) until labels.size).mapNotNull { j ->
+                matrix.getOrNull(i)?.getOrNull(j)?.takeIf { it.isFinite() }?.let { Triple(labels[i], labels[j], it) }
+            }
+        }.maxByOrNull { abs(it.third) }
+        Text(
+            pair?.let { "${it.first} × ${it.second} · ${ChartGallery.corrText(it.third)}" } ?: "No overlapping days",
+            color = c.textPrimary,
+            style = MaterialTheme.typography.labelMedium,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+        labels.forEachIndexed { r, label ->
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(label, Modifier.width(108.dp), color = c.textPrimary, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Canvas(Modifier.weight(1f).height(22.dp)) {
+                    val row = matrix.getOrNull(r).orEmpty()
+                    val slot = size.width / labels.size.toFloat()
+                    labels.indices.forEach { col ->
+                        val value = row.getOrNull(col)
+                        drawRoundRect(
+                            corrColor(value, c.upButton, c.downButton, c.surfaceAlt),
+                            Offset(col * slot + 1.dp.toPx(), 1.dp.toPx()),
+                            Size((slot - 2.dp.toPx()).coerceAtLeast(1f), size.height - 2.dp.toPx()),
+                            CornerRadius(2.dp.toPx())
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun corrColor(r: Double?, up: Color, down: Color, empty: Color): Color {
+    if (r == null || !r.isFinite()) return empty
+    val alpha = (0.28f + 0.72f * abs(r).toFloat()).coerceIn(0.28f, 1f)
+    return when {
+        r > 0.02 -> up.copy(alpha = alpha)
+        r < -0.02 -> down.copy(alpha = alpha)
+        else -> empty
+    }
+}
+
 /** One sparkline per strategy. Fewer than two points is a placeholder in that cell. Frozen is grey. */
 @Composable
 fun EquitySparkGrid(lines: List<ChartGallery.SparkLine>, modifier: Modifier = Modifier) {

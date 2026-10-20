@@ -76,6 +76,26 @@ class ChartGalleryTest {
         assertTrue(ChartGallery.equitySparks(windows, day, emptyList()).isEmpty())
     }
 
+    @Test fun dailyCorrelationNeedsTwoMovers() {
+        val m0 = ScalpModels.ALL[0]
+        val m1 = ScalpModels.ALL[1]
+        val day = ZonedDateTime.of(2026, 10, 18, 15, 30, 0, 0, ChartShapes.ET).toInstant().toEpochMilli()
+        val later = day + 86_400_000
+        val windows = listOf(
+            ScalpModels.WindowRow("a", day, mapOf(m0 to 1.0, m1 to -2.0), emptyMap(), m0),
+            ScalpModels.WindowRow("b", later, mapOf(m0 to 3.0, m1 to -4.0), emptyMap(), m1)
+        )
+        val corr = ChartGallery.dailyCorrelation(windows, later + 1, listOf(m0, m1))!!
+        assertEquals(listOf(m1.label, m0.label), corr.labels)
+        assertEquals(1.0, corr.matrix[0][0]!!, 1e-9)
+        assertEquals(-1.0, corr.matrix[0][1]!!, 1e-9)
+        assertEquals("−1.00", ChartGallery.corrText(-1.0))
+        assertNull(ChartGallery.dailyCorrelation(emptyList(), later, listOf(m0, m1)))
+        assertNull(ChartGallery.dailyCorrelation(windows.take(1), later, listOf(m0, m1)))
+        assertNull(ChartGallery.dailyCorrelation(windows, later + 1, listOf(m0)))
+        assertNull(ChartGallery.pearson(listOf(1.0, 1.0), listOf(2.0, 2.0)))
+    }
+
     private fun trade(id: String, side: String, rule: String, net: Double) = ScalpTrade(
         id = id,
         ticker = "KXBTC15M-26OCT181500-00",

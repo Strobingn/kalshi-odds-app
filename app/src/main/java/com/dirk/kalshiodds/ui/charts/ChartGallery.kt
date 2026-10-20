@@ -5,6 +5,9 @@ import com.dirk.kalshiodds.decision.ScalpState
 import com.dirk.kalshiodds.decision.ScalpTrade
 import java.time.Instant
 import java.time.ZoneId
+import java.util.Locale
+import kotlin.math.abs
+import kotlin.math.sqrt
 
 /**
  * Pure inputs for the shared Analysis, Scorecard, and strategy charts.
@@ -43,6 +46,66 @@ object ChartGallery {
             }
             SideGroup(label, upEntries, downEntries, upNet, downNet)
         }.sortedByDescending { it.upNet + it.downNet }
+    }
+
+    data class Correlation(val labels: List<String>, val matrix: List<List<Double?>>)
+
+    /**
+     * Pearson correlation of ET-day nets. Needs two days and two strategies that actually moved.
+     * At most [maxStrategies], the ones with the largest absolute daily movement.
+     */
+    fun dailyCorrelation(
+        windows: List<ScalpModels.WindowRow>,
+        nowMs: Long,
+        models: List<ScalpModels.Model>,
+        zone: ZoneId = ChartShapes.ET,
+        maxStrategies: Int = 12
+    ): Correlation? {
+        if (models.isEmpty() || maxStrategies < 2) return null
+        val wanted = models.toSet()
+        val byDay = windows.filter { w ->
+            val close = w.closeMs
+            close != null && close <= nowMs && w.netByModel.keys.any { it in wanted }
+        }.groupBy { Instant.ofEpochMilli(it.closeMs!!).atZone(zone).toLocalDate() }.toSortedMap()
+        if (byDay.size < 2) return null
+        val series = models.map { model ->
+            model to byDay.values.map { rows ->
+                rows.sumOf { w -> w.netByModel[model]?.takeIf { it.isFinite() } ?: 0.0 }
+            }
+        }.filter { (_, values) -> values.any { abs(it) > 1e-9 } }
+        if (series.size < 2) return null
+        val ranked = series.sortedByDescending { (_, values) -> values.sumOf { abs(it) } }.take(maxStrategies)
+        return Correlation(
+            ranked.map { it.first.label },
+            ranked.map { (_, a) -> ranked.map { (_, b) -> pearson(a, b) } }
+        )
+    }
+
+    fun pearson(a: List<Double>, b: List<Double>): Double? {
+        if (a.size != b.size || a.size < 2) return null
+        val meanA = a.average()
+        val meanB = b.average()
+        var num = 0.0
+        var da = 0.0
+        var db = 0.0
+        for (i in a.indices) {
+            val xa = a[i] - meanA
+            val xb = b[i] - meanB
+            num += xa * xb
+            da += xa * xa
+            db += xb * xb
+        }
+        if (da < 1e-12 || db < 1e-12) return null
+        return (num / sqrt(da * db)).coerceIn(-1.0, 1.0)
+    }
+
+    fun corrText(r: Double): String {
+        val body = String.format(Locale.US, "%.2f", abs(r))
+        return when {
+            r < -0.005 -> "−$body"
+            r > 0.005 -> "+$body"
+            else -> "0.00"
+        }
     }
 
     data class SparkLine(val label: String, val values: List<Double>, val frozen: Boolean = false)
