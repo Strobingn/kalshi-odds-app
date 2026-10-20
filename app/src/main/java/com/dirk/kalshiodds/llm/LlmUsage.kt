@@ -88,7 +88,12 @@ object LlmPrices {
         ModelPrice("gpt-5.4", 2.50, 15.0),
         ModelPrice("gpt-5.4-mini", 0.75, 4.50),
         ModelPrice("mistral-large-latest", 2.0, 6.0),
-        ModelPrice("openai/gpt-4o-mini", 0.15, 0.60)
+        ModelPrice("openai/gpt-4o-mini", 0.15, 0.60),
+        ModelPrice(LlmProviders.GROQ_120, 0.0, 0.0),
+        ModelPrice(LlmProviders.GROQ_20, 0.0, 0.0),
+        ModelPrice(LlmProviders.GEMINI_DEFAULT, 0.0, 0.0),
+        ModelPrice(LlmProviders.GEMINI_FALLBACK, 0.0, 0.0),
+        ModelPrice(LlmProviders.OPENROUTER_FREE_MODEL, 0.0, 0.0)
     )
 
     /** Saved rows win. Defaults fill models the file never listed, including after a provider switch. */
@@ -133,7 +138,8 @@ object LlmPrices {
         var cost = 0.0
         for (src in LlmSources.ALL) by[src] = UsageSlice()
         for (b in buckets) {
-            val c = costUsd(b.promptTokens, b.completionTokens, priceFor(b.model, prices))
+            val c = if (LlmProviders.freeFamily(b.provider, b.model)) 0.0
+            else costUsd(b.promptTokens, b.completionTokens, priceFor(b.model, prices))
             calls += b.calls
             prompt += b.promptTokens
             completion += b.completionTokens

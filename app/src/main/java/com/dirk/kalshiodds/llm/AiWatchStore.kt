@@ -12,7 +12,12 @@ data class AiWatchConfig(
     val intervalMs: Long = DEFAULT_INTERVAL_MS,
     val budgetUsd: Double? = null,
     /** 1.0.14: AI posts and re-evaluates from the live feed. Default on. The card still shows Kalshi ticks when this is off. */
-    val liveFeed: Boolean = true
+    val liveFeed: Boolean = true,
+    /**
+     * 1.0.17: external LLM calls on its own. Default off.
+     * A 1.0.16 file has no key, and that upgrade stays off even when follow was on.
+     */
+    val autoCalls: Boolean = false
 ) {
     /** Blank / 0 / negative means the budget is off. A positive amount pauses the watcher once today's estimate reaches it. */
     fun budgetOrNull(): Double? = budgetUsd?.takeIf { it.isFinite() && it > 0.0 }
@@ -33,8 +38,15 @@ class AiWatchStore(private val file: File? = null) {
     private val lock = Any()
     private var follows = true
     private var liveFeed = true
+    private var autoCalls = false
     private var intervalMs = AiWatchConfig.DEFAULT_INTERVAL_MS
     private var budgetUsd: Double? = null
+    /** Explicit free-tier choice per provider. Missing means the free-family default (on). */
+    private val freeTier = HashMap<String, Boolean>()
+    /** Optional daily auto-call budget. Missing means [LlmProviders.defaultDailyCap]. */
+    private val dailyCaps = HashMap<String, Int>()
+    /** Provider reported billing or a paid tier. Automatic calls stay off until Dirk marks the key free again. */
+    private val billingHold = HashMap<String, String>()
     private var priceTable: List<ModelPrice>? = null
     private val usage = ArrayList<UsageBucket>()
     private val hours = ArrayList<UsageHour>()
@@ -51,6 +63,8 @@ class AiWatchStore(private val file: File? = null) {
     val notice: StateFlow<String> = _notice
     private val _live = MutableStateFlow<AiLiveSnapshot?>(null)
     val live: StateFlow<AiLiveSnapshot?> = _live
+    private val _safety = MutableStateFlow(0)
+    val safety: StateFlow<Int> = _safety
 
     init { load() }
 
@@ -58,7 +72,65 @@ class AiWatchStore(private val file: File? = null) {
 
     fun setFollows(on: Boolean) = synchronized(lock) { follows = on; publishConfig(); persist() }
 
+    fun setAutoCalls(on: Boolean) = synchronized(lock) { autoCalls = on; publishConfig(); persist(); bump() }
+
     fun setLiveFeed(on: Boolean) = synchronized(lock) { liveFeed = on; publishConfig(); persist() }
+
+    /** True when this provider may place an automatic LLM call. Manual chat does not ask. */
+    fun autoAllowed(provider: String, model: String): Boolean = synchronized(lock) {
+        if (!autoCalls || provider.isBlank()) return@synchronized false
+        if (billingHold.containsKey(provider)) return@synchronized false
+        if (LlmProviders.freeFamily(provider, model)) return@synchronized freeTier[provider] ?: true
+        true
+    }
+
+    fun freeTierOn(provider: String, model: String): Boolean = synchronized(lock) {
+        if (billingHold.containsKey(provider)) return@synchronized false
+        freeTier[provider] ?: LlmProviders.freeFamily(provider, model)
+    }
+
+    fun setFreeTier(provider: String, on: Boolean) = synchronized(lock) {
+        val id = provider.trim()
+        if (id.isEmpty()) return@synchronized
+        freeTier[id] = on
+        if (on) billingHold.remove(id)
+        persist(); bump()
+    }
+
+    fun dailyCap(provider: String, model: String = ""): Int = synchronized(lock) {
+        dailyCaps[provider] ?: LlmProviders.defaultDailyCap(provider, model)
+    }
+
+    /** Null or a non-positive number restores the provider default. */
+    fun setDailyCap(provider: String, cap: Int?) = synchronized(lock) {
+        val id = provider.trim()
+        if (id.isEmpty()) return@synchronized
+        if (cap == null || cap <= 0) dailyCaps.remove(id) else dailyCaps[id] = cap.coerceAtMost(100_000)
+        persist(); bump()
+    }
+
+    fun markBilled(provider: String, detail: String) = synchronized(lock) {
+        val id = provider.trim().ifBlank { return@synchronized }
+        val label = LlmProviders.spec(id).label
+        billingHold[id] = "$label is manual-only: the provider reported billing or a paid tier. ${detail.take(140)}".trim()
+        freeTier[id] = false
+        persist(); bump()
+    }
+
+    fun blockNotice(provider: String, model: String): String = synchronized(lock) {
+        billingHold[provider]?.let { return@synchronized it }
+        if (LlmProviders.freeFamily(provider, model) && freeTier[provider] == false) {
+            return@synchronized "${LlmProviders.spec(provider).label} is manual-only: this key is not marked free tier."
+        }
+        ""
+    }
+
+    fun callsFor(provider: String, model: String, nowMs: Long): Int = synchronized(lock) {
+        val day = LlmPrices.dayKey(nowMs)
+        usage.filter { it.day == day && it.provider == provider && (model.isEmpty() || it.model == model) }.sumOf { it.calls }
+    }
+
+    private fun bump() { _safety.value = _safety.value + 1 }
 
     fun publishLive(s: AiLiveSnapshot) { _live.value = s }
 
@@ -144,7 +216,7 @@ class AiWatchStore(private val file: File? = null) {
         return usage.filter { it.day == day }.sumOf { LlmPrices.costUsd(it.promptTokens, it.completionTokens, LlmPrices.priceFor(it.model, prices)) }
     }
 
-    private fun publishConfig() { _config.value = AiWatchConfig(follows, intervalMs, budgetUsd, liveFeed) }
+    private fun publishConfig() { _config.value = AiWatchConfig(follows, intervalMs, budgetUsd, liveFeed, autoCalls) }
 
     private fun publishSummary() {
         _summary.value = LlmPrices.summarize(usage.toList(), LlmPrices.withDefaults(priceTable), System.currentTimeMillis())
@@ -158,6 +230,32 @@ class AiWatchStore(private val file: File? = null) {
         synchronized(lock) {
             follows = js.optBoolean("followsWindow", true)
             liveFeed = js.optBoolean("liveFeed", true)
+            autoCalls = if (js.has("autoCalls")) js.optBoolean("autoCalls") else false
+            freeTier.clear()
+            js.optJSONObject("freeTier")?.let { obj ->
+                val keys = obj.keys()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    freeTier[k] = obj.optBoolean(k)
+                }
+            }
+            dailyCaps.clear()
+            js.optJSONObject("dailyCap")?.let { obj ->
+                val keys = obj.keys()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    dailyCaps[k] = obj.optInt(k)
+                }
+            }
+            billingHold.clear()
+            js.optJSONObject("billingHold")?.let { obj ->
+                val keys = obj.keys()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    val msg = obj.optString(k)
+                    if (msg.isNotBlank()) billingHold[k] = msg
+                }
+            }
             intervalMs = js.optLong("intervalMs", AiWatchConfig.DEFAULT_INTERVAL_MS)
                 .coerceIn(AiWatchConfig.MIN_INTERVAL_MS, AiWatchConfig.MAX_INTERVAL_MS)
             budgetUsd = if (js.has("budgetUsd") && !js.isNull("budgetUsd")) js.optDouble("budgetUsd").takeIf { it.isFinite() && it > 0.0 } else null
@@ -203,8 +301,12 @@ class AiWatchStore(private val file: File? = null) {
         val js = JSONObject()
             .put("followsWindow", follows)
             .put("liveFeed", liveFeed)
+            .put("autoCalls", autoCalls)
             .put("intervalMs", intervalMs)
             .put("budgetUsd", budgetUsd ?: JSONObject.NULL)
+            .put("freeTier", JSONObject().apply { freeTier.forEach { (k, v) -> put(k, v) } })
+            .put("dailyCap", JSONObject().apply { dailyCaps.forEach { (k, v) -> put(k, v) } })
+            .put("billingHold", JSONObject().apply { billingHold.forEach { (k, v) -> put(k, v) } })
         if (priceTable == null) js.put("prices", JSONObject.NULL) else js.put("prices", JSONArray().apply {
             priceTable.orEmpty().forEach { put(JSONObject().put("model", it.model).put("input", it.inputPerMillion).put("output", it.outputPerMillion)) }
         })

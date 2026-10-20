@@ -295,6 +295,8 @@ class AiWindowWatcher(
     private val now: () -> Long = System::currentTimeMillis,
     private val paper: () -> List<PaperTape> = { emptyList() },
     private val onBenched: () -> Unit = {},
+    private val alternates: () -> List<LlmEndpoint> = { emptyList() },
+    private val pacer: FreeCallPacer = FreeCallPacer(),
 ) {
     var onLivePost: (String) -> Unit = {}
     var onWake: () -> Unit = {}
@@ -340,6 +342,17 @@ class AiWindowWatcher(
         if (!cfg.followsWindow) { store.setNotice(""); return }
         // On-device freeze/bench runs every poll, before any chat-LLM wait.
         runCatching { autoBench() }
+        val epNow = runCatching { endpoint() }.getOrNull()
+        val provider = epNow?.provider.orEmpty()
+        val model = epNow?.model.orEmpty()
+        if (!store.autoAllowed(provider, model)) {
+            store.setNotice("")
+            return
+        }
+        if (epNow != null && LlmProviders.freeFamily(provider, model)) {
+            runCatching { freeFollow(epNow) }
+            return
+        }
         runCatching { maybeLive() }
         val cap = cfg.budgetOrNull()
         if (cap != null && store.budgetPaused(now())) {
@@ -400,12 +413,63 @@ class AiWindowWatcher(
         val t = AiLiveFeed.trigger(prev, next)
         if (t != LiveTrigger.NONE) pending = AiLiveFeed.prefer(pending, t)
         val cfg = store.config.value
-        if (!cfg.liveFeed || !cfg.followsWindow || pending == LiveTrigger.NONE) return
+        val ep = runCatching { endpoint() }.getOrNull()
+        if (ep == null || !store.autoAllowed(ep.provider, ep.model) || !cfg.liveFeed || !cfg.followsWindow || pending == LiveTrigger.NONE) return
+        if (LlmProviders.freeFamily(ep.provider, ep.model)) {
+            val quota = LlmProviders.effectiveQuota(ep.provider, ep.model, store.dailyCap(ep.provider, ep.model)) ?: return
+            if (pacer.ready(ep.provider, LlmProviders.paceModels(ep), quota, now(), AiCompact.GROQ_CALL_TOKENS)) runCatching { onWake() }
+            return
+        }
         if (AiLiveFeed.llmDue(lastCallAt, now(), pending, false)) runCatching { onWake() }
+    }
+
+    /** Free-tier follow. Paced, compact, and able to move to the next free provider. No paid fallback. */
+    private fun freeFollow(selected: LlmEndpoint) {
+        val cap = store.config.value.budgetOrNull()
+        if (cap != null && store.budgetPaused(now())) {
+            store.setNotice(LlmUsageText.budgetNotice(store.todaySpend(now()), cap))
+            return
+        }
+        val snap = runCatching { snapshot() }.getOrElse {
+            store.setNotice("AI follow: window unavailable")
+            return
+        }
+        if (snap.windowKey.isBlank()) { store.setNotice(""); return }
+        if (!selected.usable) {
+            store.setNotice("AI follow: no API key for ${LlmProviders.spec(selected.provider).label}")
+            return
+        }
+        val result = AiAutoCalls.callFree(
+            selected = selected,
+            slots = runCatching { alternates() }.getOrDefault(emptyList()),
+            pacer = pacer,
+            nowMs = now(),
+            messages = AiCompact.watch(snap.context),
+            reserveCompletion = AiCompact.RESERVE_COMPLETION,
+            quotaOf = { LlmProviders.effectiveQuota(it.provider, it.model, store.dailyCap(it.provider, it.model)) },
+            allowed = { store.autoAllowed(it.provider, it.model) },
+            ask = ask,
+            onBilling = { provider, detail -> store.markBilled(provider, detail) }
+        )
+        if (result == null) { store.setNotice(""); return }
+        val (used, reply) = result
+        lastCallAt = now()
+        lastCalledWindow = snap.windowKey
+        lastFingerprint = snap.fingerprint
+        val trigger = pending
+        pending = LiveTrigger.NONE
+        store.record(AiLiveFeed.source(trigger), used.provider, reply.model.ifBlank { used.model }, reply.promptTokens, reply.completionTokens, now())
+        val tweaks = apply(reply.text)
+        if (store.config.value.liveFeed) runCatching { onLivePost(AiLiveFeed.post(liveSnap, trigger, tweaks)) }
+        val capAfter = store.config.value.budgetOrNull()
+        if (capAfter != null && store.budgetPaused(now())) store.setNotice(LlmUsageText.budgetNotice(store.todaySpend(now()), capAfter))
+        else store.setNotice("")
     }
 
     private fun maybeLive() {
         val cfg = store.config.value
+        val epNow = runCatching { endpoint() }.getOrNull()
+        if (epNow != null && !store.autoAllowed(epNow.provider, epNow.model)) return
         if (!cfg.liveFeed || !cfg.followsWindow || pending == LiveTrigger.NONE) return
         val trigger = pending
         if (!AiLiveFeed.llmDue(lastCallAt, now(), trigger, false)) return

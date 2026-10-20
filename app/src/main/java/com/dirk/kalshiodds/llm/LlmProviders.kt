@@ -1,12 +1,23 @@
 package com.dirk.kalshiodds.llm
 
 /**
- * 1.0.12: OpenAI-compatible providers for the AI chat and the window watcher.
- * The paper LLM strategy stays on the xAI slot. Keys never reach a real-money path.
+ * OpenAI-compatible providers plus the native Gemini API.
+ * The paper LLM strategy and the window watcher use whichever provider is selected.
+ * Keys never reach a real-money path.
  */
 data class LlmEndpoint(val provider: String, val baseUrl: String, val model: String, val apiKey: String) {
     val usable: Boolean get() = apiKey.isNotBlank() && model.isNotBlank() && baseUrl.startsWith("https://")
 }
+
+/** Free-tier ceilings the auto caller paces under. Token totals are for one model. */
+data class FreeQuota(
+    val requestsPerMinute: Int,
+    val requestsPerDay: Int,
+    val tokensPerMinute: Long,
+    val tokensPerDay: Long,
+    /** Steady gap between calls to one model. */
+    val perModelPaceMs: Long
+)
 
 object LlmProviders {
     const val XAI = "xai"
@@ -14,16 +25,39 @@ object LlmProviders {
     const val MISTRAL = "mistral"
     const val OPENROUTER = "openrouter"
     const val CUSTOM = "custom"
+    const val GROQ = "groq"
+    const val GEMINI = "gemini"
+    const val OPENROUTER_FREE = "openrouter-free"
 
-    data class Spec(val id: String, val label: String, val defaultBase: String, val defaultModel: String)
+    const val GROQ_120 = "openai/gpt-oss-120b"
+    const val GROQ_20 = "openai/gpt-oss-20b"
+    const val GEMINI_DEFAULT = "gemini-3.8-flash"
+    const val GEMINI_FALLBACK = "gemini-3.5-flash-lite"
+    const val OPENROUTER_FREE_MODEL = "minimax/minimax-m3.1-flash:free"
+    const val FREE_KEY_HINT = "Get a free key at console.groq.com or aistudio.google.com."
+
+    data class Spec(
+        val id: String,
+        val label: String,
+        val defaultBase: String,
+        val defaultModel: String,
+        val free: Boolean = false,
+        /** Native generateContent, not the OpenAI-compatible route. */
+        val nativeGemini: Boolean = false
+    )
 
     val ALL = listOf(
         Spec(XAI, "xAI / Grok", "https://api.x.ai/v1", "grok-4.7"),
         Spec(OPENAI, "OpenAI", "https://api.openai.com/v1", "gpt-4.1"),
         Spec(MISTRAL, "Mistral", "https://api.mistral.ai/v1", "mistral-large-latest"),
         Spec(OPENROUTER, "OpenRouter", "https://openrouter.ai/api/v1", "openai/gpt-4o-mini"),
+        Spec(GROQ, "Groq (free)", "https://api.groq.com/openai/v1", GROQ_120, free = true),
+        Spec(GEMINI, "Google Gemini (free)", "https://generativelanguage.googleapis.com/v1beta", GEMINI_DEFAULT, free = true, nativeGemini = true),
+        Spec(OPENROUTER_FREE, "OpenRouter free models", "https://openrouter.ai/api/v1", OPENROUTER_FREE_MODEL, free = true),
         Spec(CUSTOM, "Custom", "", "")
     )
+
+    val FREE_IDS = listOf(GROQ, GEMINI, OPENROUTER_FREE)
 
     fun spec(id: String): Spec = ALL.firstOrNull { it.id == id } ?: ALL.first()
 
@@ -34,4 +68,62 @@ object LlmProviders {
         val b = base.trim().ifBlank { s.defaultBase }.trimEnd('/')
         return LlmEndpoint(s.id, b, m, apiKey.trim())
     }
+
+    /** Groq, Gemini, an OpenRouter free preset, or any model id that ends in `:free`. */
+    fun freeFamily(id: String, model: String = ""): Boolean =
+        spec(id).free || model.trim().endsWith(":free", ignoreCase = true)
+
+    fun isGemini(id: String): Boolean = spec(id).nativeGemini
+
+    /**
+     * Groq rotates the two free gpt-oss models on one key.
+     * A model Dirk typed that is not one of those two stays on its own pace.
+     */
+    fun paceModels(ep: LlmEndpoint): List<String> {
+        if (ep.provider != GROQ) return listOf(ep.model.ifBlank { spec(ep.provider).defaultModel })
+        val pair = listOf(GROQ_120, GROQ_20)
+        val m = ep.model.trim()
+        return if (m.isEmpty() || m in pair) pair else listOf(m)
+    }
+
+    /**
+     * Provider ceilings before the optional daily budget.
+     * Groq: 30/min, 1,000/day, 8K tokens/min, 200K tokens/day, per model.
+     * Gemini's daily figure is the safety budget (500), because a key may be free or billed.
+     * OpenRouter `:free`: 20/min, 50/day.
+     */
+    fun baseQuota(id: String, model: String = ""): FreeQuota? {
+        if (!freeFamily(id, model)) return null
+        return when (id) {
+            GROQ -> FreeQuota(30, 1_000, 8_000, 200_000, 90_000L)
+            GEMINI -> FreeQuota(10, 500, 250_000, 50_000_000, spreadPaceMs(500))
+            else -> FreeQuota(20, 50, 250_000, 50_000_000, spreadPaceMs(50))
+        }
+    }
+
+    /** Optional daily auto-call budget. Groq is per model. 0 means no extra cap. */
+    fun defaultDailyCap(id: String, model: String = ""): Int = when {
+        id == GROQ -> 1_000
+        id == GEMINI -> 500
+        freeFamily(id, model) -> 50
+        else -> 0
+    }
+
+    /** The tighter of the provider ceiling and Dirk's daily auto-call budget. */
+    fun effectiveQuota(id: String, model: String, dailyCap: Int): FreeQuota? {
+        val base = baseQuota(id, model) ?: return null
+        val cap = if (dailyCap > 0) minOf(base.requestsPerDay, dailyCap) else base.requestsPerDay
+        val pace = maxOf(base.perModelPaceMs, spreadPaceMs(cap))
+        return base.copy(requestsPerDay = cap, perModelPaceMs = pace)
+    }
+
+    /** Spread [perDay] calls across 24h with one slot of margin so a simulated day stays under the cap. */
+    fun spreadPaceMs(perDay: Int): Long {
+        val slots = (perDay - 1).coerceAtLeast(1)
+        return kotlin.math.ceil(86_400_000.0 / slots).toLong().coerceAtLeast(1L)
+    }
+
+    /** Retired Gemini models switch here once. The fallback itself has nowhere further to go. */
+    fun geminiFallback(model: String): String? =
+        if (model.trim() == GEMINI_FALLBACK) null else GEMINI_FALLBACK
 }
