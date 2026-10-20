@@ -125,6 +125,43 @@ class ChartGalleryTest {
         assertTrue(ChartGallery.entryExit(listOf(open)).isEmpty())
     }
 
+    @Test fun familyStackSumsToCombined() {
+        val model = ChartGallery.familyStacks(
+            listOf(
+                ChartGallery.FamilyEvent(10, "AI alert", 2.0),
+                ChartGallery.FamilyEvent(20, "manual paper", -0.5),
+                ChartGallery.FamilyEvent(30, "AI alert", 1.0),
+                ChartGallery.FamilyEvent(40, "", Double.NaN)
+            )
+        )!!
+        assertEquals(listOf("AI alert", "manual paper"), model.names)
+        assertEquals(0.0, model.values[0].first(), 0.0)
+        assertEquals(3.0, model.values[0].last(), 1e-9)
+        assertEquals(-0.5, model.values[1].last(), 1e-9)
+        val total = model.values.sumOf { it.last() }
+        assertEquals(2.5, total, 1e-9)
+        assertNull(ChartGallery.familyStacks(emptyList()))
+        assertEquals("manual paper", ChartGallery.scorecardFamily("manual", null, "Manual"))
+        assertEquals("AI picks", ChartGallery.scorecardFamily(null, null, "AI picks"))
+    }
+
+    @Test fun cumulativeDepthKeepsBothSides() {
+        val series = ChartGallery.cumulativeDepth(
+            yes = listOf(0.60 to 10.0, 0.50 to 5.0, -1.0 to 9.0),
+            no = listOf(0.40 to 8.0, 0.40 to 0.0)
+        )
+        assertEquals(listOf("UP bid", "UP ask", "DOWN bid", "DOWN ask"), series.map { it.name })
+        assertEquals(listOf(60.0, 50.0), series[0].cents)
+        assertEquals(listOf(10.0, 15.0), series[0].size)
+        assertEquals(listOf(60.0), series[1].cents)
+        assertEquals(listOf(8.0), series[1].size)
+        assertEquals(listOf(40.0), series[2].cents)
+        assertEquals(listOf(40.0, 50.0), series[3].cents)
+        assertEquals(listOf(10.0, 15.0), series[3].size)
+        assertTrue(series[0].up && series[0].bid && !series[1].bid && !series[3].up)
+        assertTrue(ChartGallery.cumulativeDepth(emptyList(), emptyList()).isEmpty())
+    }
+
     private fun trade(id: String, side: String, rule: String, net: Double) = ScalpTrade(
         id = id,
         ticker = "KXBTC15M-26OCT181500-00",

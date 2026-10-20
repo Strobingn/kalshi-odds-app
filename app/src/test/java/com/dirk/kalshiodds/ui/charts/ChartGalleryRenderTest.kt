@@ -67,6 +67,43 @@ class ChartGalleryRenderTest {
         compose.onAllNodesWithText("No data yet").assertCountEquals(0)
     }
 
+    @Test fun depthEmpty() {
+        show { CumulativeDepthChart(emptyList()) }
+        compose.onNodeWithTag("chart_depth").assertExists()
+        compose.onNodeWithText("Order book depth").assertExists()
+        compose.onNodeWithText("No data yet").assertExists()
+    }
+
+    @Test fun depthSample() {
+        val series = ChartGallery.cumulativeDepth(listOf(0.60 to 10.0, 0.50 to 5.0), listOf(0.40 to 8.0))
+        show { CumulativeDepthChart(series) }
+        compose.onNodeWithText("UP bid").assertExists()
+        compose.onNodeWithText("UP ask").assertExists()
+        compose.onNodeWithText("DOWN bid").assertExists()
+        compose.onNodeWithText("DOWN ask").assertExists()
+        compose.onAllNodesWithText("No data yet").assertCountEquals(0)
+    }
+
+    @Test fun familyStackEmpty() {
+        show { FamilyStackChart(null) }
+        compose.onNodeWithTag("chart_family_stack").assertExists()
+        compose.onNodeWithText("Cumulative P&L by family").assertExists()
+        compose.onNodeWithText("No data yet").assertExists()
+    }
+
+    @Test fun familyStackSample() {
+        val model = ChartGallery.familyStacks(
+            listOf(
+                ChartGallery.FamilyEvent(10, "AI alert", 2.0),
+                ChartGallery.FamilyEvent(20, "manual paper", -0.5)
+            )
+        )
+        show { FamilyStackChart(model) }
+        compose.onNodeWithText("AI alert +$2.00", substring = true).assertExists()
+        compose.onNodeWithText("manual paper −$0.50", substring = true).assertExists()
+        compose.onAllNodesWithText("No data yet").assertCountEquals(0)
+    }
+
     @Test fun rollingEmpty() {
         show { RollingWinRateChart(emptyList()) }
         compose.onNodeWithTag("chart_rolling").assertExists()

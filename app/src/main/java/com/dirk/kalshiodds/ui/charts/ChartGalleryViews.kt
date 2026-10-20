@@ -1,14 +1,18 @@
 package com.dirk.kalshiodds.ui.charts
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -16,6 +20,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.testTag
@@ -34,6 +42,136 @@ private fun heatColor(rate: Double?, n: Int, up: Color, down: Color, empty: Colo
     val dist = (abs(rate - 0.5) / 0.5).toFloat().coerceIn(0f, 1f)
     val alpha = 0.35f + 0.65f * dist
     return if (rate >= 0.5) up.copy(alpha = alpha) else down.copy(alpha = alpha)
+}
+
+/** UP and DOWN cumulative bids and asks on one price axis. Asks are dashed. */
+@Composable
+fun CumulativeDepthChart(series: List<ChartGallery.DepthSeries>, modifier: Modifier = Modifier) {
+    val c = DipTheme.colors
+    Column(
+        modifier.fillMaxWidth().testTag("chart_depth")
+            .semantics { contentDescription = "Order book cumulative depth, UP and DOWN bids and asks" },
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text("Order book depth", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
+        Text("Cumulative size. Solid is bids, dashed is asks. UP and DOWN are on the same scale.", style = MaterialTheme.typography.bodySmall, color = c.textSecondary)
+        if (series.isEmpty()) {
+            ChartEmptyState(height = 160.dp)
+            return
+        }
+        val maxSize = series.maxOf { it.size.maxOrNull() ?: 0.0 }.coerceAtLeast(1.0)
+        Text(
+            series.joinToString(" · ") { "${it.name} ${it.size.lastOrNull()?.roundToInt() ?: 0}" },
+            color = c.textPrimary,
+            style = MaterialTheme.typography.labelMedium,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis
+        )
+        Canvas(Modifier.fillMaxWidth().height(200.dp)) {
+            val left = 36.dp.toPx()
+            val top = 8.dp.toPx()
+            val plotW = (size.width - left - 8.dp.toPx()).coerceAtLeast(1f)
+            val plotH = (size.height - top - 18.dp.toPx()).coerceAtLeast(1f)
+            fun x(cents: Double) = left + plotW * (cents / 100.0).toFloat().coerceIn(0f, 1f)
+            fun y(qty: Double) = top + plotH * (1f - (qty / maxSize).toFloat().coerceIn(0f, 1f))
+            drawLine(c.border, Offset(left, top + plotH), Offset(left + plotW, top + plotH), 1.dp.toPx())
+            series.forEach { s ->
+                val color = if (s.up) c.upButton else c.downButton
+                val path = Path()
+                val order = s.cents.indices.sortedBy { s.cents[it] }
+                order.forEachIndexed { i, idx ->
+                    val px = x(s.cents[idx])
+                    val py = y(s.size[idx])
+                    if (i == 0) path.moveTo(px, py) else path.lineTo(px, py)
+                }
+                drawPath(
+                    path,
+                    color,
+                    style = Stroke(
+                        width = 2.5.dp.toPx(),
+                        cap = StrokeCap.Round,
+                        pathEffect = if (s.bid) null else PathEffect.dashPathEffect(floatArrayOf(10.dp.toPx(), 6.dp.toPx()))
+                    )
+                )
+            }
+        }
+        series.forEach { s ->
+            Text(s.name, color = if (s.up) c.up else c.down, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+/** Stacked cumulative P&L. The top of the stack is the sum of the families. */
+@Composable
+fun FamilyStackChart(model: ChartGallery.StackModel?, modifier: Modifier = Modifier) {
+    val c = DipTheme.colors
+    Column(
+        modifier.fillMaxWidth().testTag("chart_family_stack")
+            .semantics { contentDescription = "Cumulative P and L by family, stacked" },
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text("Cumulative P&L by family", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
+        Text("Settled picks stacked by source. The top of the stack is the combined net.", style = MaterialTheme.typography.bodySmall, color = c.textSecondary)
+        val names = model?.names.orEmpty()
+        val times = model?.times.orEmpty()
+        val values = model?.values.orEmpty()
+        if (names.isEmpty() || times.size < 2 || values.size != names.size) {
+            ChartEmptyState(height = 160.dp)
+            return
+        }
+        val palette = listOf(c.upButton, c.downButton, c.up, c.down, c.textSecondary)
+        Text(
+            names.mapIndexed { i, name -> "$name ${chartMoney(values[i].lastOrNull() ?: 0.0)}" }.joinToString(" · "),
+            color = c.textPrimary,
+            style = MaterialTheme.typography.labelMedium,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis
+        )
+        Canvas(Modifier.fillMaxWidth().height(200.dp)) {
+            val left = 48.dp.toPx()
+            val top = 8.dp.toPx()
+            val plotW = (size.width - left - 8.dp.toPx()).coerceAtLeast(1f)
+            val plotH = (size.height - top - 8.dp.toPx()).coerceAtLeast(1f)
+            val flat = values.flatten().filter { it.isFinite() }
+            var lo = minOf(0.0, flat.minOrNull() ?: 0.0)
+            var hi = maxOf(0.0, flat.maxOrNull() ?: 0.0)
+            for (t in times.indices) {
+                val sum = values.sumOf { it.getOrElse(t) { 0.0 } }
+                lo = minOf(lo, sum)
+                hi = maxOf(hi, sum)
+            }
+            if (hi - lo < 1e-6) { lo -= 1.0; hi += 1.0 }
+            val pad = (hi - lo) * 0.08
+            lo -= pad
+            hi += pad
+            fun x(i: Int) = left + plotW * i / (times.size - 1).toFloat()
+            fun y(v: Double) = top + plotH * (1f - ((v - lo) / (hi - lo)).toFloat())
+            drawLine(c.textSecondary.copy(alpha = 0.45f), Offset(left, y(0.0)), Offset(left + plotW, y(0.0)), 1.dp.toPx())
+            names.indices.forEach { family ->
+                val path = Path()
+                for (t in times.indices) {
+                    val topV = (0..family).sumOf { values[it].getOrElse(t) { 0.0 } }
+                    val px = x(t)
+                    val py = y(topV)
+                    if (t == 0) path.moveTo(px, py) else path.lineTo(px, py)
+                }
+                for (t in times.indices.reversed()) {
+                    val base = (0 until family).sumOf { values[it].getOrElse(t) { 0.0 } }
+                    path.lineTo(x(t), y(base))
+                }
+                path.close()
+                drawPath(path, palette[family % palette.size].copy(alpha = 0.82f))
+            }
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            names.forEachIndexed { i, name ->
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Box(Modifier.size(10.dp).background(palette[i % palette.size], RoundedCornerShape(2.dp)))
+                    Text(name, color = c.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                }
+            }
+        }
+    }
 }
 
 /** Trailing win rate. The line is empty until 30 closed trades exist. */

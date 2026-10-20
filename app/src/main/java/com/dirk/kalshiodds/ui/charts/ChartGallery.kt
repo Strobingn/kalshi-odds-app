@@ -7,6 +7,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
 /**
@@ -146,6 +147,96 @@ object ChartGallery {
         val exit = t.proceedsUsd / sold
         if (!exit.isFinite() || exit !in 0.0..1.0) return@mapNotNull null
         ScatterDot(entry * 100.0, exit * 100.0, (t.netUsd ?: 0.0) > 0.0)
+    }
+
+    data class DepthSeries(val name: String, val up: Boolean, val bid: Boolean, val cents: List<Double>, val size: List<Double>)
+
+    /**
+     * Cumulative depth. YES levels are UP bids. NO levels are DOWN bids.
+     * The other side's bids are the asks: an UP ask sits at 100¢ minus the DOWN bid.
+     */
+    fun cumulativeDepth(yes: List<Pair<Double, Double>>, no: List<Pair<Double, Double>>): List<DepthSeries> {
+        val yesC = depthLevels(yes)
+        val noC = depthLevels(no)
+        if (yesC.isEmpty() && noC.isEmpty()) return emptyList()
+        return listOfNotNull(
+            depthSeries("UP bid", up = true, bid = true, cumulativeBids(yesC)),
+            depthSeries("UP ask", up = true, bid = false, cumulativeAsks(noC)),
+            depthSeries("DOWN bid", up = false, bid = true, cumulativeBids(noC)),
+            depthSeries("DOWN ask", up = false, bid = false, cumulativeAsks(yesC))
+        )
+    }
+
+    private fun depthLevels(levels: List<Pair<Double, Double>>): Map<Int, Double> {
+        val acc = HashMap<Int, Double>()
+        for ((price, size) in levels) {
+            if (!price.isFinite() || !size.isFinite() || size <= 0.0 || price !in 0.0..1.0) continue
+            val cents = (price * 100.0).roundToInt().coerceIn(0, 100)
+            acc[cents] = (acc[cents] ?: 0.0) + size
+        }
+        return acc
+    }
+
+    private fun cumulativeBids(levels: Map<Int, Double>): Pair<List<Double>, List<Double>> {
+        var acc = 0.0
+        val cents = ArrayList<Double>()
+        val size = ArrayList<Double>()
+        for ((cent, qty) in levels.entries.sortedByDescending { it.key }) {
+            acc += qty
+            cents += cent.toDouble()
+            size += acc
+        }
+        return cents to size
+    }
+
+    private fun cumulativeAsks(otherBids: Map<Int, Double>): Pair<List<Double>, List<Double>> {
+        val asks = HashMap<Int, Double>()
+        for ((cent, qty) in otherBids) {
+            val ask = (100 - cent).coerceIn(0, 100)
+            asks[ask] = (asks[ask] ?: 0.0) + qty
+        }
+        var acc = 0.0
+        val cents = ArrayList<Double>()
+        val size = ArrayList<Double>()
+        for ((cent, qty) in asks.entries.sortedBy { it.key }) {
+            acc += qty
+            cents += cent.toDouble()
+            size += acc
+        }
+        return cents to size
+    }
+
+    private fun depthSeries(name: String, up: Boolean, bid: Boolean, curve: Pair<List<Double>, List<Double>>): DepthSeries? {
+        if (curve.first.isEmpty()) return null
+        return DepthSeries(name, up, bid, curve.first, curve.second)
+    }
+
+    data class FamilyEvent(val tMs: Long, val family: String, val pnl: Double)
+    data class StackModel(val names: List<String>, val times: List<Long>, val values: List<List<Double>>)
+
+    /** Cumulative P&L per family, sharing one time axis so the bands can stack. */
+    fun familyStacks(events: List<FamilyEvent>): StackModel? {
+        val clean = events.filter { it.family.isNotBlank() && it.pnl.isFinite() }.sortedBy { it.tMs }
+        if (clean.isEmpty()) return null
+        val names = clean.map { it.family }.distinct()
+        val index = names.withIndex().associate { it.value to it.index }
+        val running = DoubleArray(names.size)
+        val times = ArrayList<Long>(clean.size + 1)
+        val series = List(names.size) { ArrayList<Double>(clean.size + 1) }
+        times += clean.first().tMs - 1
+        series.forEach { it += 0.0 }
+        for (event in clean) {
+            running[index.getValue(event.family)] += event.pnl
+            times += event.tMs
+            running.forEachIndexed { i, v -> series[i] += v }
+        }
+        return StackModel(names, times, series)
+    }
+
+    fun scorecardFamily(source: String?, pickSource: String?, fallback: String): String {
+        com.dirk.kalshiodds.signal.paper.PaperPickSource.of(source, pickSource)?.label?.let { return it }
+        val raw = source?.trim().orEmpty()
+        return raw.ifEmpty { fallback.ifBlank { "Other" } }
     }
 
     fun winLossCaption(wins: Int, losses: Int): String {

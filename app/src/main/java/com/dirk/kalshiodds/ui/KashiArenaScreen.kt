@@ -34,7 +34,7 @@ internal enum class KashiArenaTab(val label: String) { OVERVIEW("Overview"), STR
 @Composable
 internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) -> Unit = {}, onSettings: () -> Unit = {},
     onHistory: () -> Unit = {}, onLadder: () -> Unit = {}, initialTab: KashiArenaTab = KashiArenaTab.OVERVIEW,
-    aiPanel: AiWatchPanelModel? = null, onAiFollows: (Boolean) -> Unit = {}) {
+    aiPanel: AiWatchPanelModel? = null, onAiFollows: (Boolean) -> Unit = {}, extras: LiveWindowExtras = LiveWindowExtras()) {
     val c = DipTheme.colors
     val openAi = LocalOpenAiTab.current
     var tabName by rememberSaveable { mutableStateOf(initialTab.name) }
@@ -93,7 +93,7 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
                     DailyNetBars(daily, Modifier.fillMaxWidth())
                 } }
                 item(key = "live") {
-                    ScalpWindowChart(ScalpAlgoDetail(chart = st.arenaChart.copy(trades = liveTrades)), title = "Live window") { id -> liveTrades.firstOrNull { it.id == id }?.let { ScalpModels.modelOf(it)?.let(onOpen) } }
+                    ScalpWindowChart(ScalpAlgoDetail(chart = st.arenaChart.copy(trades = liveTrades)), title = "Live window", extras = extras) { id -> liveTrades.firstOrNull { it.id == id }?.let { ScalpModels.modelOf(it)?.let(onOpen) } }
                 }
                 item(key = "top-header") { ArenaSectionHeader("Top strategies", "See all") { tabName = KashiArenaTab.STRATEGIES.name } }
                 items(rows.filter { it.roundTrips > 0 }.sortedByDescending { it.netUsd }.take(5), key = { "top-${it.model.code}" }) { r -> ArenaStrategyRow(r, st) { onOpen(r.model) } }

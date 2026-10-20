@@ -136,6 +136,8 @@ fun ScalpTabScreen(viewModel: OddsViewModel, onOpenScalpData: () -> Unit, onOpen
     val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as? com.dirk.kalshiodds.KalshiOddsApp
     val aiStore = app?.let { runCatching { it.container.aiWatch }.getOrNull() }
     val aiPanel = rememberAiWatchPanel(aiStore)
+    val book = st.arenaChart.ticker.takeIf { it.isNotBlank() }?.let { viewModel.orderBook(it) }
+    val extras = LiveWindowExtras(bookYes = book?.yes.orEmpty(), bookNo = book?.no.orEmpty())
     var settings by remember { mutableStateOf(false) }
     if (settings) SwarmScalpSettingsDialog { settings = false }
     ScalpTabContent(
@@ -151,7 +153,8 @@ fun ScalpTabScreen(viewModel: OddsViewModel, onOpenScalpData: () -> Unit, onOpen
         onSellOwnedAt = viewModel::sellOwnedAt,
         onOpenAlgo = onOpenAlgo,
         aiPanel = aiPanel,
-        onAiFollows = { on -> aiStore?.setFollows(on) }
+        onAiFollows = { on -> aiStore?.setFollows(on) },
+        extras = extras
     )
 }
 
@@ -172,7 +175,8 @@ fun ScalpTabContent(
     showCoinCards: Boolean = true,
     onOpenSettings: () -> Unit = {},
     aiPanel: AiWatchPanelModel? = null,
-    onAiFollows: (Boolean) -> Unit = {}
+    onAiFollows: (Boolean) -> Unit = {},
+    extras: LiveWindowExtras = LiveWindowExtras()
 ) {
     if (showCoinCards) {
         var ladder by rememberSaveable { mutableStateOf(false) }
@@ -182,10 +186,10 @@ fun ScalpTabContent(
                 Box(Modifier.weight(1f)) {
                     ScalpTabContent(st, onOpenScalpData, onOpenScalpRules, onSelectMarket, onSelectSide,
                         onPlace, onCancel, onReprice, onSellOwnedAt, onOpenAlgo, showCoinCards = false, onOpenSettings = onOpenSettings,
-                        aiPanel = aiPanel, onAiFollows = onAiFollows)
+                        aiPanel = aiPanel, onAiFollows = onAiFollows, extras = extras)
                 }
             }
-        } else KashiArenaContent(st, onOpenAlgo, onOpenSettings, onOpenScalpData, { ladder = true }, aiPanel = aiPanel, onAiFollows = onAiFollows)
+        } else KashiArenaContent(st, onOpenAlgo, onOpenSettings, onOpenScalpData, { ladder = true }, aiPanel = aiPanel, onAiFollows = onAiFollows, extras = extras)
         return
     }
     var qty by remember { mutableIntStateOf(PriceLadder.PRESET_SIZES[1]) }

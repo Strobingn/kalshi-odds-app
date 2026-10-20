@@ -87,14 +87,19 @@ fun ScalpAlgoScreen(viewModel: OddsViewModel, onBack: () -> Unit) {
             onChange = { viewModel.saveScalpStrategySettings(model.code, it) },
             onEnabled = { viewModel.enableScalpStrategy(model.code, it) },
             onBenchOverride = { viewModel.setScalpBenchOverride(model.code, it) })
-    } else ScalpAlgoContent(d, onBack, paged, viewModel::selectScalpChartWindow, viewModel::followScalpChartLive,
-        onSettings = if (model != null) ({ settingsOpen = true }) else null,
-        aiNote = model?.let { controls.settings(it.code).aiNote }.orEmpty())
+    } else {
+        val book = d.chart.ticker.takeIf { it.isNotBlank() }?.let { viewModel.orderBook(it) }
+        ScalpAlgoContent(d, onBack, paged, viewModel::selectScalpChartWindow, viewModel::followScalpChartLive,
+            onSettings = if (model != null) ({ settingsOpen = true }) else null,
+            aiNote = model?.let { controls.settings(it.code).aiNote }.orEmpty(),
+            extras = LiveWindowExtras(bookYes = book?.yes.orEmpty(), bookNo = book?.no.orEmpty()))
+    }
 }
 
 @Composable
 fun ScalpAlgoContent(d: ScalpAlgoDetail, onBack: () -> Unit = {}, paged: androidx.paging.compose.LazyPagingItems<ScalpTrade>? = null,
-    onWindow: (String) -> Unit = {}, onLive: () -> Unit = {}, onSettings: (() -> Unit)? = null, aiNote: String = "") {
+    onWindow: (String) -> Unit = {}, onLive: () -> Unit = {}, onSettings: (() -> Unit)? = null, aiNote: String = "",
+    extras: LiveWindowExtras = LiveWindowExtras()) {
     val c = DipTheme.colors
     var selectedTrade by androidx.compose.runtime.remember(d.chart.ticker) { androidx.compose.runtime.mutableStateOf<String?>(null) }
     var showHistory by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
@@ -112,7 +117,7 @@ fun ScalpAlgoContent(d: ScalpAlgoDetail, onBack: () -> Unit = {}, paged: android
         item(key = "strategy-hero") {
             d.allTime?.let { row -> ArenaSummary(listOf(row), listOfNotNull(d.today), row.open) }
         }
-        item(key = "live-chart") { ScalpWindowChart(d, onWindow, onLive) { selectedTrade = it } }
+        item(key = "live-chart") { ScalpWindowChart(d, onWindow, onLive, extras = extras) { selectedTrade = it } }
         item(key = "window-trades-h") { Text("This window · ${d.chart.trades.size} signals / trades", color = c.textPrimary, fontWeight = FontWeight.Bold) }
         if (d.chart.trades.isEmpty()) item { Text("No entries from this strategy in this window yet. The live price chart keeps updating.", color = c.textSecondary) }
         items(d.chart.trades.sortedByDescending { it.signalAtMs }, key = { "window-${it.id}" }) { t ->

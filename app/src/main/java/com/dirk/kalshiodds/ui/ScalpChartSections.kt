@@ -19,6 +19,12 @@ import com.dirk.kalshiodds.ui.charts.StrategyLeaderboard
 import com.dirk.kalshiodds.ui.charts.StrategySideBars
 import com.dirk.kalshiodds.ui.charts.WinRateHeatmap
 
+/** Optional inputs for the live-window card charts. Empty fields render the placeholder. */
+data class LiveWindowExtras(
+    val bookYes: List<Pair<Double, Double>> = emptyList(),
+    val bookNo: List<Pair<Double, Double>> = emptyList()
+)
+
 /** Charts added on the Scalp Analysis tab. Existing cards stay where they are. */
 @Composable
 internal fun AnalysisGallery(
