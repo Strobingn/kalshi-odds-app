@@ -4,13 +4,13 @@ import com.dirk.kalshiodds.domain.MarketUiModel
 
 /**
  * Twenty versioned paper-only scalp hypotheses. They are all evaluated for
- * visibility, but only the active V6 tracks may open an automatic paper fill.
+ * visibility, but only the active V7 tracks may open an automatic paper fill.
  * Each active track has an independently recorded price band, time window,
  * and (where a probability exists) after-fee edge threshold. A hypothesis may
  * still decline an observation when its required input is absent.
  */
 object ScalpSignal {
-    const val FORMULA_VERSION = "scalp-v6-evidence-gated"
+    const val FORMULA_VERSION = "scalp-v7-time-price-gated"
     private const val RETIRED_RATIONALE = "Retired: after-fee whole-day review did not validate this V5 formula"
 
     /**
@@ -30,7 +30,7 @@ object ScalpSignal {
         val rationale: String
     ) {
         init {
-            require(entryMinCents in 1..99)
+            require(entryMinCents in 10..89)
             require(entryMaxCents in entryMinCents..89)
             require(fromMinute in 0..14)
             require(untilMinute in (fromMinute + 1)..15)
@@ -44,26 +44,26 @@ object ScalpSignal {
         val family: String,
         val settings: Settings
     ) {
-        DIP_HUNTER("scalp-v6-dip-hunter", "Dip Hunter", "Baseline", Settings(false, rationale = RETIRED_RATIONALE)),
-        MOMENTUM_SNIPER("scalp-v6-momentum-sniper", "Momentum Sniper", "Spot momentum", Settings(true, 10, 89, 1, 12, rationale = "Claude-style timed momentum candidate")),
-        EXTREME_REVERSAL("scalp-v6-extreme-reversal", "5m Mean Reversion", "Spot reversal", Settings(true, 10, 89, 1, 12, rationale = "Claude-style timed reversal candidate")),
-        ONE_MINUTE_REVERSAL("scalp-v6-one-minute-reversal", "1m Mean Reversion", "Spot reversal", Settings(false, rationale = RETIRED_RATIONALE)),
-        FIVE_MINUTE_TREND("scalp-v6-five-minute-trend", "5m Trend Rider", "Spot momentum", Settings(false, rationale = RETIRED_RATIONALE)),
-        FAIR_VALUE_FOLLOWER("scalp-v6-fair-value-follower", "Fair Value Follower", "Fair value", Settings(false, rationale = RETIRED_RATIONALE)),
-        BOOK_PRESSURE("scalp-v6-book-pressure", "Best-Ask Contrarian", "Order book", Settings(false, rationale = RETIRED_RATIONALE)),
-        MARKET_FAVORITE("scalp-v6-market-favorite", "Market Favorite", "Market baseline", Settings(false, rationale = RETIRED_RATIONALE)),
-        DUAL_HORIZON_MOMENTUM("scalp-v6-dual-horizon-momentum", "Dual-Horizon Momentum", "Spot momentum", Settings(false, rationale = RETIRED_RATIONALE)),
-        DUAL_HORIZON_REVERSAL("scalp-v6-dual-horizon-reversal", "Dual-Horizon Reversal", "Spot reversal", Settings(false, rationale = "Duplicate of the 5m reversal signal in the observed ledger")),
-        FAIR_VALUE_DISLOCATION("scalp-v6-fair-value-dislocation", "Fair-Value Dislocation", "Fair value", Settings(true, 10, 89, 0, 15, 4.0, "Claude-style fair-value dislocation; 4pp after-fee buffer")),
-        MODEL_DISLOCATION("scalp-v6-model-dislocation", "Model Dislocation", "Model comparison", Settings(false, rationale = RETIRED_RATIONALE)),
-        IMPORTED_MODEL("scalp-v6-imported-model", "Imported Edge Model", "Model comparison", Settings(false, rationale = RETIRED_RATIONALE)),
-        MLP_CHANNEL("scalp-v6-mlp-channel", "MLP Channel", "Model channel", Settings(false, rationale = RETIRED_RATIONALE)),
-        CNN_CHANNEL("scalp-v6-cnn-channel", "CNN Channel", "Model channel", Settings(false, rationale = RETIRED_RATIONALE)),
-        GBM_CHANNEL("scalp-v6-gbm-channel", "GBM Channel", "Model channel", Settings(true, 10, 89, 0, 15, 4.0, "Claude-style model channel; 4pp after-fee buffer")),
-        SURVIVAL_CHANNEL("scalp-v6-survival-channel", "Survival Channel", "Path model", Settings(false, rationale = RETIRED_RATIONALE)),
-        MM_SHADOW("scalp-v6-mm-shadow", "MM Shadow", "Microstructure", Settings(false, rationale = RETIRED_RATIONALE)),
-        ODDS_TAPE("scalp-v6-odds-tape", "Odds Tape", "Market momentum", Settings(false, rationale = RETIRED_RATIONALE)),
-        SPOT_TARGET("scalp-v6-spot-target", "Spot vs Target", "Settlement proxy", Settings(false, rationale = RETIRED_RATIONALE));
+        DIP_HUNTER("scalp-v7-dip-hunter", "Dip Hunter", "Baseline", Settings(false, rationale = RETIRED_RATIONALE)),
+        MOMENTUM_SNIPER("scalp-v7-momentum-sniper", "Momentum Sniper", "Spot momentum", Settings(false, rationale = "Retired: public-spot momentum did not survive the after-fee out-of-sample review")),
+        EXTREME_REVERSAL("scalp-v7-extreme-reversal", "5m Mean Reversion", "Spot reversal", Settings(false, rationale = "Retired: public-spot reversal did not survive the after-fee out-of-sample review")),
+        ONE_MINUTE_REVERSAL("scalp-v7-one-minute-reversal", "1m Mean Reversion", "Spot reversal", Settings(false, rationale = RETIRED_RATIONALE)),
+        FIVE_MINUTE_TREND("scalp-v7-five-minute-trend", "5m Trend Rider", "Spot momentum", Settings(false, rationale = RETIRED_RATIONALE)),
+        FAIR_VALUE_FOLLOWER("scalp-v7-fair-value-follower", "Fair Value Follower", "Fair value", Settings(false, rationale = RETIRED_RATIONALE)),
+        BOOK_PRESSURE("scalp-v7-book-pressure", "Best-Ask Contrarian", "Order book", Settings(false, rationale = RETIRED_RATIONALE)),
+        MARKET_FAVORITE("scalp-v7-market-favorite", "Market Favorite", "Market baseline", Settings(false, rationale = RETIRED_RATIONALE)),
+        DUAL_HORIZON_MOMENTUM("scalp-v7-dual-horizon-momentum", "Dual-Horizon Momentum", "Spot momentum", Settings(false, rationale = RETIRED_RATIONALE)),
+        DUAL_HORIZON_REVERSAL("scalp-v7-dual-horizon-reversal", "Dual-Horizon Reversal", "Spot reversal", Settings(false, rationale = "Duplicate of the 5m reversal signal in the observed ledger")),
+        FAIR_VALUE_DISLOCATION("scalp-v7-fair-value-dislocation", "Fair-Value Dislocation", "Fair value", Settings(true, 10, 89, 2, 11, 5.0, "Settlement-aware fair value; 10–<90¢, 13–4m left, 5pp after-fee buffer")),
+        MODEL_DISLOCATION("scalp-v7-settlement-consensus", "Settlement Consensus", "Consensus fair value", Settings(true, 10, 89, 2, 11, 6.0, "New paper hypothesis: requires digital settlement fair value and GBM to agree before paying fees")),
+        IMPORTED_MODEL("scalp-v7-imported-model", "Imported Edge Model", "Model comparison", Settings(false, rationale = RETIRED_RATIONALE)),
+        MLP_CHANNEL("scalp-v7-mlp-channel", "MLP Channel", "Model channel", Settings(false, rationale = RETIRED_RATIONALE)),
+        CNN_CHANNEL("scalp-v7-cnn-channel", "CNN Channel", "Model channel", Settings(false, rationale = RETIRED_RATIONALE)),
+        GBM_CHANNEL("scalp-v7-gbm-channel", "GBM Channel", "Model channel", Settings(true, 10, 89, 2, 11, 5.0, "Model-channel fair value; 10–<90¢, 13–4m left, 5pp after-fee buffer")),
+        SURVIVAL_CHANNEL("scalp-v7-survival-channel", "Survival Channel", "Path model", Settings(false, rationale = RETIRED_RATIONALE)),
+        MM_SHADOW("scalp-v7-mm-shadow", "MM Shadow", "Microstructure", Settings(false, rationale = RETIRED_RATIONALE)),
+        ODDS_TAPE("scalp-v7-odds-tape", "Odds Tape", "Market momentum", Settings(false, rationale = RETIRED_RATIONALE)),
+        SPOT_TARGET("scalp-v7-spot-target", "Spot vs Target", "Settlement proxy", Settings(false, rationale = RETIRED_RATIONALE));
     }
 
     data class Candidate(
@@ -118,7 +118,7 @@ object ScalpSignal {
         dualHorizon(Track.DUAL_HORIZON_MOMENTUM, market, follow = true, nowMs = nowMs),
         dualHorizon(Track.DUAL_HORIZON_REVERSAL, market, follow = false, nowMs = nowMs),
         dislocation(Track.FAIR_VALUE_DISLOCATION, market.digitalFairPp, "digital fair", market, nowMs),
-        dislocation(Track.MODEL_DISLOCATION, market.aiYesPercent, "on-device fair", market, nowMs),
+        settlementConsensus(market, nowMs),
         probability(Track.IMPORTED_MODEL, market.importedModelPp, "imported edge model", market, nowMs),
         probability(Track.MLP_CHANNEL, market.mlpPp, "MLP channel", market, nowMs),
         probability(Track.CNN_CHANNEL, market.cnnPp, "CNN channel", market, nowMs),
@@ -137,7 +137,7 @@ object ScalpSignal {
      */
     fun allowsEntry(candidate: Candidate, sideAsk: Double, allInPerContract: Double): Boolean {
         val settings = candidate.track.settings
-        if (!settings.enabled || !sideAsk.isFinite() || !allInPerContract.isFinite()) return false
+        if (!settings.enabled || !PaperEntryPolicy.allowsAutomaticEntry(sideAsk) || !allInPerContract.isFinite()) return false
         val cents = sideAsk * 100.0
         if (cents < settings.entryMinCents || cents > settings.entryMaxCents) return false
         val tte = candidate.timeToCloseSec ?: return false
@@ -158,7 +158,8 @@ object ScalpSignal {
     fun exitProbability(strategyVersion: String?, market: MarketUiModel, side: String): Double? {
         val track = Track.values().firstOrNull { it.formulaVersion == strategyVersion } ?: return null
         val yes = when (track) {
-            Track.DIP_HUNTER, Track.MODEL_DISLOCATION -> percent(market.aiYesPercent)
+            Track.DIP_HUNTER -> percent(market.aiYesPercent)
+            Track.MODEL_DISLOCATION -> settlementConsensusYes(market)
             Track.FAIR_VALUE_FOLLOWER -> percent(market.finalMinuteFairPp)
             Track.FAIR_VALUE_DISLOCATION, Track.SPOT_TARGET -> percent(market.digitalFairPp)
             Track.MARKET_FAVORITE, Track.BOOK_PRESSURE -> percent(market.yesProbabilityPercent)
@@ -203,6 +204,33 @@ object ScalpSignal {
             nowMs,
             marketYes?.div(100.0)
         )
+    }
+
+    /**
+     * A deliberately narrow paper hypothesis. It will not pick a side unless
+     * the settlement-aware fair value and independently fitted GBM point to
+     * the same direction within 8pp. This is a consensus filter, not a claim
+     * of independence or a live-trading recommendation.
+     */
+    private fun settlementConsensus(market: MarketUiModel, nowMs: Long): Candidate {
+        val yes = settlementConsensusYes(market)
+            ?: return unavailable(Track.MODEL_DISLOCATION, "digital/GBM consensus unavailable or disagrees", market, nowMs)
+        val selected = side(yes * 100.0)
+        return candidate(
+            Track.MODEL_DISLOCATION,
+            selected,
+            "digital settlement + GBM consensus",
+            market,
+            nowMs,
+            sideProbability(selected, yes * 100.0)
+        )
+    }
+
+    private fun settlementConsensusYes(market: MarketUiModel): Double? {
+        val digital = percent(market.digitalFairPp)?.div(100.0) ?: return null
+        val gbm = percent(market.gbmPp)?.div(100.0) ?: return null
+        if (kotlin.math.abs(digital - gbm) > 0.08) return null
+        return (digital + gbm) / 2.0
     }
 
     private fun spotDirection(

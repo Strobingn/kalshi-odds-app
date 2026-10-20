@@ -20,6 +20,8 @@ object PaperOpportunity {
         val visibleContracts: Int,
         val feePerContractUsd: Double,
         val expectedNetPerContractUsd: Double,
+        /** Explicitly frozen so regular 15-minute AI can be audited by time-to-close. */
+        val timeToCloseSec: Long = 10 * 60L,
         val source: String
     )
 
@@ -42,6 +44,9 @@ object PaperOpportunity {
         fairSideProbability: Double,
         context: TicketBuilder.Context
     ): Candidate? {
+        val timeToCloseSec = market.closeTimeEpochMs?.let { close ->
+            ((close - context.nowMs) / 1_000L).takeIf { it in 4 * 60L..13 * 60L }
+        } ?: return null
         val ask = KalshiPrice.usable(TicketBuilder.bestAsk(market, side, context)) ?: return null
         if (!PaperEntryPolicy.allowsAutomaticEntry(ask)) return null
         val visible = TicketBuilder.quotedSize(market, side, context.books[market.ticker])
@@ -56,6 +61,7 @@ object PaperOpportunity {
             visibleContracts = visible,
             feePerContractUsd = fee,
             expectedNetPerContractUsd = expected,
+            timeToCloseSec = timeToCloseSec,
             source = "15-minute AI model"
         )
     }

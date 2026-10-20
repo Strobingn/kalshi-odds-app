@@ -201,6 +201,7 @@ fun ScorecardScreen(
                 if (ledger.cumulativePnl.size >= 2) {
                     item { CumulativePnlCard(ledger.cumulativePnl) }
                 }
+                item { RegularAiExecutionCharts(view.byPrice, snap?.honest) }
                 item { SectionCard(ScorecardCopy.SIDE_TITLE) { view.bySide.forEach { BucketRow(it) } } }
                 item { SectionCard(ScorecardCopy.PRICE_TITLE) { view.byPrice.forEach { BucketRow(it) } } }
                 item { SectionCard(ScorecardCopy.TIME_TITLE) { view.timeOfDay.forEach { BucketRow(it) } } }
@@ -217,6 +218,74 @@ fun ScorecardScreen(
                 }
             }
             item { Spacer(Modifier.height(8.dp)) }
+        }
+    }
+}
+
+@Composable
+private fun RegularAiExecutionCharts(
+    priceBands: List<ScorecardCopy.Bucket>,
+    honest: ScorecardMetrics.Honest?
+) {
+    val colors = DipTheme.colors
+    val values = priceBands.map { it.pnlUsd }
+    val scale = values.maxOfOrNull { kotlin.math.abs(it) }?.coerceAtLeast(1.0) ?: 1.0
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(colors.surface, RoundedCornerShape(16.dp))
+            .padding(16.dp)
+    ) {
+        Text("Regular 15-minute AI execution", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary, fontWeight = FontWeight.Bold)
+        Text(
+            "Automatic paper entries use only 10–<90¢ quotes and only 13–4 minutes remaining. These are after-fee executed-paper results, not a profit forecast.",
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.textSecondary,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+        Canvas(Modifier.fillMaxWidth().height(86.dp).padding(top = 12.dp)) {
+            val baseline = size.height / 2f
+            drawLine(colors.border, Offset(0f, baseline), Offset(size.width, baseline), 2f)
+            val slot = size.width / priceBands.size.coerceAtLeast(1)
+            priceBands.forEachIndexed { index, bucket ->
+                if (bucket.settledCount == 0) return@forEachIndexed
+                val h = (kotlin.math.abs(bucket.pnlUsd) / scale * (size.height * .42f)).toFloat()
+                val left = index * slot + slot * .2f
+                val top = if (bucket.pnlUsd >= 0.0) baseline - h else baseline
+                drawRect(
+                    color = if (bucket.pnlUsd >= 0.0) colors.up else colors.down,
+                    topLeft = Offset(left, top),
+                    size = androidx.compose.ui.geometry.Size(slot * .6f, h)
+                )
+            }
+        }
+        Row(Modifier.fillMaxWidth()) {
+            priceBands.forEach { bucket ->
+                Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(bucket.label, style = MaterialTheme.typography.labelSmall, color = colors.textSecondary)
+                    Text(
+                        if (bucket.settledCount == 0) "—" else ScorecardLedger.signedUsd(bucket.pnlUsd),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (bucket.pnlUsd >= 0.0) colors.up else colors.down,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text("${bucket.settledCount} settled", style = MaterialTheme.typography.labelSmall, color = colors.textSecondary)
+                }
+            }
+        }
+        honest?.let { h ->
+            val model = h.modelBrier
+            val market = h.marketBrier
+            if (model != null && market != null) {
+                Text(
+                    String.format(Locale.US, "Forecast quality: model Brier %.3f vs market %.3f (lower is better) · %d settled signals", model, market, h.n),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (h.enoughData) colors.textSecondary else colors.accentOrange,
+                    modifier = Modifier.padding(top = 10.dp)
+                )
+            } else {
+                Text("Forecast-quality comparison appears once there are settled signals with recorded probabilities.", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary, modifier = Modifier.padding(top = 10.dp))
+            }
         }
     }
 }

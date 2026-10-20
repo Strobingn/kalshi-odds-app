@@ -46,6 +46,10 @@ data class PaperFill(
     val strategyDecisionFingerprint: String? = null,
     /** Track-specific probability present when this fill was opened. */
     val strategyEntryProbability: Double? = null,
+    /** Seconds remaining in the 15-minute contract when this strategy entered. */
+    val strategyTimeToCloseSec: Long? = null,
+    /** Frozen fair-probability minus fee-inclusive cost, in percentage points. */
+    val strategyEntryEdgePp: Double? = null,
     val note: String,
     val winTargetUsd: Double? = null
 ) {
@@ -192,7 +196,13 @@ class PaperBook(
             winTargetUsd = ticket.winTargetUsd,
             strategyVersion = ticket.strategyVersion,
             strategyDecisionFingerprint = ticket.strategyDecisionFingerprint,
-            strategyEntryProbability = ticket.strategyEntryProbability
+            strategyEntryProbability = ticket.strategyEntryProbability,
+            strategyTimeToCloseSec = ticket.strategyTimeToCloseSec,
+            strategyEntryEdgePp = ticket.strategyEntryProbability?.let { probability ->
+                val allIn = ticket.allInUsd ?: return@let null
+                val contracts = ticket.contracts.takeIf { it > 0 } ?: return@let null
+                ((probability - allIn / contracts.toDouble()) * 100.0).takeIf { it.isFinite() }
+            }
         )
     }
 
@@ -216,8 +226,12 @@ class PaperBook(
             limitPrice = opportunity.ask,
             contracts = opportunity.visibleContracts,
             source = "AI ${opportunity.source}",
-            note = "Unlimited-credit paper scalping · EV ${String.format(java.util.Locale.US, "%+.4f", opportunity.expectedNetPerContractUsd)} per contract · visible touch only · never sent to Kalshi",
-            strategyVersion = null
+            note = "Unlimited-credit regular 15-minute AI · EV ${String.format(java.util.Locale.US, "%+.4f", opportunity.expectedNetPerContractUsd)} per contract · ${opportunity.timeToCloseSec}s left · visible touch only · never sent to Kalshi",
+            strategyVersion = "ai-v2-time-price-gated",
+            strategyDecisionFingerprint = "ai-v2|${opportunity.side}|tte=${opportunity.timeToCloseSec}|p=${String.format(java.util.Locale.US, "%.5f", opportunity.fairSideProbability)}",
+            strategyEntryProbability = opportunity.fairSideProbability,
+            strategyTimeToCloseSec = opportunity.timeToCloseSec,
+            strategyEntryEdgePp = opportunity.expectedNetPerContractUsd * 100.0
         )
     }
 
@@ -709,7 +723,9 @@ class PaperBook(
         winTargetUsd: Double? = null,
         strategyVersion: String? = null,
         strategyDecisionFingerprint: String? = null,
-        strategyEntryProbability: Double? = null
+        strategyEntryProbability: Double? = null,
+        strategyTimeToCloseSec: Long? = null,
+        strategyEntryEdgePp: Double? = null
     ): PaperFill? {
         if (CryptoMarkets.isRetiredTicker(ticker)) return null
         val want = if (side.equals("NO", true)) "NO" else "YES"
@@ -750,6 +766,8 @@ class PaperBook(
                 strategyVersion = strategyVersion,
                 strategyDecisionFingerprint = strategyDecisionFingerprint,
                 strategyEntryProbability = strategyEntryProbability,
+                strategyTimeToCloseSec = strategyTimeToCloseSec,
+                strategyEntryEdgePp = strategyEntryEdgePp,
                 note = "$note · fee ${fmt(fee)}",
                 winTargetUsd = winTargetUsd
             )

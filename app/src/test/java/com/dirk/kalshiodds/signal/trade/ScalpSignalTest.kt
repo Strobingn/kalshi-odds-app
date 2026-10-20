@@ -32,7 +32,7 @@ class ScalpSignalTest {
         assertEquals(660L, candidate.timeToCloseSec)
     }
 
-    @Test fun twentyTracksRemainVisibleWithVersionedV6Formulas() {
+    @Test fun twentyTracksRemainVisibleWithVersionedV7Formulas() {
         val candidates = ScalpSignal.candidates(
             market(0.50, 0.004, 0.020).copy(predictedSide = "YES"),
             openedAt + 60_000L
@@ -61,9 +61,9 @@ class ScalpSignalTest {
             finalMinuteFairPp = 80.0,
             finalMinuteSamples = 30
         )
-        assertEquals(0.35, ScalpSignal.exitProbability("scalp-v6-imported-model", m, "YES")!!, 1e-9)
-        assertEquals(0.20, ScalpSignal.exitProbability("scalp-v6-fair-value-follower", m, "NO")!!, 1e-9)
-        org.junit.Assert.assertNull(ScalpSignal.exitProbability("scalp-v6-momentum-sniper", m, "YES"))
+        assertEquals(0.35, ScalpSignal.exitProbability("scalp-v7-imported-model", m, "YES")!!, 1e-9)
+        assertEquals(0.20, ScalpSignal.exitProbability("scalp-v7-fair-value-follower", m, "NO")!!, 1e-9)
+        org.junit.Assert.assertNull(ScalpSignal.exitProbability("scalp-v7-momentum-sniper", m, "YES"))
     }
 
     @Test fun modelAndMarketChannelsUseTheirOwnAvailableInputs() {
@@ -84,7 +84,7 @@ class ScalpSignalTest {
         ).associateBy { it.track }
 
         assertEquals("NO", candidates.getValue(ScalpSignal.Track.FAIR_VALUE_DISLOCATION).side)
-        assertEquals("YES", candidates.getValue(ScalpSignal.Track.MODEL_DISLOCATION).side)
+        assertEquals(null, candidates.getValue(ScalpSignal.Track.MODEL_DISLOCATION).side)
         assertEquals("YES", candidates.getValue(ScalpSignal.Track.IMPORTED_MODEL).side)
         assertEquals("NO", candidates.getValue(ScalpSignal.Track.MLP_CHANNEL).side)
         assertEquals("YES", candidates.getValue(ScalpSignal.Track.CNN_CHANNEL).side)
@@ -96,7 +96,7 @@ class ScalpSignalTest {
     }
 
     @Test fun retiredBaselineCannotOpenAnAutomaticPaperTicket() {
-        val now = openedAt + 14 * 60_000L
+        val now = openedAt + 3 * 60_000L
         val ticket = TicketBuilder.proposeScalp(
             market(0.49, -0.9, 0.9).copy(aiYesPercent = 50.0, yesAskSize = 12.0),
             TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false, nowMs = now)
@@ -120,7 +120,7 @@ class ScalpSignalTest {
             market(0.50, -0.003, 0.010).copy(predictedSide = "YES", digitalFairPp = 70.0, gbmPp = 70.0, yesAskSize = 10.0),
             TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false, nowMs = openedAt + 2 * 60_000L)
         )
-        assertEquals(4, tickets.size)
+        assertEquals(3, tickets.size)
         assertEquals(tickets.size, tickets.mapNotNull { it.strategyVersion }.toSet().size)
         org.junit.Assert.assertTrue(tickets.all { it.paperOnly && it.canPaper && !it.canApprove })
     }
@@ -133,7 +133,38 @@ class ScalpSignalTest {
 
         assertEquals("NO", candidate.side)
         assertEquals(0.70, candidate.entryProbability!!, 1e-9)
-        org.junit.Assert.assertTrue(ScalpSignal.allowsEntry(candidate, sideAsk = 0.65, allInPerContract = 0.66))
-        org.junit.Assert.assertFalse(ScalpSignal.allowsEntry(candidate, sideAsk = 0.68, allInPerContract = 0.67))
+        org.junit.Assert.assertTrue(ScalpSignal.allowsEntry(candidate, sideAsk = 0.65, allInPerContract = 0.64))
+        org.junit.Assert.assertFalse(ScalpSignal.allowsEntry(candidate, sideAsk = 0.68, allInPerContract = 0.66))
+    }
+
+    @Test fun activeTracksRejectLotteryPricesAndTheVolatileFinalMinutes() {
+        val candidate = ScalpSignal.candidates(
+            market(0.50, 0.0, 0.0).copy(digitalFairPp = 30.0),
+            openedAt + 2 * 60_000L
+        ).first { it.track == ScalpSignal.Track.FAIR_VALUE_DISLOCATION }
+
+        org.junit.Assert.assertFalse(ScalpSignal.allowsEntry(candidate, sideAsk = 0.099, allInPerContract = 0.10))
+        org.junit.Assert.assertFalse(ScalpSignal.allowsEntry(candidate, sideAsk = 0.90, allInPerContract = 0.90))
+
+        val late = ScalpSignal.candidates(
+            market(0.50, 0.0, 0.0).copy(digitalFairPp = 30.0),
+            openedAt + 12 * 60_000L
+        ).first { it.track == ScalpSignal.Track.FAIR_VALUE_DISLOCATION }
+        org.junit.Assert.assertFalse(ScalpSignal.allowsEntry(late, sideAsk = 0.65, allInPerContract = 0.66))
+    }
+
+    @Test fun settlementConsensusRequiresTwoAgreeingFairValueInputs() {
+        val agreed = ScalpSignal.candidates(
+            market(0.50, 0.0, 0.0).copy(digitalFairPp = 72.0, gbmPp = 68.0),
+            openedAt + 2 * 60_000L
+        ).first { it.track == ScalpSignal.Track.MODEL_DISLOCATION }
+        assertEquals("YES", agreed.side)
+        assertEquals(0.70, agreed.entryProbability!!, 1e-9)
+
+        val disagreed = ScalpSignal.candidates(
+            market(0.50, 0.0, 0.0).copy(digitalFairPp = 72.0, gbmPp = 55.0),
+            openedAt + 2 * 60_000L
+        ).first { it.track == ScalpSignal.Track.MODEL_DISLOCATION }
+        assertEquals(null, disagreed.side)
     }
 }
