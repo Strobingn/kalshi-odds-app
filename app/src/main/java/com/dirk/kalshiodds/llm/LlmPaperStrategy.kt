@@ -3,13 +3,11 @@ package com.dirk.kalshiodds.llm
 import com.dirk.kalshiodds.decision.ScalpBook
 import com.dirk.kalshiodds.decision.ScalpRule
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.util.Locale
 
 /**
@@ -22,41 +20,56 @@ class LlmPaperStrategy(
     private val book: ScalpBook,
     private val settings: LlmSettings,
     private val client: LlmClient = LlmClient(settings),
-    private val onUsage: (LlmClient.Reply) -> Unit = {}
+    private val onUsage: (LlmEndpoint, LlmClient.Reply) -> Unit = { _, _ -> },
+    private val autoCalls: () -> Boolean = { true },
+    private val endpoint: () -> LlmEndpoint = { settings.chatEndpoint() },
+    private val pacer: FreeCallPacer = FreeCallPacer(),
+    private val alternates: () -> List<LlmEndpoint> = { emptyList() },
+    private val quotaOf: (LlmEndpoint) -> FreeQuota? = { LlmProviders.baseQuota(it.provider, it.model) },
+    private val onBilling: (String, String) -> Unit = { _, _ -> }
 ) {
     private val _status = MutableStateFlow("needs key")
     val status: StateFlow<String> = _status
-    private var lastWindow: String? = null
     /** 1.0.9 strong-AI-call alert hook: (callId, "UP"/"DOWN", confidence 0–1). Notification only. */
     @Volatile var onCall: ((String, String, Double) -> Unit)? = null
+    private val loop = LlmPaperLoop(
+        autoCalls = autoCalls,
+        hasKey = { endpoint().usable },
+        quote = {
+            book.marks.value.values.filter { it.ticker.uppercase().contains("BTC") && it.closeMs > it.nowMs }.minByOrNull { it.closeMs }
+        },
+        call = { messages -> perform(messages) },
+        place = { q, side, conf -> book.llmEntry(q, side, conf) },
+        onUsage = onUsage,
+        onCall = { id, dir, conf -> onCall?.invoke(id, dir, conf) }
+    )
 
     fun start(scope: CoroutineScope) = scope.launch {
         while (isActive) {
-            runCatching { tick() }.onFailure { _status.value = "error (${settings.model}, no fallback model): ${it.message?.take(120)}" }
+            runCatching { loop.tick()?.let { _status.value = it } }
+                .onFailure { _status.value = "error (${settings.model}, no fallback model): ${it.message?.take(120)}" }
             // Built-in paper strategy. Not the chat LLM's 60s cap; still one decision per window.
             delay(15_000)
         }
     }
 
-    private suspend fun tick() {
-        if (!settings.hasKey) { _status.value = "needs key"; return }
-        val q = book.marks.value.values.filter { it.ticker.uppercase().contains("BTC") && it.closeMs > it.nowMs }.minByOrNull { it.closeMs } ?: run { _status.value = "idle: no BTC quote"; return }
-        val minuteIn = 15.0 - q.tauS / 60.0
-        if (q.ticker == lastWindow) return
-        if (minuteIn > LLM_OPEN_MIN) { _status.value = PAST_OPEN_STATUS; return }
-        lastWindow = q.ticker // rate limit: one decision per window, even on failure
-        val prompt = String.format(Locale.US, STRATEGY_PROMPT,
-            q.ticker, q.strike ?: 0.0, q.spot ?: 0.0, q.tauS / 60, q.yesBid?.let { "%.2f".format(Locale.US, it) } ?: "-", q.yesAsk?.let { "%.2f".format(Locale.US, it) } ?: "-",
-            q.fair("YES")?.let { "%.2f".format(Locale.US, it) } ?: "-")
-        val r = withContext(Dispatchers.IO) { client.chatReply(listOf("system" to "You are a cautious BTC scalping assistant.", "user" to prompt), 20) }
-        runCatching { onUsage(r) }
-        val reply = r.text
-        val d = parse(reply)
-        d?.let { (side, conf) -> runCatching { onCall?.invoke(q.ticker, if (side.equals("YES", true)) "UP" else "DOWN", conf) } }
-        _status.value = "model ${r.model} · " + (if (d == null) "skipped ${q.ticker}: ${reply.take(40)}" else {
-            val placed = book.llmEntry(q, d.first, d.second)
-            "${q.ticker}: ${d.first} conf ${"%.2f".format(Locale.US, d.second)} → ${placed ?: "paper entry queued"}"
-        })
+    private fun perform(messages: List<Pair<String, String>>): Pair<LlmEndpoint, LlmClient.Reply>? {
+        val ep = endpoint()
+        if (LlmProviders.freeFamily(ep.provider, ep.model)) {
+            return AiAutoCalls.callFree(
+                selected = ep,
+                slots = alternates(),
+                pacer = pacer,
+                nowMs = System.currentTimeMillis(),
+                messages = messages,
+                reserveCompletion = 20,
+                quotaOf = quotaOf,
+                allowed = { autoCalls() && LlmProviders.freeFamily(it.provider, it.model) },
+                ask = { use, msgs -> client.chatReply(msgs, 20, use, automatic = true) },
+                onBilling = onBilling
+            )
+        }
+        return ep to client.chatReply(messages, 20, ep, automatic = true)
     }
 
     companion object {
@@ -69,5 +82,49 @@ class LlmPaperStrategy(
             val m = Regex("\\b(YES|NO)\\b\\s*([01](?:\\.\\d+)?)?", RegexOption.IGNORE_CASE).find(reply.trim()) ?: return null
             return m.groupValues[1].uppercase() to (m.groupValues[2].toDoubleOrNull() ?: 0.5).coerceIn(0.0, 1.0)
         }
+    }
+}
+
+/**
+ * One paper decision per window, and no provider call when automatic calls are off.
+ * A free-tier pace miss does not consume the window. History of the last decision window is kept.
+ */
+internal class LlmPaperLoop(
+    private val autoCalls: () -> Boolean,
+    private val hasKey: () -> Boolean,
+    private val quote: () -> ScalpRule.Quote?,
+    private val call: (List<Pair<String, String>>) -> Pair<LlmEndpoint, LlmClient.Reply>?,
+    private val place: (ScalpRule.Quote, String, Double) -> String?,
+    private val onUsage: (LlmEndpoint, LlmClient.Reply) -> Unit,
+    private val onCall: (String, String, Double) -> Unit
+) {
+    var lastWindow: String? = null
+
+    /** Null means the visible status stays as it was (same window, already decided). */
+    fun tick(): String? {
+        if (!autoCalls()) return AiAutoCalls.PAUSED
+        if (!hasKey()) return "needs key"
+        val q = quote() ?: return "idle: no BTC quote"
+        val minuteIn = 15.0 - q.tauS / 60.0
+        if (q.ticker == lastWindow) return null
+        if (minuteIn > LlmPaperStrategy.LLM_OPEN_MIN) return LlmPaperStrategy.PAST_OPEN_STATUS
+        val prompt = String.format(Locale.US, LlmPaperStrategy.STRATEGY_PROMPT,
+            q.ticker, q.strike ?: 0.0, q.spot ?: 0.0, q.tauS / 60, q.yesBid?.let { "%.2f".format(Locale.US, it) } ?: "-", q.yesAsk?.let { "%.2f".format(Locale.US, it) } ?: "-",
+            q.fair("YES")?.let { "%.2f".format(Locale.US, it) } ?: "-")
+        val messages = listOf("system" to "You are a cautious BTC scalping assistant.", "user" to prompt)
+        val hit = try {
+            call(messages)
+        } catch (e: LlmSkipped) {
+            return null
+        } ?: return "waiting for the free-tier pace"
+        val (used, reply) = hit
+        lastWindow = q.ticker
+        runCatching { onUsage(used, reply) }
+        val parsed = LlmPaperStrategy.parse(reply.text)
+        parsed?.let { (side, conf) -> runCatching { onCall(q.ticker, if (side.equals("YES", true)) "UP" else "DOWN", conf) } }
+        return "model ${reply.model} · " + (if (parsed == null) "skipped ${q.ticker}: ${reply.text.take(40)}" else {
+            val placed = place(q, parsed.first, parsed.second)
+            "${q.ticker}: ${parsed.first} conf ${"%.2f".format(Locale.US, parsed.second)} → ${placed ?: "paper entry queued"}"
+        })
     }
 }

@@ -218,7 +218,7 @@ class AiWindowWatchTest {
         val losing = List(30) { -1.0 }
         val w = AiWindowWatcher(
             controls = controls,
-            store = AiWatchStore(),
+            store = AiWatchStore().also { it.setAutoCalls(true) },
             snapshot = { snap },
             ask = { _, _ -> calls++; reply("""{"adjustments":[]}""") },
             endpoint = { LlmProviders.resolve(provider, "k", "", "") },
@@ -334,8 +334,10 @@ class AiWindowWatchTest {
         assertEquals("r10", store.adjustments.value.last().reason)
     }
 
-    private fun watcher(controls: MemoryScalpControls, store: AiWatchStore = AiWatchStore(), ask: (LlmEndpoint, List<Pair<String, String>>) -> LlmClient.Reply) =
-        AiWindowWatcher(controls, store, { snap }, ask, { LlmProviders.resolve(provider, "k", "", "") }, now = { nowMs })
+    private fun watcher(controls: MemoryScalpControls, store: AiWatchStore = AiWatchStore(), ask: (LlmEndpoint, List<Pair<String, String>>) -> LlmClient.Reply): AiWindowWatcher {
+        store.setAutoCalls(true)
+        return AiWindowWatcher(controls, store, { snap }, ask, { LlmProviders.resolve(provider, "k", "", "") }, now = { nowMs })
+    }
 
     private fun reply(text: String, prompt: Long = 12, completion: Long = 4) =
         LlmClient.Reply(text, "grok-4.7", "grok-4.7", prompt, completion)

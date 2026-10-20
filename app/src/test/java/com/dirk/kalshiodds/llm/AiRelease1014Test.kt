@@ -189,7 +189,10 @@ class AiRelease1014Test {
         store: AiWatchStore = AiWatchStore(),
         paper: () -> List<PaperTape> = { emptyList() },
         ask: (LlmEndpoint, List<Pair<String, String>>) -> LlmClient.Reply = { _, _ -> reply("""{"adjustments":[]}""") }
-    ) = AiWindowWatcher(controls, store, { WindowSnapshot("W", 1_700_000_900_000L, "live", "fp") }, ask, { LlmProviders.resolve(LlmProviders.XAI, "k", "", "") }, now = { 1_700_000_000_000L }, paper = paper)
+    ): AiWindowWatcher {
+        store.setAutoCalls(true)
+        return AiWindowWatcher(controls, store, { WindowSnapshot("W", 1_700_000_900_000L, "live", "fp") }, ask, { LlmProviders.resolve(LlmProviders.XAI, "k", "", "") }, now = { 1_700_000_000_000L }, paper = paper)
+    }
 
     private fun reply(text: String) = LlmClient.Reply(text, "grok-4.7", "grok-4.7", 12, 4)
 }

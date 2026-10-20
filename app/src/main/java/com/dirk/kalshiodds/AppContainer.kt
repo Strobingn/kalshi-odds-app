@@ -77,10 +77,23 @@ class AppContainer(context: Context) {
     val aiWatch = com.dirk.kalshiodds.llm.AiWatchStore(File(app.filesDir, "ai-watch.json"))
     val llmSettings by lazy { com.dirk.kalshiodds.llm.LlmSettings(app) }
     val llmClient by lazy { com.dirk.kalshiodds.llm.LlmClient(llmSettings) }
+    /** Shared by the window watcher and the paper strategy so free-tier quotas are one budget. */
+    val freePacer = com.dirk.kalshiodds.llm.FreeCallPacer()
     val llmStrategy by lazy {
-        com.dirk.kalshiodds.llm.LlmPaperStrategy(scalp, llmSettings, llmClient) { reply ->
-            recordLlm(com.dirk.kalshiodds.llm.LlmSources.STRATEGY, com.dirk.kalshiodds.llm.LlmProviders.XAI, reply.model.ifBlank { llmSettings.model }, reply.promptTokens, reply.completionTokens)
-        }
+        com.dirk.kalshiodds.llm.LlmPaperStrategy(
+            book = scalp,
+            settings = llmSettings,
+            client = llmClient,
+            onUsage = { ep, reply ->
+                recordLlm(com.dirk.kalshiodds.llm.LlmSources.STRATEGY, ep.provider, reply.model.ifBlank { ep.model }, reply.promptTokens, reply.completionTokens)
+            },
+            autoCalls = { aiWatch.autoAllowed(llmSettings.providerId, llmSettings.chatEndpoint().model) },
+            endpoint = { llmSettings.chatEndpoint() },
+            pacer = freePacer,
+            alternates = { freeSlots() },
+            quotaOf = { ep -> com.dirk.kalshiodds.llm.LlmProviders.effectiveQuota(ep.provider, ep.model, aiWatch.dailyCap(ep.provider, ep.model)) },
+            onBilling = { provider, detail -> aiWatch.markBilled(provider, detail) }
+        )
     }
     private val aiScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
     private val livePost = java.util.concurrent.atomic.AtomicReference<(String) -> Unit> { }
@@ -90,12 +103,14 @@ class AppContainer(context: Context) {
             controls = scalpControls,
             store = aiWatch,
             snapshot = { watchSnapshot() },
-            ask = { ep, msgs -> llmClient.chatReply(msgs, 1200, ep) },
+            ask = { ep, msgs -> llmClient.chatReply(msgs, 1200, ep, automatic = true) },
             endpoint = { llmSettings.chatEndpoint() },
             scalpersRunning = { scalpServiceRunning() },
             now = { clock.nowMs() },
             paper = { scalpInsights.tapes(scalp.stats.value) },
-            onBenched = { runCatching { scalpInsights.recompute() } }
+            onBenched = { runCatching { scalpInsights.recompute() } },
+            alternates = { freeSlots() },
+            pacer = freePacer
         ).also { watcher ->
             watcher.onLivePost = { text -> livePost.get().invoke(text) }
             watcher.onWake = { aiScope.launch { runCatching { watcher.tick() } } }
@@ -108,9 +123,14 @@ class AppContainer(context: Context) {
             controls = scalpControls,
             ask = { msgs ->
                 val ep = llmSettings.chatEndpoint()
-                val reply = llmClient.chatReply(msgs, 4000, ep)
-                recordLlm(com.dirk.kalshiodds.llm.LlmSources.CHAT, ep.provider, reply.model.ifBlank { ep.model }, reply.promptTokens, reply.completionTokens)
-                reply.model to reply.text
+                try {
+                    val reply = llmClient.chatReply(msgs, 4000, ep)
+                    recordLlm(com.dirk.kalshiodds.llm.LlmSources.CHAT, ep.provider, reply.model.ifBlank { ep.model }, reply.promptTokens, reply.completionTokens)
+                    reply.model to reply.text
+                } catch (e: com.dirk.kalshiodds.llm.LlmBillingRequired) {
+                    aiWatch.markBilled(e.provider, e.message ?: "")
+                    throw e
+                }
             },
             hasKey = { llmSettings.chatReady },
             modelName = { llmSettings.chatEndpoint().model },
@@ -140,6 +160,9 @@ class AppContainer(context: Context) {
         val history = com.dirk.kalshiodds.llm.ChatPrompt.tickHistory(card, aiWatch.adjustments.value, posts)
         return listOf(window, history).filter { it.isNotBlank() }.joinToString("\n")
     }
+
+    private fun freeSlots(): List<com.dirk.kalshiodds.llm.LlmEndpoint> =
+        com.dirk.kalshiodds.llm.LlmProviders.FREE_IDS.map { llmSettings.readSlot(it) }
 
     private fun recordLlm(source: String, provider: String, model: String, prompt: Long, completion: Long) {
         runCatching { aiWatch.record(source, provider, model, prompt, completion, clock.nowMs()) }

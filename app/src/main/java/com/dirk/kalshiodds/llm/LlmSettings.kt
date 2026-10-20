@@ -68,6 +68,18 @@ class LlmSettings(context: Context) {
             ?.apply()
     }
 
+    /** Gemini writes the fallback model here after a retired-model 404. The key slot is left alone. */
+    fun saveModelOnly(id: String, model: String) {
+        val spec = LlmProviders.spec(id)
+        val next = model.trim()
+        if (next.isEmpty()) return
+        if (spec.id == LlmProviders.XAI) {
+            this.model = next
+            return
+        }
+        prefs?.edit()?.putString("model.${spec.id}", next)?.apply()
+    }
+
     companion object {
         const val DEFAULT_BASE = "https://api.x.ai/v1"
         /** 1.0.8: Grok 4.7 (xAI's public API id; the "Fast" serving tier has no separate public API id). */

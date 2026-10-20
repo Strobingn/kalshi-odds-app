@@ -35,6 +35,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dirk.kalshiodds.llm.AiAdjustmentLog
+import com.dirk.kalshiodds.llm.AiAutoCalls
 import com.dirk.kalshiodds.llm.AiUsageCharts
 import com.dirk.kalshiodds.llm.AiWatchConfig
 import com.dirk.kalshiodds.llm.AiWatchStore
@@ -128,14 +129,35 @@ fun AiUsageSettingsCard(store: AiWatchStore, settings: LlmSettings) {
     var budget by remember(cfg.budgetUsd) { mutableStateOf(cfg.budgetUsd?.takeIf { it > 0.0 }?.toString().orEmpty()) }
     var prices by remember { mutableStateOf(store.prices()) }
     var addModel by remember { mutableStateOf("") }
+    val safety by store.safety.collectAsStateWithLifecycle()
+    val active = settings.chatEndpoint()
+    val editedModel = model.ifBlank { LlmProviders.spec(provider).defaultModel }
+    var capText by remember(provider, safety) { mutableStateOf(store.dailyCap(provider, editedModel).takeIf { it > 0 }?.toString().orEmpty()) }
+    val running = store.autoAllowed(active.provider, active.model)
+    val quota = LlmProviders.effectiveQuota(active.provider, active.model, store.dailyCap(active.provider, active.model))
+    val kind = if (LlmProviders.freeFamily(active.provider, active.model) && store.freeTierOn(active.provider, active.model)) "free" else "paid"
+    val block = store.blockNotice(active.provider, active.model)
     val colors = MaterialTheme.colorScheme
     FieldCard {
         Text("AI usage", color = colors.onSurface, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Text(
-            "Chat and the window watcher share this provider (xAI, OpenAI, Mistral, OpenRouter, or Custom). Automatic chat calls, live posts, and odds or BTC re-checks wait at least 60 seconds in total, whichever provider is selected. A message you send is answered right away. The on-device paper scalpers, forecast, auto-freeze, and tuner keep their own pace. Nothing here places orders or changes real money.",
+            "Chat and the window watcher share this provider. A message you send is answered right away, including one retry if the reply talks like a one-shot snapshot. Automatic calls stay off for a paid provider until you turn on \"${AiAutoCalls.SWITCH}\". Groq, Gemini, and OpenRouter free models pace themselves inside the free quota and the daily auto-call budget. The on-device paper scalpers, forecast, auto-freeze, and tuner keep their own pace. Nothing here places orders or changes real money.",
             color = colors.onSurfaceVariant,
             style = MaterialTheme.typography.bodySmall
         )
+        Text(LlmProviders.FREE_KEY_HINT, color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(AiAutoCalls.SWITCH, modifier = Modifier.weight(1f), color = colors.onSurface, fontWeight = FontWeight.SemiBold)
+            Switch(checked = cfg.autoCalls, onCheckedChange = { store.setAutoCalls(it) })
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(AiAutoCalls.FREE_TIER, modifier = Modifier.weight(1f), color = colors.onSurface, fontWeight = FontWeight.SemiBold)
+            Switch(checked = store.freeTierOn(provider, editedModel), onCheckedChange = { store.setFreeTier(provider, it) })
+        }
+        Text("Active provider: ${LlmProviders.spec(active.provider).label} · $kind", color = colors.onSurface, style = MaterialTheme.typography.bodySmall)
+        Text(callsTodayLine(store, active.provider, active.model), color = colors.onSurface, style = MaterialTheme.typography.bodySmall)
+        Text(AiAutoCalls.paceLabel(running, active, if (running) quota else null), color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+        if (block.isNotBlank()) Text(block, color = colors.error, style = MaterialTheme.typography.bodySmall)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("AI follows window", modifier = Modifier.weight(1f), color = colors.onSurface, fontWeight = FontWeight.SemiBold)
             Switch(checked = cfg.followsWindow, onCheckedChange = { store.setFollows(it) })
@@ -163,6 +185,13 @@ fun AiUsageSettingsCard(store: AiWatchStore, settings: LlmSettings) {
         OutlinedTextField(
             interval, { interval = it },
             label = { Text("Follow interval (seconds, minimum 60)") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            capText, { capText = it },
+            label = { Text("Daily auto-call budget (blank = provider default)") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             modifier = Modifier.fillMaxWidth()
@@ -209,13 +238,32 @@ fun AiUsageSettingsCard(store: AiWatchStore, settings: LlmSettings) {
             }) { Text("Add") }
         }
         TextButton(onClick = {
+            val prev = settings.providerId
+            val prevModel = settings.chatEndpoint().model
             settings.saveSlot(provider, key, model, base)
+            val savedModel = model.trim().ifBlank { LlmProviders.spec(provider).defaultModel }
             val sec = interval.toLongOrNull() ?: (AiWatchConfig.DEFAULT_INTERVAL_MS / 1000)
             store.setIntervalMs(sec * 1000)
             store.setBudgetUsd(if (budgetOn) budget.toDoubleOrNull() else null)
+            store.setDailyCap(provider, capText.toIntOrNull())
             store.setPrices(prices)
+            if (provider != prev || LlmProviders.freeFamily(prev, prevModel) != LlmProviders.freeFamily(provider, savedModel)) {
+                store.setAutoCalls(LlmProviders.freeFamily(provider, savedModel) && store.freeTierOn(provider, savedModel))
+            }
         }) { Text("Save AI settings") }
     }
+}
+
+private fun callsTodayLine(store: AiWatchStore, provider: String, model: String): String {
+    val now = System.currentTimeMillis()
+    val cap = store.dailyCap(provider, model)
+    if (provider == LlmProviders.GROQ) {
+        val models = LlmProviders.paceModels(com.dirk.kalshiodds.llm.LlmEndpoint(provider, "https://api.groq.com/openai/v1", model, "k"))
+        val bits = models.joinToString(" · ") { m -> "$m ${store.callsFor(provider, m, now)}/$cap" }
+        return "Calls today: $bits"
+    }
+    val n = store.callsFor(provider, "", now)
+    return if (cap > 0) "Calls today: $n / $cap" else "Calls today: $n"
 }
 
 private fun List<ModelPrice>.replacePrice(index: Int, edit: (ModelPrice) -> ModelPrice): List<ModelPrice> =
