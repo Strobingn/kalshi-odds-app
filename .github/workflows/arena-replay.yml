@@ -17,7 +17,6 @@ on:
     paths:
       - "app/src/test/java/com/dirk/kalshiodds/signal/scalper/ArenaReplayTest.kt"
       - ".github/workflows/arena-replay.yml"
-      - "data/phone-recordings/**"
 
 permissions:
   contents: read
@@ -41,8 +40,8 @@ jobs:
       - name: Download the recordings
         env:
           GH_TOKEN: ${{ github.token }}
-          # A push that only adds phone days replays those days alone.
-          SOURCE: ${{ inputs.source || (contains(join(github.event.commits.*.added, ' '), 'data/phone-recordings/') && 'phone' || 'cloud') }}
+          # Pushes replay the cloud days; run it by hand with source=phone for the phone's days.
+          SOURCE: ${{ inputs.source || 'cloud' }}
         run: |
           mkdir -p rec
           echo "source: $SOURCE"
