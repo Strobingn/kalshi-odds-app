@@ -33,7 +33,10 @@ fun AiPredictionBannerLive(modifier: Modifier = Modifier) {
         while (true) { // off Main; dm60 read under the book lock
             f = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
                 val now = System.currentTimeMillis()
-                val q = AiDirection.current(book?.marks?.value ?: emptyMap(), now)
+                val marks = book?.marks?.value ?: emptyMap()
+                val close = marks.values.filter { it.ticker.uppercase().contains("BTC") && it.closeMs > now }.minOfOrNull { it.closeMs }
+                val openPx = close?.let { book?.spotAt("BTC", it - 900_000L) }
+                val q = AiDirection.current(marks, now, openPx)
                 AiDirection.forecast(q, now) { GbmModel.pSide(it, "YES", book?.dm60Snapshot(it.ticker.uppercase(), it.nowMs) ?: 0.0) }
             }
             delay(1000)

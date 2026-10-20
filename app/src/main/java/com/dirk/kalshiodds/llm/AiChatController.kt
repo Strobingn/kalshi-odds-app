@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.llm
 
+import com.dirk.kalshiodds.decision.AtmStrike
 import com.dirk.kalshiodds.decision.GbmModel
 import com.dirk.kalshiodds.decision.ScalpControlsRepository
 import com.dirk.kalshiodds.decision.ScalpRule
@@ -238,12 +239,9 @@ object ChatPrompt {
         return best?.spot
     }
 
-    /** At-the-money strike in this window (nearest the live spot). */
-    fun atm(strikes: List<ScalpRule.Quote>, spot: Double?): ScalpRule.Quote? =
-        strikes.minWithOrNull(compareBy<ScalpRule.Quote> { q ->
-            val k = q.strike
-            if (spot != null && k != null && k.isFinite()) kotlin.math.abs(spot - k) else Double.MAX_VALUE
-        }.thenBy { it.ticker })
+    /** At-the-money strike in this window: nearest the live spot, then nearest the window open. Exact ties pick neither. */
+    fun atm(strikes: List<ScalpRule.Quote>, spot: Double?, openPx: Double? = null): ScalpRule.Quote? =
+        AtmStrike.pick(strikes, { q -> AtmStrike.priceDistance(q.strike, spot) }, { q -> AtmStrike.priceDistance(q.strike, openPx) })
 
     /** GBM P(YES) when the asset is loaded, otherwise the spot-implied fair. */
     fun modelUp(q: ScalpRule.Quote?, dm60: Double): Double? {
@@ -258,7 +256,7 @@ object ChatPrompt {
         val openMs = closeMs - MarketLifecycle.WINDOW_MS
         val key = MarketLifecycle.windowKey(strikes.first().ticker) ?: strikes.first().ticker.substringAfter('-').substringBefore('-')
         val spot = liveSpot(strikes)
-        val atm = atm(strikes, spot)
+        val atm = atm(strikes, spot, w.btcAtOpen)
         val leftS = ((closeMs - w.nowMs).coerceAtLeast(0L)) / 1000L
         val move = moveSinceOpen(spot, w.btcAtOpen)
         val up = w.modelUp?.takeIf { it.isFinite() }?.let { String.format(Locale.US, "%.2f", it.coerceIn(0.0, 1.0)) } ?: "unavailable"

@@ -185,9 +185,14 @@ object DecisionPipeline {
             sideQuote("YES", final, input.yesAsk, input.yesBid, input.yesDepth, input, ctx),
             sideQuote("NO", 1.0 - final, input.noAsk, input.noBid, input.noDepth, input, ctx)
         )
+        val yAsk = input.yesAsk?.takeIf { it.isFinite() && it > 0.0 }
+        val nAsk = input.noAsk?.takeIf { it.isFinite() && it > 0.0 }
+        val asksTied = yAsk != null && nAsk != null && yAsk == nAsk
         val fav = FavouritePolicy.favouriteSide(input.yesAsk, input.noAsk)
         val favQuote = sides.firstOrNull { it.side == fav }
         val chosen = when {
+            // Equal asks are not a YES favourite. Take the larger expected net, or neither when those match too.
+            asksTied -> SidePick.onlyMaxBy(sides) { it.expectedNetPerContract }
             favQuote != null && favQuote.expectedNetPerContract > 0.0 -> favQuote
             else -> sides.maxByOrNull { it.expectedNetPerContract }
         }
