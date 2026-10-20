@@ -38,7 +38,13 @@ data class ScalpKnobs(
     /** Trailing stop instead of a fixed one (scalps). Null = the strategy's own. */
     val trail: Boolean? = null,
     /** How long a resting entry bid waits to fill, in seconds. Null = the arena's 20 s. */
-    val bidWaitSeconds: Int? = null
+    val bidWaitSeconds: Int? = null,
+    /** The late strategies (Kashi's favourites, late edge): buy only with at most this many seconds left… */
+    val secondsLeftMax: Int? = null,
+    /** …and at least this many. */
+    val secondsLeftMin: Int? = null,
+    /** Kashi's favourites: least the ask must sit under the fair price, in cents. */
+    val edgeCents: Double? = null
 ) {
     val isDefault: Boolean get() = this == ScalpKnobs()
 }
@@ -48,6 +54,11 @@ data class ScalpKnobs(
  * the strategies actually trade on.
  */
 class Tuned(val strategy: ScalpStrategy, val knobs: ScalpKnobs, defaultContracts: Int) {
+    companion object {
+        /** The arena makes no decision in a window's last 5 s ([PaperScalper.LATE_LAST_SECOND]). */
+        const val MIN_SECONDS_LEFT = 5
+    }
+
     val enabled: Boolean = knobs.enabled
     val contracts: Int = (knobs.contracts ?: defaultContracts).coerceIn(1, ScalpTuning.MAX_CONTRACTS)
     val targetDollars: Double = knobs.targetCents?.div(100.0) ?: strategy.targetDollars
@@ -63,7 +74,7 @@ class Tuned(val strategy: ScalpStrategy, val knobs: ScalpKnobs, defaultContracts
     val entryMax: Double = knobs.entryMaxCents?.div(100.0) ?: strategy.entryMax
 
     /** Second of the window it may open orders from, and the second it stops before. */
-    val fromSecond: Int = ((knobs.fromMinute ?: 0).coerceIn(0, 15)) * 60
+    val fromSecond: Int = ((knobs.fromMinute ?: strategy.startMinute).coerceIn(0, 15)) * 60
     val untilSecond: Int = ((knobs.untilMinute ?: 15).coerceIn(0, 15)) * 60
 
     /** No minute left between [fromSecond] and [untilSecond]: it opens nothing. */
@@ -86,6 +97,17 @@ class Tuned(val strategy: ScalpStrategy, val knobs: ScalpKnobs, defaultContracts
     val dailyLossUsd: Double? = knobs.dailyLossUsd?.takeIf { it > 0.0 }
 
     val trail: Boolean = knobs.trail ?: strategy.trail
+
+    /**
+     * Seconds left in the window it buys in, for the late strategies ([ScalpStrategy.fav]); null for the rest.
+     * Never under 5 s: the arena stops deciding then.
+     */
+    val secondsLeft: IntRange? = strategy.fav?.let { f ->
+        (knobs.secondsLeftMin ?: f.tteMin).coerceIn(MIN_SECONDS_LEFT, 899)..(knobs.secondsLeftMax ?: f.tteMax).coerceIn(1, 899)
+    }
+
+    /** Kashi's favourites: least the ask must sit under the fair price, in dollars. */
+    val favGap: Double? = strategy.fav?.let { f -> knobs.edgeCents?.takeIf { it >= 0.0 }?.div(100.0) ?: f.gap }
 
     /** How long its resting entry bid waits, given the arena's default. */
     fun entryWaitMs(default: Long): Long = knobs.bidWaitSeconds?.takeIf { it > 0 }?.let { it * 1000L } ?: default

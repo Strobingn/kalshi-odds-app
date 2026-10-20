@@ -67,7 +67,9 @@ enum class ScalpStrategy(
     /** The stop follows the best bid since the entry up ([stopDollars] under it) instead of staying put. */
     val trail: Boolean = false,
     /** Trades only in the first minute of the window (the opening ride). */
-    val opening: Boolean = false
+    val opening: Boolean = false,
+    /** First minute of the window it opens orders in (the "from minute" setting starts here). */
+    val startMinute: Int = 0
 ) {
     /** The trained model picks calm moments. Rest in, +1¢ out. */
     ML_REST("ML scalper · resting", false, 0.01, 0.04, 120_000L, 5, 12, -2.01),
@@ -214,7 +216,7 @@ enum class ScalpStrategy(
     /** Late comeback: minutes 10–13, an underdog (20–40¢) up 4¢ in 30 s. Buy now, hold to the settlement. */
     LATE_COMEBACK(
         "Late comeback · buy, hold", true, 0.0, 0.0, 0L, 5, 1, null,
-        hold = true, entryMin = 0.20, entryMax = 0.40, origin = "Claude 1.9.4"
+        hold = true, entryMin = 0.20, entryMax = 0.40, origin = "Claude 1.9.4", startMinute = 10
     ),
 
     /**

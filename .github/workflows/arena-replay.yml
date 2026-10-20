@@ -12,6 +12,11 @@ on:
         type: choice
         options: [cloud, phone, both]
         default: cloud
+      mode:
+        description: "replay = every strategy on its defaults; sweep = small tweaks to the strategies still running"
+        type: choice
+        options: [replay, sweep]
+        default: replay
   push:
     branches: [Claude]
     paths:
@@ -58,6 +63,7 @@ jobs:
           ARENA_REPLAY_DIR: ${{ github.workspace }}/rec
           ARENA_REPLAY_OUT: ${{ github.workspace }}/arena_replay.md
           TEST_MAX_HEAP: 6g
+          ARENA_SWEEP: ${{ inputs.mode == 'sweep' && '1' || '' }}
         run: ./gradlew :app:testDebugUnitTest --tests 'com.dirk.kalshiodds.signal.scalper.ArenaReplayTest' --no-daemon --stacktrace
 
       - name: Report

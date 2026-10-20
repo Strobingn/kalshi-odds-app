@@ -136,7 +136,7 @@ class ScalpTuningTest {
     fun untouchedLimitsChangeNothing() {
         for (st in ScalpStrategy.values()) {
             val d = Tuned(st, ScalpKnobs(), 10)
-            assertEquals(0, d.fromSecond)
+            assertEquals("late comeback starts at minute 10, the rest at the open", st.startMinute * 60, d.fromSecond)
             assertEquals(900, d.untilSecond)
             assertTrue(d.sideAllowed("YES") && d.sideAllowed("NO"))
             assertEquals(null, d.maxSpread)

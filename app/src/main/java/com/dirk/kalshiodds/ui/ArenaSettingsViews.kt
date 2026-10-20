@@ -207,7 +207,7 @@ internal fun StrategySettingsCard(st: ScalpStrategy, tuning: ScalpTuning, modelT
             KnobSlider(
                 "Opens orders from minute", t.fromSecond / 60.0, 0.0, 14.0, 1.0, "KNOB_FROM_MIN", k.fromMinute != null,
                 { if (it.roundToInt() == 0) "the open" else "minute ${it.roundToInt()}" }
-            ) { save(k.copy(fromMinute = it.roundToInt().takeIf { m -> m != 0 })) }
+            ) { save(k.copy(fromMinute = it.roundToInt().takeIf { m -> m != d.fromSecond / 60 })) }
         }
         if (triggerMinute != "Until minute") {
             KnobSlider(
@@ -216,6 +216,28 @@ internal fun StrategySettingsCard(st: ScalpStrategy, tuning: ScalpTuning, modelT
             ) { save(k.copy(untilMinute = it.roundToInt().takeIf { m -> m != 15 })) }
         }
         if (t.noMinutes) Muted("No minutes left between those two: it opens nothing.")
+        // The late strategies buy by seconds left, not by minute.
+        val late = t.secondsLeft
+        val lateDefault = d.secondsLeft
+        if (late != null && lateDefault != null) {
+            KnobSlider(
+                "Buys from this many seconds left", late.last.toDouble(), 10.0, 300.0, 5.0, "KNOB_LEFT_MAX",
+                k.secondsLeftMax != null, { "${it.roundToInt()} s" }
+            ) { save(k.copy(secondsLeftMax = it.roundToInt().takeIf { n -> n != lateDefault.last })) }
+            KnobSlider(
+                "…until this many seconds left", late.first.toDouble(), Tuned.MIN_SECONDS_LEFT.toDouble(), 120.0, 1.0, "KNOB_LEFT_MIN",
+                k.secondsLeftMin != null, { "${it.roundToInt()} s" }
+            ) { save(k.copy(secondsLeftMin = it.roundToInt().takeIf { n -> n != lateDefault.first })) }
+            if (late.first > late.last) Muted("No seconds left between those two: it opens nothing.")
+        }
+        val gap = t.favGap
+        val gapDefault = d.favGap
+        // Late edge's own trigger is already its edge.
+        if (gap != null && gapDefault != null && st != ScalpStrategy.LATE_EDGE) {
+            KnobSlider(
+                "Ask under the fair price by at least", gap * 100, 0.0, 20.0, 1.0, "KNOB_EDGE", k.edgeCents != null, ::cents
+            ) { save(k.copy(edgeCents = it.takeIf { c -> c.roundToInt() != (gapDefault * 100).roundToInt() })) }
+        }
         SideChoice(t.onlySide) { save(k.copy(side = it)) }
         KnobSlider(
             "Widest spread it trades into", (t.maxSpread?.times(100) ?: SPREAD_ANY), 1.0, SPREAD_ANY, 1.0, "KNOB_SPREAD",

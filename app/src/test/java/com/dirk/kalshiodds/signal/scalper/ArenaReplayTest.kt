@@ -108,12 +108,21 @@ class ArenaReplayTest {
         )
     }
 
-    @Test
-    fun replayRecordedDays() {
-        val dirName = System.getenv("ARENA_REPLAY_DIR")
-        Assume.assumeTrue("set ARENA_REPLAY_DIR to replay the recordings", !dirName.isNullOrBlank())
-        val dir = File(dirName!!)
-        val outFile = File(System.getenv("ARENA_REPLAY_OUT") ?: "build/arena_replay.md")
+    /** One paper scalper fed by the replay, with the trades it closed. */
+    private class Run(val name: String, val strategy: ScalpStrategy?, val scalper: PaperScalper, val trades: ArrayList<ScalpTrade>)
+
+    private class Replayed(val days: List<String>, val prints: Long, val settled: Int, val hasModel: Boolean)
+
+    private var clock = 0L
+
+    /**
+     * Feeds every recorded day in [dir] to the scalpers [make] builds, the way the app does. [make] gets the
+     * model, the shared book map and the fair-price function, and returns the runs to feed.
+     */
+    private fun replay(
+        dir: File,
+        make: (model: ScalperModel?, books: HashMap<String, TopOfBook>, fair: (String, Long) -> Double?) -> List<Run>
+    ): Pair<Replayed, List<Run>> {
         val dayRe = Regex("""^trades_(\d{4}-\d{2}-\d{2})\.csv\.gz$""")
         val days = dir.listFiles().orEmpty().mapNotNull { dayRe.find(it.name)?.groupValues?.get(1) }.sorted()
         require(days.isNotEmpty()) { "no trades_*.csv.gz in $dir" }
@@ -135,9 +144,6 @@ class ArenaReplayTest {
 
         val model = listOf("src/main/assets/scalper_model.json", "app/src/main/assets/scalper_model.json")
             .map { File(it) }.firstOrNull { it.isFile }?.let { ScalperModel.parse(it.readText()) }
-        var clock = 0L
-        val trades = ArrayList<ScalpTrade>()
-        val ledger = ScalperLedger(nowMs = { clock }, record = { t, _ -> trades.addAll(t) }, hourOf = { 0 })
         val books = HashMap<String, TopOfBook>()
         val cf = CfIndexBook()
         fun fair(ticker: String, now: Long): Double? {
@@ -149,15 +155,13 @@ class ArenaReplayTest {
                 std1m = cf.std1m("BTC", now), coin = "BTC", observedMeanLog = observed
             )
         }
-        val scalper = PaperScalper(
-            model = model, ledger = ledger, topOfBook = { books[it] }, bookLevels = { null },
-            closeMs = { closes[it] ?: TakerCost.closeEpochMs(it) },
-            engine = ScalperEngine(), fairYes = { t, now -> fair(t, now) }, strategies = ScalpStrategy.values().toList()
-        )
+        val fairFn: (String, Long) -> Double? = { t, now -> fair(t, now) }
+        val runs = make(model, books, fairFn)
+        val scalpers = runs.map { it.scalper }
         fun settleUpTo(now: Long) {
             while (nextSettle < pending.size && pending[nextSettle].second.first + 2_000L <= now) {
                 val (tk, cr) = pending[nextSettle++]
-                scalper.settle(tk, cr.second, cr.first + 2_000L)
+                for (sc in scalpers) sc.settle(tk, cr.second, cr.first + 2_000L)
             }
         }
 
@@ -181,16 +185,15 @@ class ArenaReplayTest {
                         settleUpTo(tB)
                         val tk = tickers[r.bookTicker[j]]
                         books[tk] = r.book[j]
-                        scalper.onClock(tk, tB)
+                        for (sc in scalpers) sc.onClock(tk, tB)
                         j++
                     }
                     else -> {
                         clock = tT
                         settleUpTo(tT)
-                        scalper.onTrade(
-                            tickers[r.tradeTicker[i]], if (r.tradeYes[i]) "yes" else "no",
-                            r.tradePrice[i], r.tradeCount[i], tT
-                        )
+                        val tk = tickers[r.tradeTicker[i]]
+                        val side = if (r.tradeYes[i]) "yes" else "no"
+                        for (sc in scalpers) sc.onTrade(tk, side, r.tradePrice[i], r.tradeCount[i], tT)
                         printsSeen++
                         i++
                     }
@@ -198,8 +201,149 @@ class ArenaReplayTest {
             }
         }
         settleUpTo(Long.MAX_VALUE)
+        return Replayed(days, printsSeen, results.size, model != null) to runs
+    }
+
+    private fun run(
+        name: String, strategy: ScalpStrategy?, strategies: List<ScalpStrategy>, model: ScalperModel?,
+        books: HashMap<String, TopOfBook>, fair: (String, Long) -> Double?,
+        knobs: Map<String, ScalpKnobs> = emptyMap(), oneSidedPrints: Boolean = false
+    ): Run {
+        val trades = ArrayList<ScalpTrade>()
+        val ledger = ScalperLedger(nowMs = { clock }, record = { t, _ -> trades.addAll(t) }, hourOf = { 0 })
+        val scalper = PaperScalper(
+            model = model, ledger = ledger, topOfBook = { books[it] }, bookLevels = { null },
+            closeMs = { closes[it] ?: TakerCost.closeEpochMs(it) },
+            engine = ScalperEngine(tuning = ScalpTuning(knobs)), fairYes = fair, strategies = strategies,
+            oneSidedPrints = oneSidedPrints
+        )
+        return Run(name, strategy, scalper, trades)
+    }
+
+    @Test
+    fun replayRecordedDays() {
+        val dirName = System.getenv("ARENA_REPLAY_DIR")
+        Assume.assumeTrue("set ARENA_REPLAY_DIR to replay the recordings", !dirName.isNullOrBlank())
+        Assume.assumeTrue("ARENA_SWEEP runs the sweep instead", System.getenv("ARENA_SWEEP").isNullOrBlank())
+        val outFile = File(System.getenv("ARENA_REPLAY_OUT") ?: "build/arena_replay.md")
+        val (info, runs) = replay(File(dirName!!)) { model, books, fair ->
+            listOf(run("all", null, ScalpStrategy.values().toList(), model, books, fair))
+        }
         outFile.parentFile?.mkdirs()
-        outFile.writeText(report(trades, days, printsSeen, results.size, model != null))
+        outFile.writeText(report(runs.single().trades, info.days, info.prints, info.settled, info.hasModel))
+        println(outFile.readText())
+    }
+
+    /** One small change to one strategy's settings, run on its own. */
+    private class Variant(val strategy: ScalpStrategy, val name: String, val knobs: ScalpKnobs = ScalpKnobs(), val oneSided: Boolean = false)
+
+    /**
+     * The tweaks tried on the strategies still running, written down before the sweep ran: each loosens one
+     * setting one small step (or two together), so the strategy takes more trades. "defaults" is the baseline.
+     */
+    private fun variants(): List<Variant> {
+        val out = ArrayList<Variant>()
+        val cb = ScalpStrategy.LATE_COMEBACK
+        out += Variant(cb, "defaults")
+        out += Variant(cb, "rise 3¢", ScalpKnobs(trigger = 3.0))
+        out += Variant(cb, "rise 5¢", ScalpKnobs(trigger = 5.0))
+        out += Variant(cb, "from 15¢", ScalpKnobs(entryMinCents = 15.0))
+        out += Variant(cb, "up to 45¢", ScalpKnobs(entryMaxCents = 45.0))
+        out += Variant(cb, "from minute 9", ScalpKnobs(fromMinute = 9))
+        out += Variant(cb, "from minute 8", ScalpKnobs(fromMinute = 8))
+        out += Variant(cb, "2 at once, 60 s apart", ScalpKnobs(maxPerSide = 2, cooldownSeconds = 60))
+        out += Variant(cb, "rise 3¢ + 15–45¢", ScalpKnobs(trigger = 3.0, entryMinCents = 15.0, entryMaxCents = 45.0))
+        out += Variant(cb, "minute 9 + 15–45¢", ScalpKnobs(fromMinute = 9, entryMinCents = 15.0, entryMaxCents = 45.0))
+        for (st in listOf(
+            ScalpStrategy.KASHI_FAV_BASE, ScalpStrategy.KASHI_FAV_STRICT, ScalpStrategy.KASHI_FAV_97,
+            ScalpStrategy.KASHI_FAV_LAST30, ScalpStrategy.KASHI_FAV_NIGHT
+        )) {
+            val f = st.fav!!
+            val gap = Math.round(f.gap * 100).toDouble()
+            out += Variant(st, "defaults")
+            out += Variant(st, "edge ${(gap - 1).toInt()}¢", ScalpKnobs(edgeCents = gap - 1))
+            out += Variant(st, "edge ${(gap - 2).toInt()}¢", ScalpKnobs(edgeCents = gap - 2))
+            out += Variant(st, "fair ${Math.round(f.fairMin * 100) - 2}%", ScalpKnobs(trigger = f.fairMin * 100 - 2))
+            out += Variant(st, "from ${f.tteMax * 3 / 2} s left", ScalpKnobs(secondsLeftMax = f.tteMax * 3 / 2))
+            out += Variant(st, "from ${f.tteMax * 2} s left", ScalpKnobs(secondsLeftMax = f.tteMax * 2))
+            out += Variant(st, "until ${f.tteMin / 2} s left", ScalpKnobs(secondsLeftMin = f.tteMin / 2))
+            out += Variant(st, "2 at once, 15 s apart", ScalpKnobs(maxPerSide = 2, cooldownSeconds = 15))
+            out += Variant(st, "one-sided prints ok", oneSided = true)
+            out += Variant(
+                st, "edge ${(gap - 1).toInt()}¢ + from ${f.tteMax * 3 / 2} s",
+                ScalpKnobs(edgeCents = gap - 1, secondsLeftMax = f.tteMax * 3 / 2)
+            )
+        }
+        val le = ScalpStrategy.LATE_EDGE
+        out += Variant(le, "defaults")
+        out += Variant(le, "edge 1¢", ScalpKnobs(trigger = 1.0))
+        out += Variant(le, "edge 0¢", ScalpKnobs(trigger = 0.0))
+        out += Variant(le, "edge 3¢", ScalpKnobs(trigger = 3.0))
+        out += Variant(le, "from 60 s left", ScalpKnobs(secondsLeftMax = 60))
+        out += Variant(le, "from 90 s left", ScalpKnobs(secondsLeftMax = 90))
+        out += Variant(le, "one-sided prints ok", oneSided = true)
+        out += Variant(le, "edge 1¢ + from 60 s", ScalpKnobs(trigger = 1.0, secondsLeftMax = 60))
+        return out
+    }
+
+    /**
+     * Every tweak in [variants] on every recorded day, each strategy on its own. A tweak counts as better
+     * (rule fixed before the run) when it takes at least 10% more trades, nets at least the defaults' dollars,
+     * and makes money in both the first 60% and the last 40% of the days.
+     */
+    @Test
+    fun sweepTweaks() {
+        val dirName = System.getenv("ARENA_REPLAY_DIR")
+        Assume.assumeTrue("set ARENA_REPLAY_DIR and ARENA_SWEEP to sweep", !dirName.isNullOrBlank() && !System.getenv("ARENA_SWEEP").isNullOrBlank())
+        val outFile = File(System.getenv("ARENA_REPLAY_OUT") ?: "build/arena_sweep.md")
+        val vs = variants()
+        val (info, runs) = replay(File(dirName!!)) { model, books, fair ->
+            vs.map { v ->
+                run(v.name, v.strategy, listOf(v.strategy), model, books, fair, mapOf(v.strategy.name to v.knobs), v.oneSided)
+            }
+        }
+        val dayOf = { ms: Long -> java.time.Instant.ofEpochMilli(ms).atZone(java.time.ZoneOffset.UTC).toLocalDate().toString() }
+        val split = info.days.getOrNull((info.days.size * 0.6).toInt()) ?: ""
+        val sb = StringBuilder()
+        sb.append("# Arena sweep: small tweaks to the strategies still running\n\n")
+        sb.append("Recorded days: ${info.days.first()} → ${info.days.last()} (${info.days.size}) · ${info.prints} BTC prints · ")
+        sb.append("${info.settled} settled windows. Each row is one strategy alone with one change. ")
+        sb.append("Better = 10%+ more trades, net at least the defaults', up in both the first 60% and last 40% of days (split $split).\n\n")
+        sb.append("| Strategy | Tweak | Trades | Net $ | ¢/contract | Win % | Days up | First | Last | $/day 95% CI | Better |\n")
+        sb.append("|---|---|---:|---:|---:|---:|---:|---:|---:|---|---|\n")
+        val lines = ArrayList<String>()
+        for ((st, group) in runs.groupBy { it.strategy!! }) {
+            val base = group.first { it.name == "defaults" }.trades
+            val baseNet = base.sumOf { it.pnlUsd }
+            val scored = group.map { r ->
+                val t = r.trades
+                val net = t.sumOf { it.pnlUsd }
+                val contracts = t.sumOf { it.contracts.toLong() }
+                val first = t.filter { dayOf(it.closedAtMs) < split }.sumOf { it.pnlUsd }
+                val last = t.filter { dayOf(it.closedAtMs) >= split }.sumOf { it.pnlUsd }
+                val byDay = info.days.map { d -> t.filter { dayOf(it.closedAtMs) == d }.sumOf { it.pnlUsd } }
+                val rnd = Random(7)
+                val boots = DoubleArray(2_000) { byDay.indices.sumOf { byDay[rnd.nextInt(byDay.size)] } / byDay.size }.also { it.sort() }
+                val better = r.name != "defaults" && t.size >= base.size * 1.1 && net >= baseNet - 1e-9 && first > 0 && last > 0
+                sb.append(
+                    String.format(
+                        Locale.US, "| %s | %s | %d | %+.2f | %+.2f | %.0f%% | %d / %d | %+.2f | %+.2f | [%+.2f, %+.2f] | %s |\n",
+                        st.name, r.name, t.size, net, if (contracts > 0) net * 100.0 / contracts else 0.0,
+                        if (t.isEmpty()) 0.0 else t.count { it.pnlUsd > 0 } * 100.0 / t.size,
+                        byDay.count { it > 0 }, byDay.count { it != 0.0 }, first, last,
+                        boots[(0.025 * boots.size).toInt()], boots[(0.975 * boots.size).toInt().coerceAtMost(boots.size - 1)],
+                        if (better) "yes" else ""
+                    )
+                )
+                Triple(r.name, net, better)
+            }
+            val pick = scored.filter { it.third }.maxByOrNull { it.second }
+            lines += "${st.name} ${pick?.first ?: "keep defaults"}"
+        }
+        sb.append("\nSWEEP_PICKS\n")
+        lines.forEach { sb.append(it).append('\n') }
+        outFile.parentFile?.mkdirs()
+        outFile.writeText(sb.toString())
         println(outFile.readText())
     }
 

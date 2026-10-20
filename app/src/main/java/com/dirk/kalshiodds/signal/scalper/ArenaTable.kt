@@ -218,6 +218,12 @@ object ArenaTable {
                 else "Opens orders only from minute ${t.fromSecond / 60} until minute ${t.untilSecond / 60}."
             )
         }
+        if (k.secondsLeftMax != null || k.secondsLeftMin != null) {
+            t.secondsLeft?.let { w ->
+                add(if (w.first > w.last) "Your seconds-left window is empty: it opens nothing." else "Buys only with ${w.first}–${w.last} s left.")
+            }
+        }
+        if (k.edgeCents != null) t.favGap?.let { add("Needs the ask ${c(it)} or more under the fair price.") }
         t.onlySide?.let { add("Buys $it only.") }
         t.maxSpread?.let { add("Skips a spread wider than ${c(it)}.") }
         t.maxOrdersPerWindow?.let { add("At most $it order${if (it == 1) "" else "s"} a window.") }

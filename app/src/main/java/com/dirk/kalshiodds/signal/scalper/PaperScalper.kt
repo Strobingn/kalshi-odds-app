@@ -364,7 +364,12 @@ class PaperScalper(
     /** YES fair price from the live spot ([ScalpFair]) for Kashi's late favourites; null when unknown. */
     private val fairYes: (ticker: String, nowMs: Long) -> Double? = { _, _ -> null },
     /** What runs. The retired strategies ([ScalpStrategy.RETIRED]) open nothing; tests and the replay pass them all. */
-    private val strategies: List<ScalpStrategy> = ScalpStrategy.ACTIVE
+    private val strategies: List<ScalpStrategy> = ScalpStrategy.ACTIVE,
+    /**
+     * Own-band strategies normally need both a fresh taker-buy and a fresh taker-sell print (10 s) next to the
+     * book; true accepts either one. Off in the app (the cached book has no age); the replay measures it.
+     */
+    private val oneSidedPrints: Boolean = false
 ) {
     private val grids = HashMap<String, PrintGrid>()
     private val lastDecision = HashMap<String, IntArray>()   // ticker -> last decision second per cadence slot
@@ -539,16 +544,17 @@ class PaperScalper(
         val tte = PrintGrid.SECONDS - s
         val tuning = engine.tuning
         val done = onceDone[ticker]
-        val inWindow = { st: ScalpStrategy ->
+        val inWindow = { st: ScalpStrategy, t: Tuned ->
+            val late = t.secondsLeft
             when {
                 st.opening -> s <= OPEN_LAST_SECOND
-                st.fav != null -> tte in st.fav.tteMin..st.fav.tteMax
+                late != null -> tte in late
                 else -> s in PrintGrid.MIN_DECISION_SECOND..PrintGrid.MAX_DECISION_SECOND
             }
         }
         val due0 = strategies.filter { st ->
             val t = tuning.tuned(st)
-            t.enabled && s - last[st.ordinal + 1] >= t.cadenceSeconds && inWindow(st) && t.inMinutes(s) &&
+            t.enabled && s - last[st.ordinal + 1] >= t.cadenceSeconds && inWindow(st, t) && t.inMinutes(s) &&
                 (done == null || st !in done) && !pausedForLoss(st, t.dailyLossUsd, nowMs)
         }
         if (due0.isEmpty()) return emptyList()
@@ -629,7 +635,11 @@ class PaperScalper(
                 val ownBand = tn.ownBand
                 // Own-band strategies may trade outside the grid's 10–90¢ quotable band, but still need a
                 // current grid quote: the cached book has no age, and a stalled book would price stale.
-                val printsLive = !grid.bid(side, s).isNaN() && !grid.ask(side, s).isNaN()
+                val printsLive = if (oneSidedPrints) {
+                    !grid.bid(side, s).isNaN() || !grid.ask(side, s).isNaN()
+                } else {
+                    !grid.bid(side, s).isNaN() && !grid.ask(side, s).isNaN()
+                }
                 if (if (ownBand) !(fresh && printsLive) else !scalpOk) continue
                 val fire = when (st) {
                     ScalpStrategy.ML_REST -> null
@@ -732,13 +742,15 @@ class PaperScalper(
                     ScalpStrategy.BOOK_IMBALANCE ->
                         queue != null && askQty != null && askQty > 0.0 &&
                             queue >= ScalpStrategy.IMBALANCE_MIN_CONTRACTS && queue >= trig(ScalpStrategy.IMBALANCE_RATIO) * askQty
+                    // From minute 10 by default ([ScalpStrategy.startMinute], checked with the other minutes above).
                     ScalpStrategy.LATE_COMEBACK ->
-                        s >= 600 && !d30.isNaN() && d30 >= trig(ScalpStrategy.COMEBACK_MOVE_DOLLARS) - EPS
+                        !d30.isNaN() && d30 >= trig(ScalpStrategy.COMEBACK_MOVE_DOLLARS) - EPS
                     ScalpStrategy.KASHI_FAV_BASE, ScalpStrategy.KASHI_FAV_STRICT, ScalpStrategy.KASHI_FAV_97,
                     ScalpStrategy.KASHI_FAV_LAST30, ScalpStrategy.KASHI_FAV_NIGHT -> {
                         val f = st.fav!!
                         val fair = fairY?.let { if (yes) it else 1.0 - it }
-                        fair != null && fair >= trig(f.fairMin) - EPS && fair - ask >= f.gap - EPS && !(f.offUsHours && usHours)
+                        fair != null && fair >= trig(f.fairMin) - EPS && fair - ask >= (tn.favGap ?: f.gap) - EPS &&
+                            !(f.offUsHours && usHours)
                     }
                     ScalpStrategy.OPENING_RIDE -> rideYes == yes
                     ScalpStrategy.LATE_EDGE -> {
