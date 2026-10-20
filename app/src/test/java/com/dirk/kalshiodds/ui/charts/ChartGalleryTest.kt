@@ -16,8 +16,8 @@ class ChartGalleryTest {
         val down = trade("b", "NO", "v|v2-fair|P", -0.4)
         val other = trade("c", "YES", "v|v2-dip|P", 0.2)
         val skip = trade("d", "NO", "v|v2-dip|P", 9.0).copy(state = ScalpState.NO_FILL, entryPrice = null, contracts = 0)
-        val groups = ChartGallery.sideGroups(listOf(up, down, other, skip))
-        assertEquals(listOf("v2 · Fair-gap", "v2 · Dip-hunter"), groups.map { it.label })
+        val groups = ChartGallery.sideGroups(listOf(up, down, other, skip)) { if (it.id == "c") "Dip-hunter" else "Fair-gap" }
+        assertEquals(listOf("Fair-gap", "Dip-hunter"), groups.map { it.label })
         val fair = groups[0]
         assertEquals(1, fair.upEntries)
         assertEquals(1, fair.downEntries)

@@ -216,6 +216,7 @@ class ChartGalleryRenderTest {
                 )
             )
         }
+        compose.onNodeWithText("Peak ±25¢ · 4").assertExists()
         compose.onNodeWithText("±25¢ · 4").assertExists()
         compose.onNodeWithText("≤ −$2 · 1").assertExists()
         compose.onNodeWithText("≥ $2 · 2").assertExists()

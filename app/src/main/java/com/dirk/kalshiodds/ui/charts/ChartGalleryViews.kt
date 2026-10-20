@@ -391,7 +391,7 @@ fun PnlHistogram(bins: List<ChartGallery.SignedBin>, modifier: Modifier = Modifi
             return
         }
         val peak = bins.maxBy { it.count }
-        Text("${peak.label} · ${peak.count}", color = c.textPrimary, style = MaterialTheme.typography.labelMedium)
+        Text("Peak ${peak.label} · ${peak.count}", color = c.textPrimary, style = MaterialTheme.typography.labelMedium)
         val max = bins.maxOf { it.count }.coerceAtLeast(1)
         Canvas(Modifier.fillMaxWidth().height(140.dp)) {
             val slot = size.width / bins.size.toFloat()

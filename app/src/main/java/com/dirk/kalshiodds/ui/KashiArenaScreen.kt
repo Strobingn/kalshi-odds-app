@@ -42,6 +42,7 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
     var v2 by rememberSaveable { mutableStateOf(true) }
     var sortName by rememberSaveable { mutableStateOf(KashiArenaData.Sort.NET.name) }
     val sort = KashiArenaData.Sort.valueOf(sortName)
+    val bench = com.dirk.kalshiodds.decision.insights.BenchRegistry.decisions.collectAsState().value
     val rows = remember(st.algoAllTime, v2, sort) { KashiArenaData.rows(st, v2, sort) }
     val models = rows.map { it.model }.toSet()
     val active = st.activeScalps.filter { ScalpModels.modelOf(it) in models && it.isPrimary }
@@ -110,7 +111,6 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
             }
             KashiArenaTab.ANALYSIS -> {
                 val galleryTrades = (st.arenaChart.trades + st.activeScalps).distinctBy { it.id }
-                val bench = com.dirk.kalshiodds.decision.insights.BenchRegistry.decisions.collectAsState().value
                 val leaders = rows.map { row ->
                     val frozen = com.dirk.kalshiodds.decision.insights.ScalpFreeze.isFrozen(bench[row.model.code])
                     row to frozen
