@@ -42,9 +42,13 @@ class KashiLateFavTest {
             assertTrue(st.name, st.hold && st.taker && st.stopDollars > 0.0 && st.targetDollars == 0.0 && st.timeoutMs == 0L)
             assertTrue(st.name, st.origin.startsWith("kashi sf"))
         }
-        assertEquals(ScalpStrategy.FavSpec(20, 60, 0.95, 0.05), ScalpStrategy.KASHI_FAV_STRICT.fav)
+        assertEquals(ScalpStrategy.FavSpec(20, 60, 0.93, 0.05), ScalpStrategy.KASHI_FAV_STRICT.fav)
         assertEquals(0.15, ScalpStrategy.KASHI_FAV_STRICT.stopDollars, 0.0)
-        assertEquals(ScalpStrategy.FavSpec(10, 30, 0.95, 0.05), ScalpStrategy.KASHI_FAV_LAST30.fav)
+        assertEquals(ScalpStrategy.FavSpec(10, 45, 0.95, 0.05), ScalpStrategy.KASHI_FAV_LAST30.fav)
+        assertEquals(ScalpStrategy.FavSpec(20, 90, 0.90, 0.05), ScalpStrategy.KASHI_FAV_BASE.fav)
+        assertEquals(ScalpStrategy.FavSpec(20, 60, 0.97, 0.02), ScalpStrategy.KASHI_FAV_97.fav)
+        assertEquals(2, ScalpStrategy.KASHI_FAV_NIGHT.maxPerSide)
+        assertEquals(15, ScalpStrategy.KASHI_FAV_NIGHT.cooldownSeconds)
         assertTrue(ScalpStrategy.KASHI_FAV_NIGHT.fav!!.offUsHours)
     }
 
@@ -61,20 +65,25 @@ class KashiLateFavTest {
     }
 
     @Test
-    fun theyBuyTheFavouriteOnlyInTheLastMinuteWhileItsAskIsUnderFair() {
+    fun theyBuyTheFavouriteOnlyLateWhileItsAskIsUnderFair() {
         val s = runner { 0.98 }
-        // Minutes 0–13: the fair price says YES, but it is not the last minute yet.
-        prints(s, 0, 835, 0.90, 0.92)
+        // Up to 96 s left: the fair price says YES, but it is not late enough for any of them.
+        prints(s, 0, 805, 0.90, 0.92)
         assertTrue(favs.all { yes(s, it) == 0 })
-        // 60 s left: base, strict, 97% and the off-US-hours copy (1970-01-01 00:14 UTC) buy; last-30 waits.
-        prints(s, 836, 845, 0.90, 0.92)
-        for (st in listOf(ScalpStrategy.KASHI_FAV_BASE, ScalpStrategy.KASHI_FAV_STRICT, ScalpStrategy.KASHI_FAV_97, ScalpStrategy.KASHI_FAV_NIGHT)) {
+        // 90 s left: only base, which buys from 90 s since 2026-10-20.
+        prints(s, 806, 815, 0.90, 0.92)
+        assertEquals(1, yes(s, ScalpStrategy.KASHI_FAV_BASE))
+        assertTrue(favs.filter { it != ScalpStrategy.KASHI_FAV_BASE }.all { yes(s, it) == 0 })
+        // 60 s left: strict, 97% and the off-US-hours copy (1970-01-01 00:14 UTC) buy; last-45 waits.
+        prints(s, 816, 845, 0.90, 0.92)
+        for (st in listOf(ScalpStrategy.KASHI_FAV_STRICT, ScalpStrategy.KASHI_FAV_97, ScalpStrategy.KASHI_FAV_NIGHT)) {
             assertEquals(st.name, 1, yes(s, st))
         }
         assertEquals(0, yes(s, ScalpStrategy.KASHI_FAV_LAST30))
         prints(s, 846, 875, 0.90, 0.92)
-        assertEquals("30 s left", 1, yes(s, ScalpStrategy.KASHI_FAV_LAST30))
-        assertTrue("one each: a hold stays open", favs.all { yes(s, it) == 1 })
+        assertEquals("45 s left", 1, yes(s, ScalpStrategy.KASHI_FAV_LAST30))
+        assertEquals("the off-US-hours copy buys a second 15 s later", 2, yes(s, ScalpStrategy.KASHI_FAV_NIGHT))
+        assertTrue("one each for the rest: a hold stays open", favs.filter { it != ScalpStrategy.KASHI_FAV_NIGHT }.all { yes(s, it) == 1 })
         assertTrue("never the underdog", favs.all { s.engine.workingFor(it, t, "NO") == 0 })
     }
 

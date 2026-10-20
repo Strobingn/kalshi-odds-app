@@ -103,21 +103,21 @@ class OpeningRideLateEdgeTest {
     }
 
     @Test
-    fun lateEdgeBuysInTheLast45SecondsWhenFairBeatsTheAskByTheFeePlusTwoCents() {
+    fun lateEdgeBuysInTheLast60SecondsWhenFairBeatsTheAskByTheFeePlusOneCent() {
         val st = ScalpStrategy.LATE_EDGE
         assertTrue(st.hold && st.taker && st.stopDollars == 0.0)
-        assertEquals(ScalpStrategy.FavSpec(5, 45, 0.80, 0.02), st.fav)
+        assertEquals(ScalpStrategy.FavSpec(5, 60, 0.80, 0.01), st.fav)
         val s = runner { 0.97 }
-        prints(s, 0, 850, 0.90, 0.92)
-        assertEquals("51 s left: too early", 0, posted(s, st))
-        prints(s, 851, 860, 0.90, 0.92)
+        prints(s, 0, 835, 0.90, 0.92)
+        assertEquals("66 s left: too early", 0, posted(s, st))
+        prints(s, 836, 845, 0.90, 0.92)
         assertEquals(1, s.engine.workingFor(st, t, "YES"))
         prints(s, 861, 894, 0.90, 0.92)
         assertEquals("once a window", 1, posted(s, st))
         s.settle(t, "yes", 900_000L)
         assertEquals((1.0 - 0.92) * 10 - KalshiFee.total(10, 0.92), s.ledger.snapshot().stats(st.name).pnlUsd, 1e-9)
 
-        // Fair 93% against a 92¢ ask: 1¢ does not cover the fee plus 2¢.
+        // Fair 93% against a 92¢ ask: 1¢ does not cover the fee plus 1¢.
         val thin = runner { 0.93 }
         prints(thin, 0, 894, 0.90, 0.92)
         assertEquals(0, posted(thin, st))

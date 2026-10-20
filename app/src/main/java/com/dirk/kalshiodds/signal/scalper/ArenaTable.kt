@@ -201,7 +201,8 @@ object ArenaTable {
         } else {
             "Trades between ${c(PrintGrid.MIN_PRICE)} and ${c(PrintGrid.MAX_PRICE)}."
         }
-        val size = "${t.contracts} contracts an order, up to ${t.maxPerSide} at once per side; looks every ${t.cadenceSeconds} s."
+        val size = "${t.contracts} contracts an order, up to ${t.maxPerSide} at once per side; looks every ${t.cadenceSeconds} s" +
+            (if (t.knobs.cooldownSeconds == null && t.cooldownMs > 0) "; ${t.cooldownMs / 1000} s between buys." else ".")
         val spec = ScalpTriggers.of(st)
         val trigger = t.knobs.trigger
         val signal = signal(st) + if (spec != null && trigger != null) " Your setting: ${spec.label.lowercase()} ${ScalpTriggers.text(spec, trigger)}." else ""
@@ -227,7 +228,7 @@ object ArenaTable {
         t.onlySide?.let { add("Buys $it only.") }
         t.maxSpread?.let { add("Skips a spread wider than ${c(it)}.") }
         t.maxOrdersPerWindow?.let { add("At most $it order${if (it == 1) "" else "s"} a window.") }
-        if (t.cooldownMs > 0) add("Waits ${t.cooldownMs / 1000} s after an order before the next.")
+        if (k.cooldownSeconds != null && t.cooldownMs > 0) add("Waits ${t.cooldownMs / 1000} s after an order before the next.")
         t.dailyLossUsd?.let { add(String.format(java.util.Locale.US, "Pauses for the rest of the day (UTC) once it is down \$%.0f today.", it)) }
     }
 

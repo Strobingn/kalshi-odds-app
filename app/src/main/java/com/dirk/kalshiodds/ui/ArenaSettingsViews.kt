@@ -253,7 +253,7 @@ internal fun StrategySettingsCard(st: ScalpStrategy, tuning: ScalpTuning, modelT
         KnobSlider(
             "Wait after an order", t.cooldownMs / 1000.0, 0.0, 300.0, 5.0, "KNOB_COOLDOWN", k.cooldownSeconds != null,
             { if (it.roundToInt() == 0) "none" else "${it.roundToInt()} s" }
-        ) { save(k.copy(cooldownSeconds = it.roundToInt().takeIf { n -> n > 0 })) }
+        ) { save(k.copy(cooldownSeconds = it.roundToInt().takeIf { n -> n.toLong() * 1000L != d.cooldownMs })) }
         if (!st.taker) {
             KnobSlider(
                 "A resting bid waits", t.entryWaitMs(com.dirk.kalshiodds.signal.scalper.ScalperEngine.Config().entryWaitMs) / 1000.0,

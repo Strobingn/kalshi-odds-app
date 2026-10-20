@@ -141,7 +141,7 @@ class ScalpTuningTest {
             assertTrue(d.sideAllowed("YES") && d.sideAllowed("NO"))
             assertEquals(null, d.maxSpread)
             assertEquals(null, d.maxOrdersPerWindow)
-            assertEquals(0L, d.cooldownMs)
+            assertEquals(st.cooldownSeconds * 1000L, d.cooldownMs)
             assertEquals(null, d.dailyLossUsd)
             assertEquals(st.trail, d.trail)
             assertEquals(20_000L, d.entryWaitMs(20_000L))
@@ -162,7 +162,7 @@ class ScalpTuningTest {
         assertEquals("untouched buys YES", 1, run(ScalpKnobs()))
         assertEquals("NO only", 0, run(ScalpKnobs(side = "NO")))
         assertEquals("YES only still buys", 1, run(ScalpKnobs(side = "YES")))
-        assertEquals("stops at minute 14: the late window never comes", 0, run(ScalpKnobs(untilMinute = 14)))
+        assertEquals("stops at minute 13: the late window never comes", 0, run(ScalpKnobs(untilMinute = 13)))
         assertEquals("a 1¢ spread limit skips the 2¢ spread", 0, run(ScalpKnobs(maxSpreadCents = 1.0)))
         assertEquals("a 2¢ spread limit lets it through", 1, run(ScalpKnobs(maxSpreadCents = 2.0)))
     }

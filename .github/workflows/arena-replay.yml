@@ -62,6 +62,7 @@ jobs:
         env:
           ARENA_REPLAY_DIR: ${{ github.workspace }}/rec
           ARENA_REPLAY_OUT: ${{ github.workspace }}/arena_replay.md
+          ARENA_CLEAR_LEAD_OUT: ${{ github.workspace }}/clear_lead.md
           TEST_MAX_HEAP: 6g
           ARENA_SWEEP: ${{ inputs.mode == 'sweep' && '1' || '' }}
         run: ./gradlew :app:testDebugUnitTest --tests 'com.dirk.kalshiodds.signal.scalper.ArenaReplayTest' --no-daemon --stacktrace
@@ -71,12 +72,16 @@ jobs:
         run: |
           echo "===== ARENA REPLAY ====="
           cat arena_replay.md || echo "(no report)"
+          cat clear_lead.md 2>/dev/null || true
           echo "===== END ARENA REPLAY ====="
           cat arena_replay.md >> "$GITHUB_STEP_SUMMARY" || true
+          cat clear_lead.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: arena-replay
-          path: arena_replay.md
+          path: |
+            arena_replay.md
+            clear_lead.md
           if-no-files-found: ignore

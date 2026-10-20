@@ -3,6 +3,7 @@ package com.dirk.kalshiodds.signal.scalper
 import com.dirk.kalshiodds.signal.engine.TopOfBook
 import com.dirk.kalshiodds.signal.external.CfIndexBook
 import com.dirk.kalshiodds.signal.trade.TakerCost
+import com.dirk.kalshiodds.signal.trend.ClearLeadRule
 import com.dirk.kalshiodds.signal.ws.KalshiWsMessages
 import org.junit.Assume
 import org.junit.Test
@@ -121,6 +122,8 @@ class ArenaReplayTest {
      */
     private fun replay(
         dir: File,
+        onBook: ((ticker: String, ts: Long, top: TopOfBook) -> Unit)? = null,
+        onSettle: ((ticker: String, result: String) -> Unit)? = null,
         make: (model: ScalperModel?, books: HashMap<String, TopOfBook>, fair: (String, Long) -> Double?) -> List<Run>
     ): Pair<Replayed, List<Run>> {
         val dayRe = Regex("""^trades_(\d{4}-\d{2}-\d{2})\.csv\.gz$""")
@@ -162,6 +165,7 @@ class ArenaReplayTest {
             while (nextSettle < pending.size && pending[nextSettle].second.first + 2_000L <= now) {
                 val (tk, cr) = pending[nextSettle++]
                 for (sc in scalpers) sc.settle(tk, cr.second, cr.first + 2_000L)
+                onSettle?.invoke(tk, cr.second)
             }
         }
 
@@ -185,6 +189,7 @@ class ArenaReplayTest {
                         settleUpTo(tB)
                         val tk = tickers[r.bookTicker[j]]
                         books[tk] = r.book[j]
+                        onBook?.invoke(tk, tB, r.book[j])
                         for (sc in scalpers) sc.onClock(tk, tB)
                         j++
                     }
@@ -207,15 +212,14 @@ class ArenaReplayTest {
     private fun run(
         name: String, strategy: ScalpStrategy?, strategies: List<ScalpStrategy>, model: ScalperModel?,
         books: HashMap<String, TopOfBook>, fair: (String, Long) -> Double?,
-        knobs: Map<String, ScalpKnobs> = emptyMap(), oneSidedPrints: Boolean = false
+        knobs: Map<String, ScalpKnobs> = emptyMap()
     ): Run {
         val trades = ArrayList<ScalpTrade>()
         val ledger = ScalperLedger(nowMs = { clock }, record = { t, _ -> trades.addAll(t) }, hourOf = { 0 })
         val scalper = PaperScalper(
             model = model, ledger = ledger, topOfBook = { books[it] }, bookLevels = { null },
             closeMs = { closes[it] ?: TakerCost.closeEpochMs(it) },
-            engine = ScalperEngine(tuning = ScalpTuning(knobs)), fairYes = fair, strategies = strategies,
-            oneSidedPrints = oneSidedPrints
+            engine = ScalperEngine(tuning = ScalpTuning(knobs)), fairYes = fair, strategies = strategies
         )
         return Run(name, strategy, scalper, trades)
     }
@@ -235,7 +239,7 @@ class ArenaReplayTest {
     }
 
     /** One small change to one strategy's settings, run on its own. */
-    private class Variant(val strategy: ScalpStrategy, val name: String, val knobs: ScalpKnobs = ScalpKnobs(), val oneSided: Boolean = false)
+    private class Variant(val strategy: ScalpStrategy, val name: String, val knobs: ScalpKnobs = ScalpKnobs())
 
     /**
      * The tweaks tried on the strategies still running, written down before the sweep ran: each loosens one
@@ -251,7 +255,9 @@ class ArenaReplayTest {
         out += Variant(cb, "up to 45¢", ScalpKnobs(entryMaxCents = 45.0))
         out += Variant(cb, "from minute 9", ScalpKnobs(fromMinute = 9))
         out += Variant(cb, "from minute 8", ScalpKnobs(fromMinute = 8))
-        out += Variant(cb, "2 at once, 60 s apart", ScalpKnobs(maxPerSide = 2, cooldownSeconds = 60))
+        out += Variant(cb, "3 at once, 60 s apart", ScalpKnobs(maxPerSide = 3))
+        out += Variant(cb, "2 at once, 30 s apart", ScalpKnobs(cooldownSeconds = 30))
+        out += Variant(cb, "1 at once (before 2026-10-20)", ScalpKnobs(maxPerSide = 1))
         out += Variant(cb, "rise 3¢ + 15–45¢", ScalpKnobs(trigger = 3.0, entryMinCents = 15.0, entryMaxCents = 45.0))
         out += Variant(cb, "minute 9 + 15–45¢", ScalpKnobs(fromMinute = 9, entryMinCents = 15.0, entryMaxCents = 45.0))
         for (st in listOf(
@@ -268,7 +274,6 @@ class ArenaReplayTest {
             out += Variant(st, "from ${f.tteMax * 2} s left", ScalpKnobs(secondsLeftMax = f.tteMax * 2))
             out += Variant(st, "until ${f.tteMin / 2} s left", ScalpKnobs(secondsLeftMin = f.tteMin / 2))
             out += Variant(st, "2 at once, 15 s apart", ScalpKnobs(maxPerSide = 2, cooldownSeconds = 15))
-            out += Variant(st, "one-sided prints ok", oneSided = true)
             out += Variant(
                 st, "edge ${(gap - 1).toInt()}¢ + from ${f.tteMax * 3 / 2} s",
                 ScalpKnobs(edgeCents = gap - 1, secondsLeftMax = f.tteMax * 3 / 2)
@@ -276,13 +281,11 @@ class ArenaReplayTest {
         }
         val le = ScalpStrategy.LATE_EDGE
         out += Variant(le, "defaults")
-        out += Variant(le, "edge 1¢", ScalpKnobs(trigger = 1.0))
         out += Variant(le, "edge 0¢", ScalpKnobs(trigger = 0.0))
-        out += Variant(le, "edge 3¢", ScalpKnobs(trigger = 3.0))
-        out += Variant(le, "from 60 s left", ScalpKnobs(secondsLeftMax = 60))
+        out += Variant(le, "edge 2¢", ScalpKnobs(trigger = 2.0))
+        out += Variant(le, "from 45 s left", ScalpKnobs(secondsLeftMax = 45))
         out += Variant(le, "from 90 s left", ScalpKnobs(secondsLeftMax = 90))
-        out += Variant(le, "one-sided prints ok", oneSided = true)
-        out += Variant(le, "edge 1¢ + from 60 s", ScalpKnobs(trigger = 1.0, secondsLeftMax = 60))
+        out += Variant(le, "edge 2¢ + from 45 s (before 2026-10-20)", ScalpKnobs(trigger = 2.0, secondsLeftMax = 45))
         return out
     }
 
@@ -299,7 +302,7 @@ class ArenaReplayTest {
         val vs = variants()
         val (info, runs) = replay(File(dirName!!)) { model, books, fair ->
             vs.map { v ->
-                run(v.name, v.strategy, listOf(v.strategy), model, books, fair, mapOf(v.strategy.name to v.knobs), v.oneSided)
+                run(v.name, v.strategy, listOf(v.strategy), model, books, fair, mapOf(v.strategy.name to v.knobs))
             }
         }
         val dayOf = { ms: Long -> java.time.Instant.ofEpochMilli(ms).atZone(java.time.ZoneOffset.UTC).toLocalDate().toString() }
@@ -345,6 +348,106 @@ class ArenaReplayTest {
         outFile.parentFile?.mkdirs()
         outFile.writeText(sb.toString())
         println(outFile.readText())
+    }
+
+    /**
+     * The phone's own call, clear lead ([com.dirk.kalshiodds.signal.trend.ClearLeadRule]), on every recorded
+     * day from the recorded book's asks (Kalshi data only, like the app): the first moment in a window the
+     * favourite's ask is in the band, $5 all-in at that ask with the exact taker fee, held to the settlement.
+     * The bands are written down before the run; the same "better" rule as [sweepTweaks].
+     */
+    @Test
+    fun sweepClearLead() {
+        val dirName = System.getenv("ARENA_REPLAY_DIR")
+        Assume.assumeTrue("set ARENA_REPLAY_DIR and ARENA_SWEEP to sweep", !dirName.isNullOrBlank() && !System.getenv("ARENA_SWEEP").isNullOrBlank())
+        val outFile = File(System.getenv("ARENA_CLEAR_LEAD_OUT") ?: "build/clear_lead_sweep.md")
+        val band = ClearLeadRule.DEFAULT_BAND
+        val bands = listOf(
+            "defaults (minutes 3–10, 80–90¢)" to band,
+            "80–95¢" to band.copy(maxAsk = 0.95),
+            "85–95¢" to band.copy(minAsk = 0.85, maxAsk = 0.95),
+            "75–90¢" to band.copy(minAsk = 0.75),
+            "70–85¢" to band.copy(minAsk = 0.70, maxAsk = 0.85),
+            "minutes 3–12" to band.copy(minTte = 180L),
+            "minutes 5–10" to band.copy(maxTte = 600L),
+            "minutes 1–10" to band.copy(maxTte = 840L),
+            "minutes 10–13" to band.copy(minTte = 120L, maxTte = 300L),
+            "minutes 10–13, 80–95¢" to ClearLeadRule.Band(120L, 300L, 0.80, 0.95),
+            "minutes 12–14.5, 85–97¢" to ClearLeadRule.Band(30L, 180L, 0.85, 0.97),
+            "last 90 s, 90–97¢" to ClearLeadRule.Band(20L, 90L, 0.90, 0.97)
+        )
+        class Bet(val ticker: String, val side: String, val sized: com.dirk.kalshiodds.signal.latefav.LateFavoriteRule.Sized, val ms: Long) {
+            var pnl: Double? = null
+        }
+        val bets = bands.map { HashMap<String, Bet>() }
+        val info = replay(
+            File(dirName!!),
+            onBook = { tk, ts, top ->
+                val close = closes[tk] ?: TakerCost.closeEpochMs(tk)
+                if (close != null) {
+                    val tte = (close - ts) / 1000L
+                    val yesAsk = com.dirk.kalshiodds.domain.KalshiPrice.usable(top.yesAsk)
+                        ?: com.dirk.kalshiodds.domain.KalshiPrice.impliedAskFromOppositeBid(top.noBid)
+                    val noAsk = com.dirk.kalshiodds.domain.KalshiPrice.usable(top.noAsk)
+                        ?: com.dirk.kalshiodds.domain.KalshiPrice.impliedAskFromOppositeBid(top.yesBid)
+                    for ((k, b) in bands.withIndex()) {
+                        if (tk in bets[k]) continue
+                        val sig = ClearLeadRule.signal(tte, yesAsk, noAsk, b.second) ?: continue
+                        val d = ClearLeadRule.decide(tk, ts, sig, yesAsk, noAsk) ?: continue
+                        bets[k][tk] = Bet(tk, d.side, d.sized, ts)
+                    }
+                }
+            },
+            onSettle = { tk, result ->
+                for (m in bets) m[tk]?.let { b ->
+                    if (b.pnl == null) b.pnl = com.dirk.kalshiodds.signal.latefav.LateFavoriteRule.pnl(b.sized, b.side.equals(result, true))
+                }
+            }
+        ) { _, _, _ -> emptyList() }.first
+        // The default band must be exactly what the app calls.
+        assertDefaultIsShipped()
+        val dayOf = { ms: Long -> java.time.Instant.ofEpochMilli(ms).atZone(java.time.ZoneOffset.UTC).toLocalDate().toString() }
+        val split = info.days.getOrNull((info.days.size * 0.6).toInt()) ?: ""
+        val sb = StringBuilder()
+        sb.append("# Clear lead on the recorded days\n\n")
+        sb.append("Recorded days: ${info.days.first()} → ${info.days.last()} (${info.days.size}) · ${info.settled} settled windows. ")
+        sb.append("$5 all-in at the recorded ask, exact taker fee, once a window, held to the settlement. ")
+        sb.append("Better = 10%+ more bets, net at least the defaults', up in both the first 60% and last 40% of days (split $split).\n\n")
+        sb.append("| Band | Bets | Won | Net $ | $ a bet | First | Last | $/day 95% CI | Better |\n|---|---:|---:|---:|---:|---:|---:|---|---|\n")
+        val base = bets[0].values.filter { it.pnl != null }
+        val baseNet = base.sumOf { it.pnl!! }
+        var pick: Pair<String, Double>? = null
+        for ((k, b) in bands.withIndex()) {
+            val done = bets[k].values.filter { it.pnl != null }
+            val net = done.sumOf { it.pnl!! }
+            val first = done.filter { dayOf(it.ms) < split }.sumOf { it.pnl!! }
+            val last = done.filter { dayOf(it.ms) >= split }.sumOf { it.pnl!! }
+            val byDay = info.days.map { d -> done.filter { dayOf(it.ms) == d }.sumOf { it.pnl!! } }
+            val rnd = Random(7)
+            val boots = DoubleArray(2_000) { byDay.indices.sumOf { byDay[rnd.nextInt(byDay.size)] } / byDay.size }.also { it.sort() }
+            val better = k > 0 && done.size >= base.size * 1.1 && net >= baseNet - 1e-9 && first > 0 && last > 0
+            if (better && (pick == null || net > pick!!.second)) pick = b.first to net
+            sb.append(
+                String.format(
+                    Locale.US, "| %s | %d | %.0f%% | %+.2f | %+.3f | %+.2f | %+.2f | [%+.2f, %+.2f] | %s |\n",
+                    b.first, done.size, if (done.isEmpty()) 0.0 else done.count { it.pnl!! > 0 } * 100.0 / done.size,
+                    net, if (done.isEmpty()) 0.0 else net / done.size, first, last,
+                    boots[(0.025 * boots.size).toInt()], boots[(0.975 * boots.size).toInt().coerceAtMost(boots.size - 1)],
+                    if (better) "yes" else ""
+                )
+            )
+        }
+        sb.append("\nCLEAR_LEAD_PICK ${pick?.first ?: "keep defaults"}\n")
+        outFile.parentFile?.mkdirs()
+        outFile.writeText(sb.toString())
+        println(outFile.readText())
+    }
+
+    private fun assertDefaultIsShipped() {
+        check(
+            ClearLeadRule.DEFAULT_BAND ==
+                ClearLeadRule.Band(ClearLeadRule.MIN_TTE_SECONDS, ClearLeadRule.MAX_TTE_SECONDS, ClearLeadRule.MIN_ASK, ClearLeadRule.MAX_ASK)
+        )
     }
 
     private fun report(trades: List<ScalpTrade>, days: List<String>, prints: Long, settled: Int, hasModel: Boolean): String {

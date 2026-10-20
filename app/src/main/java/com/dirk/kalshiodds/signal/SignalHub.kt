@@ -384,6 +384,8 @@ class SignalHub(
             maybeLateFavorite(tick, scored)
             maybeFlowFade(tick, scored)
             maybeCentBetter(tick, scored)
+            // Every tick, not only book publishes: the first moment in the band is the bet (once a window).
+            maybeClearLead(tick, scored)
         }
         persistChartTick(tick)
         val alert = if (notify && scored != null) {

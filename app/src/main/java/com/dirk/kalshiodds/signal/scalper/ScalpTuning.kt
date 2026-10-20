@@ -92,7 +92,7 @@ class Tuned(val strategy: ScalpStrategy, val knobs: ScalpKnobs, defaultContracts
 
     val maxOrdersPerWindow: Int? = knobs.maxOrdersPerWindow?.takeIf { it > 0 }
 
-    val cooldownMs: Long = (knobs.cooldownSeconds ?: 0).coerceAtLeast(0) * 1000L
+    val cooldownMs: Long = (knobs.cooldownSeconds ?: strategy.cooldownSeconds).coerceAtLeast(0) * 1000L
 
     val dailyLossUsd: Double? = knobs.dailyLossUsd?.takeIf { it > 0.0 }
 

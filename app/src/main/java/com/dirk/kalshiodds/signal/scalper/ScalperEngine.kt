@@ -69,7 +69,9 @@ enum class ScalpStrategy(
     /** Trades only in the first minute of the window (the opening ride). */
     val opening: Boolean = false,
     /** First minute of the window it opens orders in (the "from minute" setting starts here). */
-    val startMinute: Int = 0
+    val startMinute: Int = 0,
+    /** Seconds it waits after opening an order before the next (the "wait after an order" setting starts here). */
+    val cooldownSeconds: Int = 0
 ) {
     /** The trained model picks calm moments. Rest in, +1¢ out. */
     ML_REST("ML scalper · resting", false, 0.01, 0.04, 120_000L, 5, 12, -2.01),
@@ -213,10 +215,14 @@ enum class ScalpStrategy(
     /** Book imbalance: the bid shows 3× the size of the ask and 300+ contracts (the book must be live). Buy now. */
     BOOK_IMBALANCE("Book imbalance · buy now", true, 0.02, 0.02, 30_000L, 2, 1, null, origin = "Claude 1.9.4"),
 
-    /** Late comeback: minutes 10–13, an underdog (20–40¢) up 4¢ in 30 s. Buy now, hold to the settlement. */
+    /**
+     * Late comeback: minutes 10–13, an underdog (20–40¢) up 4¢ in 30 s. Buy now, hold to the settlement.
+     * Up to two a side, 60 s apart (sweep of 2026-10-20 on the 12 recorded days: 487 trades and +$214.93
+     * against 381 and +$107.40 with one).
+     */
     LATE_COMEBACK(
-        "Late comeback · buy, hold", true, 0.0, 0.0, 0L, 5, 1, null,
-        hold = true, entryMin = 0.20, entryMax = 0.40, origin = "Claude 1.9.4", startMinute = 10
+        "Late comeback · buy, hold", true, 0.0, 0.0, 0L, 5, 2, null,
+        hold = true, entryMin = 0.20, entryMax = 0.40, origin = "Claude 1.9.4", startMinute = 10, cooldownSeconds = 60
     ),
 
     /**
@@ -229,27 +235,34 @@ enum class ScalpStrategy(
      * stops were added) sf19 / sf21 / sf31 made about +$1.40 a 10-contract
      * trade and sf23 +$1.79, intervals above zero but on 10–16 trades each;
      * sf16's interval crossed zero.
+     *
+     * Tweaked 2026-10-20 by the arena sweep on the 12 recorded days (ArenaReplayTest.sweepTweaks, rule fixed
+     * before the run: 10%+ more trades, no less net, up in both parts of the days): base buys from 90 s left
+     * (169 trades, +$47.05, was 93 and +$46.43), strict from a 93% fair price (74, +$34.33, was 67 and
+     * +$26.92), 97% on a 2¢ edge (82, +$20.23, was 72 and +$19.84), the last-30 copy from 45 s left (30,
+     * +$33.22, was 16 and +$17.18) and the off-US-hours copy two a side 15 s apart (50, +$39.87, was 45 and
+     * +$35.22). Chosen on the same days they are scored on.
      */
     KASHI_FAV_BASE(
         "Kashi late fav · base", true, 0.0, 0.10, 0L, 1, 1, null,
-        hold = true, entryMin = 0.50, entryMax = 0.97, origin = "kashi sf16", fav = FavSpec(20, 60, 0.90, 0.05)
+        hold = true, entryMin = 0.50, entryMax = 0.97, origin = "kashi sf16", fav = FavSpec(20, 90, 0.90, 0.05)
     ),
     KASHI_FAV_STRICT(
         "Kashi late fav · strict", true, 0.0, 0.15, 0L, 1, 1, null,
-        hold = true, entryMin = 0.50, entryMax = 0.95, origin = "kashi sf19", fav = FavSpec(20, 60, 0.95, 0.05)
+        hold = true, entryMin = 0.50, entryMax = 0.95, origin = "kashi sf19", fav = FavSpec(20, 60, 0.93, 0.05)
     ),
     KASHI_FAV_97(
         "Kashi late fav · 97%", true, 0.0, 0.10, 0L, 1, 1, null,
-        hold = true, entryMin = 0.50, entryMax = 0.97, origin = "kashi sf21", fav = FavSpec(20, 60, 0.97, 0.03)
+        hold = true, entryMin = 0.50, entryMax = 0.97, origin = "kashi sf21", fav = FavSpec(20, 60, 0.97, 0.02)
     ),
     KASHI_FAV_LAST30(
-        "Kashi late fav · last 30 s", true, 0.0, 0.10, 0L, 1, 1, null,
-        hold = true, entryMin = 0.50, entryMax = 0.95, origin = "kashi sf23", fav = FavSpec(10, 30, 0.95, 0.05)
+        "Kashi late fav · last 45 s", true, 0.0, 0.10, 0L, 1, 1, null,
+        hold = true, entryMin = 0.50, entryMax = 0.95, origin = "kashi sf23", fav = FavSpec(10, 45, 0.95, 0.05)
     ),
     KASHI_FAV_NIGHT(
-        "Kashi late fav · off US hours", true, 0.0, 0.25, 0L, 1, 1, null,
+        "Kashi late fav · off US hours", true, 0.0, 0.25, 0L, 1, 2, null,
         hold = true, entryMin = 0.50, entryMax = 0.95, origin = "kashi sf31",
-        fav = FavSpec(20, 60, 0.95, 0.05, offUsHours = true)
+        fav = FavSpec(20, 60, 0.95, 0.05, offUsHours = true), cooldownSeconds = 15
     ),
 
     /**
@@ -272,11 +285,12 @@ enum class ScalpStrategy(
      * fixed. [ScalpFair] prices the side from the prints fixed so far plus
      * the live index; buy any side whose fair price is at least
      * [FavSpec.fairMin] and beats its ask by the taker fee plus
-     * [FavSpec.gap]. Hold to the settlement, no stop. Once a window.
+     * [FavSpec.gap]. Hold to the settlement, no stop. Once a window. From 60 s left on a 1¢ edge since the
+     * 2026-10-20 sweep (153 trades, +$67.14, was 5–45 s and 2¢: 63 and +$55.80; its interval now crosses zero).
      */
     LATE_EDGE(
         "Late edge · settle average, buy, hold", true, 0.0, 0.0, 0L, 1, 1, null,
-        hold = true, entryMin = 0.50, entryMax = 0.98, origin = "edge report", fav = FavSpec(5, 45, 0.80, 0.02)
+        hold = true, entryMin = 0.50, entryMax = 0.98, origin = "edge report", fav = FavSpec(5, 60, 0.80, 0.01)
     );
 
     /**

@@ -65,18 +65,24 @@ object ClearLeadRule {
             )
     }
 
-    fun inTimeBand(tteSeconds: Long?): Boolean =
-        tteSeconds != null && tteSeconds in MIN_TTE_SECONDS..MAX_TTE_SECONDS
+    /** When and at what price the rule buys: [minTte]–[maxTte] seconds left, the favourite's ask in [[minAsk], [maxAsk]). */
+    data class Band(val minTte: Long, val maxTte: Long, val minAsk: Double, val maxAsk: Double)
 
-    fun inBand(ask: Double?): Boolean =
-        ask != null && ask.isFinite() && ask >= MIN_ASK - EPS && ask < MAX_ASK - EPS
+    /** The shipped band (the replay in ArenaReplayTest tries others on the recorded days). */
+    val DEFAULT_BAND = Band(MIN_TTE_SECONDS, MAX_TTE_SECONDS, MIN_ASK, MAX_ASK)
+
+    fun inTimeBand(tteSeconds: Long?, band: Band = DEFAULT_BAND): Boolean =
+        tteSeconds != null && tteSeconds in band.minTte..band.maxTte
+
+    fun inBand(ask: Double?, band: Band = DEFAULT_BAND): Boolean =
+        ask != null && ask.isFinite() && ask >= band.minAsk - EPS && ask < band.maxAsk - EPS
 
     /** The rule's call right now from Kalshi's asks, or null. */
-    fun signal(tteSeconds: Long?, yesAsk: Double?, noAsk: Double?): Signal? {
-        val tte = tteSeconds?.takeIf { inTimeBand(it) } ?: return null
+    fun signal(tteSeconds: Long?, yesAsk: Double?, noAsk: Double?, band: Band = DEFAULT_BAND): Signal? {
+        val tte = tteSeconds?.takeIf { inTimeBand(it, band) } ?: return null
         return when {
-            inBand(yesAsk) -> Signal("YES", yesAsk!!, tte)
-            inBand(noAsk) -> Signal("NO", noAsk!!, tte)
+            inBand(yesAsk, band) -> Signal("YES", yesAsk!!, tte)
+            inBand(noAsk, band) -> Signal("NO", noAsk!!, tte)
             else -> null
         }
     }

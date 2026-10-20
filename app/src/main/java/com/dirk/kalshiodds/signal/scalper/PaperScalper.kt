@@ -364,12 +364,7 @@ class PaperScalper(
     /** YES fair price from the live spot ([ScalpFair]) for Kashi's late favourites; null when unknown. */
     private val fairYes: (ticker: String, nowMs: Long) -> Double? = { _, _ -> null },
     /** What runs. The retired strategies ([ScalpStrategy.RETIRED]) open nothing; tests and the replay pass them all. */
-    private val strategies: List<ScalpStrategy> = ScalpStrategy.ACTIVE,
-    /**
-     * Own-band strategies normally need both a fresh taker-buy and a fresh taker-sell print (10 s) next to the
-     * book; true accepts either one. Off in the app (the cached book has no age); the replay measures it.
-     */
-    private val oneSidedPrints: Boolean = false
+    private val strategies: List<ScalpStrategy> = ScalpStrategy.ACTIVE
 ) {
     private val grids = HashMap<String, PrintGrid>()
     private val lastDecision = HashMap<String, IntArray>()   // ticker -> last decision second per cadence slot
@@ -635,11 +630,7 @@ class PaperScalper(
                 val ownBand = tn.ownBand
                 // Own-band strategies may trade outside the grid's 10–90¢ quotable band, but still need a
                 // current grid quote: the cached book has no age, and a stalled book would price stale.
-                val printsLive = if (oneSidedPrints) {
-                    !grid.bid(side, s).isNaN() || !grid.ask(side, s).isNaN()
-                } else {
-                    !grid.bid(side, s).isNaN() && !grid.ask(side, s).isNaN()
-                }
+                val printsLive = !grid.bid(side, s).isNaN() && !grid.ask(side, s).isNaN()
                 if (if (ownBand) !(fresh && printsLive) else !scalpOk) continue
                 val fire = when (st) {
                     ScalpStrategy.ML_REST -> null
