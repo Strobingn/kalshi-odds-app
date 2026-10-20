@@ -6,11 +6,18 @@ name: Arena replay (Claude)
 
 on:
   workflow_dispatch:
+    inputs:
+      source:
+        description: "Which days: cloud (scalper-data release), phone (data/phone-recordings) or both"
+        type: choice
+        options: [cloud, phone, both]
+        default: cloud
   push:
     branches: [Claude]
     paths:
       - "app/src/test/java/com/dirk/kalshiodds/signal/scalper/ArenaReplayTest.kt"
       - ".github/workflows/arena-replay.yml"
+      - "data/phone-recordings/**"
 
 permissions:
   contents: read
@@ -34,9 +41,17 @@ jobs:
       - name: Download the recordings
         env:
           GH_TOKEN: ${{ github.token }}
+          # A push that only adds phone days replays those days alone.
+          SOURCE: ${{ inputs.source || (contains(join(github.event.commits.*.added, ' '), 'data/phone-recordings/') && 'phone' || 'cloud') }}
         run: |
           mkdir -p rec
-          gh release download scalper-data -R "$GITHUB_REPOSITORY" -D rec -p 'trades_*' -p 'book_*' -p 'spot_*' -p 'settle_*'
+          echo "source: $SOURCE"
+          if [ "$SOURCE" != phone ]; then
+            gh release download scalper-data -R "$GITHUB_REPOSITORY" -D rec -p 'trades_*' -p 'book_*' -p 'spot_*' -p 'settle_*'
+          fi
+          if [ "$SOURCE" != cloud ]; then
+            cp data/phone-recordings/trades_* data/phone-recordings/book_* data/phone-recordings/spot_* data/phone-recordings/settle_* rec/
+          fi
           ls -la rec
 
       - name: Replay
