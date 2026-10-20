@@ -44,6 +44,44 @@ private fun heatColor(rate: Double?, n: Int, up: Color, down: Color, empty: Colo
     return if (rate >= 0.5) up.copy(alpha = alpha) else down.copy(alpha = alpha)
 }
 
+/** Tuner changes on a time axis. Every strategy's knobs share the line. */
+@Composable
+fun KnobTimeline(ticks: List<ChartGallery.KnobTick>, modifier: Modifier = Modifier) {
+    val c = DipTheme.colors
+    val shown = ChartGallery.knobTicks(ticks)
+    Column(
+        modifier.fillMaxWidth().testTag("chart_knobs")
+            .semantics { contentDescription = "Tuner knob change timeline" },
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text("Tuner knobs", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
+        Text("Recorded knob changes, oldest first. Every strategy is on this line.", style = MaterialTheme.typography.bodySmall, color = c.textSecondary)
+        if (shown.isEmpty()) {
+            ChartEmptyState(height = 120.dp)
+            return
+        }
+        Canvas(Modifier.fillMaxWidth().height(72.dp)) {
+            val left = 8.dp.toPx()
+            val right = 8.dp.toPx()
+            val y = size.height / 2f
+            val plotW = (size.width - left - right).coerceAtLeast(1f)
+            val t0 = shown.first().atMs
+            val t1 = shown.last().atMs.coerceAtLeast(t0 + 1)
+            drawLine(c.border, Offset(left, y), Offset(left + plotW, y), 2.dp.toPx())
+            shown.forEach { tick ->
+                val x = left + plotW * ((tick.atMs - t0).toFloat() / (t1 - t0).toFloat()).coerceIn(0f, 1f)
+                drawCircle(c.upButton, 6.dp.toPx(), Offset(x, y))
+            }
+        }
+        shown.forEach { tick ->
+            Column {
+                Text("${tick.who} · ${tick.knob}", color = c.textPrimary, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("${tick.from} → ${tick.to} · ${chartClock(tick.atMs)} ET", color = c.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
 /** Gross, fees, and net for the window and the day on one chart. */
 @Composable
 fun FeeWaterfall(window: ChartGallery.FeeLeg?, day: ChartGallery.FeeLeg?, modifier: Modifier = Modifier) {

@@ -67,6 +67,29 @@ class ChartGalleryRenderTest {
         compose.onAllNodesWithText("No data yet").assertCountEquals(0)
     }
 
+    @Test fun knobsEmpty() {
+        show { KnobTimeline(emptyList()) }
+        compose.onNodeWithTag("chart_knobs").assertExists()
+        compose.onNodeWithText("Tuner knobs").assertExists()
+        compose.onNodeWithText("No data yet").assertExists()
+    }
+
+    @Test fun knobsSample() {
+        show {
+            KnobTimeline(
+                listOf(
+                    ChartGallery.KnobTick(1_700_000_000_000, "v2-dip", "maxEntryCents", "50", "48"),
+                    ChartGallery.KnobTick(1_700_000_060_000, "v2-fair", "stopCents", "20", "19")
+                )
+            )
+        }
+        compose.onNodeWithText("v2-dip · maxEntryCents").assertExists()
+        compose.onNodeWithText("v2-fair · stopCents").assertExists()
+        compose.onNodeWithText("50 → 48", substring = true).assertExists()
+        compose.onNodeWithText("20 → 19", substring = true).assertExists()
+        compose.onAllNodesWithText("No data yet").assertCountEquals(0)
+    }
+
     @Test fun waterfallEmpty() {
         show { FeeWaterfall(null, null) }
         compose.onNodeWithTag("chart_waterfall").assertExists()

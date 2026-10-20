@@ -1,11 +1,15 @@
 package com.dirk.kalshiodds.ui
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.dirk.kalshiodds.KalshiOddsApp
+import com.dirk.kalshiodds.llm.AiAdjustment
 import com.dirk.kalshiodds.decision.ScalpModels
 import com.dirk.kalshiodds.decision.ScalpTrade
 import com.dirk.kalshiodds.signal.paper.PaperFill
-import com.dirk.kalshiodds.ui.charts.CalibrationPlot
 import com.dirk.kalshiodds.ui.charts.ChartShapes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -27,8 +31,23 @@ data class LiveWindowExtras(
     val bookYes: List<Pair<Double, Double>> = emptyList(),
     val bookNo: List<Pair<Double, Double>> = emptyList(),
     val calibration: List<Pair<Double, Boolean>> = emptyList(),
-    val dayFees: ChartGallery.FeeLeg? = null
+    val dayFees: ChartGallery.FeeLeg? = null,
+    val knobs: List<ChartGallery.KnobTick> = emptyList()
 )
+
+/** Recorded tuner changes. Reads the existing adjustment log and does not call a provider. */
+@Composable
+fun rememberKnobTicks(): List<ChartGallery.KnobTick> {
+    val context = LocalContext.current
+    val store = remember(context) {
+        (context.applicationContext as? KalshiOddsApp)?.let { runCatching { it.container.aiWatch }.getOrNull() }
+    }
+    val log by (store?.adjustments ?: kotlinx.coroutines.flow.flowOf(emptyList<AiAdjustment>()))
+        .collectAsStateWithLifecycle(emptyList())
+    return remember(log) {
+        ChartGallery.knobTicks(log.map { ChartGallery.KnobTick(it.atMs, it.scalper, it.setting, it.oldValue, it.newValue) })
+    }
+}
 
 /** Settled paper fills → (AI UP chance 0–100, whether UP settled). */
 fun paperCalibration(fills: List<PaperFill>): List<Pair<Double, Boolean>> = fills.mapNotNull { fill ->

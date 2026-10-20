@@ -69,6 +69,7 @@ fun ScalpAlgoScreen(viewModel: OddsViewModel, onBack: () -> Unit) {
     val controls by viewModel.scalpStrategyControls.collectAsStateWithLifecycle()
     val paper = viewModel.state.collectAsStateWithLifecycle().value.paper
     val scalpTab = viewModel.scalpTab.collectAsStateWithLifecycle().value
+    val knobTicks = rememberKnobTicks()
     var settingsOpen by androidx.compose.runtime.remember(d.model) { androidx.compose.runtime.mutableStateOf(false) }
     val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     androidx.compose.runtime.DisposableEffect(owner, viewModel, settingsOpen) {
@@ -98,7 +99,8 @@ fun ScalpAlgoScreen(viewModel: OddsViewModel, onBack: () -> Unit) {
                 bookYes = book?.yes.orEmpty(),
                 bookNo = book?.no.orEmpty(),
                 calibration = paperCalibration(paper.postResetFills.ifEmpty { paper.fills }),
-                dayFees = com.dirk.kalshiodds.ui.charts.ChartGallery.dayLeg(scalpTab.algoToday.values)
+                dayFees = com.dirk.kalshiodds.ui.charts.ChartGallery.dayLeg(scalpTab.algoToday.values),
+                knobs = knobTicks
             ))
     }
 }

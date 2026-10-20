@@ -187,6 +187,21 @@ class ChartGalleryTest {
         assertNull(ChartGallery.dayLeg(emptyList()))
     }
 
+    @Test fun knobTicksDropUnchangedAndSort() {
+        val ticks = ChartGallery.knobTicks(
+            listOf(
+                ChartGallery.KnobTick(200, "v2-fair", "stopCents", "20", "19"),
+                ChartGallery.KnobTick(100, "v2-dip", "maxEntryCents", "50", "48"),
+                ChartGallery.KnobTick(300, "v2-fair", "stopCents", "19", "19"),
+                ChartGallery.KnobTick(0, "v2-fair", "stopCents", "1", "2"),
+                ChartGallery.KnobTick(150, " ", "stopCents", "1", "2")
+            )
+        )
+        assertEquals(listOf(100L, 200L), ticks.map { it.atMs })
+        assertEquals("48", ticks[0].to)
+        assertTrue(ChartGallery.knobTicks(emptyList()).isEmpty())
+    }
+
     private fun trade(id: String, side: String, rule: String, net: Double) = ScalpTrade(
         id = id,
         ticker = "KXBTC15M-26OCT181500-00",

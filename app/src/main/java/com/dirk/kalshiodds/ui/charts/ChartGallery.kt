@@ -149,6 +149,13 @@ object ChartGallery {
         ScatterDot(entry * 100.0, exit * 100.0, (t.netUsd ?: 0.0) > 0.0)
     }
 
+    data class KnobTick(val atMs: Long, val who: String, val knob: String, val from: String, val to: String)
+
+    /** Recorded tuner changes, oldest first. Identical values and blank knobs are dropped. */
+    fun knobTicks(rows: List<KnobTick>): List<KnobTick> =
+        rows.filter { it.atMs > 0L && it.knob.isNotBlank() && it.from != it.to && it.who.isNotBlank() }
+            .sortedBy { it.atMs }
+
     data class FeeLeg(val scope: String, val gross: Double, val fees: Double, val net: Double)
 
     /** Gross, fee cost, and net. A flat zero leg is omitted. Fees are stored as a positive cost. */

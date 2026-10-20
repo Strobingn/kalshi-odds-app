@@ -142,7 +142,8 @@ fun ScalpTabScreen(viewModel: OddsViewModel, onOpenScalpData: () -> Unit, onOpen
         bookYes = book?.yes.orEmpty(),
         bookNo = book?.no.orEmpty(),
         calibration = paperCalibration(paper.postResetFills.ifEmpty { paper.fills }),
-        dayFees = com.dirk.kalshiodds.ui.charts.ChartGallery.dayLeg(st.algoToday.values)
+        dayFees = com.dirk.kalshiodds.ui.charts.ChartGallery.dayLeg(st.algoToday.values),
+        knobs = rememberKnobTicks()
     )
     var settings by remember { mutableStateOf(false) }
     if (settings) SwarmScalpSettingsDialog { settings = false }
