@@ -81,9 +81,16 @@ object LlmProviders {
         return LlmEndpoint(s.id, b, m, apiKey.trim())
     }
 
-    /** Mistral, Groq, Gemini, an OpenRouter free preset, or any model id that ends in `:free`. */
-    fun freeFamily(id: String, model: String = ""): Boolean =
-        spec(id).free || model.trim().endsWith(":free", ignoreCase = true)
+    /**
+     * Mistral free-plan models, Groq, Gemini, an OpenRouter free preset, or any model id that ends in `:free`.
+     * A paid Mistral model Dirk typed or saved (mistral-large-latest and the like) is not free, so it never
+     * gets automatic calls. Blank means the free default.
+     */
+    fun freeFamily(id: String, model: String = ""): Boolean {
+        val m = model.trim()
+        if (id == MISTRAL) return m.isEmpty() || m in MISTRAL_CHAIN
+        return spec(id).free || m.endsWith(":free", ignoreCase = true)
+    }
 
     fun isGemini(id: String): Boolean = spec(id).nativeGemini
 

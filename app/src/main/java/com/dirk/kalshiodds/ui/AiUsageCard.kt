@@ -167,7 +167,8 @@ fun AiUsageSettingsCard(store: AiWatchStore, settings: LlmSettings) {
             Switch(checked = store.freeTierOn(provider, editedModel), onCheckedChange = { store.setFreeTier(provider, it) })
         }
         Text("Active provider: ${LlmProviders.spec(active.provider).label} · $kind", color = colors.onSurface, style = MaterialTheme.typography.bodySmall)
-        if (key.isBlank()) {
+        // Keyed on the saved slot, not the text being typed, so the field does not vanish on the first keystroke.
+        if (slot.apiKey.isBlank()) {
             Text(
                 "No ${LlmProviders.shortLabel(provider)} API key saved yet.",
                 color = colors.error,

@@ -35,9 +35,13 @@ object GeminiApi {
         return root.toString()
     }
 
-    /** Any 404, a NOT_FOUND status, or a "not found" / "no longer available" body. */
+    /**
+     * Any 404, or an error response with a NOT_FOUND status or a "not found" / "no longer available" body.
+     * A 2xx reply is never retired, even when the model's answer text says "not found".
+     */
     fun retired(code: Int, body: String): Boolean {
         if (code == 404) return true
+        if (code in 200..299) return false
         val b = body.lowercase()
         return "not_found" in b || "not found" in b || "no longer available" in b
     }
