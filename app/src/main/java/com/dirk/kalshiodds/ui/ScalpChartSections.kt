@@ -7,8 +7,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dirk.kalshiodds.KalshiOddsApp
 import com.dirk.kalshiodds.llm.AiAdjustment
+import com.dirk.kalshiodds.decision.ScalpChartFeed
 import com.dirk.kalshiodds.decision.ScalpModels
+import com.dirk.kalshiodds.decision.ScalpState
 import com.dirk.kalshiodds.decision.ScalpTrade
+import com.dirk.kalshiodds.decision.WindowCalibration
 import com.dirk.kalshiodds.signal.paper.PaperFill
 import com.dirk.kalshiodds.ui.charts.ChartShapes
 import androidx.compose.foundation.layout.Arrangement
@@ -20,6 +23,7 @@ import com.dirk.kalshiodds.ui.charts.ChartGallery
 import com.dirk.kalshiodds.ui.charts.CorrelationHeatmap
 import com.dirk.kalshiodds.ui.charts.EntryExitScatter
 import com.dirk.kalshiodds.ui.charts.EquitySparkGrid
+import com.dirk.kalshiodds.ui.charts.FamilyStackChart
 import com.dirk.kalshiodds.ui.charts.PnlHistogram
 import com.dirk.kalshiodds.ui.charts.RollingWinRateChart
 import com.dirk.kalshiodds.ui.charts.StrategyLeaderboard
@@ -50,6 +54,24 @@ fun rememberKnobTicks(): List<ChartGallery.KnobTick> {
     }
 }
 
+/** Ledger, settled scalps, and paper fills for the calibration chart. Empty until the app container is up. */
+@Composable
+fun rememberScalpChartHistory(): ScalpChartFeed.Snapshot {
+    val context = LocalContext.current
+    val feed = remember(context) {
+        (context.applicationContext as? KalshiOddsApp)?.let { runCatching { it.container.chartFeed }.getOrNull() }
+    }
+    val flow = feed?.snapshots ?: kotlinx.coroutines.flow.flowOf(ScalpChartFeed.Snapshot())
+    return flow.collectAsStateWithLifecycle(ScalpChartFeed.Snapshot()).value
+}
+
+/** Injected pairs win, so previews stay deterministic. Otherwise the off-thread chart feed. */
+@Composable
+fun rememberCalibrationReport(injected: List<Pair<Double, Boolean>>): WindowCalibration.Report {
+    val history = rememberScalpChartHistory()
+    return if (injected.isNotEmpty()) WindowCalibration.fromPairs(injected) else history.calibration
+}
+
 /** Settled paper fills → (AI UP chance 0–100, whether UP settled). */
 fun paperCalibration(fills: List<PaperFill>): List<Pair<Double, Boolean>> = fills.mapNotNull { fill ->
     val won = fill.won ?: return@mapNotNull null
@@ -73,12 +95,28 @@ internal fun AnalysisGallery(
     val heat = remember(trades) { ChartGallery.winRateByHourCoin(trades) }
     val board = remember(leaders) { ChartGallery.leaderboard(leaders) }
     val corr = remember(windows, nowMs, models) { ChartGallery.dailyCorrelation(windows, nowMs, models) }
+    val families = remember(trades) {
+        ChartGallery.familyStacks(trades.mapNotNull { trade ->
+            if (trade.state != ScalpState.CLOSED) return@mapNotNull null
+            val net = trade.netUsd?.takeIf { it.isFinite() } ?: return@mapNotNull null
+            val at = trade.closedAtMs ?: return@mapNotNull null
+            ChartGallery.FamilyEvent(at, trade.algoLabel.ifBlank { "Scalp" }, net)
+        })
+    }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         ArenaCard { StrategySideBars(groups) }
         ArenaCard { WinRateHeatmap(heat) }
         ArenaCard { StrategyLeaderboard(board) }
         ArenaCard { EquitySparkGrid(sparks) }
         ArenaCard { CorrelationHeatmap(corr) }
+        if (families != null) {
+            ArenaCard {
+                FamilyStackChart(
+                    families,
+                    subtitle = "Closed scalp trades by strategy. The top of the stack is the combined net."
+                )
+            }
+        }
     }
 }
 

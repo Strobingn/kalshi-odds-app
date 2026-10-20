@@ -62,6 +62,7 @@ fun ChartDetailScreen(
     onBuyNo: (MarketUiModel) -> Unit,
     book: com.dirk.kalshiodds.signal.engine.BookLevelSnapshot? = null,
     calibration: List<Pair<Double, Boolean>> = emptyList(),
+    strikeUsd: Double? = null,
     windowFees: ChartGallery.FeeLeg? = null,
     dayFees: ChartGallery.FeeLeg? = null,
     knobs: List<ChartGallery.KnobTick> = emptyList()
@@ -190,10 +191,19 @@ fun ChartDetailScreen(
                 }
             OrderBookCard(book)
             CumulativeDepthChart(ChartGallery.cumulativeDepth(book?.yes.orEmpty(), book?.no.orEmpty()))
-            CalibrationPlot(ChartGallery.calibration(calibration))
+            run {
+                val report = rememberCalibrationReport(calibration)
+                CalibrationPlot(
+                    ChartGallery.calibration(report.pairs()),
+                    sampleCount = report.count,
+                    brierLine = report.brierLabel()
+                )
+            }
             FeeWaterfall(windowFees, dayFees)
             KnobTimeline(knobs)
-            DistanceToStrikeChart(ChartGallery.distanceToStrike(points, market.floorStrike))
+            DistanceToStrikeChart(
+                ChartGallery.distanceToStrike(points, strikeUsd?.takeIf { it.isFinite() && it > 0.0 } ?: market.floorStrike)
+            )
             UpDownBuyButtons(
                 market = market,
                 onBuyYes = { onBuyYes(market) },

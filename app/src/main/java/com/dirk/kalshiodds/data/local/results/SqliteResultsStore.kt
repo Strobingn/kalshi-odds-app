@@ -1096,11 +1096,16 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
         return out
     }
 
-    override fun loadDaily(dayEt: String): List<com.dirk.kalshiodds.decision.ScalpDaily> {
+    override fun loadDaily(dayEt: String): List<com.dirk.kalshiodds.decision.ScalpDaily> = dailyRows("day_et = ?", arrayOf(dayEt))
+
+    override fun loadDailySince(dayEtInclusive: String): List<com.dirk.kalshiodds.decision.ScalpDaily> =
+        dailyRows("day_et >= ?", arrayOf(dayEtInclusive))
+
+    private fun dailyRows(where: String, args: Array<String>): List<com.dirk.kalshiodds.decision.ScalpDaily> {
         val out = ArrayList<com.dirk.kalshiodds.decision.ScalpDaily>()
         runCatching {
             db.readableDatabase.rawQuery("SELECT scalper_id, day_et, n, wins, net_usd, fees_usd, sum_sq, sum_win, sum_loss, n_loss, neg_sum, neg_n, cost_sum, best_usd, worst_usd " +
-                "FROM ${ST.DAILY} WHERE day_et = ?", arrayOf(dayEt)).use { c ->
+                "FROM ${ST.DAILY} WHERE $where", args).use { c ->
                 while (c.moveToNext()) out += com.dirk.kalshiodds.decision.ScalpDaily(c.getString(0), c.getString(1), c.getInt(2), c.getInt(3), c.getDouble(4), c.getDouble(5),
                     c.getDouble(6), c.getDouble(7), c.getDouble(8), c.getInt(9), c.getDouble(10), c.getInt(11), c.getDouble(12),
                     if (c.isNull(13)) null else c.getDouble(13), if (c.isNull(14)) null else c.getDouble(14))
@@ -1276,6 +1281,68 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
             ruleVersion = c.strOrNull("rule_version") ?: com.dirk.kalshiodds.decision.ScalpRule.VERSION
         )
     }
+
+    /**
+     * Settled 15-minute ledger rows in [sinceCloseMs, untilCloseMs], reduced to the
+     * latest timestamp at or before close for each coin and window. The calibration
+     * mapper reduces again if two rows share that timestamp.
+     */
+    fun calibrationLedgerRows(sinceCloseMs: Long, untilCloseMs: Long): List<com.dirk.kalshiodds.data.local.ledger.LedgerRow> =
+        runCatching {
+            val coin = coinKeySql("series", "ticker")
+            val sql = """
+                SELECT p.* FROM ${com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.TABLE} p
+                INNER JOIN (
+                  SELECT coin_key, close_ms, MAX(ts) AS ts FROM (
+                    SELECT $coin AS coin_key, close_time_ms AS close_ms, timestamp_ms AS ts
+                    FROM ${com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.TABLE}
+                    WHERE LOWER(settlement_result) IN ('yes','no')
+                      AND final_prob IS NOT NULL
+                      AND close_time_ms IS NOT NULL
+                      AND close_time_ms >= ? AND close_time_ms <= ?
+                      AND timestamp_ms <= close_time_ms
+                      AND (UPPER(IFNULL(series, '')) LIKE '%15M%' OR UPPER(ticker) LIKE '%15M%')
+                  )
+                  GROUP BY coin_key, close_ms
+                ) g
+                ON p.close_time_ms = g.close_ms AND p.timestamp_ms = g.ts AND ${coinKeySql("p.series", "p.ticker")} = g.coin_key
+                WHERE LOWER(p.settlement_result) IN ('yes','no') AND p.final_prob IS NOT NULL AND p.timestamp_ms <= p.close_time_ms
+            """.trimIndent()
+            val out = ArrayList<com.dirk.kalshiodds.data.local.ledger.LedgerRow>()
+            db.readableDatabase.rawQuery(sql, arrayOf(sinceCloseMs.toString(), untilCloseMs.toString())).use { c ->
+                while (c.moveToNext()) out += cursorToLedger(c)
+            }
+            out
+        }.getOrDefault(emptyList())
+
+    /** Closed scalps held to settlement (the note carries a settlement fill). Bounded. */
+    fun settlementScalps(sinceMs: Long, limit: Int = 4_000): List<com.dirk.kalshiodds.decision.ScalpTrade> = runCatching {
+        scalpRows(
+            "SELECT * FROM ${ST.TABLE} WHERE state = 'CLOSED' AND closed_at_ms >= ? AND note LIKE '%scalpFill=%' AND note LIKE '%,X%' " +
+                "ORDER BY closed_at_ms DESC LIMIT ${limit.coerceIn(1, 8_000)}",
+            arrayOf(sinceMs.toString())
+        )
+    }.getOrDefault(emptyList())
+
+    /**
+     * Recent closed scalps for heatmaps, side bars, and family stacks.
+     * The note is omitted. Shadows (`|S`) stay out so they do not crowd the limit.
+     */
+    fun closedScalpsForCharts(sinceMs: Long, limit: Int = 8_000): List<com.dirk.kalshiodds.decision.ScalpTrade> = runCatching {
+        scalpRows(
+            "SELECT id, ticker, side, state, signal_at_ms, signal_ask, fair_at_signal, contracts, entry_price, entry_fee_usd, " +
+                "entry_at_ms, NULL AS exit_decided_at_ms, exit_reason, sold_contracts, proceeds_usd, exit_fee_usd, closed_at_ms, " +
+                "net_usd, '' AS note, rule_version FROM ${ST.TABLE} " +
+                "WHERE state = 'CLOSED' AND closed_at_ms >= ? AND net_usd IS NOT NULL " +
+                "AND (rule_version IS NULL OR rule_version LIKE '%|P' OR INSTR(rule_version, '|') = 0) " +
+                "ORDER BY closed_at_ms DESC LIMIT ${limit.coerceIn(1, 12_000)}",
+            arrayOf(sinceMs.toString())
+        ).filter { it.isPrimary }
+    }.getOrDefault(emptyList())
+
+    private fun coinKeySql(series: String, ticker: String): String =
+        "CASE WHEN UPPER(IFNULL($series, '') || ' ' || $ticker) LIKE '%SOL%' THEN 'SOL' " +
+            "WHEN UPPER(IFNULL($series, '') || ' ' || $ticker) LIKE '%ETH%' THEN 'ETH' ELSE 'BTC' END"
 
     /** Fill in the outcome on every unsettled prediction for [ticker]. Never deletes rows. */
     fun settleLedger(ticker: String, result: String, atMs: Long): Int {

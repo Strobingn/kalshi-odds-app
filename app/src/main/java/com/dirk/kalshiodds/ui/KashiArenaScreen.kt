@@ -37,6 +37,7 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
     aiPanel: AiWatchPanelModel? = null, onAiFollows: (Boolean) -> Unit = {}, extras: LiveWindowExtras = LiveWindowExtras()) {
     val c = DipTheme.colors
     val openAi = LocalOpenAiTab.current
+    val chartHistory = rememberScalpChartHistory()
     var tabName by rememberSaveable { mutableStateOf(initialTab.name) }
     val tab = KashiArenaTab.valueOf(tabName)
     var v2 by rememberSaveable { mutableStateOf(true) }
@@ -110,7 +111,12 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
                 items(rows, key = { "strategy-${it.model.code}" }) { r -> ArenaStrategyRow(r, st) { onOpen(r.model) } }
             }
             KashiArenaTab.ANALYSIS -> {
-                val galleryTrades = (st.arenaChart.trades + st.activeScalps).distinctBy { it.id }
+                val history = chartHistory
+                val galleryTrades = run {
+                    val live = (st.arenaChart.trades + st.activeScalps).distinctBy { it.id }
+                    if (history.closed.isEmpty()) live else (history.closed + live).distinctBy { it.id }
+                }
+                val corrWindows = if (history.daily.isEmpty()) st.windows else com.dirk.kalshiodds.decision.WindowCalibration.windowsFromDaily(history.daily)
                 val leaders = rows.map { row ->
                     val frozen = com.dirk.kalshiodds.decision.insights.ScalpFreeze.isFrozen(bench[row.model.code])
                     row to frozen
@@ -162,7 +168,7 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
                 }
                 // After the existing analysis cards, so the race, profit bars and fees stay on top.
                 item(key = "analysis-gallery") {
-                    AnalysisGallery(galleryTrades, leaders, sparks, st.windows, st.updatedAtMs, rows.map { it.model })
+                    AnalysisGallery(galleryTrades, leaders, sparks, corrWindows, st.updatedAtMs, rows.map { it.model })
                 }
                 item(key = "analysis-data") { OutlinedButton(onClick = onHistory, modifier = Modifier.fillMaxWidth()) { Text("Detailed results & comparison") } }
             }

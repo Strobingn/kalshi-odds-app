@@ -1718,16 +1718,25 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
      * quote), spot from the settlement feed (CF first, Coinbase fallback), σ from the in-app trailing
      * estimator. Never calls Kalshi.
      */
+    /** Snapshot strike, then the live book, then the scalper quote. Distance-to-strike uses this. */
+    fun displayStrike(ticker: String, snapshotStrike: Double?): Double? {
+        snapshotStrike?.takeIf { it.isFinite() && it > 0.0 }?.let { return it }
+        runCatching { hub.scoring.book.strike(ticker) }.getOrNull()?.takeIf { it.isFinite() && it > 0.0 }?.let { return it }
+        return container.scalp.marks.value[ticker]?.strike?.takeIf { it.isFinite() && it > 0.0 }
+    }
+
     private fun runScalp(live: List<MarketUiModel>, s: com.dirk.kalshiodds.signal.config.SignalSettings) {
         val now = container.clock.nowMs()
         val openScalps = container.scalp.openTickers()
         val cardSnaps = ArrayList<com.dirk.kalshiodds.llm.AiLiveSnapshot>()
+        val forecastQuotes = ArrayList<com.dirk.kalshiodds.decision.ScalpRule.Quote>()
         live.forEach { market ->
             val series = com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(market.ticker)
             if (series !in com.dirk.kalshiodds.domain.CryptoMarkets.FIFTEEN_SERIES) return@forEach
             // 0.3.59: scalpers trade Bitcoin only (ETH/SOL markets only to wind down positions opened before 0.3.59).
-            if (com.dirk.kalshiodds.decision.ScalpParams.coinOf(market.ticker) != com.dirk.kalshiodds.decision.ShockFav.TRADE_COIN &&
-                market.ticker.uppercase() !in openScalps) return@forEach
+            val tradeThis = com.dirk.kalshiodds.decision.ScalpParams.coinOf(market.ticker) == com.dirk.kalshiodds.decision.ShockFav.TRADE_COIN ||
+                market.ticker.uppercase() in openScalps
+            if (!tradeThis && !s.paperTradingEnabled) return@forEach
             val book = hub.scoring.book.snapshotBook(market.ticker) ?: return@forEach
             val spot = settlementFor(market.ticker, now).spot
             val coin = when {
@@ -1757,19 +1766,22 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 cfAgeMs = cfTick?.ageMs(now),
                 bookGap = !hub.scoring.book.hasSnapshot(market.ticker)
             )
-            // 0.3.62: a paper-scalp exception must never take down the quote lane / app.
-            runCatching { container.scalp.onQuote(qq, enabled = s.paperTradingEnabled) }
-            // 0.3.53 Forecast ride / fade: same quote + top-3 book sizes (recorder-identical features).
-            runCatching {
-                container.scalp.onForecastQuote(
-                    qq,
-                    top3Yes = book.yes.filter { it.second > 0 }.sortedBy { it.first }.takeLast(3).sumOf { it.second },
-                    top3No = book.no.filter { it.second > 0 }.sortedBy { it.first }.takeLast(3).sumOf { it.second },
-                    enabled = s.paperTradingEnabled
-                )
+            if (tradeThis) {
+                // 0.3.62: a paper-scalp exception must never take down the quote lane / app.
+                runCatching { container.scalp.onQuote(qq, enabled = s.paperTradingEnabled) }
+                // 0.3.53 Forecast ride / fade: same quote + top-3 book sizes (recorder-identical features).
+                runCatching {
+                    container.scalp.onForecastQuote(
+                        qq,
+                        top3Yes = book.yes.filter { it.second > 0 }.sortedBy { it.first }.takeLast(3).sumOf { it.second },
+                        top3No = book.no.filter { it.second > 0 }.sortedBy { it.first }.takeLast(3).sumOf { it.second },
+                        enabled = s.paperTradingEnabled
+                    )
+                }
+                // 0.3.57 sf57: twenty shock / late-favourite paper scalpers on the same conflated quote (paper lane).
+                runCatching { container.scalp.onShockFavQuote(qq, enabled = s.paperTradingEnabled) }
             }
-            // 0.3.57 sf57: twenty shock / late-favourite paper scalpers on the same conflated quote (paper lane).
-            runCatching { container.scalp.onShockFavQuote(qq, enabled = s.paperTradingEnabled) }
+            if (s.paperTradingEnabled) forecastQuotes += qq
             if (coin == "BTC") cardSnaps += liveSnap(market, qq, now)
         }
         val openMs = cardSnaps.firstOrNull()?.closeMs?.minus(com.dirk.kalshiodds.domain.MarketLifecycle.WINDOW_MS)
@@ -1778,6 +1790,16 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         }
         // 0.3.67: batch SQLite+stats writes off the quote path (same paperLane worker, not Main).
         runCatching { container.scalp.flushWrites() }
+        if (s.paperTradingEnabled && forecastQuotes.isNotEmpty()) {
+            runCatching {
+                container.forecastRecorder.observe(forecastQuotes) { q ->
+                    com.dirk.kalshiodds.llm.ChatPrompt.modelUp(
+                        q,
+                        runCatching { container.scalp.dm60Snapshot(q.ticker.uppercase(), q.nowMs) }.getOrDefault(0.0)
+                    )
+                }
+            }
+        }
     }
 
     /** Same quote the scalp lane just applied. The AI card takes this tick, not a timer. */

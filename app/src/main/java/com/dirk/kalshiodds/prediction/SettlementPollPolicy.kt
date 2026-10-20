@@ -39,7 +39,9 @@ object SettlementPollPolicy {
 
     fun seriesOf(ticker: String): String? {
         val u = ticker.trim().uppercase()
-        if (u.startsWith(SERIES) && CryptoMarkets.isLiveTicker(u)) return SERIES
+        for (series in CryptoMarkets.FIFTEEN_SERIES) {
+            if (u.startsWith(series) && CryptoMarkets.isLiveTicker(u)) return series
+        }
         if (isD3Ticker(u)) return D3_SERIES
         return null
     }
