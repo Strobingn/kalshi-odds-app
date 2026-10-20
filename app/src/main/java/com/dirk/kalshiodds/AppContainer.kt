@@ -132,14 +132,17 @@ class AppContainer(context: Context) {
      * YES fair price for the arena's late favourites, from Kalshi only: the CF
      * Benchmarks index Kalshi streams on its WebSocket (the index these markets
      * settle on), its own 1-second volatility, the strike Kalshi publishes and,
-     * in the final minute, Kalshi's running settlement average. Null (no trade)
-     * while the index is stale: there is no Coinbase fallback.
+     * in the final minute, Kalshi's running settlement average. While the index
+     * is stale it falls back to the Coinbase stream ([coinbaseIndex], the source
+     * the arena replay priced these strategies with), unless Settings → "Bitcoin
+     * price from Kalshi only" is on; null (no trade) when neither is fresh.
      */
     private fun scalperFairYes(ticker: String, nowMs: Long): Double? {
         val coin = com.dirk.kalshiodds.signal.scalper.ScalperState.coinOf(ticker)
         val close = scoring.book.closeTime(ticker) ?: com.dirk.kalshiodds.signal.trade.TakerCost.closeEpochMs(ticker) ?: return null
         val strike = scoring.book.strike(ticker) ?: com.dirk.kalshiodds.signal.engine.DirectionSanity.parseStrike(ticker)
-        val spot = cfIndex.fresh(coin, nowMs)?.value ?: return null
+        val spot = cfIndex.fresh(coin, nowMs)?.value
+            ?: return if (hub.settings.kalshiPriceOnly) null else coinbaseFairYes(coin, strike, close, nowMs)
         val observed = if (close - nowMs < 60_000L) {
             cfIndex.finalMinuteAverage(coin, close, nowMs)?.takeIf { it > 0.0 }?.let { kotlin.math.ln(it) }
                 ?: cfIndex.meanLog(coin, close - 60_000L, nowMs)
@@ -154,6 +157,20 @@ class AppContainer(context: Context) {
             coin = coin,
             observedMeanLog = observed,
             indexNoise = com.dirk.kalshiodds.signal.external.CfIndexBook.INDEX_NOISE_LOG
+        )
+    }
+
+    /** [scalperFairYes] from the Coinbase stream alone, priced the way the arena replay prices it. */
+    private fun coinbaseFairYes(coin: String, strike: Double?, close: Long, nowMs: Long): Double? {
+        val spot = coinbaseIndex.fresh(coin, nowMs)?.value ?: return null
+        val observed = if (close - nowMs < 60_000L) coinbaseIndex.meanLog(coin, close - 60_000L, nowMs) else null
+        return com.dirk.kalshiodds.signal.scalper.ScalpFair.fairYes(
+            spot = spot,
+            strike = strike,
+            tteSeconds = (close - nowMs) / 1000.0,
+            std1m = coinbaseIndex.std1m(coin, nowMs),
+            coin = coin,
+            observedMeanLog = observed
         )
     }
     /** Paper limit orders resting against the real book, filled by real trades. Never orders. */
@@ -186,6 +203,9 @@ class AppContainer(context: Context) {
     /** Kalshi's CF Benchmarks settlement index (Live signals WebSocket). */
     val cfIndex = com.dirk.kalshiodds.signal.external.CfIndexBook().also { scoring.cfIndex = it }
 
+    /** Coinbase prints kept like the index, for the arena's fair price while the index is stale. */
+    val coinbaseIndex = com.dirk.kalshiodds.signal.external.CfIndexBook()
+
     /**
      * Account changes pushed by Kalshi's WebSocket (a fill, an order update,
      * a position change). Screens listening refresh positions and cash from
@@ -217,6 +237,14 @@ class AppContainer(context: Context) {
         onPrint = { asset, price, recvNanos ->
             recorder.onSpot("$asset-USD", price)
             hub.ingestSpot(asset, price, recvNanos)
+            com.dirk.kalshiodds.signal.external.CfIndexBook.indexIdOf(asset)?.let { id ->
+                val now = System.currentTimeMillis()
+                runCatching {
+                    coinbaseIndex.onUpdate(
+                        com.dirk.kalshiodds.signal.ws.KalshiWsMessages.Parsed.IndexValue(id, price, now, now, null, null, null, null), now
+                    )
+                }
+            }
         }
     )
     val lastOrderError = com.dirk.kalshiodds.signal.trade.LastOrderErrorStore(app)

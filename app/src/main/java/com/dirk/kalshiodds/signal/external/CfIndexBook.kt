@@ -195,5 +195,13 @@ class CfIndexBook {
             "SOLUSD_RTI" -> "SOL"
             else -> null
         }
+
+        /** The index id [assetOf] reads back as [asset]; null for a coin with no index. */
+        fun indexIdOf(asset: String): String? = when (asset.uppercase()) {
+            "BTC" -> "BRTI"
+            "ETH" -> "ETHUSD_RTI"
+            "SOL" -> "SOLUSD_RTI"
+            else -> null
+        }
     }
 }

@@ -9,7 +9,7 @@ class RetiredStrategiesTest {
     private val kept = setOf(
         ScalpStrategy.LATE_COMEBACK, ScalpStrategy.LATE_EDGE, ScalpStrategy.KASHI_FAV_BASE,
         ScalpStrategy.KASHI_FAV_NIGHT, ScalpStrategy.KASHI_FAV_STRICT, ScalpStrategy.KASHI_FAV_97,
-        ScalpStrategy.FLOW_FADE, ScalpStrategy.KASHI_FAV_LAST30
+        ScalpStrategy.KASHI_FAV_LAST30
     )
 
     @Test
@@ -38,7 +38,8 @@ class RetiredStrategiesTest {
         assertEquals(setOf(ScalpStrategy.LATE_EDGE.name, ScalperState.ALL), st.groups.keys)
         assertEquals(-1.5, st.stats(ScalperState.ALL).pnlUsd, 1e-12)
         assertTrue(ScalpStrategy.isRetired("ML_REST"))
-        assertTrue(!ScalpStrategy.isRetired("FLOW_FADE"))
+        assertTrue(ScalpStrategy.isRetired("FLOW_FADE"))
+        assertTrue(!ScalpStrategy.isRetired("LATE_EDGE"))
     }
 
     @Test

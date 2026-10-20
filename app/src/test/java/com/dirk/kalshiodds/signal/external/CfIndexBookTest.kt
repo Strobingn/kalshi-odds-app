@@ -108,4 +108,13 @@ class CfIndexBookTest {
         assertTrue(kotlin.math.abs(mean - kotlin.math.ln(100_000.0)) < 1e-3)
         assertNull(book.meanLog("ETH", 0L, 1L))
     }
+
+    @Test
+    fun coinbasePricesFedUnderTheIndexIdReadBackAsTheirCoin() {
+        for (coin in listOf("BTC", "ETH", "SOL")) assertEquals(coin, CfIndexBook.assetOf(CfIndexBook.indexIdOf(coin)!!))
+        assertNull(CfIndexBook.indexIdOf("DOGE"))
+        val book = CfIndexBook()
+        book.onUpdate(KalshiWsMessages.Parsed.IndexValue("BRTI", 100_000.0, 1_000L, 1_000L, null, null, null, null), 1_000L)
+        assertEquals(100_000.0, book.fresh("BTC", 1_500L)!!.value, 0.0)
+    }
 }
