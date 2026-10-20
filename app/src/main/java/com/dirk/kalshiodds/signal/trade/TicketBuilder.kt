@@ -171,8 +171,9 @@ object TicketBuilder {
             minPayoutUsd = SignalConstants.CONTRACT_SETTLEMENT_USD,
             kind = TicketKind.MANUAL,
             requireGates = false,
-            // The clear-lead rule buys the favourite: no min-profit gate on its side.
-            clearLead = clearLeadSide(market, ctx.settings) == want
+            // The phone's rules (late comeback, clear lead) skip the min-profit gate on their side.
+            clearLead = comebackSide(market, ctx.settings) == want || clearLeadSide(market, ctx.settings) == want,
+            comeback = comebackSide(market, ctx.settings) == want
         ) ?: blocked(market, want, ctx, noSellers(want), stake)
         val heldOpposite = ctx.heldOpposite(market.ticker, want)
         return if (heldOpposite > 0) {
@@ -206,6 +207,37 @@ object TicketBuilder {
         if (!ctx.settings.ticketsEnabled) return null
         val side = clearLeadSide(market, ctx.settings) ?: return null
         return proposeManual(market, side, ctx)?.takeIf { it.clearLead && it.canApprove }
+    }
+
+    /**
+     * The side the late-comeback rule ([com.dirk.kalshiodds.signal.trend.LateComebackRule]) is calling on
+     * [market] right now, or null: rule off in Settings, or no late underdog rising.
+     */
+    fun comebackSide(market: MarketUiModel, settings: SignalSettings): String? {
+        if (!settings.lateComebackEnabled) return null
+        return when (market.comebackSide?.uppercase()) {
+            "YES" -> "YES"
+            "NO" -> "NO"
+            else -> null
+        }
+    }
+
+    /** Approve-gated $5 buy on the late-comeback side, or null (same ticket the Buy button builds). */
+    fun proposeComeback(market: MarketUiModel, ctx: Context): TradeTicket? {
+        if (!ctx.settings.ticketsEnabled) return null
+        val side = comebackSide(market, ctx.settings) ?: return null
+        return proposeManual(market, side, ctx)?.takeIf { it.comeback && it.canApprove }
+    }
+
+    fun comebackNote(market: MarketUiModel, nowMs: Long): String {
+        val tte = market.closeTimeEpochMs?.let { ((it - nowMs) / 1000L).coerceAtLeast(0L) }
+        val ask = market.comebackAsk
+        val why = if (ask != null && ask.isFinite() && tte != null) {
+            String.format(java.util.Locale.US, "the underdog at %.0f¢ is climbing with %d:%02d left", ask * 100.0, tte / 60L, tte % 60L)
+        } else {
+            "the late underdog is climbing"
+        }
+        return "Late comeback · $why · $5 all-in cap including fees · Approve still required"
     }
 
     fun clearLeadNote(market: MarketUiModel, nowMs: Long): String {
@@ -376,7 +408,8 @@ object TicketBuilder {
         minPayoutUsd: Double,
         kind: TicketKind,
         requireGates: Boolean,
-        clearLead: Boolean = false
+        clearLead: Boolean = false,
+        comeback: Boolean = false
     ): TradeTicket? {
         if (!MarketLifecycle.isTradable(market, ctx.nowMs)) return null
         if (kind != TicketKind.MANUAL && entryBlockReason(market, ctx.settings) != null) return null
@@ -484,7 +517,9 @@ object TicketBuilder {
                     minProfit
                 )
                 TicketKind.MANUAL ->
-                    if (clearLead) {
+                    if (comeback) {
+                        comebackNote(market, ctx.nowMs)
+                    } else if (clearLead) {
                         clearLeadNote(market, ctx.nowMs)
                     } else {
                         "Manual buy · $5 all-in cap including fees · Approve still required"
@@ -505,6 +540,7 @@ object TicketBuilder {
             belowMinProfit = belowMin,
             minProfitIfWinUsd = minProfit,
             clearLead = clearLead,
+            comeback = comeback,
             winTargetUsd = minProfit,
             winTargetCapped = true,
             winTargetNote = if (clearLead) {

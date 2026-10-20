@@ -83,6 +83,9 @@ data class OddsUiState(
     /** Paper record of the clear-lead rule (same ledger type). */
     val clearLead: com.dirk.kalshiodds.signal.latefav.LateFavoriteState =
         com.dirk.kalshiodds.signal.latefav.LateFavoriteState(),
+    /** Paper record of the late-comeback rule (same ledger type). */
+    val lateComeback: com.dirk.kalshiodds.signal.latefav.LateFavoriteState =
+        com.dirk.kalshiodds.signal.latefav.LateFavoriteState(),
     /** Paper scalper scoreboard. */
     val scalper: com.dirk.kalshiodds.signal.scalper.ScalperState =
         com.dirk.kalshiodds.signal.scalper.ScalperState.fresh(),
@@ -228,6 +231,13 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             runCatching {
                 container.clearLead.ledger.state.collect { cl ->
                     _state.update { it.copy(clearLead = cl) }
+                }
+            }
+        }
+        viewModelScope.launch {
+            runCatching {
+                container.lateComeback.ledger.state.collect { lc ->
+                    _state.update { it.copy(lateComeback = lc) }
                 }
             }
         }
@@ -1095,7 +1105,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         ticketSession.replaceProposals(tickets, liveTickers = liveTickers)
         // The clear-lead ticket is built on demand by the Buy button, so it is
         // not in the proposal list; it still gets the heads-up notification.
-        val clearLeadTickets = live.mapNotNull { TicketBuilder.proposeClearLead(it, ctx) }
+        val clearLeadTickets = live.mapNotNull { TicketBuilder.proposeComeback(it, ctx) ?: TicketBuilder.proposeClearLead(it, ctx) }
         runCatching {
             container.opportunities.consider(
                 tickets = tickets + clearLeadTickets,

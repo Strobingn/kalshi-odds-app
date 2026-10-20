@@ -1,7 +1,12 @@
 package com.dirk.kalshiodds.signal.trend
 
+import android.content.Context
 import com.dirk.kalshiodds.domain.CryptoMarkets
+import com.dirk.kalshiodds.signal.flowfade.FlowFadeSummary
+import com.dirk.kalshiodds.signal.latefav.LateFavoriteLedger
 import com.dirk.kalshiodds.signal.latefav.LateFavoriteRule
+import com.dirk.kalshiodds.signal.latefav.LateFavoriteState
+import kotlinx.serialization.json.Json
 
 /**
  * "Late comeback": in minutes 10–13, the underdog Kalshi prices at 20–40¢
@@ -98,5 +103,62 @@ class MidTape(private val keepSeconds: Int = 120) {
 
     private companion object {
         const val MAX_TICKERS = 64
+    }
+}
+
+/** On-device paper ledger for the late-comeback rule, same entry / settle logic as the other trackers. */
+class LateComebackStore(context: Context) {
+    private val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private val json = Json {
+        ignoreUnknownKeys = true
+        encodeDefaults = true
+    }
+
+    /** Every bet also goes to the permanent archive ([com.dirk.kalshiodds.signal.archive.BetArchiveStore]). */
+    private val archive = com.dirk.kalshiodds.signal.archive.BetArchiveStore.of(context)
+
+    val ledger: LateFavoriteLedger = LateFavoriteLedger(
+        initial = load(),
+        persist = {
+            save(it)
+            archive.tracker(com.dirk.kalshiodds.signal.archive.BetRows.LATE_COMEBACK, it)
+        }
+    ).also { archive.tracker(com.dirk.kalshiodds.signal.archive.BetRows.LATE_COMEBACK, it.snapshot()) }
+
+    private fun load(): LateFavoriteState {
+        val raw = prefs.getString(KEY, null) ?: return LateFavoriteState()
+        return runCatching { json.decodeFromString(LateFavoriteState.serializer(), raw) }
+            .getOrElse { LateFavoriteState() }
+    }
+
+    private fun save(state: LateFavoriteState) {
+        runCatching {
+            prefs.edit().putString(KEY, json.encodeToString(LateFavoriteState.serializer(), state)).apply()
+        }
+    }
+
+    private companion object {
+        const val PREFS = "bitcoin_claude_late_comeback"
+        const val KEY = "state_json"
+    }
+}
+
+/** Home-card copy. Same lines as the other tracker cards, its own title and note. */
+object LateComebackSummary {
+    const val TITLE = "Late comeback (phone rule) · PAPER RECORD"
+    const val NOTE =
+        "Kalshi data only: in minutes 10–13, buys the underdog Kalshi prices at 20–40¢ once its mid has risen 4¢ " +
+            "or more in 30 seconds, $5 at the ask, held to the close, once a window. On the 12 recorded days " +
+            "(2026-09-28 → 10-16, the recorded order book): 405 bets, +$286.22 after fees (+71¢ a bet), up in both " +
+            "parts of the days; most bets lose (34% won), the winners pay. The paper record here is the real test."
+
+    fun of(state: LateFavoriteState): FlowFadeSummary {
+        val base = FlowFadeSummary.of(state)
+        return base.copy(
+            title = TITLE,
+            recordLine = base.recordLine.replace("¢ bid", "¢ ask"),
+            worseLine = base.worseLine.replace("With a maker fee", "Worse fill (+1¢)"),
+            note = NOTE
+        )
     }
 }

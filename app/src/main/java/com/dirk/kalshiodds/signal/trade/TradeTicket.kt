@@ -74,6 +74,8 @@ data class TradeTicket(
      * These buys are favourites at 60–95¢, so the min-profit-if-win gate does not apply.
      */
     val clearLead: Boolean = false,
+    /** Built on the late-comeback rule ([com.dirk.kalshiodds.signal.trend.LateComebackRule]); [clearLead] is set too (same gates). */
+    val comeback: Boolean = false,
     val winTargetUsd: Double? = null,
     val winTargetCapped: Boolean = false,
     val winTargetNote: String? = null,

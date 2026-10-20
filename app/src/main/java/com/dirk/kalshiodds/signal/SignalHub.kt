@@ -59,6 +59,8 @@ class SignalHub(
     private val centBetter: com.dirk.kalshiodds.signal.latefav.LateFavoriteLedger? = null,
     /** Paper record of the clear-lead rule; logs, never orders. */
     private val clearLead: com.dirk.kalshiodds.signal.latefav.LateFavoriteLedger? = null,
+    /** Paper record of the late-comeback rule; logs, never orders. */
+    private val lateComeback: com.dirk.kalshiodds.signal.latefav.LateFavoriteLedger? = null,
     /** Paper scalper: every scalping strategy at once, on paper. Never orders. */
     private val scalper: com.dirk.kalshiodds.signal.scalper.PaperScalper? = null,
     /** Paper limit orders the user placed: filled by the same real trade prints. Never orders. */
@@ -386,6 +388,7 @@ class SignalHub(
             maybeCentBetter(tick, scored)
             // Every tick, not only book publishes: the first moment in the band is the bet (once a window).
             maybeClearLead(tick, scored)
+            maybeLateComeback(tick, scored)
         }
         persistChartTick(tick)
         val alert = if (notify && scored != null) {
@@ -418,6 +421,7 @@ class SignalHub(
         maybeFlowFade(tick, scored)
         maybeCentBetter(tick, scored)
         maybeClearLead(tick, scored)
+        maybeLateComeback(tick, scored)
     }
 
     /**
@@ -456,6 +460,38 @@ class SignalHub(
                 Log.d(TAG, "clearlead paper ${it.ticker} ${it.side} @ ${it.ask} bp=${it.z} tte=${it.tteSeconds}")
             }
         }.onFailure { CrashBreadcrumb.record("clearlead ${tick.ticker}", it) }
+    }
+
+    /**
+     * Paper record of the late-comeback rule ([com.dirk.kalshiodds.signal.trend.LateComebackRule]): the first
+     * moment in a window the score calls it, a $5 buy of that side at the book's ask. Logs to [lateComeback];
+     * there is no path from here to an order.
+     */
+    private fun maybeLateComeback(tick: MarketTick, scored: ScoringEngine.Score) {
+        val ledger = lateComeback ?: return
+        if (!settings.lateComebackEnabled) return
+        val side = scored.comebackSide ?: return
+        val tte = scored.tteSeconds ?: return
+        if (!CryptoMarkets.isLiveTicker(tick.ticker) || ledger.hasEntry(tick.ticker)) return
+        runCatching {
+            val top = scoring.book.topOfBook(tick.ticker)
+            val yesAsk = KalshiPrice.usable(top?.yesAsk) ?: KalshiPrice.impliedAskFromOppositeBid(top?.noBid) ?: scored.comebackAsk?.takeIf { side == "YES" }
+            val noAsk = KalshiPrice.usable(top?.noAsk) ?: KalshiPrice.impliedAskFromOppositeBid(top?.yesBid) ?: scored.comebackAsk?.takeIf { side == "NO" }
+            val ask = (if (side == "YES") yesAsk else noAsk) ?: return
+            val band = com.dirk.kalshiodds.signal.trend.LateComebackRule.DEFAULT_BAND
+            // The price paid must still be in the band.
+            if (ask < band.minAsk - 1e-9 || ask > band.maxAsk + 1e-9) return
+            val decision = com.dirk.kalshiodds.signal.trend.LateComebackRule.decide(
+                ticker = tick.ticker,
+                nowMs = System.currentTimeMillis(),
+                signal = com.dirk.kalshiodds.signal.trend.ClearLeadRule.Signal(side, ask, tte),
+                yesAsk = yesAsk,
+                noAsk = noAsk
+            ) ?: return
+            ledger.record(decision)?.let {
+                Log.d(TAG, "comeback paper ${it.ticker} ${it.side} @ ${it.ask} tte=${it.tteSeconds}")
+            }
+        }.onFailure { CrashBreadcrumb.record("comeback ${tick.ticker}", it) }
     }
 
     /**

@@ -248,6 +248,14 @@ fun HomeScreen(
                                 )
                             }
                         }
+                        if (state.settings.lateComebackEnabled) {
+                            item(key = "late_comeback") {
+                                com.dirk.kalshiodds.ui.components.FlowFadeCard(
+                                    state.lateComeback,
+                                    summary = com.dirk.kalshiodds.signal.trend.LateComebackSummary.of(state.lateComeback)
+                                )
+                            }
+                        }
                         if (state.settings.clearLeadEnabled) {
                             item(key = "clear_lead") {
                                 com.dirk.kalshiodds.ui.components.FlowFadeCard(

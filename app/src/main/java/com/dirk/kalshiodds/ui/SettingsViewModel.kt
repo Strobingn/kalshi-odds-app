@@ -198,6 +198,15 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setClearLead(v: Boolean) = track("clear_lead", _state.value.settings.clearLeadEnabled, v) {
         prefs.updateClearLead(v)
     }
+    fun setLateComeback(v: Boolean) = track("late_comeback", _state.value.settings.lateComebackEnabled, v) {
+        prefs.updateLateComeback(v)
+    }
+    fun resetLateComeback() {
+        val before = container.lateComeback.ledger.snapshot().totals.settledBets
+        container.lateComeback.ledger.reset()
+        track("late_comeback_reset", before, 0) { }
+        _state.update { it.copy(credentialMessage = "Late-comeback paper record reset (kept in the bet archive) — no Kalshi orders") }
+    }
     fun resetClearLead() {
         val before = container.clearLead.ledger.snapshot().totals.settledBets
         container.clearLead.ledger.reset()

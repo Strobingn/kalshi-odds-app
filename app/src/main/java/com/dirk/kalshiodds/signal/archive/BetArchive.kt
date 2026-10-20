@@ -37,6 +37,7 @@ data class BetRow(
 
 object BetRows {
     const val CLEAR_LEAD = "Clear lead"
+    const val LATE_COMEBACK = "Late comeback"
     const val LATE_FAVORITE = "Late favorite"
     const val FLOW_FADE = "Flow fade"
     const val CENT_BETTER = "1¢ better"

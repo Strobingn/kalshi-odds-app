@@ -9,8 +9,9 @@ import com.dirk.kalshiodds.signal.config.SignalSettings
  * Single source of truth for the card headline, the ticket side, and
  * the Approve target. Never a separate heuristic.
  *
- * Kalshi data only: BET UP / BET DOWN comes only from the clear-lead rule,
- * which reads Kalshi's own prices. Everything else is NO BET.
+ * Kalshi data only: BET UP / BET DOWN comes only from the phone's rules,
+ * late comeback first, then clear lead, which read Kalshi's own prices.
+ * Everything else is NO BET.
  */
 object BetCall {
 
@@ -41,8 +42,10 @@ object BetCall {
         if (!ctx.settings.ticketsEnabled) {
             return none("Trade tickets are off in Settings")
         }
-        // Kalshi data only (since 1.9.6): the only call is the clear-lead rule, read from Kalshi's prices.
-        // The AI model's chance comes from an outside Bitcoin feed, so it no longer makes calls.
+        // Kalshi data only (since 1.9.6): the calls are the phone's rules, read from Kalshi's prices. The late
+        // comeback goes first (it made money on the 12 recorded days; clear lead did not). The AI model's chance
+        // comes from an outside Bitcoin feed, so it makes no calls.
+        comebackCall(market, ctx)?.let { return it }
         clearLeadCall(market, ctx)?.let { return it }
         if (!MarketLifecycle.isTradable(market, ctx.nowMs)) {
             return none(TicketBuilder.MARKET_CLOSED)
@@ -54,8 +57,15 @@ object BetCall {
      * BET UP / BET DOWN from the clear-lead rule, or null when the rule is
      * not on for [market] or its ticket cannot be approved right now.
      */
-    fun clearLeadCall(market: MarketUiModel, ctx: TicketBuilder.Context): Decision? {
-        val ticket = TicketBuilder.proposeClearLead(market, ctx) ?: return null
+    fun clearLeadCall(market: MarketUiModel, ctx: TicketBuilder.Context): Decision? =
+        ruleCall(market, TicketBuilder.proposeClearLead(market, ctx))
+
+    /** BET UP / BET DOWN from the late-comeback rule, or null when it is not on or cannot be approved. */
+    fun comebackCall(market: MarketUiModel, ctx: TicketBuilder.Context): Decision? =
+        ruleCall(market, TicketBuilder.proposeComeback(market, ctx))
+
+    private fun ruleCall(market: MarketUiModel, proposed: TradeTicket?): Decision? {
+        val ticket = proposed ?: return null
         val ask = KalshiPrice.usable(ticket.limitPrice) ?: return null
         if (com.dirk.kalshiodds.signal.engine.QuoteSanity.isPlaceholder(ask)) return null
         val bid = if (ticket.side.equals("NO", true)) market.noBid else market.yesBid
@@ -76,7 +86,8 @@ object BetCall {
         decide(market, TicketBuilder.Context(settings = settings, alertsPaused = false, nowMs = nowMs))
 
     const val NO_RULE =
-        "No bet: the clear-lead rule (Kalshi prices UP or DOWN at 80–90¢, minutes 3–10) is not on right now."
+        "No bet: neither the late comeback (an underdog at 20–40¢ up 4¢ in 30 s, minutes 10–13) nor the " +
+            "clear-lead rule (Kalshi prices UP or DOWN at 80–90¢, minutes 3–10) is on right now."
 
     fun sortKey(decision: Decision): Int = if (decision.isActionable) 0 else 1
 

@@ -58,6 +58,12 @@ data class SignalSettings(
      */
     val clearLeadEnabled: Boolean = true,
     /**
+     * Settings → "Late comeback rule": the underdog Kalshi prices at 20–40¢ rising 4¢+ in 30 s in minutes
+     * 10–13 ([com.dirk.kalshiodds.signal.trend.LateComebackRule]). Says BET first, logs every window to its
+     * paper record. Approve is still required.
+     */
+    val lateComebackEnabled: Boolean = true,
+    /**
      * Settings → "Paper scalper". Runs every scalping strategy at once on
      * paper ([com.dirk.kalshiodds.signal.scalper.PaperScalper]). Never orders.
      */
@@ -205,6 +211,7 @@ class SignalPreferences(
     suspend fun updateKalshiPriceOnly(value: Boolean) = edit { it[KEY_KALSHI_PRICE_ONLY] = value }
     suspend fun updateLateFavorite(value: Boolean) = edit { it[KEY_LATE_FAVORITE] = value }
     suspend fun updateClearLead(value: Boolean) = edit { it[KEY_CLEAR_LEAD] = value }
+    suspend fun updateLateComeback(value: Boolean) = edit { it[KEY_LATE_COMEBACK] = value }
     suspend fun updateScalper(value: Boolean) = edit { it[KEY_SCALPER] = value }
     suspend fun updateRecordMarketData(value: Boolean) = edit { it[KEY_RECORD_MARKET_DATA] = value }
     suspend fun updateMinConfidence(value: Double) = edit {
@@ -423,6 +430,7 @@ class SignalPreferences(
             lateFavoriteEnabled = this[KEY_LATE_FAVORITE]
                 ?: com.dirk.kalshiodds.signal.latefav.LateFavoriteRule.DEFAULT_ENABLED,
             clearLeadEnabled = this[KEY_CLEAR_LEAD] ?: true,
+            lateComebackEnabled = this[KEY_LATE_COMEBACK] ?: true,
             scalperEnabled = this[KEY_SCALPER] ?: true,
             recordMarketData = this[KEY_RECORD_MARKET_DATA] ?: true,
             debounceMs = this[KEY_DEBOUNCE] ?: def.debounceMs,
@@ -504,6 +512,7 @@ class SignalPreferences(
         private val KEY_KALSHI_PRICE_ONLY = booleanPreferencesKey("kalshi_price_only")
         private val KEY_LATE_FAVORITE = booleanPreferencesKey("late_favorite_enabled")
         private val KEY_CLEAR_LEAD = booleanPreferencesKey("clear_lead_enabled")
+        private val KEY_LATE_COMEBACK = booleanPreferencesKey("late_comeback_enabled")
         private val KEY_SCALPER = booleanPreferencesKey("paper_scalper_enabled")
         private val KEY_RECORD_MARKET_DATA = booleanPreferencesKey("record_market_data")
         private val KEY_DEBOUNCE = longPreferencesKey("debounce_ms")

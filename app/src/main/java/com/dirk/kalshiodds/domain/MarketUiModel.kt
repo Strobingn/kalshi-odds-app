@@ -123,6 +123,10 @@ data class MarketUiModel(
     val clearLeadSide: String? = null,
     /** The clear-lead side's Kalshi ask while the rule is on. */
     val clearLeadAsk: Double? = null,
+    /** Late-comeback rule ([com.dirk.kalshiodds.signal.trend.LateComebackRule]): "YES" / "NO" while it is on, else null. */
+    val comebackSide: String? = null,
+    /** The late-comeback side's Kalshi ask while the rule is on. */
+    val comebackAsk: Double? = null,
     val pastSettlements: List<Boolean> = emptyList(),
     /** Blend-channel deviations (featureFair − mid) in pp from [ScoringEngine.Score]. */
     val featureDevs: Map<String, Double> = emptyMap(),
@@ -304,6 +308,8 @@ fun MarketUiModel.withSignalScore(
         spotVsTargetUsd = score.spotVsTargetUsd,
         clearLeadSide = score.clearLeadSide,
         clearLeadAsk = score.clearLeadAsk,
+        comebackSide = score.comebackSide,
+        comebackAsk = score.comebackAsk,
         featureDevs = score.featureDevs
     )
 }

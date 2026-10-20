@@ -47,6 +47,7 @@ class OpportunityNotifier(private val context: Context) {
 
     fun notify(ticket: TradeTicket, quiet: Boolean): Boolean {
         val title = when {
+            ticket.comeback -> context.getString(R.string.opportunity_comeback_title, WindowLabel.of(ticket.ticker))
             ticket.clearLead -> context.getString(R.string.opportunity_clearlead_title, WindowLabel.of(ticket.ticker))
             else -> when (ticket.kind) {
             TicketKind.HUNTER_VALUE -> context.getString(R.string.opportunity_longshot_title, WindowLabel.of(ticket.ticker))

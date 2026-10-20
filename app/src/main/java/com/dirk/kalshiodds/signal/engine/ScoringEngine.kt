@@ -62,6 +62,10 @@ class ScoringEngine(
 ) {
     @Volatile
     var edgeModel: com.dirk.kalshiodds.prediction.EdgeModel? = null
+
+    /** Each market's YES mid over the last two minutes, for the late-comeback rule. */
+    val comebackTape = com.dirk.kalshiodds.signal.trend.MidTape()
+
     data class Score(
         val fairValuePp: Double,
         val marketMidPp: Double,
@@ -153,7 +157,14 @@ class ScoringEngine(
          */
         val clearLeadSide: String? = null,
         /** That side's ask while the rule is on. */
-        val clearLeadAsk: Double? = null
+        val clearLeadAsk: Double? = null,
+        /**
+         * [com.dirk.kalshiodds.signal.trend.LateComebackRule]: the late underdog rising right now
+         * ("YES" / "NO"), or null. Kalshi prices only.
+         */
+        val comebackSide: String? = null,
+        /** That side's ask while the rule is on. */
+        val comebackAsk: Double? = null
     )
 
     data class BlendWeights(
@@ -656,6 +667,24 @@ class ScoringEngine(
             com.dirk.kalshiodds.domain.KalshiPrice.usable(tick.yesAsk),
             com.dirk.kalshiodds.domain.KalshiPrice.usable(tick.noAsk ?: tick.yesBid?.let { 1.0 - it })
         )
+        // The late comeback: the underdog rising in minutes 10–13, from the book's own prices (Kalshi only).
+        val comeback = runCatching {
+            val top = book.topOfBook(tick.ticker)
+            // A trade tick carries only the print price, so its quotes are used only when it is a quote.
+            val quoted = tick.source != com.dirk.kalshiodds.signal.model.TickSource.WS_TRADE
+            val yb = com.dirk.kalshiodds.domain.KalshiPrice.usable(top?.yesBid ?: tick.yesBid.takeIf { quoted })
+            val ya = com.dirk.kalshiodds.domain.KalshiPrice.usable(top?.yesAsk ?: tick.yesAsk.takeIf { quoted })
+            val nb = com.dirk.kalshiodds.domain.KalshiPrice.usable(top?.noBid ?: tick.noBid.takeIf { quoted })
+            val na = com.dirk.kalshiodds.domain.KalshiPrice.usable(top?.noAsk ?: tick.noAsk.takeIf { quoted })
+                ?: com.dirk.kalshiodds.domain.KalshiPrice.impliedAskFromOppositeBid(yb)
+            val yesAsk = ya ?: com.dirk.kalshiodds.domain.KalshiPrice.impliedAskFromOppositeBid(nb)
+            val mid = if (yb != null && yesAsk != null && yb < yesAsk) (yb + yesAsk) / 2.0 else null
+            comebackTape.note(tick.ticker, nowMs, mid)
+            val band = com.dirk.kalshiodds.signal.trend.LateComebackRule.DEFAULT_BAND
+            com.dirk.kalshiodds.signal.trend.LateComebackRule.signal(
+                tteSec, yesAsk, na, mid, comebackTape.midAgo(tick.ticker, nowMs, band.lookbackSeconds), band
+            )
+        }.getOrNull()
         val digitalFairPp = if (fairSpot != null && strikeUsd != null && sigmaAnnual != null) {
             com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.pSettleAtLeast(
                 spot = fairSpot,
@@ -951,7 +980,9 @@ class ScoringEngine(
             modelBacked = loaded?.beatsMarket == true,
             blendWeight = importedBlendW,
             clearLeadSide = clearLead?.side,
-            clearLeadAsk = clearLead?.ask
+            clearLeadAsk = clearLead?.ask,
+            comebackSide = comeback?.side,
+            comebackAsk = comeback?.ask
         )
     }
 

@@ -793,12 +793,25 @@ fun SettingsContent(
             OutlinedButton(onClick = { viewModel?.resetPaperBook() }, modifier = Modifier.height(44.dp)) {
                 Text("Reset paper book to $100")
             }
+            ToggleRow("Late comeback rule (the late underdog that is climbing)", s.lateComebackEnabled, { viewModel?.setLateComeback(it) })
+            Text(
+                "Kalshi data only. In minutes 10–13, when the underdog Kalshi prices at 20–40¢ has risen 4¢ or more " +
+                    "in 30 seconds, the card says BET on it with a \$5 ticket (Approve still required), and every window " +
+                    "is logged to the Late comeback paper record on Home. It goes before clear lead. On the 12 recorded " +
+                    "days: 405 bets, +\$286 after fees, up in both parts of the days; most bets lose, the winners pay.",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+            OutlinedButton(onClick = { viewModel?.resetLateComeback() }, modifier = Modifier.height(44.dp)) {
+                Text("Reset late-comeback record")
+            }
             ToggleRow("Clear lead rule (bet the side Kalshi favours at 80–90¢)", s.clearLeadEnabled, { viewModel?.setClearLead(it) })
             Text(
                 "Your rule, Kalshi data only. When Kalshi prices UP or DOWN at 80–90¢ between minute 3 and minute 10, " +
                     "the card says BET on that side with a \$5 ticket (Approve still required), and every window is " +
-                    "logged to the Clear lead paper record on Home. It is the only rule that can say BET. The " +
-                    "min-profit setting does not block it. History (46 days of Kalshi prices): about break-even, not proven.",
+                    "logged to the Clear lead paper record on Home. The late comeback goes first. The " +
+                    "min-profit setting does not block it. History (46 days of Kalshi prices): about break-even, not proven. " +
+                    "On the 12 recorded days with the real book and fee: 717 bets, −\$86 (−12¢ a bet); no other band tried made money.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )

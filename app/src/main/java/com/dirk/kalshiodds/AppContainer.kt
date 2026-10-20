@@ -113,6 +113,8 @@ class AppContainer(context: Context) {
     val centBetter = com.dirk.kalshiodds.signal.centbetter.CentBetterStore(app)
     /** Paper record of the clear-lead rule (Dirk's "bet the way Bitcoin is going"). Never orders. */
     val clearLead = com.dirk.kalshiodds.signal.trend.ClearLeadStore(app)
+    /** Paper record of the late-comeback rule (the phone's call that made money on the recorded days). Never orders. */
+    val lateComeback = com.dirk.kalshiodds.signal.trend.LateComebackStore(app)
     /** Paper scalper record and model (docs/scalping-2026-10-09.md). Never orders. */
     val scalperStore = com.dirk.kalshiodds.signal.scalper.ScalperStore(app)
     val scalper = com.dirk.kalshiodds.signal.scalper.PaperScalper(
@@ -190,6 +192,7 @@ class AppContainer(context: Context) {
         flowFade = flowFade.ledger,
         centBetter = centBetter.ledger,
         clearLead = clearLead.ledger,
+        lateComeback = lateComeback.ledger,
         scalper = scalper
     )
 
@@ -292,7 +295,8 @@ class AppContainer(context: Context) {
         logStore = logStore,
         extraOpenTickers = {
             paper.book.openTickers() + lateFavorite.ledger.openTickers() + flowFade.ledger.openTickers() +
-                centBetter.ledger.openTickers() + clearLead.ledger.openTickers() + scalper.openTickers() +
+                centBetter.ledger.openTickers() + clearLead.ledger.openTickers() + lateComeback.ledger.openTickers() +
+                scalper.openTickers() +
                 paperLimits.openTickers() +
                 recorder.pendingSettlementTickers()
         },
@@ -303,6 +307,7 @@ class AppContainer(context: Context) {
             flowFade.ledger.settle(ticker, result)
             centBetter.ledger.settle(ticker, result)
             clearLead.ledger.settle(ticker, result)
+            lateComeback.ledger.settle(ticker, result)
             scalper.settle(ticker, result)
             paperLimits.closeTicker(ticker)
             recorder.onSettled(ticker, result)
@@ -315,6 +320,7 @@ class AppContainer(context: Context) {
             flowFade.ledger.settleFromLog(logStore.readAll())
             centBetter.ledger.settleFromLog(logStore.readAll())
             clearLead.ledger.settleFromLog(logStore.readAll())
+            lateComeback.ledger.settleFromLog(logStore.readAll())
             val tuned = com.dirk.kalshiodds.signal.feedback.EdgeAutoTuner.fromEntries(
                 logStore.readAll(),
                 feeRate = hub.settings.feeRate
