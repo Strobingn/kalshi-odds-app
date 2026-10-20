@@ -19,6 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.decision.*
+import com.dirk.kalshiodds.ui.charts.ChartGallery
 import com.dirk.kalshiodds.ui.charts.ChartSeries
 import com.dirk.kalshiodds.ui.charts.ChartShapes
 import com.dirk.kalshiodds.ui.charts.DailyNetBars
@@ -109,7 +110,14 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
             }
             KashiArenaTab.ANALYSIS -> {
                 val galleryTrades = (st.arenaChart.trades + st.activeScalps).distinctBy { it.id }
-                item(key = "side-bars") { AnalysisGallery(galleryTrades) }
+                val bench = com.dirk.kalshiodds.decision.insights.BenchRegistry.decisions.collectAsState().value
+                val leaders = rows.map { row ->
+                    val frozen = com.dirk.kalshiodds.decision.insights.ScalpFreeze.isFrozen(bench[row.model.code])
+                    row to frozen
+                }.filter { (row, frozen) -> row.roundTrips > 0 || frozen }.map { (row, frozen) ->
+                    ChartGallery.LeaderRow(row.model.label, row.netUsd, frozen)
+                }
+                item(key = "analysis-gallery") { AnalysisGallery(galleryTrades, leaders) }
                 item(key = "race") { ArenaCard {
                     Text("Strategy race", style = MaterialTheme.typography.titleMedium, color = c.textPrimary, fontWeight = FontWeight.SemiBold)
                     Text("Top four by all-time profit · recorded window results", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)

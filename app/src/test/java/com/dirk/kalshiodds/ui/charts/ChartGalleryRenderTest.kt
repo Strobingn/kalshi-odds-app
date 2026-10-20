@@ -67,6 +67,31 @@ class ChartGalleryRenderTest {
         compose.onAllNodesWithText("No data yet").assertCountEquals(0)
     }
 
+    @Test fun leaderboardEmpty() {
+        show { StrategyLeaderboard(emptyList()) }
+        compose.onNodeWithTag("chart_leaderboard").assertExists()
+        compose.onNodeWithText("Strategy leaderboard").assertExists()
+        compose.onNodeWithText("No data yet").assertExists()
+    }
+
+    @Test fun leaderboardSampleKeepsFrozen() {
+        show {
+            StrategyLeaderboard(
+                listOf(
+                    ChartGallery.LeaderRow("Fade", -4.5, true),
+                    ChartGallery.LeaderRow("Peak ride", 12.84, false),
+                    ChartGallery.LeaderRow("Flat", 0.0, true)
+                )
+            )
+        }
+        compose.onNodeWithText("Peak ride").assertExists()
+        compose.onNodeWithText("Fade · FROZEN").assertExists()
+        compose.onNodeWithText("Flat · FROZEN").assertExists()
+        compose.onNodeWithText("+$12.84").assertExists()
+        compose.onNodeWithText("−$4.50").assertExists()
+        compose.onAllNodesWithText("No data yet").assertCountEquals(0)
+    }
+
     private fun show(content: @androidx.compose.runtime.Composable () -> Unit) {
         compose.setContent {
             KalshiOddsTheme(darkTheme = true, colorStyle = ColorStyles.FIELDOPS) {

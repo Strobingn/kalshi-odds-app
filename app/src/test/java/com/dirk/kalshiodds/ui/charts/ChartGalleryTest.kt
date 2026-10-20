@@ -46,6 +46,22 @@ class ChartGalleryTest {
         assertNull(ChartGallery.winRateByHourCoin(listOf(open)))
     }
 
+    @Test fun leaderboardKeepsFrozenAndDropsNonFinite() {
+        val rows = ChartGallery.leaderboard(
+            listOf(
+                ChartGallery.LeaderRow("Fade", -4.0, true),
+                ChartGallery.LeaderRow("Peak", 2.0, false),
+                ChartGallery.LeaderRow("Flat", 0.0, true),
+                ChartGallery.LeaderRow("Broken", Double.NaN, true),
+                ChartGallery.LeaderRow(" ", 5.0, false)
+            )
+        )
+        assertEquals(listOf("Peak", "Flat", "Fade"), rows.map { it.label })
+        assertTrue(rows[1].frozen && rows[2].frozen)
+        assertTrue(!rows[0].frozen)
+        assertTrue(ChartGallery.leaderboard(emptyList()).isEmpty())
+    }
+
     private fun trade(id: String, side: String, rule: String, net: Double) = ScalpTrade(
         id = id,
         ticker = "KXBTC15M-26OCT181500-00",

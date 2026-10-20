@@ -44,6 +44,12 @@ object ChartGallery {
         }.sortedByDescending { it.upNet + it.downNet }
     }
 
+    data class LeaderRow(val label: String, val net: Double, val frozen: Boolean)
+
+    /** Best net first. Frozen rows stay, including a flat $0. Non-finite nets are dropped. */
+    fun leaderboard(rows: List<LeaderRow>): List<LeaderRow> =
+        rows.filter { it.label.isNotBlank() && it.net.isFinite() }.sortedByDescending { it.net }
+
     data class HeatCell(val row: String, val column: String, val rate: Double?, val n: Int)
     data class HeatGrid(val rows: List<String>, val columns: List<String>, val cells: List<List<HeatCell>>)
 

@@ -137,3 +137,51 @@ fun WinRateHeatmap(grid: ChartGallery.HeatGrid?, modifier: Modifier = Modifier) 
         }
     }
 }
+
+/** Net after fees, best first. Frozen strategies are grey and still listed. */
+@Composable
+fun StrategyLeaderboard(rows: List<ChartGallery.LeaderRow>, modifier: Modifier = Modifier) {
+    val c = DipTheme.colors
+    val shown = ChartGallery.leaderboard(rows)
+    Column(
+        modifier.fillMaxWidth().testTag("chart_leaderboard")
+            .semantics { contentDescription = "Strategy leaderboard by net dollars. Frozen strategies stay visible." },
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text("Strategy leaderboard", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
+        Text("Net after fees. FROZEN stays on the board in grey.", style = MaterialTheme.typography.bodySmall, color = c.textSecondary)
+        if (shown.isEmpty()) {
+            ChartEmptyState(height = 120.dp)
+            return
+        }
+        val maxAbs = shown.maxOf { abs(it.net) }.coerceAtLeast(0.01)
+        val allPos = shown.all { it.net >= 0.0 }
+        val allNeg = shown.all { it.net <= 0.0 }
+        shown.forEach { row ->
+            val ink = if (row.frozen) c.textSecondary else c.textPrimary
+            val bar = if (row.frozen) c.textSecondary.copy(alpha = 0.55f) else if (row.net >= 0) c.upButton else c.downButton
+            val name = if (row.frozen) "${row.label} · FROZEN" else row.label
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(name, Modifier.width(132.dp), color = ink, style = MaterialTheme.typography.labelMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Canvas(Modifier.weight(1f).height(16.dp).semantics { contentDescription = "$name ${chartMoney(row.net)}" }) {
+                    val zero = when {
+                        allPos -> 0f
+                        allNeg -> size.width
+                        else -> size.width / 2f
+                    }
+                    val room = if (allPos || allNeg) size.width else size.width / 2f
+                    val len = (abs(row.net) / maxAbs * room).toFloat()
+                    val left = if (row.net >= 0) zero else zero - len
+                    if (len > 0f) drawRoundRect(bar, Offset(left, 2.dp.toPx()), Size(len, size.height - 4.dp.toPx()), CornerRadius(3.dp.toPx()))
+                    drawLine(c.border, Offset(zero, 0f), Offset(zero, size.height), 1.dp.toPx())
+                }
+                Text(
+                    chartMoney(row.net),
+                    Modifier.width(72.dp),
+                    color = if (row.frozen) c.textSecondary else chartSignTextColor(row.net),
+                    style = MaterialTheme.typography.labelSmall
+                )
+            }
+        }
+    }
+}

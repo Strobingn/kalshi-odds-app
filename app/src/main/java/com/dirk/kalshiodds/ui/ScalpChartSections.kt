@@ -9,16 +9,19 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.ui.charts.ChartGallery
+import com.dirk.kalshiodds.ui.charts.StrategyLeaderboard
 import com.dirk.kalshiodds.ui.charts.StrategySideBars
 import com.dirk.kalshiodds.ui.charts.WinRateHeatmap
 
 /** Charts added on the Scalp Analysis tab. Existing cards stay where they are. */
 @Composable
-internal fun AnalysisGallery(trades: List<ScalpTrade>) {
+internal fun AnalysisGallery(trades: List<ScalpTrade>, leaders: List<ChartGallery.LeaderRow> = emptyList()) {
     val groups = remember(trades) { ChartGallery.sideGroups(trades) }
     val heat = remember(trades) { ChartGallery.winRateByHourCoin(trades) }
+    val board = remember(leaders) { ChartGallery.leaderboard(leaders) }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         ArenaCard { StrategySideBars(groups) }
         ArenaCard { WinRateHeatmap(heat) }
+        ArenaCard { StrategyLeaderboard(board) }
     }
 }
