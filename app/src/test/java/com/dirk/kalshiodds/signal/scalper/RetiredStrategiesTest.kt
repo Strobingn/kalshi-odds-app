@@ -26,6 +26,22 @@ class RetiredStrategiesTest {
     }
 
     @Test
+    fun theScreenDropsRetiredRowsButKeepsTheTotals() {
+        val st = ScalperState(
+            groups = mapOf(
+                ScalpStrategy.DIP_HUNTER.name to ScalpStats(closed = 3, pnlUsd = -2.0),
+                ScalpStrategy.LATE_EDGE.name to ScalpStats(closed = 1, pnlUsd = 0.5),
+                ScalperState.ALL to ScalpStats(closed = 4, pnlUsd = -1.5)
+            ),
+            version = ScalperState.VERSION
+        ).withoutRetired()
+        assertEquals(setOf(ScalpStrategy.LATE_EDGE.name, ScalperState.ALL), st.groups.keys)
+        assertEquals(-1.5, st.stats(ScalperState.ALL).pnlUsd, 1e-12)
+        assertTrue(ScalpStrategy.isRetired("ML_REST"))
+        assertTrue(!ScalpStrategy.isRetired("FLOW_FADE"))
+    }
+
+    @Test
     fun theRunnerPostsNothingForRetiredStrategies() {
         val active = window(ScalpStrategy.ACTIVE)
         for (st in ScalpStrategy.RETIRED) assertEquals(st.name, 0, active.stats(st.name).posted)

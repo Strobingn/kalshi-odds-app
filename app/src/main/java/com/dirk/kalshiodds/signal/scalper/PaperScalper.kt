@@ -140,6 +140,12 @@ data class ScalperState(
 ) {
     fun stats(key: String): ScalpStats = groups[key] ?: ScalpStats()
 
+    /** The record without the retired strategies' own rows ([ScalpStrategy.RETIRED]); totals stay the real history. */
+    fun withoutRetired(): ScalperState = copy(
+        groups = groups.filterKeys { !ScalpStrategy.isRetired(it) },
+        recent = recent.filterNot { ScalpStrategy.isRetired(it.strategy) }
+    )
+
     companion object {
         /**
          * 3 = the 15-strategy arena (1.9.0). A 1.8.x record holds history for the original seven

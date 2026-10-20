@@ -15,6 +15,9 @@ import java.util.zip.GZIPOutputStream
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
+/** The trades of strategies still running: the retired ones ([ScalpStrategy.RETIRED]) are left out. */
+fun List<ScalpTrade>.withoutRetired(): List<ScalpTrade> = filterNot { ScalpStrategy.isRetired(it.strategy) }
+
 /** One closed paper scalp, as kept on disk and shown in the trade list. Never a real trade. */
 data class ScalpTrade(
     val closedAtMs: Long,

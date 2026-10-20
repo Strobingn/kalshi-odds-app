@@ -239,7 +239,7 @@ object ArenaTable {
 
     fun detail(st: ScalpStrategy, state: ScalperState, trades: List<ScalpTrade>, recent: Int = 20): Detail {
         val mine = trades.filter { it.strategy == st.name }
-        val row = rows(state, trades).first { it.strategy == st }
+        val row = rows(state, trades, listOf(st)).first()
         val ps = ArenaStats.strategyStats(mine).firstOrNull()
         return Detail(
             row = row,

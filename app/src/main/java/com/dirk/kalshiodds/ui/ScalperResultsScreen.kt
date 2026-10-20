@@ -70,6 +70,7 @@ import com.dirk.kalshiodds.signal.scalper.LiveWindow
 import com.dirk.kalshiodds.signal.scalper.CurvePoint
 import com.dirk.kalshiodds.signal.scalper.ScalpStrategy
 import com.dirk.kalshiodds.signal.scalper.ScalpTrade
+import com.dirk.kalshiodds.signal.scalper.withoutRetired
 import com.dirk.kalshiodds.signal.scalper.ScalperResults
 import com.dirk.kalshiodds.signal.scalper.ScalperState
 import com.dirk.kalshiodds.ui.theme.DipTheme
@@ -119,17 +120,17 @@ fun ScalperResultsRoute(onBack: (() -> Unit)?, onOpenSettings: () -> Unit = {}) 
         s.checks.state.collect { value = com.dirk.kalshiodds.signal.scalper.ContractChecks.lines(it) }
     }
     // The record changes many times a second while scalps close: read it once a second.
-    val state by produceState(store?.ledger?.snapshot() ?: ScalperState.fresh(), store) {
+    val state by produceState(store?.ledger?.snapshot()?.withoutRetired() ?: ScalperState.fresh(), store) {
         val s = store ?: return@produceState
         while (true) {
-            value = s.ledger.snapshot()
+            value = s.ledger.snapshot().withoutRetired()
             delay(1_000L)
         }
     }
     val trades by produceState(emptyList<ScalpTrade>(), store, limit) {
         val s = store ?: return@produceState
         while (true) {
-            value = withContext(Dispatchers.IO) { runCatching { s.log.recent(limit) }.getOrDefault(value) }
+            value = withContext(Dispatchers.IO) { runCatching { s.log.recent(limit).withoutRetired() }.getOrDefault(value) }
             delay(3_000L)
         }
     }
@@ -137,7 +138,7 @@ fun ScalperResultsRoute(onBack: (() -> Unit)?, onOpenSettings: () -> Unit = {}) 
     val chartTrades by produceState(emptyList<ScalpTrade>(), store) {
         val s = store ?: return@produceState
         while (true) {
-            value = withContext(Dispatchers.IO) { runCatching { s.log.recent(CHART_TRADES) }.getOrDefault(value) }
+            value = withContext(Dispatchers.IO) { runCatching { s.log.recent(CHART_TRADES).withoutRetired() }.getOrDefault(value) }
             delay(10_000L)
         }
     }

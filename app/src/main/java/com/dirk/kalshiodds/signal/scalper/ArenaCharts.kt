@@ -124,7 +124,7 @@ object ArenaCharts {
 
     /** Strategies that have closed a trade, in leaderboard order. */
     fun exitMix(state: ScalperState): List<ExitMix> =
-        ScalperResults.leaderboard(state).filter { it.stats.closed > 0 }.map {
+        ScalperResults.leaderboard(state, ScalpStrategy.values().toList()).filter { it.stats.closed > 0 }.map {
             ExitMix(it.strategy, it.stats.targets, it.stats.stops, it.stats.timeouts, it.stats.settled)
         }
 
@@ -132,7 +132,7 @@ object ArenaCharts {
     data class WinRate(val strategy: ScalpStrategy, val rate: Double, val closed: Int)
 
     fun winRates(state: ScalperState): List<WinRate> =
-        ScalperResults.leaderboard(state).mapNotNull { r ->
+        ScalperResults.leaderboard(state, ScalpStrategy.values().toList()).mapNotNull { r ->
             r.stats.winRate?.let { WinRate(r.strategy, it, r.stats.closed) }
         }
 
@@ -140,7 +140,7 @@ object ArenaCharts {
     data class FeeDrag(val strategy: ScalpStrategy, val grossUsd: Double, val netUsd: Double, val feesUsd: Double)
 
     fun feeDrag(state: ScalperState): List<FeeDrag> =
-        ScalperResults.leaderboard(state).filter { it.stats.closed > 0 }.map {
+        ScalperResults.leaderboard(state, ScalpStrategy.values().toList()).filter { it.stats.closed > 0 }.map {
             FeeDrag(it.strategy, it.stats.pnlUsd + it.stats.feesUsd, it.stats.pnlUsd, it.stats.feesUsd)
         }
 

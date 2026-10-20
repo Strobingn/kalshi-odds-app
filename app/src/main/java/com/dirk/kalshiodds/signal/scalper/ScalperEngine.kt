@@ -309,6 +309,10 @@ enum class ScalpStrategy(
 
         /** The strategies the arena runs and shows: every one that made money in the replay. */
         val ACTIVE: List<ScalpStrategy> by lazy { values().filter { it !in RETIRED } }
+        private val RETIRED_NAMES: Set<String> by lazy { RETIRED.mapTo(HashSet()) { it.name } }
+
+        /** A trade-file or ledger name of a retired strategy. */
+        fun isRetired(name: String): Boolean = name in RETIRED_NAMES
 
         /** Price move over 10 s that the dip-hunter and the momentum-sniper react to. */
         const val FAST_MOVE_DOLLARS = 0.02
