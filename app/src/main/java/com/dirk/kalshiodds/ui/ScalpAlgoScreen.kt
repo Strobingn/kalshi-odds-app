@@ -93,14 +93,16 @@ fun ScalpAlgoScreen(viewModel: OddsViewModel, onBack: () -> Unit) {
             onBenchOverride = { viewModel.setScalpBenchOverride(model.code, it) })
     } else {
         val book = d.chart.ticker.takeIf { it.isNotBlank() }?.let { viewModel.orderBook(it) }
-        val strike = odds.snapshot?.allMarkets?.firstOrNull { it.ticker.equals(d.chart.ticker, true) }?.floorStrike
+        val strike = viewModel.displayStrike(
+            d.chart.ticker,
+            odds.snapshot?.allMarkets?.firstOrNull { it.ticker.equals(d.chart.ticker, true) }?.floorStrike
+        )
         ScalpAlgoContent(d, onBack, paged, viewModel::selectScalpChartWindow, viewModel::followScalpChartLive,
             onSettings = if (model != null) ({ settingsOpen = true }) else null,
             aiNote = model?.let { controls.settings(it.code).aiNote }.orEmpty(),
             extras = LiveWindowExtras(
                 bookYes = book?.yes.orEmpty(),
                 bookNo = book?.no.orEmpty(),
-                calibration = paperCalibration(odds.paper.postResetFills.ifEmpty { odds.paper.fills }),
                 dayFees = com.dirk.kalshiodds.ui.charts.ChartGallery.dayLeg(scalpTab.algoToday.values),
                 knobs = knobTicks,
                 strikeUsd = strike

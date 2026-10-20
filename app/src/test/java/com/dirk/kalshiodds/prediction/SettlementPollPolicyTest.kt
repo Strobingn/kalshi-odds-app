@@ -135,5 +135,9 @@ class SettlementPollPolicyTest {
         assertTrue(withHeld.none { it.ticker.startsWith("KXGRAMMY") })
         assertEquals(close, withHeld.first { it.ticker == "KXBTCD-HELD" }.closeTimeMs)
         assertEquals("KXBTCD", SettlementPollPolicy.seriesOf("KXBTCD-HELD"))
+        assertEquals("KXBTC15M", SettlementPollPolicy.seriesOf("KXBTC15M-27SEP161500-00"))
+        assertEquals("KXETH15M", SettlementPollPolicy.seriesOf("KXETH15M-27SEP161500-00"))
+        assertEquals("KXSOL15M", SettlementPollPolicy.seriesOf("KXSOL15M-27SEP161500-00"))
+        assertEquals(null, SettlementPollPolicy.seriesOf("KXETHD-27SEP16"))
     }
 }

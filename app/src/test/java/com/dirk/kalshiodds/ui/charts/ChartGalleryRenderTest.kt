@@ -131,20 +131,31 @@ class ChartGalleryRenderTest {
         show { CalibrationPlot(emptyList()) }
         compose.onNodeWithTag("chart_calibration").assertExists()
         compose.onNodeWithText("AI UP calibration").assertExists()
-        compose.onNodeWithText("No data yet").assertExists()
+        compose.onNodeWithText("Collecting: 0 of 10 windows settled").assertExists()
+    }
+
+    @Test fun calibrationCollecting() {
+        show { CalibrationPlot(listOf(ChartGallery.CalPoint("40–50%", 43.0, 50.0, 3))) }
+        compose.onNodeWithText("Collecting: 3 of 10 windows settled").assertExists()
+        compose.onAllNodesWithText("40–50%", substring = true).assertCountEquals(0)
     }
 
     @Test fun calibrationSample() {
         show {
             CalibrationPlot(
                 listOf(
-                    ChartGallery.CalPoint("40–50%", 43.0, 50.0, 4),
-                    ChartGallery.CalPoint("90–100%", 92.0, 40.0, 5)
-                )
+                    ChartGallery.CalPoint("40–50%", 43.0, 50.0, 6),
+                    ChartGallery.CalPoint("90–100%", 92.0, 40.0, 6)
+                ),
+                brierLine = "Brier 0.210 · market 0.240"
             )
         }
-        compose.onNodeWithText("40–50% · predicted 43% · settled 50% · 4").assertExists()
-        compose.onNodeWithText("90–100% · predicted 92% · settled 40% · 5").assertExists()
+        compose.onNodeWithText("n=12 windows").assertExists()
+        compose.onNodeWithText("Brier 0.210 · market 0.240").assertExists()
+        compose.onNodeWithText("UP").assertExists()
+        compose.onNodeWithText("DOWN").assertExists()
+        compose.onNodeWithText("40–50% · predicted 43% · settled 50% · n=6").assertExists()
+        compose.onNodeWithText("90–100% · predicted 92% · settled 40% · n=6").assertExists()
         compose.onAllNodesWithText("No data yet").assertCountEquals(0)
     }
 

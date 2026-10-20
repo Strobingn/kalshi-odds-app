@@ -280,9 +280,7 @@ class MainActivity : ComponentActivity() {
                                 ChartDetailScreen(
                                     market = market,
                                     book = oddsViewModel.orderBook(market.ticker),
-                                    calibration = com.dirk.kalshiodds.ui.paperCalibration(
-                                        oddsState.paper.postResetFills.ifEmpty { oddsState.paper.fills }
-                                    ),
+                                    strikeUsd = oddsViewModel.displayStrike(market.ticker, market.floorStrike),
                                     windowFees = com.dirk.kalshiodds.ui.charts.ChartGallery.feeLegFromTrades(
                                         "Window",
                                         scalpState.arenaChart.trades.filter { it.ticker.equals(market.ticker, true) }

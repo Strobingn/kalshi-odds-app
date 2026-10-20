@@ -175,24 +175,46 @@ fun FeeWaterfall(window: ChartGallery.FeeLeg?, day: ChartGallery.FeeLeg?, modifi
     }
 }
 
-/** Predicted AI UP chance against the share of buckets that settled UP. */
+/** Predicted AI UP chance against the share of buckets that settled UP. UP and DOWN share the chart. */
 @Composable
-fun CalibrationPlot(points: List<ChartGallery.CalPoint>, modifier: Modifier = Modifier) {
+fun CalibrationPlot(
+    points: List<ChartGallery.CalPoint>,
+    modifier: Modifier = Modifier,
+    sampleCount: Int = points.sumOf { it.n },
+    brierLine: String? = null,
+    minSamples: Int = com.dirk.kalshiodds.decision.WindowCalibration.MIN_SAMPLES
+) {
     val c = DipTheme.colors
     Column(
         modifier.fillMaxWidth().testTag("chart_calibration")
-            .semantics { contentDescription = "AI UP chance buckets versus actual UP settle rate" },
+            .semantics { contentDescription = "AI UP chance buckets versus actual UP settle rate. UP and DOWN share this chart. n=$sampleCount" },
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         Text("AI UP calibration", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
-        Text("Each bucket is the AI's UP chance. The dot is how often UP settled. The dashed line is perfect calibration.", style = MaterialTheme.typography.bodySmall, color = c.textSecondary)
+        Text("Each bucket is the AI's UP chance. UP and DOWN forecasts share this chart. The dashed line is perfect calibration.", style = MaterialTheme.typography.bodySmall, color = c.textSecondary)
+        if (sampleCount < minSamples) {
+            Text(
+                "Collecting: $sampleCount of $minSamples windows settled",
+                color = c.textPrimary,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(vertical = 28.dp)
+            )
+            return
+        }
         if (points.isEmpty()) {
             ChartEmptyState(height = 160.dp)
             return
         }
+        Text("n=$sampleCount windows", color = c.textPrimary, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+        brierLine?.let { Text(it, color = c.textSecondary, style = MaterialTheme.typography.labelMedium) }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("UP", color = c.upButton, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+            Text("DOWN", color = c.downButton, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+        }
         points.forEach { p ->
             Text(
-                "${p.label} · predicted ${p.predicted.roundToInt()}% · settled ${p.actual.roundToInt()}% · ${p.n}",
+                "${p.label} · predicted ${p.predicted.roundToInt()}% · settled ${p.actual.roundToInt()}% · n=${p.n}",
                 color = if (p.actual + 0.5 >= p.predicted) c.up else c.down,
                 style = MaterialTheme.typography.labelSmall
             )
@@ -281,7 +303,11 @@ fun CumulativeDepthChart(series: List<ChartGallery.DepthSeries>, modifier: Modif
 
 /** Stacked cumulative P&L. The top of the stack is the sum of the families. */
 @Composable
-fun FamilyStackChart(model: ChartGallery.StackModel?, modifier: Modifier = Modifier) {
+fun FamilyStackChart(
+    model: ChartGallery.StackModel?,
+    modifier: Modifier = Modifier,
+    subtitle: String = "Settled picks stacked by source. The top of the stack is the combined net."
+) {
     val c = DipTheme.colors
     Column(
         modifier.fillMaxWidth().testTag("chart_family_stack")
@@ -289,7 +315,7 @@ fun FamilyStackChart(model: ChartGallery.StackModel?, modifier: Modifier = Modif
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         Text("Cumulative P&L by family", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
-        Text("Settled picks stacked by source. The top of the stack is the combined net.", style = MaterialTheme.typography.bodySmall, color = c.textSecondary)
+        Text(subtitle, style = MaterialTheme.typography.bodySmall, color = c.textSecondary)
         val names = model?.names.orEmpty()
         val times = model?.times.orEmpty()
         val values = model?.values.orEmpty()

@@ -1574,6 +1574,7 @@ class ScalpBook(
     fun loadExits() = store.loadExits()
     fun loadWindows(limitWindows: Int = 48) = store.loadWindows(limitWindows)
     fun loadDaily(dayEt: String) = store.loadDaily(dayEt)
+    fun loadDailySince(dayEtInclusive: String) = store.loadDailySince(dayEtInclusive)
     fun pageTrades(scalperId: String, afterClosedAtMs: Long? = null, afterId: String? = null, limit: Int = 50) =
         store.pageTrades(scalperId, afterClosedAtMs, afterId, limit)
     fun windowTrades(scalperId: String, ticker: String) = store.windowTrades(scalperId, ticker)

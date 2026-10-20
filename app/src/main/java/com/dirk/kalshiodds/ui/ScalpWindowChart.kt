@@ -195,7 +195,14 @@ internal fun ScalpWindowChart(d: ScalpAlgoDetail, onWindow: (String) -> Unit = {
             Column { Text("Round trips", color = c.textSecondary, style = MaterialTheme.typography.labelSmall); Text("${data.trades.count { it.state == com.dirk.kalshiodds.decision.ScalpState.CLOSED }}", color = c.textPrimary, fontWeight = FontWeight.Bold) }
         }
         CumulativeDepthChart(ChartGallery.cumulativeDepth(extras.bookYes, extras.bookNo))
-        CalibrationPlot(ChartGallery.calibration(extras.calibration))
+        run {
+            val report = rememberCalibrationReport(extras.calibration)
+            CalibrationPlot(
+                ChartGallery.calibration(report.pairs()),
+                sampleCount = report.count,
+                brierLine = report.brierLabel()
+            )
+        }
         FeeWaterfall(ChartGallery.feeLegFromTrades("Window", data.trades), extras.dayFees)
         KnobTimeline(extras.knobs)
         DistanceToStrikeChart(ChartGallery.distanceToStrike(data.points, extras.strikeUsd))

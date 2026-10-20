@@ -138,11 +138,13 @@ fun ScalpTabScreen(viewModel: OddsViewModel, onOpenScalpData: () -> Unit, onOpen
     val aiPanel = rememberAiWatchPanel(aiStore)
     val book = st.arenaChart.ticker.takeIf { it.isNotBlank() }?.let { viewModel.orderBook(it) }
     val odds = viewModel.state.collectAsStateWithLifecycle().value
-    val strike = odds.snapshot?.allMarkets?.firstOrNull { it.ticker.equals(st.arenaChart.ticker, true) }?.floorStrike
+    val strike = viewModel.displayStrike(
+        st.arenaChart.ticker,
+        odds.snapshot?.allMarkets?.firstOrNull { it.ticker.equals(st.arenaChart.ticker, true) }?.floorStrike
+    )
     val extras = LiveWindowExtras(
         bookYes = book?.yes.orEmpty(),
         bookNo = book?.no.orEmpty(),
-        calibration = paperCalibration(odds.paper.postResetFills.ifEmpty { odds.paper.fills }),
         dayFees = com.dirk.kalshiodds.ui.charts.ChartGallery.dayLeg(st.algoToday.values),
         knobs = rememberKnobTicks(),
         strikeUsd = strike

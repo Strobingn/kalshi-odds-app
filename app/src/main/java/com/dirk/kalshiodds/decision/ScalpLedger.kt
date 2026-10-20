@@ -84,6 +84,8 @@ interface ScalpPersistence {
     fun upsertScalpAndStats(trade: ScalpTrade, prev: ScalpTrade?) { upsertScalp(trade) }
     fun loadStats(): List<ScalpStat> = emptyList()
     fun loadDaily(dayEt: String): List<ScalpDaily> = emptyList()
+    /** Eastern days on or after [dayEtInclusive] (`yyyy-MM-dd`). */
+    fun loadDailySince(dayEtInclusive: String): List<ScalpDaily> = emptyList()
     fun loadExits(): List<ScalpExitAgg> = emptyList()
     /** Newest [limitWindows] windows' per-scalper aggregates. */
     fun loadWindows(limitWindows: Int = 48): List<ScalpWindowAgg> = emptyList()
@@ -132,6 +134,8 @@ class InMemoryScalpPersistence : ScalpPersistence {
     }
     override fun loadStats(): List<ScalpStat> = stats.values.toList()
     override fun loadDaily(dayEt: String): List<ScalpDaily> = daily.values.filter { it.dayEt == dayEt }
+    override fun loadDailySince(dayEtInclusive: String): List<ScalpDaily> =
+        daily.values.filter { it.dayEt >= dayEtInclusive }
     override fun loadExits(): List<ScalpExitAgg> = exits.values.toList()
     override fun loadWindows(limitWindows: Int): List<ScalpWindowAgg> {
         val keys = windows.values.map { it.windowKey to (it.closeMs ?: 0L) }.distinct().sortedByDescending { it.second }.take(limitWindows).map { it.first }.toSet()

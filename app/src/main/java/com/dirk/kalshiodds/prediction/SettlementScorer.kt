@@ -47,6 +47,7 @@ class SettlementScorer(
 
     fun closeTime(ticker: String): Long? =
         closeTimes[ticker.uppercase()] ?: closeTimeOf(ticker.uppercase()) ?: closeTimeOf(ticker)
+            ?: com.dirk.kalshiodds.decision.ScalpTicker.closeMs(ticker)
 
     suspend fun maybeScore(
         nowMs: Long = this.nowMs(),

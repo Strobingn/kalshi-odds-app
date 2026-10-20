@@ -53,6 +53,11 @@ class AppContainer(context: Context) {
     val cfFeed = com.dirk.kalshiodds.signal.ws.CfBenchmarkStore()
     val predictionLedger: com.dirk.kalshiodds.data.local.results.SqliteResultsStore? =
         resultsImpl as? com.dirk.kalshiodds.data.local.results.SqliteResultsStore
+    /** Paper only. One on-device UP forecast per coin per 15-minute window, stored on the prediction ledger. */
+    val forecastRecorder = com.dirk.kalshiodds.decision.ScalpForecastRecorder { row ->
+        val store = predictionLedger ?: return@ScalpForecastRecorder false
+        store.insertLedger(row) >= 0L
+    }
     val archive: com.dirk.kalshiodds.data.local.archive.DataArchive = resultsImpl
     val sessionId: String = java.util.UUID.randomUUID().toString()
     val dataPrefs = com.dirk.kalshiodds.data.prefs.DataPrefs(app)
@@ -352,8 +357,12 @@ class AppContainer(context: Context) {
         model = model,
         logStore = logStore,
         extraOpenTickers = {
+            val now = clock.nowMs()
+            val unsettled = runCatching {
+                predictionLedger?.unsettledLedgerTickers(now, now - 3L * 86_400_000L, 120).orEmpty()
+            }.getOrDefault(emptyList())
             paper.book.openTickers() + shadow.book.openTickers() + d3Store.heldTickers() + d3Store.openTickers() +
-                ladder.openTickers() + decisions.unsettledTickers() + scalp.openTickers()
+                ladder.openTickers() + decisions.unsettledTickers() + scalp.openTickers() + unsettled
         },
         onMarketSettled = { ticker, result ->
             paper.book.settle(ticker, result)
@@ -420,6 +429,28 @@ class AppContainer(context: Context) {
     private fun tradingCredentials(): Pair<String, String> =
         if (hub.settings.kalshiDemoEnabled) extraSecrets.demoSnapshot()
         else preferences.credentialSnapshot()
+
+    /** Calibration and the analysis charts that need more than the live window. Collected off the main thread. */
+    val chartFeed: com.dirk.kalshiodds.decision.ScalpChartFeed by lazy {
+        com.dirk.kalshiodds.decision.ScalpChartFeed(load = { loadScalpChartSnapshot() }, scope = aiScope)
+    }
+
+    private fun loadScalpChartSnapshot(): com.dirk.kalshiodds.decision.ScalpChartFeed.Snapshot {
+        val now = clock.nowMs()
+        val since = now - com.dirk.kalshiodds.decision.WindowCalibration.LOOKBACK_MS
+        val store = predictionLedger
+        val snap = runCatching { paper.book.snapshot() }.getOrNull()
+        val fills = snap?.postResetFills?.ifEmpty { snap.fills }.orEmpty()
+        val day = java.time.Instant.ofEpochMilli(since).atZone(com.dirk.kalshiodds.domain.EtTime.ZONE).toLocalDate().toString()
+        return com.dirk.kalshiodds.decision.ScalpChartFeed.snapshot(
+            ledger = store?.calibrationLedgerRows(since, now).orEmpty(),
+            settlementScalps = store?.settlementScalps(since).orEmpty(),
+            closed = store?.closedScalpsForCharts(since).orEmpty(),
+            fills = fills,
+            daily = runCatching { scalp.loadDailySince(day) }.getOrDefault(emptyList()),
+            nowMs = now
+        )
+    }
 
     fun endSession() {
         val paperSnap = runCatching { paper.book.snapshot() }.getOrNull()
