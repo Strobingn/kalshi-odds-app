@@ -201,7 +201,10 @@ fun HomeScreen(
                                 nowMs = nowMs,
                                 scorecard = state.scorecardSummary,
                                 paper = state.paper,
-                                onOpenScorecard = onOpenScorecard
+                                onOpenScorecard = onOpenScorecard,
+                                comebackRecord = state.lateComeback.totals.takeIf { state.settings.lateComebackEnabled },
+                                clearLeadRecord = state.clearLead.totals.takeIf { state.settings.clearLeadEnabled },
+                                onReview = onBuyMarket
                             )
                         }
                         items(coinCards, key = { it.series }) { card ->

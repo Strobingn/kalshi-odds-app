@@ -1,6 +1,16 @@
 package com.dirk.kalshiodds.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.ui.platform.testTag
+import com.dirk.kalshiodds.signal.latefav.LateFavoriteTotals
+import com.dirk.kalshiodds.ui.AiBanner
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -65,33 +75,90 @@ fun ThisWindowCard(
     scorecard: HomeScorecardSummary = HomeScorecardSummary.EMPTY,
     paper: PaperBookState = PaperBookState(),
     onOpenScorecard: () -> Unit = {},
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** The late-comeback and clear-lead paper records, for the banner's "record" figure. */
+    comebackRecord: LateFavoriteTotals? = null,
+    clearLeadRecord: LateFavoriteTotals? = null,
+    /** Opens the $5 ticket on the called side (same as the card's Buy button). */
+    onReview: ((MarketUiModel, String) -> Unit)? = null
 ) {
     val colors = DipTheme.colors
-    val headline = HomeCopy.thisWindowHeadline(decision, market, nowMs)
-    val accent = SideColor.of(decision?.headline ?: BetCall.Headline.NO_BET, colors)
+    val banner = AiBanner.of(decision, market, nowMs, comebackRecord, clearLeadRecord)
+    val accent = SideColor.of(banner.headline, colors)
+    val shape = RoundedCornerShape(18.dp)
     val equity = remember(paper.fills, paper.startingUsd) {
         PaperEquity.curve(paper.fills, paper.startingUsd)
     }
     Column(
         modifier
             .fillMaxWidth()
-            .background(colors.surface, RoundedCornerShape(16.dp))
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+            .border(2.dp, if (banner.isBet) accent else colors.border, shape)
+            .background(SideColor.container(banner.headline, colors), shape)
+            .padding(16.dp)
+            .testTag("AI_BANNER"),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Text(
-            HomeCopy.THIS_WINDOW,
+            "${HomeCopy.THIS_WINDOW.uppercase()} · ${banner.window}",
             style = MaterialTheme.typography.labelMedium,
             color = colors.textSecondary,
             fontWeight = FontWeight.Bold
         )
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Icon(
+                when (banner.headline) {
+                    BetCall.Headline.BET_UP -> Icons.Default.ArrowUpward
+                    BetCall.Headline.BET_DOWN -> Icons.Default.ArrowDownward
+                    BetCall.Headline.NO_BET -> Icons.Default.Schedule
+                },
+                contentDescription = null,
+                tint = if (banner.isBet) accent else colors.textSecondary,
+                modifier = Modifier.size(40.dp)
+            )
+            Text(
+                banner.title,
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.ExtraBold,
+                color = if (banner.isBet) accent else colors.textPrimary,
+                modifier = Modifier.testTag("AI_BANNER_TITLE")
+            )
+        }
         Text(
-            headline,
+            "${banner.rule} · ${banner.reason}",
             style = MaterialTheme.typography.bodyMedium,
-            color = accent,
+            color = colors.textPrimary,
             fontWeight = FontWeight.SemiBold
         )
+        banner.figures.chunked(3).forEach { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                row.forEach { f ->
+                    Column(Modifier.weight(1f)) {
+                        Text(f.label, style = MaterialTheme.typography.labelSmall, color = colors.textSecondary, maxLines = 1)
+                        Text(
+                            f.value,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.textPrimary,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 2
+                        )
+                    }
+                }
+                repeat(3 - row.size) { Box(Modifier.weight(1f)) }
+            }
+        }
+        val side = banner.side
+        if (banner.isBet && onReview != null && market != null && side != null) {
+            Button(
+                onClick = { onReview(market, side) },
+                colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = SideColor.on(banner.headline, colors)),
+                modifier = Modifier.fillMaxWidth().height(48.dp).testTag("AI_BANNER_REVIEW")
+            ) {
+                Text(
+                    "Review the \$5 ${if (banner.headline == BetCall.Headline.BET_DOWN) "DOWN" else "UP"} ticket",
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
         if (equity.size >= 2) {
             val last = equity.last()
             Text(
@@ -112,6 +179,7 @@ fun ThisWindowCard(
                 heightDp = 96
             )
         }
+        Text(banner.footer, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
         HomeScorecardLine(summary = scorecard, onOpenScorecard = onOpenScorecard)
     }
 }
