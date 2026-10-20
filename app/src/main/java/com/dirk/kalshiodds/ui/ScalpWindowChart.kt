@@ -20,6 +20,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.dirk.kalshiodds.ui.charts.CalibrationPlot
 import com.dirk.kalshiodds.ui.charts.ChartGallery
 import com.dirk.kalshiodds.ui.charts.ChartShapes
 import com.dirk.kalshiodds.ui.charts.CumulativeDepthChart
@@ -191,5 +192,6 @@ internal fun ScalpWindowChart(d: ScalpAlgoDetail, onWindow: (String) -> Unit = {
             Column { Text("Round trips", color = c.textSecondary, style = MaterialTheme.typography.labelSmall); Text("${data.trades.count { it.state == com.dirk.kalshiodds.decision.ScalpState.CLOSED }}", color = c.textPrimary, fontWeight = FontWeight.Bold) }
         }
         CumulativeDepthChart(ChartGallery.cumulativeDepth(extras.bookYes, extras.bookNo))
+        CalibrationPlot(ChartGallery.calibration(extras.calibration))
     }
 }

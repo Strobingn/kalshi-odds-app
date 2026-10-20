@@ -162,6 +162,20 @@ class ChartGalleryTest {
         assertTrue(ChartGallery.cumulativeDepth(emptyList(), emptyList()).isEmpty())
     }
 
+    @Test fun calibrationBucketsUpChance() {
+        val points = ChartGallery.calibration(
+            listOf(42.0 to true, 0.44 to false, 90.0 to true, 140.0 to true, 50.0 to true)
+        )
+        assertEquals(listOf("40–50%", "50–60%", "90–100%"), points.map { it.label })
+        assertEquals(2, points[0].n)
+        assertEquals(43.0, points[0].predicted, 1e-9)
+        assertEquals(50.0, points[0].actual, 1e-9)
+        assertEquals(100.0, points[1].actual, 0.0)
+        assertEquals(100.0, points[2].actual, 0.0)
+        assertTrue(ChartGallery.calibration(emptyList()).isEmpty())
+        assertTrue(ChartGallery.calibration(listOf(Double.NaN to true)).isEmpty())
+    }
+
     private fun trade(id: String, side: String, rule: String, net: Double) = ScalpTrade(
         id = id,
         ticker = "KXBTC15M-26OCT181500-00",

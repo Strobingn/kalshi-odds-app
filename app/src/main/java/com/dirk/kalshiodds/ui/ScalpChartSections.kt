@@ -4,6 +4,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import com.dirk.kalshiodds.decision.ScalpModels
 import com.dirk.kalshiodds.decision.ScalpTrade
+import com.dirk.kalshiodds.signal.paper.PaperFill
+import com.dirk.kalshiodds.ui.charts.CalibrationPlot
+import com.dirk.kalshiodds.ui.charts.ChartShapes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,8 +25,18 @@ import com.dirk.kalshiodds.ui.charts.WinRateHeatmap
 /** Optional inputs for the live-window card charts. Empty fields render the placeholder. */
 data class LiveWindowExtras(
     val bookYes: List<Pair<Double, Double>> = emptyList(),
-    val bookNo: List<Pair<Double, Double>> = emptyList()
+    val bookNo: List<Pair<Double, Double>> = emptyList(),
+    val calibration: List<Pair<Double, Boolean>> = emptyList()
 )
+
+/** Settled paper fills → (AI UP chance 0–100, whether UP settled). */
+fun paperCalibration(fills: List<PaperFill>): List<Pair<Double, Boolean>> = fills.mapNotNull { fill ->
+    val won = fill.won ?: return@mapNotNull null
+    if (!fill.settled) return@mapNotNull null
+    val yes = !fill.side.equals("NO", true)
+    val up = ChartShapes.aiUp(yes, fill.aiPct) ?: return@mapNotNull null
+    up to if (yes) won else !won
+}
 
 /** Charts added on the Scalp Analysis tab. Existing cards stay where they are. */
 @Composable

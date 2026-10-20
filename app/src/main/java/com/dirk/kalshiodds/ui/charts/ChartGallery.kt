@@ -149,6 +149,27 @@ object ChartGallery {
         ScatterDot(entry * 100.0, exit * 100.0, (t.netUsd ?: 0.0) > 0.0)
     }
 
+    data class CalPoint(val label: String, val predicted: Double, val actual: Double, val n: Int)
+
+    /** AI UP chance (0–100 or 0–1) versus whether UP settled. Ten-point buckets that have samples. */
+    fun calibration(samples: List<Pair<Double, Boolean>>): List<CalPoint> {
+        val clean = samples.mapNotNull { (raw, settledUp) ->
+            ChartShapes.scalePct(raw)?.let { it to settledUp }
+        }
+        if (clean.isEmpty()) return emptyList()
+        return (0 until 10).mapNotNull { i ->
+            val lo = i * 10.0
+            val hi = lo + 10.0
+            val rows = clean.filter { (p, _) -> if (i == 9) p in lo..100.0 else p >= lo && p < hi }
+            if (rows.isEmpty()) null else CalPoint(
+                "${lo.toInt()}–${hi.toInt()}%",
+                rows.map { it.first }.average(),
+                rows.count { it.second } * 100.0 / rows.size,
+                rows.size
+            )
+        }
+    }
+
     data class DepthSeries(val name: String, val up: Boolean, val bid: Boolean, val cents: List<Double>, val size: List<Double>)
 
     /**

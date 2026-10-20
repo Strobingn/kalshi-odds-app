@@ -137,7 +137,12 @@ fun ScalpTabScreen(viewModel: OddsViewModel, onOpenScalpData: () -> Unit, onOpen
     val aiStore = app?.let { runCatching { it.container.aiWatch }.getOrNull() }
     val aiPanel = rememberAiWatchPanel(aiStore)
     val book = st.arenaChart.ticker.takeIf { it.isNotBlank() }?.let { viewModel.orderBook(it) }
-    val extras = LiveWindowExtras(bookYes = book?.yes.orEmpty(), bookNo = book?.no.orEmpty())
+    val paper = viewModel.state.collectAsStateWithLifecycle().value.paper
+    val extras = LiveWindowExtras(
+        bookYes = book?.yes.orEmpty(),
+        bookNo = book?.no.orEmpty(),
+        calibration = paperCalibration(paper.postResetFills.ifEmpty { paper.fills })
+    )
     var settings by remember { mutableStateOf(false) }
     if (settings) SwarmScalpSettingsDialog { settings = false }
     ScalpTabContent(

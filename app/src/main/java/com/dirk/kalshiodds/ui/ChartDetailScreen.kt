@@ -30,6 +30,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.chart.BidPoint
 import com.dirk.kalshiodds.domain.MarketUiModel
+import com.dirk.kalshiodds.ui.charts.CalibrationPlot
 import com.dirk.kalshiodds.ui.charts.ChartBlock
 import com.dirk.kalshiodds.ui.charts.ChartGallery
 import com.dirk.kalshiodds.ui.charts.ChartShapes
@@ -56,7 +57,8 @@ fun ChartDetailScreen(
     onBack: () -> Unit,
     onBuyYes: (MarketUiModel) -> Unit,
     onBuyNo: (MarketUiModel) -> Unit,
-    book: com.dirk.kalshiodds.signal.engine.BookLevelSnapshot? = null
+    book: com.dirk.kalshiodds.signal.engine.BookLevelSnapshot? = null,
+    calibration: List<Pair<Double, Boolean>> = emptyList()
 ) {
     val colors = DipTheme.colors
     Scaffold(
@@ -182,6 +184,7 @@ fun ChartDetailScreen(
                 }
             OrderBookCard(book)
             CumulativeDepthChart(ChartGallery.cumulativeDepth(book?.yes.orEmpty(), book?.no.orEmpty()))
+            CalibrationPlot(ChartGallery.calibration(calibration))
             UpDownBuyButtons(
                 market = market,
                 onBuyYes = { onBuyYes(market) },

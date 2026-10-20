@@ -278,6 +278,9 @@ class MainActivity : ComponentActivity() {
                                 ChartDetailScreen(
                                     market = market,
                                     book = oddsViewModel.orderBook(market.ticker),
+                                    calibration = com.dirk.kalshiodds.ui.paperCalibration(
+                                        oddsState.paper.postResetFills.ifEmpty { oddsState.paper.fills }
+                                    ),
                                     points = market.bidHistory.ifEmpty {
                                         market.oddsHistory.mapIndexed { i, mid ->
                                             com.dirk.kalshiodds.chart.BidPoint(

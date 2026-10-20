@@ -44,6 +44,53 @@ private fun heatColor(rate: Double?, n: Int, up: Color, down: Color, empty: Colo
     return if (rate >= 0.5) up.copy(alpha = alpha) else down.copy(alpha = alpha)
 }
 
+/** Predicted AI UP chance against the share of buckets that settled UP. */
+@Composable
+fun CalibrationPlot(points: List<ChartGallery.CalPoint>, modifier: Modifier = Modifier) {
+    val c = DipTheme.colors
+    Column(
+        modifier.fillMaxWidth().testTag("chart_calibration")
+            .semantics { contentDescription = "AI UP chance buckets versus actual UP settle rate" },
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text("AI UP calibration", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
+        Text("Each bucket is the AI's UP chance. The dot is how often UP settled. The dashed line is perfect calibration.", style = MaterialTheme.typography.bodySmall, color = c.textSecondary)
+        if (points.isEmpty()) {
+            ChartEmptyState(height = 160.dp)
+            return
+        }
+        points.forEach { p ->
+            Text(
+                "${p.label} · predicted ${p.predicted.roundToInt()}% · settled ${p.actual.roundToInt()}% · ${p.n}",
+                color = if (p.actual + 0.5 >= p.predicted) c.up else c.down,
+                style = MaterialTheme.typography.labelSmall
+            )
+        }
+        Canvas(Modifier.fillMaxWidth().height(200.dp)) {
+            val left = 28.dp.toPx()
+            val top = 8.dp.toPx()
+            val plot = minOf((size.width - left - 8.dp.toPx()), (size.height - top - 16.dp.toPx())).coerceAtLeast(1f)
+            fun x(v: Double) = left + plot * (v / 100.0).toFloat().coerceIn(0f, 1f)
+            fun y(v: Double) = top + plot * (1f - (v / 100.0).toFloat().coerceIn(0f, 1f))
+            drawLine(c.border, Offset(left, y(0.0)), Offset(left + plot, y(0.0)), 1.dp.toPx())
+            drawLine(c.border, Offset(left, y(0.0)), Offset(left, y(100.0)), 1.dp.toPx())
+            drawLine(
+                c.textSecondary.copy(alpha = 0.8f),
+                Offset(x(0.0), y(0.0)),
+                Offset(x(100.0), y(100.0)),
+                1.5.dp.toPx(),
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(8.dp.toPx(), 6.dp.toPx()))
+            )
+            val maxN = points.maxOf { it.n }.coerceAtLeast(1)
+            points.forEach { p ->
+                val radius = 4.dp.toPx() + 7.dp.toPx() * p.n / maxN.toFloat()
+                val color = if (p.actual + 0.5 >= p.predicted) c.upButton else c.downButton
+                drawCircle(color, radius, Offset(x(p.predicted), y(p.actual)))
+            }
+        }
+    }
+}
+
 /** UP and DOWN cumulative bids and asks on one price axis. Asks are dashed. */
 @Composable
 fun CumulativeDepthChart(series: List<ChartGallery.DepthSeries>, modifier: Modifier = Modifier) {

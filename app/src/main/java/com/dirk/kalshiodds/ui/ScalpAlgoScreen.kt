@@ -67,6 +67,7 @@ object ScalpAlgoCopy {
 fun ScalpAlgoScreen(viewModel: OddsViewModel, onBack: () -> Unit) {
     val d by viewModel.scalpAlgo.collectAsStateWithLifecycle()
     val controls by viewModel.scalpStrategyControls.collectAsStateWithLifecycle()
+    val paper = viewModel.state.collectAsStateWithLifecycle().value.paper
     var settingsOpen by androidx.compose.runtime.remember(d.model) { androidx.compose.runtime.mutableStateOf(false) }
     val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     androidx.compose.runtime.DisposableEffect(owner, viewModel, settingsOpen) {
@@ -89,10 +90,15 @@ fun ScalpAlgoScreen(viewModel: OddsViewModel, onBack: () -> Unit) {
             onBenchOverride = { viewModel.setScalpBenchOverride(model.code, it) })
     } else {
         val book = d.chart.ticker.takeIf { it.isNotBlank() }?.let { viewModel.orderBook(it) }
+        val paper = viewModel.state.collectAsStateWithLifecycle().value.paper
         ScalpAlgoContent(d, onBack, paged, viewModel::selectScalpChartWindow, viewModel::followScalpChartLive,
             onSettings = if (model != null) ({ settingsOpen = true }) else null,
             aiNote = model?.let { controls.settings(it.code).aiNote }.orEmpty(),
-            extras = LiveWindowExtras(bookYes = book?.yes.orEmpty(), bookNo = book?.no.orEmpty()))
+            extras = LiveWindowExtras(
+                bookYes = book?.yes.orEmpty(),
+                bookNo = book?.no.orEmpty(),
+                calibration = paperCalibration(paper.postResetFills.ifEmpty { paper.fills })
+            ))
     }
 }
 

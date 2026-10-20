@@ -67,6 +67,27 @@ class ChartGalleryRenderTest {
         compose.onAllNodesWithText("No data yet").assertCountEquals(0)
     }
 
+    @Test fun calibrationEmpty() {
+        show { CalibrationPlot(emptyList()) }
+        compose.onNodeWithTag("chart_calibration").assertExists()
+        compose.onNodeWithText("AI UP calibration").assertExists()
+        compose.onNodeWithText("No data yet").assertExists()
+    }
+
+    @Test fun calibrationSample() {
+        show {
+            CalibrationPlot(
+                listOf(
+                    ChartGallery.CalPoint("40–50%", 43.0, 50.0, 4),
+                    ChartGallery.CalPoint("90–100%", 92.0, 40.0, 5)
+                )
+            )
+        }
+        compose.onNodeWithText("40–50% · predicted 43% · settled 50% · 4").assertExists()
+        compose.onNodeWithText("90–100% · predicted 92% · settled 40% · 5").assertExists()
+        compose.onAllNodesWithText("No data yet").assertCountEquals(0)
+    }
+
     @Test fun depthEmpty() {
         show { CumulativeDepthChart(emptyList()) }
         compose.onNodeWithTag("chart_depth").assertExists()
