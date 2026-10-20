@@ -77,18 +77,28 @@ class ScalpForecastRecorder(
         modelVersion = MODEL,
         ticker = quote.ticker.uppercase(),
         series = CryptoMarkets.inferSeries(quote.ticker),
-        closeTimeMs = quote.closeMs,
+        settlementRule = "15m window",
+        settlementSource = null,
         secondsRemaining = quote.tauS,
         spot = quote.spot,
         targetStrike = quote.strike,
+        zDistance = null,
         rawModelProb = pYes,
-        finalProb = pYes,
+        calibratedProb = null,
         marketMid = yesMid(quote),
-        yesAsk = quote.yesAsk,
+        bid = quote.yesBid,
+        ask = quote.yesAsk,
+        spread = null,
+        depthAtBest = null,
+        imbalance = null,
+        bookAgeMs = quote.nowMs - quote.bookAtMs,
         decision = "FORECAST",
+        sizeContracts = null,
         reasonCodes = MODEL,
+        finalProb = pYes,
         side = "YES",
-        settlementRule = "15m window"
+        closeTimeMs = quote.closeMs,
+        yesAsk = quote.yesAsk
     )
 
     private fun isFifteen(ticker: String): Boolean =

@@ -120,11 +120,28 @@ class WindowCalibrationTest {
         modelVersion = "t",
         ticker = ticker,
         series = ticker.substringBefore('-'),
-        closeTimeMs = ScalpTicker.closeMs(ticker) ?: at,
-        finalProb = p,
+        settlementRule = null,
+        settlementSource = null,
+        secondsRemaining = null,
+        spot = null,
+        targetStrike = null,
+        zDistance = null,
+        rawModelProb = p,
+        calibratedProb = null,
         marketMid = market,
+        bid = null,
+        ask = null,
+        spread = null,
+        depthAtBest = null,
+        imbalance = null,
+        bookAgeMs = null,
+        decision = "FORECAST",
+        sizeContracts = null,
+        reasonCodes = "test",
         settlementResult = result,
-        settledAtMs = result?.let { at }
+        settledAtMs = result?.let { at },
+        finalProb = p,
+        closeTimeMs = ScalpTicker.closeMs(ticker) ?: at
     )
 
     private fun paper(ai: Double, won: Boolean, side: String) = PaperFill(
