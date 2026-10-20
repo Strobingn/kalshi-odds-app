@@ -348,7 +348,7 @@ fun AiUsageChartsCard(store: AiWatchStore) {
             Text("Projected today ${LlmUsageText.money(projection.projectedUsd)} at the current pace.", color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         }
         Text("Estimated $ per hour today", color = colors.onSurface, fontWeight = FontWeight.SemiBold)
-        if (dollars.all { it.dollars == 0.0 && it.cumulative == 0.0 }) Text("No calls recorded today.", color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+        if (dollars.all { it.dollars == 0.0 && it.cumulative == 0.0 }) Text("No estimated spend today.", color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         HourBars(dollars.map { it.dollars }, dollars.map { it.cumulative }, projection.budgetUsd, up, down)
         Text("Calls per hour by trigger", color = colors.onSurface, fontWeight = FontWeight.SemiBold)
         StackedCalls(calls)
@@ -380,13 +380,12 @@ fun AiUsageChartsCard(store: AiWatchStore) {
                     series = latency.mapIndexed { i, series ->
                         LineSeries(
                             name = LlmProviders.shortLabel(series.provider),
-                            color = providerColor(i),
+                            color = providerColor(series.provider),
                             points = series.points.map { (t, v) -> ChartShapes.Sample(t, v) }
                         )
                     },
                     height = 180.dp,
                     yFormat = { "${it.toLong()} ms" },
-                    includeZero = true,
                     contentLabel = "Latency by provider"
                 )
             }
@@ -421,16 +420,14 @@ fun AiUsageChartsCard(store: AiWatchStore) {
     }
 }
 
-private fun providerColor(index: Int): Color {
-    val palette = listOf(
-        Color(FieldSwatch.Dark.SuccessFill),
-        Color(FieldSwatch.Dark.ErrorFill),
-        Color(FieldSwatch.Dark.Success),
-        Color(FieldSwatch.Dark.Error),
-        Color(FieldSwatch.Dark.StatusCompleted),
-        Color(FieldSwatch.Dark.StatusUrgent)
-    )
-    return palette[index % palette.size]
+private fun providerColor(id: String): Color = when (id) {
+    LlmProviders.MISTRAL -> Color(FieldSwatch.Dark.SuccessFill)
+    LlmProviders.GROQ -> Color(FieldSwatch.Dark.ErrorFill)
+    LlmProviders.GEMINI -> Color(FieldSwatch.Dark.StatusUrgent)
+    LlmProviders.OPENROUTER, LlmProviders.OPENROUTER_FREE -> Color(FieldSwatch.Dark.StatusCompleted)
+    LlmProviders.XAI -> Color(FieldSwatch.Dark.Error)
+    LlmProviders.OPENAI -> Color(FieldSwatch.Dark.OnSurfaceVariant)
+    else -> Color(FieldSwatch.Dark.OnSurfaceVariant)
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -443,9 +440,9 @@ private fun ProviderStack(hours: List<AiUsageCharts.HourStack>) {
         return
     }
     FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        providers.forEachIndexed { i, id ->
+        providers.forEach { id ->
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Canvas(Modifier.size(8.dp)) { drawCircle(providerColor(i)) }
+                Canvas(Modifier.size(8.dp)) { drawCircle(providerColor(id)) }
                 Text(LlmProviders.shortLabel(id), color = colors.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
             }
         }
@@ -456,12 +453,12 @@ private fun ProviderStack(hours: List<AiUsageCharts.HourStack>) {
         hours.forEachIndexed { i, hour ->
             var y = size.height - 14.dp.toPx()
             val plot = y
-            providers.forEachIndexed { s, id ->
+            providers.forEach { id ->
                 val n = (hour.byProvider[id] ?: 0).toFloat()
-                if (n <= 0f) return@forEachIndexed
+                if (n <= 0f) return@forEach
                 val h = n / max * plot
                 y -= h
-                drawRect(providerColor(s), Offset(i * slot + 1.5f, y), Size((slot - 3f).coerceAtLeast(1f), h))
+                drawRect(providerColor(id), Offset(i * slot + 1.5f, y), Size((slot - 3f).coerceAtLeast(1f), h))
             }
         }
     }
@@ -482,12 +479,14 @@ private fun LimitBars(rows: List<AiUsageCharts.LimitUse>) {
                 style = MaterialTheme.typography.labelSmall
             )
             Canvas(Modifier.fillMaxWidth().height(10.dp)) {
-                drawRoundRect(red.copy(alpha = 0.28f), cornerRadius = CornerRadius(4f, 4f))
+                val track = Color(FieldSwatch.Dark.SurfaceBright)
+                drawRoundRect(track, cornerRadius = CornerRadius(4f, 4f))
                 val frac = if (row.limit <= 0) 0f else (row.calls.toFloat() / row.limit.toFloat()).coerceIn(0f, 1f)
                 if (frac > 0f) {
+                    val shown = frac.coerceAtLeast(0.02f)
                     drawRoundRect(
                         if (over) red else green,
-                        size = Size(size.width * frac, size.height),
+                        size = Size(size.width * shown, size.height),
                         cornerRadius = CornerRadius(4f, 4f)
                     )
                 }
