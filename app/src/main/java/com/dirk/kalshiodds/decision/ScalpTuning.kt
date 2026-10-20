@@ -362,8 +362,8 @@ object ScalpBreakdown {
     fun byCoin(trades: List<ScalpTrade>) = rows(closed(trades)) { it.coin }
     fun byStrategy(trades: List<ScalpTrade>) = rows(closed(trades)) { it.algoLabel }
     fun byHourEt(trades: List<ScalpTrade>) = rows(closed(trades)) { t ->
-        (t.entryAtMs ?: t.signalAtMs).let { String.format(Locale.US, "%02d ET", ScalpTicker.hourEt(it)) }
-    }
+        (t.entryAtMs ?: t.signalAtMs).let { com.dirk.kalshiodds.domain.EtTime.hour(ScalpTicker.hourEt(it)) + " ET" }
+    }.sortedBy { r -> (0..23).indexOfFirst { com.dirk.kalshiodds.domain.EtTime.hour(it) + " ET" == r.key } } // clock order, not text order
     fun byTimeLeft(trades: List<ScalpTrade>) = rows(closed(trades)) { t ->
         val close = ScalpTicker.closeMs(t.ticker) ?: return@rows null
         val left = (close - (t.entryAtMs ?: t.signalAtMs)) / 1000.0

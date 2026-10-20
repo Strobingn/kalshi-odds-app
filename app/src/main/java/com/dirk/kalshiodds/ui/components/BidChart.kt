@@ -295,9 +295,7 @@ private fun fmtCents(c: Float?): String =
     c?.let { com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(it / 100.0) } ?: "—"
 
 private fun fmtTime(ms: Long): String {
-    val fmt = SimpleDateFormat("h:mm:ss a", Locale.US)
-    fmt.timeZone = TimeZone.getDefault()
-    return fmt.format(Date(ms))
+    return com.dirk.kalshiodds.domain.EtTime.clockSec(ms)
 }
 
 @androidx.compose.ui.tooling.preview.Preview(showBackground = true, backgroundColor = 0xFF0D1117)

@@ -119,11 +119,7 @@ object AiUsageCharts {
         return AutoSplit(auto, manual)
     }
 
-    fun hourLabel(hour: Int): String {
-        val h = hour.coerceIn(0, 23)
-        val hr = if (h % 12 == 0) 12 else h % 12
-        return "$hr${if (h < 12) "a" else "p"}"
-    }
+    fun hourLabel(hour: Int): String = com.dirk.kalshiodds.domain.EtTime.hourTick(hour)
 
     /** Project today's spend from the pace so far. Warns only when a budget is set and the pace is over it. */
     fun projection(spentUsd: Double, nowMs: Long, budgetUsd: Double?): Projection {

@@ -349,7 +349,8 @@ object ScorecardCopy {
     /** "── Paper bankroll reset to $10,000 · Oct 9, 2026 12:30 PM ET · … ──" for the latest reset, else null. */
     fun resetMarkerLine(paper: com.dirk.kalshiodds.signal.paper.PaperBookState, zoneId: ZoneId = ET_ZONE): String? {
         val last = paper.archived.maxByOrNull { it.archivedAtMs } ?: return null
-        val at = java.time.Instant.ofEpochMilli(last.archivedAtMs).atZone(zoneId)
+        val at = if (zoneId == com.dirk.kalshiodds.domain.EtTime.ZONE) com.dirk.kalshiodds.domain.EtTime.fullDateClock(last.archivedAtMs)
+        else java.time.Instant.ofEpochMilli(last.archivedAtMs).atZone(zoneId)
             .format(java.time.format.DateTimeFormatter.ofPattern("MMM d, yyyy h:mm a", Locale.US))
         val to = last.resetToUsd ?: paper.startingUsd
         return String.format(
@@ -564,7 +565,7 @@ object ScorecardCopy {
         val defs = (0 until 6).map { i ->
             val start = i * 4
             val key = "%02d-%02d".format(start, start + 4)
-            val label = "%d–%d ET".format(start, start + 4)
+            val label = com.dirk.kalshiodds.domain.EtTime.hourRange(start, start + 4)
             key to label
         }
         val groups = settled.groupBy { ScorecardMetrics.etBucketKey(settledAt(it), zoneId) }

@@ -214,7 +214,7 @@ object ScorecardMetrics {
             val start = i * 4
             val end = start + 4
             val key = "%02d-%02d".format(start, end)
-            val label = "%d–%d ET".format(start, end)
+            val label = com.dirk.kalshiodds.domain.EtTime.hourRange(start, end)
             key to label
         }
         val groups = rows.groupBy { etBucketKey(settledAt(it), zoneId) }

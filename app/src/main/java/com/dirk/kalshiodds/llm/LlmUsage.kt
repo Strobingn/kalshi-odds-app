@@ -207,12 +207,11 @@ object LlmUsageText {
 }
 
 object AiAdjustmentLog {
-    private val ET_FMT = DateTimeFormatter.ofPattern("MMM d, h:mm:ss a 'ET'", Locale.US).withZone(LlmPrices.ET)
     const val MAX = 50
 
     fun line(a: AiAdjustment): String {
         val label = ScalpModels.modelByCode(a.scalper)?.label ?: a.scalper
         val why = a.reason.replace('\n', ' ').trim().ifBlank { "window follow" }
-        return "${ET_FMT.format(Instant.ofEpochMilli(a.atMs))} · $label · ${a.setting} ${a.oldValue} → ${a.newValue} · $why"
+        return "${com.dirk.kalshiodds.domain.EtTime.dateClockSec(a.atMs)} · $label · ${a.setting} ${a.oldValue} → ${a.newValue} · $why"
     }
 }

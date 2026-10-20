@@ -73,7 +73,7 @@ internal fun SwarmScalpCurve(windows: List<ScalpModels.WindowRow>, v2: Boolean, 
                 drawPath(path, c.textPrimary, style = Stroke(3.dp.toPx()))
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                fun label(at: Long) = java.time.Instant.ofEpochMilli(at).atZone(java.time.ZoneId.of("America/New_York")).format(java.time.format.DateTimeFormatter.ofPattern("MMM d HH:mm", Locale.US))
+                fun label(at: Long) = com.dirk.kalshiodds.domain.EtTime.dateClockBare(at)
                 Text(label(times.first()), style = MaterialTheme.typography.labelSmall, color = c.textSecondary)
                 Text(label(times.last()) + " ET", style = MaterialTheme.typography.labelSmall, color = c.textSecondary)
             }

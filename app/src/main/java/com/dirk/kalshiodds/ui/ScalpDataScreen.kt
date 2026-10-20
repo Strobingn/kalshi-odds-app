@@ -138,7 +138,7 @@ object ScalpData {
         String.format(Locale.US, "Fees paid (both legs): $%,.2f", s.feesUsd)
     )
 
-    fun time(ms: Long?): String = ms?.let { Instant.ofEpochMilli(it).atZone(ET).format(TIME) + " ET" } ?: "—"
+    fun time(ms: Long?): String = ms?.let { com.dirk.kalshiodds.domain.EtTime.dateClockSec(it) } ?: "—"
 
     /** One row per round trip, newest first. */
     fun tripLines(trades: List<ScalpTrade>): List<ScalpCopy.Line> = closed(trades).asReversed().map { t ->

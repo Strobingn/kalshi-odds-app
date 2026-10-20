@@ -458,8 +458,7 @@ object ScalpModels {
     fun chipLabel(ticker: String, closeMs: Long?): String {
         val coin = ScalpParams.coinOf(ticker)
         val end = (closeMs ?: ScalpTicker.closeMs(ticker))?.let {
-            java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneId.of("America/New_York"))
-                .format(java.time.format.DateTimeFormatter.ofPattern("h:mm a", java.util.Locale.US))
+            com.dirk.kalshiodds.domain.EtTime.clock(it)
         }
         return if (end == null) "$coin 15m" else "$coin 15m · $end"
     }

@@ -173,7 +173,7 @@ class ReleaseGate0340ScalpTest {
         assertEquals(0, coin["ETH"]!!.wins)
         assertEquals(0.10, coin["BTC"]!!.netUsd, 1e-9)
         val hours = ScalpBreakdown.byHourEt(trades).map { it.key }
-        assertTrue(hours.contains("10 ET") && hours.contains("11 ET"))
+        assertTrue(hours.contains("10 AM ET") && hours.contains("11 AM ET"))
         assertEquals(listOf("5–10 min left"), ScalpBreakdown.byTimeLeft(trades).map { it.key }.distinct())
         val pw = ScalpBreakdown.roundTripsPerWindow(trades)
         assertEquals(2, pw.max)

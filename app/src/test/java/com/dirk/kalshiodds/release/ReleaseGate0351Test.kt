@@ -18,8 +18,8 @@ class ReleaseGate0351Test {
     }
 
     @Test fun chipsShowCoinAndWindowEnd() {
-        assertEquals("BTC 15m · 11:00 AM", ScalpModels.chipLabel("KXBTC15M-26OCT101100-00", null))
-        assertEquals("SOL 15m · 11:00 AM", ScalpModels.chipLabel("KXSOL15M-26OCT101100-00", null))
+        assertEquals("BTC 15m · 11:00 AM ET", ScalpModels.chipLabel("KXBTC15M-26OCT101100-00", null))
+        assertEquals("SOL 15m · 11:00 AM ET", ScalpModels.chipLabel("KXSOL15M-26OCT101100-00", null))
     }
 
     @Test fun liveDot() {

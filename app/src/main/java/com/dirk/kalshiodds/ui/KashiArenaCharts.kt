@@ -57,8 +57,7 @@ internal fun ArenaProfitChart(points: List<KashiArenaData.Point>, compact: Boole
     }
 }
 
-internal fun arenaDate(at: Long): String = java.time.Instant.ofEpochMilli(at).atZone(java.time.ZoneId.of("America/New_York"))
-    .format(java.time.format.DateTimeFormatter.ofPattern("MMM d HH:mm", java.util.Locale.US))
+internal fun arenaDate(at: Long): String = com.dirk.kalshiodds.domain.EtTime.dateClockBare(at)
 
 @Composable
 internal fun ArenaRaceChart(st: ScalpTabState, rows: List<ScalpModels.Row>) {

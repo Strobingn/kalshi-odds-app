@@ -185,6 +185,6 @@ class ReleaseGate0340MultiStrategyTest {
         val lines = ScalpBreakdown.lines(trades)
         ScalpStrategy.values().forEach { s -> assertTrue(s.label, lines.any { it.startsWith(s.label) }) }
         assertTrue(lines.any { it.startsWith("Momentum-sniper · no closed round trips yet") })
-        assertTrue(lines.any { it.startsWith("  BTC") } && lines.any { it.startsWith("  09 ET") } && lines.any { it.startsWith("  10 ET") })
+        assertTrue(lines.any { it.startsWith("  BTC") } && lines.any { it.startsWith("  9 AM ET") } && lines.any { it.startsWith("  10 AM ET") })
     }
 }

@@ -378,6 +378,5 @@ private fun MarketRow(row: SettledWindowRow, onOpen: () -> Unit) {
 }
 
 internal fun historyTime(ms: Long): String {
-    val fmt = SimpleDateFormat("MMM d, h:mm a", Locale.US)
-    return fmt.format(Date(ms))
+    return com.dirk.kalshiodds.domain.EtTime.dateClock(ms)
 }

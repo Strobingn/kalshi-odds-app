@@ -295,14 +295,11 @@ internal fun stanceFor(side: String, edgePp: Double, thresholdPp: Double): Strin
 private fun String?.toDoubleOrNullSafe(): Double? =
     this?.trim()?.takeIf { it.isNotEmpty() }?.toDoubleOrNull()
 
-private val localTimeFormatter: DateTimeFormatter =
-    DateTimeFormatter.ofPattern("MMM d, h:mm a z", Locale.US)
-
 fun formatCloseTimeLocal(iso: String?): String? {
     if (iso.isNullOrBlank()) return null
     return try {
         val instant = Instant.parse(iso)
-        localTimeFormatter.format(instant.atZone(ZoneId.systemDefault()))
+        EtTime.dateClock(instant.toEpochMilli())
     } catch (_: Exception) {
         iso
     }

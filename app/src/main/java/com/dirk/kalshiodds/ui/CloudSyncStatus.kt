@@ -20,10 +20,13 @@ import java.util.Locale
 object CloudSyncStatus {
     private val FORMAT = DateTimeFormatter.ofPattern("MMM d, yyyy, h:mm a", Locale.US)
 
-    fun lastSynced(atMs: Long, zone: ZoneId = ZoneId.systemDefault()): String {
+    fun lastSynced(atMs: Long, zone: ZoneId = com.dirk.kalshiodds.domain.EtTime.ZONE): String {
         if (atMs <= 0L) return "Last synced: never"
-        val local = Instant.ofEpochMilli(atMs).atZone(zone)
-        return "Last synced: ${FORMAT.format(local)}"
+        if (zone != com.dirk.kalshiodds.domain.EtTime.ZONE) {
+            // Tests may pin another zone; the app always shows ET.
+            return "Last synced: ${FORMAT.format(Instant.ofEpochMilli(atMs).atZone(zone))}"
+        }
+        return "Last synced: ${com.dirk.kalshiodds.domain.EtTime.fullDateClock(atMs)}"
     }
 
     fun isError(message: String): Boolean {
@@ -51,7 +54,7 @@ object CloudSyncStatus {
             m.contains("diphunter_sync ") && (m.contains("500") || m.contains("failed"))
     }
 
-    fun line(settings: DataHubSettings, zone: ZoneId = ZoneId.systemDefault()): String {
+    fun line(settings: DataHubSettings, zone: ZoneId = com.dirk.kalshiodds.domain.EtTime.ZONE): String {
         if (!settings.supabaseConfigured) return "Supabase not configured — History stays on this phone."
         if (!settings.syncEnabled) return "Cloud sync off"
         val head = lastSynced(settings.lastSyncAtMs, zone)
@@ -65,7 +68,7 @@ object CloudSyncStatus {
 }
 
 @Composable
-fun CloudSyncStatusBlock(settings: DataHubSettings, zone: ZoneId = ZoneId.systemDefault()) {
+fun CloudSyncStatusBlock(settings: DataHubSettings, zone: ZoneId = com.dirk.kalshiodds.domain.EtTime.ZONE) {
     val colors = DipTheme.colors
     val text = CloudSyncStatus.line(settings, zone)
     val error = CloudSyncStatus.isError(settings.lastSyncMessage)
