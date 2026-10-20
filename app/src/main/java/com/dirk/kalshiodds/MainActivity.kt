@@ -106,6 +106,8 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                     val oddsState by oddsViewModel.state.collectAsStateWithLifecycle()
+                    val scalpState by oddsViewModel.scalpTab.collectAsStateWithLifecycle()
+                    val knobTicks = com.dirk.kalshiodds.ui.rememberKnobTicks()
                     val sheetOpen = oddsState.tickets.phase is TicketPhase.AwaitingApprove
                     val chartMarket: MarketUiModel? = chartTicker?.let { t ->
                         oddsState.snapshot?.allMarkets?.firstOrNull { it.ticker == t }
@@ -278,6 +280,15 @@ class MainActivity : ComponentActivity() {
                                 ChartDetailScreen(
                                     market = market,
                                     book = oddsViewModel.orderBook(market.ticker),
+                                    calibration = com.dirk.kalshiodds.ui.paperCalibration(
+                                        oddsState.paper.postResetFills.ifEmpty { oddsState.paper.fills }
+                                    ),
+                                    windowFees = com.dirk.kalshiodds.ui.charts.ChartGallery.feeLegFromTrades(
+                                        "Window",
+                                        scalpState.arenaChart.trades.filter { it.ticker.equals(market.ticker, true) }
+                                    ),
+                                    dayFees = com.dirk.kalshiodds.ui.charts.ChartGallery.dayLeg(scalpState.algoToday.values),
+                                    knobs = knobTicks,
                                     points = market.bidHistory.ifEmpty {
                                         market.oddsHistory.mapIndexed { i, mid ->
                                             com.dirk.kalshiodds.chart.BidPoint(

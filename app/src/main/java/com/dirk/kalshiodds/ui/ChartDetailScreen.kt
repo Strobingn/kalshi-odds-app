@@ -30,8 +30,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.chart.BidPoint
 import com.dirk.kalshiodds.domain.MarketUiModel
+import com.dirk.kalshiodds.ui.charts.CalibrationPlot
 import com.dirk.kalshiodds.ui.charts.ChartBlock
+import com.dirk.kalshiodds.ui.charts.ChartGallery
 import com.dirk.kalshiodds.ui.charts.ChartShapes
+import com.dirk.kalshiodds.ui.charts.CumulativeDepthChart
+import com.dirk.kalshiodds.ui.charts.DistanceToStrikeChart
+import com.dirk.kalshiodds.ui.charts.FeeWaterfall
+import com.dirk.kalshiodds.ui.charts.KnobTimeline
 import com.dirk.kalshiodds.ui.charts.LineSeries
 import com.dirk.kalshiodds.ui.charts.MultiLineChart
 import java.util.Locale
@@ -54,7 +60,11 @@ fun ChartDetailScreen(
     onBack: () -> Unit,
     onBuyYes: (MarketUiModel) -> Unit,
     onBuyNo: (MarketUiModel) -> Unit,
-    book: com.dirk.kalshiodds.signal.engine.BookLevelSnapshot? = null
+    book: com.dirk.kalshiodds.signal.engine.BookLevelSnapshot? = null,
+    calibration: List<Pair<Double, Boolean>> = emptyList(),
+    windowFees: ChartGallery.FeeLeg? = null,
+    dayFees: ChartGallery.FeeLeg? = null,
+    knobs: List<ChartGallery.KnobTick> = emptyList()
 ) {
     val colors = DipTheme.colors
     Scaffold(
@@ -179,6 +189,11 @@ fun ChartDetailScreen(
                     )
                 }
             OrderBookCard(book)
+            CumulativeDepthChart(ChartGallery.cumulativeDepth(book?.yes.orEmpty(), book?.no.orEmpty()))
+            CalibrationPlot(ChartGallery.calibration(calibration))
+            FeeWaterfall(windowFees, dayFees)
+            KnobTimeline(knobs)
+            DistanceToStrikeChart(ChartGallery.distanceToStrike(points, market.floorStrike))
             UpDownBuyButtons(
                 market = market,
                 onBuyYes = { onBuyYes(market) },

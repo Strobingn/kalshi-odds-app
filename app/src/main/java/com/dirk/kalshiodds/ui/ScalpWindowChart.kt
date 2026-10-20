@@ -20,7 +20,13 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.dirk.kalshiodds.ui.charts.CalibrationPlot
+import com.dirk.kalshiodds.ui.charts.ChartGallery
 import com.dirk.kalshiodds.ui.charts.ChartShapes
+import com.dirk.kalshiodds.ui.charts.CumulativeDepthChart
+import com.dirk.kalshiodds.ui.charts.DistanceToStrikeChart
+import com.dirk.kalshiodds.ui.charts.FeeWaterfall
+import com.dirk.kalshiodds.ui.charts.KnobTimeline
 import com.dirk.kalshiodds.ui.charts.WindowTimeline
 import com.dirk.kalshiodds.ui.theme.DipTheme
 import java.time.Instant
@@ -41,7 +47,7 @@ internal fun markerName(kind: ScalpWindowChartData.Kind): String = when (kind) {
 }
 
 @Composable
-internal fun ScalpWindowChart(d: ScalpAlgoDetail, onWindow: (String) -> Unit = {}, onLive: () -> Unit = {}, title: String = "Live strategy window · 15 minutes", onTrade: (String) -> Unit = {}) {
+internal fun ScalpWindowChart(d: ScalpAlgoDetail, onWindow: (String) -> Unit = {}, onLive: () -> Unit = {}, title: String = "Live strategy window · 15 minutes", extras: LiveWindowExtras = LiveWindowExtras(), onTrade: (String) -> Unit = {}) {
     val c = DipTheme.colors
     val data = d.chart
     var selected by remember(data.ticker) { mutableStateOf<String?>(null) }
@@ -188,5 +194,10 @@ internal fun ScalpWindowChart(d: ScalpAlgoDetail, onWindow: (String) -> Unit = {
             Column { Text("Open P&L · both sides", color = c.textSecondary, style = MaterialTheme.typography.labelSmall); Text(ScalpTabCopy.money(data.openNet()), color = c.textPrimary, fontWeight = FontWeight.Bold) }
             Column { Text("Round trips", color = c.textSecondary, style = MaterialTheme.typography.labelSmall); Text("${data.trades.count { it.state == com.dirk.kalshiodds.decision.ScalpState.CLOSED }}", color = c.textPrimary, fontWeight = FontWeight.Bold) }
         }
+        CumulativeDepthChart(ChartGallery.cumulativeDepth(extras.bookYes, extras.bookNo))
+        CalibrationPlot(ChartGallery.calibration(extras.calibration))
+        FeeWaterfall(ChartGallery.feeLegFromTrades("Window", data.trades), extras.dayFees)
+        KnobTimeline(extras.knobs)
+        DistanceToStrikeChart(ChartGallery.distanceToStrike(data.points, extras.strikeUsd))
     }
 }

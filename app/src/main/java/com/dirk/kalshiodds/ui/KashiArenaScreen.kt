@@ -19,6 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.decision.*
+import com.dirk.kalshiodds.ui.charts.ChartGallery
 import com.dirk.kalshiodds.ui.charts.ChartSeries
 import com.dirk.kalshiodds.ui.charts.ChartShapes
 import com.dirk.kalshiodds.ui.charts.DailyNetBars
@@ -33,7 +34,7 @@ internal enum class KashiArenaTab(val label: String) { OVERVIEW("Overview"), STR
 @Composable
 internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) -> Unit = {}, onSettings: () -> Unit = {},
     onHistory: () -> Unit = {}, onLadder: () -> Unit = {}, initialTab: KashiArenaTab = KashiArenaTab.OVERVIEW,
-    aiPanel: AiWatchPanelModel? = null, onAiFollows: (Boolean) -> Unit = {}) {
+    aiPanel: AiWatchPanelModel? = null, onAiFollows: (Boolean) -> Unit = {}, extras: LiveWindowExtras = LiveWindowExtras()) {
     val c = DipTheme.colors
     val openAi = LocalOpenAiTab.current
     var tabName by rememberSaveable { mutableStateOf(initialTab.name) }
@@ -41,6 +42,7 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
     var v2 by rememberSaveable { mutableStateOf(true) }
     var sortName by rememberSaveable { mutableStateOf(KashiArenaData.Sort.NET.name) }
     val sort = KashiArenaData.Sort.valueOf(sortName)
+    val bench = com.dirk.kalshiodds.decision.insights.BenchRegistry.decisions.collectAsState().value
     val rows = remember(st.algoAllTime, v2, sort) { KashiArenaData.rows(st, v2, sort) }
     val models = rows.map { it.model }.toSet()
     val active = st.activeScalps.filter { ScalpModels.modelOf(it) in models && it.isPrimary }
@@ -92,7 +94,7 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
                     DailyNetBars(daily, Modifier.fillMaxWidth())
                 } }
                 item(key = "live") {
-                    ScalpWindowChart(ScalpAlgoDetail(chart = st.arenaChart.copy(trades = liveTrades)), title = "Live window") { id -> liveTrades.firstOrNull { it.id == id }?.let { ScalpModels.modelOf(it)?.let(onOpen) } }
+                    ScalpWindowChart(ScalpAlgoDetail(chart = st.arenaChart.copy(trades = liveTrades)), title = "Live window", extras = extras) { id -> liveTrades.firstOrNull { it.id == id }?.let { ScalpModels.modelOf(it)?.let(onOpen) } }
                 }
                 item(key = "top-header") { ArenaSectionHeader("Top strategies", "See all") { tabName = KashiArenaTab.STRATEGIES.name } }
                 items(rows.filter { it.roundTrips > 0 }.sortedByDescending { it.netUsd }.take(5), key = { "top-${it.model.code}" }) { r -> ArenaStrategyRow(r, st) { onOpen(r.model) } }
@@ -108,6 +110,21 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
                 items(rows, key = { "strategy-${it.model.code}" }) { r -> ArenaStrategyRow(r, st) { onOpen(r.model) } }
             }
             KashiArenaTab.ANALYSIS -> {
+                val galleryTrades = (st.arenaChart.trades + st.activeScalps).distinctBy { it.id }
+                val leaders = rows.map { row ->
+                    val frozen = com.dirk.kalshiodds.decision.insights.ScalpFreeze.isFrozen(bench[row.model.code])
+                    row to frozen
+                }.filter { (row, frozen) -> row.roundTrips > 0 || frozen }.map { (row, frozen) ->
+                    ChartGallery.LeaderRow(row.model.label, row.netUsd, frozen)
+                }
+                val sparks = ChartGallery.equitySparks(
+                    st.windows,
+                    st.updatedAtMs,
+                    rows.mapNotNull { row ->
+                        val frozen = com.dirk.kalshiodds.decision.insights.ScalpFreeze.isFrozen(bench[row.model.code])
+                        if (row.roundTrips > 0 || frozen) row.model to frozen else null
+                    }
+                )
                 item(key = "race") { ArenaCard {
                     Text("Strategy race", style = MaterialTheme.typography.titleMedium, color = c.textPrimary, fontWeight = FontWeight.SemiBold)
                     Text("Top four by all-time profit · recorded window results", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
@@ -142,6 +159,10 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
                     ArenaCard {
                         ScalpTradeInsightCharts(live, "Live window and open positions. All-time curves are above.")
                     }
+                }
+                // After the existing analysis cards, so the race, profit bars and fees stay on top.
+                item(key = "analysis-gallery") {
+                    AnalysisGallery(galleryTrades, leaders, sparks, st.windows, st.updatedAtMs, rows.map { it.model })
                 }
                 item(key = "analysis-data") { OutlinedButton(onClick = onHistory, modifier = Modifier.fillMaxWidth()) { Text("Detailed results & comparison") } }
             }

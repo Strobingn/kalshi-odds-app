@@ -10,7 +10,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.signal.feedback.ScorecardLedger
 import com.dirk.kalshiodds.ui.charts.ChartBlock
+import com.dirk.kalshiodds.ui.charts.ChartGallery
 import com.dirk.kalshiodds.ui.charts.ChartShapes
+import com.dirk.kalshiodds.ui.charts.FamilyStackChart
 import com.dirk.kalshiodds.ui.charts.HistogramChart
 import com.dirk.kalshiodds.ui.charts.HourHeatmap
 import com.dirk.kalshiodds.ui.charts.LineSeries
@@ -113,6 +115,16 @@ internal fun ScorecardDetailCharts(picks: List<ScorecardLedger.PickRow>) {
                     )
                 }
             }
+        }
+        ScorecardChartCard {
+            val families = remember(rows) {
+                ChartGallery.familyStacks(rows.mapNotNull { p ->
+                    val pnl = p.pnlUsd?.takeIf { it.isFinite() } ?: return@mapNotNull null
+                    val fallback = if (p.kind == ScorecardLedger.Kind.AI) "AI picks" else "Manual"
+                    ChartGallery.FamilyEvent(p.settledAtMs, ChartGallery.scorecardFamily(p.source, p.pickSource, fallback), pnl)
+                })
+            }
+            FamilyStackChart(families)
         }
     }
 }
