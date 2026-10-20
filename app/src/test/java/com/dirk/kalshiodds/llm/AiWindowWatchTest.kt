@@ -190,11 +190,27 @@ class AiWindowWatchTest {
         assertEquals("gpt-4.1", seen[1].model)
     }
 
+    @Test fun mistralUsesTheFreePaceInsteadOfThePaidCap() {
+        provider = LlmProviders.MISTRAL
+        var calls = 0
+        val w = watcher(MemoryScalpControls()) { _, _ -> calls++; reply("""{"adjustments":[]}""") }
+        w.tick()
+        assertEquals(1, calls)
+        nowMs += 5_000
+        snap = snap.copy(fingerprint = "inside-30s")
+        w.tick()
+        assertEquals(1, calls)
+        nowMs += 30_000
+        snap = snap.copy(fingerprint = "pace-open")
+        w.tick()
+        assertEquals(2, calls)
+    }
+
     @Test fun everyChatProviderSharesOneSixtySecondCap() {
         val seen = mutableListOf<String>()
         val w = watcher(MemoryScalpControls()) { ep, _ -> seen += ep.provider; reply("""{"adjustments":[]}""") }
         w.tick()
-        for (id in listOf(LlmProviders.OPENAI, LlmProviders.MISTRAL, LlmProviders.OPENROUTER, LlmProviders.CUSTOM)) {
+        for (id in listOf(LlmProviders.OPENAI, LlmProviders.OPENROUTER, LlmProviders.CUSTOM)) {
             provider = id
             nowMs += 5_000
             snap = snap.copy(windowKey = "W-$id", fingerprint = "fp-$id")

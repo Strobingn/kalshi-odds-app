@@ -6,13 +6,15 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.ArrayDeque
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Chat client. Blocking; call from Dispatchers.IO.
  * OpenAI-compatible providers reject a mismatched model (no silent paid-model switch).
- * Gemini uses native generateContent with x-goog-api-key, a 45s timeout, and one retired-model fallback.
+ * Gemini uses native generateContent with x-goog-api-key, a 45s timeout, and one 404 fallback.
+ * Mistral uses the free-plan model chain, a 45s timeout, and the same single in-flight lock.
  * At most one HTTP call is in flight. Automatic callers skip instead of queueing behind it.
  */
 class LlmClient(private val settings: LlmSettings, private val flight: LlmFlight = LlmFlight()) {
@@ -22,6 +24,11 @@ class LlmClient(private val settings: LlmSettings, private val flight: LlmFlight
         .readTimeout(GeminiApi.TIMEOUT_MS, TimeUnit.MILLISECONDS)
         .writeTimeout(GeminiApi.TIMEOUT_MS, TimeUnit.MILLISECONDS)
         .build()
+    private val mistralHttp = OkHttpClient.Builder()
+        .callTimeout(MistralApi.TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        .readTimeout(MistralApi.TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        .writeTimeout(MistralApi.TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        .build()
 
     data class Reply(
         val text: String,
@@ -30,7 +37,9 @@ class LlmClient(private val settings: LlmSettings, private val flight: LlmFlight
         val promptTokens: Long = 0,
         val completionTokens: Long = 0,
         val remainingRequests: Int? = null,
-        val remainingTokens: Int? = null
+        val remainingTokens: Int? = null,
+        /** Wall time of this call. Below 0 means it was not measured. */
+        val latencyMs: Long = -1
     )
 
     fun chat(messages: List<Pair<String, String>>, maxTokens: Int = 600): String = chatReply(messages, maxTokens).text
@@ -48,8 +57,14 @@ class LlmClient(private val settings: LlmSettings, private val flight: LlmFlight
         val ep = endpoint ?: LlmEndpoint(LlmProviders.XAI, settings.baseUrl, settings.model, settings.apiKey)
         require(ep.apiKey.isNotBlank()) { "needs key" }
         if (!flight.enter(automatic)) throw LlmSkipped(if (automatic) "overlap" else "busy")
+        val started = System.nanoTime()
         try {
-            return if (LlmProviders.isGemini(ep.provider)) gemini(ep, messages, maxTokens) else openAi(ep, messages, maxTokens)
+            val reply = when {
+                LlmProviders.isGemini(ep.provider) -> gemini(ep, messages, maxTokens)
+                ep.provider == LlmProviders.MISTRAL -> mistral(ep, messages, maxTokens)
+                else -> openAi(ep, messages, maxTokens)
+            }
+            return finish(ep, reply, started, automatic)
         } finally {
             flight.exit()
         }
@@ -70,8 +85,38 @@ class LlmClient(private val settings: LlmSettings, private val flight: LlmFlight
                     GeminiApi.Raw(response.code, response.body?.string().orEmpty(), headerMap(response))
                 }
             },
-            onSwitch = { next -> settings.saveModelOnly(ep.provider, next) }
+            onSwitch = { next ->
+                LlmEvents.push(ModelSwitchEvent(System.currentTimeMillis(), ep.provider, ep.model, next, "404"))
+                settings.saveModelOnly(ep.provider, next)
+            }
         )
+
+    private fun mistral(ep: LlmEndpoint, messages: List<Pair<String, String>>, maxTokens: Int): Reply =
+        MistralApi.exchange(
+            model = ep.model,
+            messages = messages,
+            maxTokens = maxTokens,
+            post = { _, body ->
+                val req = Request.Builder().url(ep.baseUrl.trimEnd('/') + "/chat/completions")
+                    .header("Authorization", "Bearer ${ep.apiKey}")
+                    .post(body.toRequestBody("application/json".toMediaType()))
+                    .build()
+                mistralHttp.newCall(req).execute().use { response ->
+                    MistralApi.Raw(response.code, response.body?.string().orEmpty(), headerMap(response))
+                }
+            },
+            onSwitch = { from, to ->
+                LlmEvents.push(ModelSwitchEvent(System.currentTimeMillis(), ep.provider, from, to, "model not on plan"))
+                settings.saveModelOnly(ep.provider, to)
+            }
+        )
+
+    private fun finish(ep: LlmEndpoint, reply: Reply, startedNs: Long, automatic: Boolean): Reply {
+        val latency = ((System.nanoTime() - startedNs) / 1_000_000L).coerceAtLeast(0L)
+        val out = if (reply.latencyMs >= 0) reply else reply.copy(latencyMs = latency)
+        LlmCallClock.publish(LlmCallClock.Stamp(ep.provider, out.model.ifBlank { ep.model }, out.latencyMs, automatic, System.currentTimeMillis()))
+        return out
+    }
 
     private fun openAi(ep: LlmEndpoint, messages: List<Pair<String, String>>, maxTokens: Int): Reply {
         val requested = ep.model
@@ -110,9 +155,11 @@ class LlmClient(private val settings: LlmSettings, private val flight: LlmFlight
         }
 
         fun remaining(headers: Map<String, String>): Pair<Int?, Int?> {
-            fun num(vararg names: String): Int? = names.firstNotNullOfOrNull { headers[it]?.trim()?.toIntOrNull()?.takeIf { n -> n >= 0 } }
-            return num("x-ratelimit-remaining-requests", "x-ratelimit-remaining") to
-                num("x-ratelimit-remaining-tokens")
+            val lower = HashMap<String, String>(headers.size)
+            headers.forEach { (k, v) -> lower[k.lowercase()] = v }
+            fun num(vararg names: String): Int? = names.firstNotNullOfOrNull { lower[it]?.trim()?.toIntOrNull()?.takeIf { n -> n >= 0 } }
+            return num("x-ratelimit-remaining-requests", "x-ratelimit-remaining-req-minute", "x-ratelimit-remaining") to
+                num("x-ratelimit-remaining-tokens", "x-ratelimit-remaining-tokens-minute")
         }
 
         /** Retry-After seconds. Missing or unparseable headers wait a minute. */
@@ -138,6 +185,45 @@ class LlmClient(private val settings: LlmSettings, private val flight: LlmFlight
             val rest = b.substring(a.length)
             return Regex("^[.-]\\d[0-9.-]*$").matches(rest)
         }
+    }
+}
+
+/**
+ * Last successful call's latency, so [AiWatchStore.record] can attach it without every caller
+ * threading the number through. Claimed once, and only when the provider and model match.
+ */
+object LlmCallClock {
+    data class Stamp(val provider: String, val model: String, val latencyMs: Long, val automatic: Boolean, val atMs: Long)
+
+    private val stamp = java.util.concurrent.atomic.AtomicReference<Stamp?>(null)
+
+    fun publish(s: Stamp) { stamp.set(s) }
+
+    fun claim(provider: String, model: String, nowMs: Long): Stamp? {
+        val s = stamp.get() ?: return null
+        if (s.provider != provider) return null
+        if (nowMs - s.atMs > 15_000L) return null
+        val same = s.model == model || LlmClient.sameModel(s.model, model) || LlmClient.sameModel(model, s.model)
+        if (!same) return null
+        return if (stamp.compareAndSet(s, null)) s else null
+    }
+}
+
+/** Model switches waiting to be folded into the usage file. */
+object LlmEvents {
+    private val lock = Any()
+    private val pending = ArrayDeque<ModelSwitchEvent>()
+
+    fun push(e: ModelSwitchEvent) = synchronized(lock) {
+        pending.addLast(e)
+        while (pending.size > 50) pending.removeFirst()
+    }
+
+    fun drain(): List<ModelSwitchEvent> = synchronized(lock) {
+        if (pending.isEmpty()) return emptyList()
+        val out = pending.toList()
+        pending.clear()
+        out
     }
 }
 

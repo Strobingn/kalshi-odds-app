@@ -54,7 +54,29 @@ data class UsageHour(
     val model: String,
     val calls: Int,
     val promptTokens: Long,
-    val completionTokens: Long
+    val completionTokens: Long,
+    val provider: String = ""
+)
+
+/** One recorded call. Latency below 0 means the clock was not captured. */
+data class UsageSample(
+    val atMs: Long,
+    val provider: String,
+    val model: String,
+    val source: String,
+    val promptTokens: Long,
+    val completionTokens: Long,
+    val latencyMs: Long = -1,
+    val automatic: Boolean = true
+)
+
+/** A model fallback inside one provider. The key slot is not part of this event. */
+data class ModelSwitchEvent(
+    val atMs: Long,
+    val provider: String,
+    val fromModel: String,
+    val toModel: String,
+    val reason: String
 )
 
 data class AiAdjustment(
@@ -88,6 +110,9 @@ object LlmPrices {
         ModelPrice("gpt-5.4", 2.50, 15.0),
         ModelPrice("gpt-5.4-mini", 0.75, 4.50),
         ModelPrice("mistral-large-latest", 2.0, 6.0),
+        ModelPrice(LlmProviders.MISTRAL_DEFAULT, 0.0, 0.0),
+        ModelPrice(LlmProviders.MISTRAL_NEMO, 0.0, 0.0),
+        ModelPrice(LlmProviders.MISTRAL_3B, 0.0, 0.0),
         ModelPrice("openai/gpt-4o-mini", 0.15, 0.60),
         ModelPrice(LlmProviders.GROQ_120, 0.0, 0.0),
         ModelPrice(LlmProviders.GROQ_20, 0.0, 0.0),
@@ -104,6 +129,7 @@ object LlmPrices {
     }
 
     fun dayKey(ms: Long, zone: ZoneId = ET): String = Instant.ofEpochMilli(ms).atZone(zone).toLocalDate().toString()
+    fun monthKey(ms: Long, zone: ZoneId = ET): String = dayKey(ms, zone).substring(0, 7)
     fun hourOf(ms: Long, zone: ZoneId = ET): Int = Instant.ofEpochMilli(ms).atZone(zone).hour
     fun minuteOf(ms: Long, zone: ZoneId = ET): Int = Instant.ofEpochMilli(ms).atZone(zone).minute
 

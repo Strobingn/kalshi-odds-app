@@ -63,7 +63,10 @@ class LlmPaperStrategy(
                 nowMs = System.currentTimeMillis(),
                 messages = messages,
                 reserveCompletion = 20,
-                quotaOf = quotaOf,
+                quotaOf = { ep ->
+                    if (!MonthlyTokenCaps.room(ep.provider, LlmPrices.monthKey(System.currentTimeMillis()))) null
+                    else quotaOf(ep)
+                },
                 allowed = { autoCalls() && LlmProviders.freeFamily(it.provider, it.model) },
                 ask = { use, msgs -> client.chatReply(msgs, 20, use, automatic = true) },
                 onBilling = onBilling

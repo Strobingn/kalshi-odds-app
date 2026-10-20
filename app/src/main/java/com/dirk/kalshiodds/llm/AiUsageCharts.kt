@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.llm
 
+import java.time.Instant
 import java.time.LocalDate
 
 /** Pure aggregations of recorded LLM calls. Hours and days with no calls stay at zero — nothing is invented. */
@@ -52,6 +53,76 @@ object AiUsageCharts {
             completion[row.day] = (completion[row.day] ?: 0L) + row.completionTokens
         }
         return days.map { DayTokens(it, prompt[it] ?: 0L, completion[it] ?: 0L) }
+    }
+
+    data class HourStack(val hourStartMs: Long, val label: String, val byProvider: Map<String, Int>)
+    data class LimitUse(val provider: String, val calls: Int, val limit: Int)
+    data class TokenBin(val label: String, val count: Int)
+    data class AutoSplit(val auto: Int, val manual: Int)
+    data class LatencySeries(val provider: String, val points: List<Pair<Long, Double>>)
+
+    /**
+     * Last 24 Eastern hours, oldest first. Hours with no calls stay at zero.
+     * Provider comes from the row, or from the model id on older rows that never stored one.
+     */
+    fun callsPerHourByProvider(rows: List<UsageHour>, nowMs: Long): List<HourStack> {
+        val end = Instant.ofEpochMilli(nowMs).atZone(LlmPrices.ET).withMinute(0).withSecond(0).withNano(0)
+        return (0 until 24).map { i ->
+            val slot = end.minusHours((23 - i).toLong())
+            val day = slot.toLocalDate().toString()
+            val hour = slot.hour
+            val counts = LinkedHashMap<String, Int>()
+            for (row in rows) {
+                if (row.day != day || row.hour != hour) continue
+                val provider = LlmProviders.chartProvider(row.provider, row.model)
+                counts[provider] = (counts[provider] ?: 0) + row.calls
+            }
+            HourStack(slot.toInstant().toEpochMilli(), hourLabel(hour), counts)
+        }
+    }
+
+    /** Today's calls against each free provider's daily auto-call budget. A limit of 0 means no daily cap. */
+    fun callsVsDailyLimit(buckets: List<UsageBucket>, limits: Map<String, Int>, nowMs: Long): List<LimitUse> {
+        val day = LlmPrices.dayKey(nowMs)
+        val ids = (LlmProviders.FREE_IDS + limits.keys).distinct()
+        return ids.map { id ->
+            val calls = buckets.filter { it.day == day && LlmProviders.chartProvider(it.provider, it.model) == id }.sumOf { it.calls }
+            LimitUse(id, calls, limits[id] ?: 0)
+        }
+    }
+
+    fun latencyByProvider(samples: List<UsageSample>): List<LatencySeries> =
+        samples.filter { it.latencyMs >= 0L }
+            .groupBy { LlmProviders.chartProvider(it.provider, it.model) }
+            .map { (provider, rows) ->
+                LatencySeries(provider, rows.sortedBy { it.atMs }.map { it.atMs to it.latencyMs.toDouble() })
+            }
+            .sortedBy { LlmProviders.freeFallbackRank(it.provider) }
+
+    fun tokenHistogram(samples: List<UsageSample>): List<TokenBin> {
+        if (samples.isEmpty()) return emptyList()
+        val edges = longArrayOf(100, 250, 500, 1_000, 2_000, 4_000)
+        val labels = listOf("<100", "100–250", "250–500", "500–1k", "1k–2k", "2k–4k", "≥4k")
+        val counts = IntArray(labels.size)
+        for (sample in samples) {
+            val tokens = sample.promptTokens + sample.completionTokens
+            val index = edges.indexOfFirst { tokens < it }.let { if (it < 0) edges.size else it }
+            counts[index]++
+        }
+        return labels.mapIndexed { i, label -> TokenBin(label, counts[i]) }
+    }
+
+    fun autoVsManual(samples: List<UsageSample>): AutoSplit {
+        var auto = 0
+        var manual = 0
+        for (sample in samples) if (sample.automatic) auto++ else manual++
+        return AutoSplit(auto, manual)
+    }
+
+    fun hourLabel(hour: Int): String {
+        val h = hour.coerceIn(0, 23)
+        val hr = if (h % 12 == 0) 12 else h % 12
+        return "$hr${if (h < 12) "a" else "p"}"
     }
 
     /** Project today's spend from the pace so far. Warns only when a budget is set and the pace is over it. */

@@ -416,6 +416,7 @@ class AiWindowWatcher(
         val ep = runCatching { endpoint() }.getOrNull()
         if (ep == null || !store.autoAllowed(ep.provider, ep.model) || !cfg.liveFeed || !cfg.followsWindow || pending == LiveTrigger.NONE) return
         if (LlmProviders.freeFamily(ep.provider, ep.model)) {
+            if (!store.monthlyRoom(ep.provider, now())) return
             val quota = LlmProviders.effectiveQuota(ep.provider, ep.model, store.dailyCap(ep.provider, ep.model)) ?: return
             if (pacer.ready(ep.provider, LlmProviders.paceModels(ep), quota, now(), AiCompact.GROQ_CALL_TOKENS)) runCatching { onWake() }
             return
@@ -446,12 +447,22 @@ class AiWindowWatcher(
             nowMs = now(),
             messages = AiCompact.watch(snap.context),
             reserveCompletion = AiCompact.RESERVE_COMPLETION,
-            quotaOf = { LlmProviders.effectiveQuota(it.provider, it.model, store.dailyCap(it.provider, it.model)) },
+            quotaOf = {
+                if (!store.monthlyRoom(it.provider, now())) null
+                else LlmProviders.effectiveQuota(it.provider, it.model, store.dailyCap(it.provider, it.model))
+            },
             allowed = { store.autoAllowed(it.provider, it.model) },
             ask = ask,
             onBilling = { provider, detail -> store.markBilled(provider, detail) }
         )
-        if (result == null) { store.setNotice(""); return }
+        if (result == null) {
+            if (!store.monthlyRoom(selected.provider, now())) {
+                val cap = store.monthlyTokenCap(selected.provider)
+                val amount = cap?.let { " (${LlmUsageText.tokens(it)} tokens)" }.orEmpty()
+                store.setNotice("${LlmProviders.shortLabel(selected.provider)} monthly token cap$amount reached. Automatic calls skip this provider. Chat still works.")
+            } else store.setNotice("")
+            return
+        }
         val (used, reply) = result
         lastCallAt = now()
         lastCalledWindow = snap.windowKey
