@@ -7,15 +7,16 @@ plugins {
 }
 
 android {
-    namespace = "com.dirk.kalshiodds"
+    namespace = "com.dirk.google-kalshi"
     compileSdk = 35
 
-    defaultConfig {
-        applicationId = "com.dirk.kalshiodds.bitscalpcursor"
+defaultConfig {
+        applicationId = "com.dirk.google-kalshi"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 108
-        versionName = "0.3.93"
+        targetSdk = 34
+        versionCode = 386
+        versionName = "0.3.86-google"
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
