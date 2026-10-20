@@ -108,6 +108,8 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
                 items(rows, key = { "strategy-${it.model.code}" }) { r -> ArenaStrategyRow(r, st) { onOpen(r.model) } }
             }
             KashiArenaTab.ANALYSIS -> {
+                val galleryTrades = (st.arenaChart.trades + st.activeScalps).distinctBy { it.id }
+                item(key = "side-bars") { AnalysisGallery(galleryTrades) }
                 item(key = "race") { ArenaCard {
                     Text("Strategy race", style = MaterialTheme.typography.titleMedium, color = c.textPrimary, fontWeight = FontWeight.SemiBold)
                     Text("Top four by all-time profit · recorded window results", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
