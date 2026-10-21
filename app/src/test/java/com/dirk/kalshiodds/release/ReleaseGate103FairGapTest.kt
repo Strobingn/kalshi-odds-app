@@ -13,8 +13,10 @@ import org.junit.Test
 
 class ReleaseGate103FairGapTest {
     @Test fun winnersKeptLosersTweaked() {
-        listOf("fair", "fairh60", "v2-fair", "v2-fairh60", Research.HOLD, Research.KELLY, Research.MAKER, "v2-llm").forEach { assertFalse(it, FairGapTune.isTweaked(it)) }
-        listOf("dip", "momo", "xrev", "cfr", "mkdip", "fcride", "fcfade", "sf01", "sf41", "sf51", "v2-sf51", "v2-dip", Research.LATE).forEach { assertTrue(it, FairGapTune.isTweaked(it)) }
+        listOf("fair", "fairh60", "v2-fair", "v2-fairh60", Research.HOLD, Research.KELLY, Research.MAKER, "v2-llm", Research.LATE).forEach { assertFalse(it, FairGapTune.isTweaked(it)) }
+        listOf("dip", "momo", "xrev", "cfr", "mkdip", "fcride", "fcfade", "sf01", "sf41", "sf51", "v2-sf51", "v2-dip").forEach { assertTrue(it, FairGapTune.isTweaked(it)) }
+        assertFalse(FairGapTune.entryGated("fcfade"))
+        assertFalse(FairGapTune.entryGated(Research.LATE))
     }
     @Test fun bandDefaultsAndSliderOverride() {
         assertEquals(0.24, FairGapTune.band(null).lo, 1e-9); assertEquals(0.42, FairGapTune.band(null).hi, 1e-9)

@@ -214,9 +214,10 @@ object StrategyAlgo {
                 s.maxEntryCents != null -> s.maxEntryCents.toDouble()
                 spec != null -> spec.maxAsk * 100.0
                 shock != null -> shock.amax * 100.0
+                FairGapTune.defaultMaxCents(code) != null -> FairGapTune.defaultMaxCents(code)!!.toDouble()
                 else -> 55.0
             }
-            "minEntryCents" -> s.minEntryCents.toDouble()
+            "minEntryCents" -> FairGapTune.effectiveMinCents(code, s).toDouble()
             "edgeCents" -> (s.edgeCents ?: Research.defaultEdge(code)).toDouble()
             "stopCents" -> s.stopCents?.toDouble()
                 ?: spec?.stop?.times(100.0)

@@ -25,13 +25,15 @@ class ScalpFreezeTest {
         signalAtMs = i * 1000L, signalAsk = 0.40, fairAtSignal = 0.50, contracts = 1, entryPrice = 0.40, closedAtMs = i * 1000L + 500, netUsd = net,
         ruleVersion = "v|$code|P")
 
-    private val kept = listOf("r-late", "fair", "r-maker", "fcfade", "fairh60", "sf51", "v2-sf51", "sf41", "v2-dip", "v2-fcride",
-        "fair-t1", "fair-t2", "r-late-t1", "r-late-t2")
+    private val kept = listOf("r-late", "fair", "r-maker", "fcfade", "fairh60", "sf41", "sf42", "sf43", "v2-dip", "v2-fcride",
+        "fair-t1", "fair-t2", "r-late-t1", "r-late-t2", "v2-llm")
 
     @Test fun frozenStrategiesStayInTheRegistryAndOldRecordsStillLoad() {
         val codes = ScalpModels.ALL.map { it.code }.toSet()
         ScalpFreeze.DEFAULT_FROZEN.forEach { assertTrue("$it still listed", it in codes); assertNotNull(it, ScalpModels.modelByCode(it)) }
-        assertEquals(setOf("sf30", "sf32", "mkdip", "diph60", "dipnotp", "r-kelly"), ScalpModels.REMOVED_CODES) // nothing new removed
+        assertTrue("1.0.21 shows former removals instead of hiding them", ScalpModels.REMOVED_CODES.isEmpty())
+        ScalpFreeze.RESTORED.forEach { assertTrue("$it visible", it in codes); assertTrue("$it frozen", it in ScalpFreeze.DEFAULT_FROZEN) }
+        listOf("xrev", "sf51", "v2-sf51").forEach { assertTrue("$it frozen", it in ScalpFreeze.DEFAULT_FROZEN) }
         val dip = ScalpParams.STRATEGY_SEEDS.getValue(ScalpStrategy.DIP_HUNTER)
         val old = mapOf(dip.id to "dip", "sf44" to "sf44", "r-hold" to "r-hold", "fcride-h600" to "fcride", "sf56n" to "sf56", "sf60" to "sf60",
             ScalpParams.STRATEGY_SEEDS.getValue(ScalpStrategy.MOMENTUM).id to "momo", ScalpParams.STRATEGY_SEEDS.getValue(ScalpStrategy.CF_REPRICE).id to "cfr")

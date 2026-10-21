@@ -98,8 +98,11 @@ internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: Sc
                 ScalpModels.isResearch(model) -> {
                     StrategyKnob("Edge needed after fees", settings.edgeCents ?: Research.defaultEdge(model.code), 0..30, "KNOB_EDGE", { "$it¢" }) { set(settings.copy(edgeCents = it)) }
                     StrategyKnob("Contracts an order", settings.contracts ?: controls.research.clip, 1..1000, "KNOB_CONTRACTS") { set(settings.copy(contracts = it)) }
-                    StrategyKnob("Lowest price it buys", settings.minEntryCents, 1..99, "KNOB_MIN", { "$it¢" }) { set(settings.copy(minEntryCents = it)) }
-                    StrategyKnob("Highest price it buys", settings.maxEntryCents ?: 99, settings.minEntryCents..99, "KNOB_MAX", { "$it¢" }) { set(settings.copy(maxEntryCents = it)) }
+                    val lateShown = if (Research.isLate(model.code)) Research.lateBand(model.code, null) else null
+                    val researchMin = if (settings.minEntryCents > 1) settings.minEntryCents else lateShown?.let { Math.round(it.lo * 100).toInt() } ?: settings.minEntryCents
+                    val researchMax = settings.maxEntryCents ?: lateShown?.let { Math.round(it.hi * 100).toInt() } ?: 99
+                    StrategyKnob("Lowest price it buys", researchMin, 1..99, "KNOB_MIN", { "$it¢" }) { set(settings.copy(minEntryCents = it)) }
+                    StrategyKnob("Highest price it buys", researchMax, researchMin..99, "KNOB_MAX", { "$it¢" }) { set(settings.copy(maxEntryCents = it)) }
                     Text("Research strategy: not bound by the 3¢ trail, window-start or >95% hold rules. Shared research limits (window exposure cap, Kelly, maker edge, late window) are in Global controls.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
                 }
                 ScalpModels.isV2(model) -> {
@@ -122,8 +125,10 @@ internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: Sc
                 }
                 else -> {
                     StrategyKnob("Until minute", settings.untilMinute, 1..14, "KNOB_UNTIL", { "minute $it" }) { set(settings.copy(untilMinute = it)) }
-                    StrategyKnob("Lowest price it buys", settings.minEntryCents, 1..55, "KNOB_MIN", { "$it¢" }) { set(settings.copy(minEntryCents = it)) }
-                    StrategyKnob("Highest price it buys", settings.maxEntryCents ?: 55, settings.minEntryCents..55, "KNOB_MAX", { "$it¢" }) { set(settings.copy(maxEntryCents = it)) }
+                    val shownMin = FairGapTune.effectiveMinCents(model.code, settings)
+                    val shownMax = settings.maxEntryCents ?: FairGapTune.defaultMaxCents(model.code) ?: 55
+                    StrategyKnob("Lowest price it buys", shownMin, 1..55, "KNOB_MIN", { "$it¢" }) { set(settings.copy(minEntryCents = it)) }
+                    StrategyKnob("Highest price it buys", shownMax, shownMin.coerceAtMost(55)..55, "KNOB_MAX", { "$it¢" }) { set(settings.copy(maxEntryCents = it)) }
                     StrategyKnob("Stop loss below fill", settings.stopLossPercent ?: 0, 0..99, "KNOB_STOP", { if (it == 0) "Strategy default" else "$it%" }) { set(settings.copy(stopLossPercent = it.takeIf { v -> v > 0 })) }
                     StrategyKnob("Take profit after fees", settings.takeProfitCents ?: 0, 0..99, "KNOB_TARGET", { if (it == 0) "Off" else "$it¢ / ct" }) { set(settings.copy(takeProfitCents = it)) }
                     StrategyKnob("Maximum hold", settings.maxHoldSeconds ?: 0, 0..3600, "KNOB_HOLD", { if (it == 0) "No timer" else "$it s" }) { set(settings.copy(maxHoldSeconds = it)) }

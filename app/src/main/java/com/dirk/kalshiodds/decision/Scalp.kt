@@ -608,6 +608,8 @@ class ScalpBook(
             var openCost = openCostUsd() + changed.filter { it.isPrimary && it.state == ScalpState.PENDING_ENTRY && it.signalAtMs == q.nowMs && !shadowEntry(it) }
                 .sumOf { it.signalAsk * ScalpRule.CONTRACTS + ScalpRule.orderFee(ScalpRule.CONTRACTS, it.signalAsk) }
             for (p in run) {
+                val modelCode = ScalpModels.modelOf(p).code
+                if (com.dirk.kalshiodds.decision.insights.ScalpFreeze.blocksRestored(modelCode, controls.state.value.benchOverrides[modelCode])) continue
                 val mine = mineAll.filter { it.variantId == p.id }.map { old -> changed.firstOrNull { it.id == old.id } ?: old }
                 if (!liveExtras && mine.count { it.state != ScalpState.NO_FILL } >= ScalpRule.MAX_ENTRIES_PER_MARKET) continue
                 if (q.nowMs >= q.closeMs) continue
@@ -712,7 +714,8 @@ class ScalpBook(
             if (!enabledNow || q.nowMs >= q.closeMs || !q.fresh()) continue
             val side = ForecastScalp.sideOf(f) ?: continue
             val ask = q.ask(side) ?: continue
-            if (!ForecastScalp.wantsEntry(mid, ya - yb, ask, kotlin.math.abs(f), q.tauS, cfg.marginUsd)) continue
+            val band = ForecastScalp.entryBand(prefix, entryView(prefix) ?: explicit(prefix))
+            if (!ForecastScalp.wantsEntry(mid, ya - yb, ask, kotlin.math.abs(f), q.tauS, cfg.marginUsd, band.first, band.second)) continue
             val model = if (ride) ScalpModels.Model.FORECAST_RIDE else ScalpModels.Model.FORECAST_FADE
             val cost = ask * ScalpRule.CONTRACTS + ScalpRule.orderFee(ScalpRule.CONTRACTS, ask)
             if (openCostUsd() + cost > bankrollUsd() + 1e-9) continue
@@ -959,7 +962,7 @@ class ScalpBook(
             val want = StrategyAlgo.clip(controls.state.value, pk?.code, ShockFav.CLIP)
             val n = minOf(want, kotlin.math.floor((q.askSize(t.side) ?: 0.0) + 1e-9).toInt())
             if (n <= 0) continue
-            if (!ScalpRule.buyPriceOk(ask)) { changed += cappedEntry(t, q.nowMs); continue }
+            if (!FairGapTune.askAllowed(pk?.code, ask, ShockFav.isFavLeg(t.variantId))) { changed += cappedEntry(t, q.nowMs); continue }
             changed += t.copy(state = ScalpState.OPEN, contracts = n, entryPrice = ask, entryFeeUsd = ScalpRule.orderFee(n, ask), entryAtMs = q.nowMs,
                 note = String.format(Locale.US, "%s; filled %d @ %.0f¢ after %.1fs", t.note, n, ask * 100, age / 1000.0))
         }
@@ -1033,7 +1036,7 @@ class ScalpBook(
             var brtiFair: Double? = null
             for (raw in ShockFav.VARIANTS) {
                 val p = StrategyAlgo.overlayShock(raw, algoOf(raw.code))
-                if (ScalpModels.isRemoved(p.code)) continue // 1.0.10: Book imbalance sf30/sf32 removed
+                if (ScalpModels.isRemoved(p.code) || com.dirk.kalshiodds.decision.insights.ScalpFreeze.blocksRestored(p.code, controls.state.value.benchOverrides[p.code])) continue
                 if (p.kind == ShockFav.Kind.OPEN50) {
                     if (p.o50 != ShockFav.O50.AI) continue // 0.3.65: handled in o50PriceEntries
                     // 0.3.64 Open 50: one shot per market per side, only 5–30 s after the open.
@@ -1087,8 +1090,10 @@ class ScalpBook(
                             sfEnter(q, p, p.shockId, side, ask, sideFair, openCost, bankroll, "shock")?.let { changed += it; if (!shadowEntry(it)) openCost += it.entryCostUsd }
                     }
                 }
-                val favFg = FairGapTune.isTweaked(p.favId.take(4)) // 1.0.3: late favourite retuned toward fair-gap (last 5 min, 24–42¢, BRTI gap 10–21¢)
-                if (p.fav && mine.none { it.variantId == p.favId } && q.tauS <= (if (favFg) maxOf(p.favTmax, 300.0) else p.favTmax) && q.tauS >= p.favTmin) {
+                val favCode = p.favId.take(4)
+                val favFg = FairGapTune.favUsesFairGapGate(favCode) // own-rule late favourites use favEntryOk, including sf31 off-US hours
+                val favTauMin = if (favFg) maxOf(p.favTmin, FairGapTune.SETTLE_MIN_S) else p.favTmin
+                if (p.fav && mine.none { it.variantId == p.favId } && q.tauS <= (if (favFg) maxOf(p.favTmax, 300.0) else p.favTmax) && q.tauS >= favTauMin) {
                     val fy = if (p.brti && sigma != null) {
                         brtiFair ?: run {
                             val m = (60.0 - q.tauS).toInt().coerceIn(0, 60)
@@ -1168,7 +1173,7 @@ class ScalpBook(
     private fun sfEnter(q: ScalpRule.Quote, p: ShockFav.Params, vid: String, side: String, ask: Double, fair: Double,
                         openCost: Double, bankroll: Double, what: String): ScalpTrade? {
         // Fade makers choose their purchase bid after the delay; the post/fill paths enforce the ceiling.
-        if (p.kind != ShockFav.Kind.FADE_MAKER && !ScalpRule.buyPriceOk(if (p.o50 == ShockFav.O50.MAKER) ShockFav.O50_MAKER_PX else ask)) return null
+        if (p.kind != ShockFav.Kind.FADE_MAKER && !FairGapTune.askAllowed(p.code, if (p.o50 == ShockFav.O50.MAKER) ShockFav.O50_MAKER_PX else ask, ShockFav.isFavLeg(vid))) return null
         // Window-start entries only. Simple-dip counts after its 4-min history; late-favourite legs are exempt.
         if (!ShockFav.isFavLeg(vid) && 15.0 - q.tauS / 60.0 > ShockFav.entryOpenMin(p, sfOpenMin(p.code))) return null
         val want = StrategyAlgo.clip(controls.state.value, p.code, ShockFav.CLIP)
@@ -1729,7 +1734,11 @@ class ScalpBook(
         val cur = controls.state.value
         val s = cur.settings(code)
         if (!s.aiLearns) return
-        val defMax = when { Research.isResearch(code) -> 99; ScalpV2.isV2(code) -> Math.round(ScalpV2.spec(code).maxAsk * 100).toInt(); else -> Math.round(ScalpRule.ENTRY_HI * 100).toInt() }
+        val defMax = when {
+            Research.isResearch(code) -> 99
+            ScalpV2.isV2(code) -> Math.round(ScalpV2.spec(code).maxAsk * 100).toInt()
+            else -> FairGapTune.defaultMaxCents(code) ?: Math.round(ScalpRule.ENTRY_HI * 100).toInt()
+        }
         val nx = Research.learn(code, s, t.netUsd ?: 0.0, defMax)
         // 1.0.4: atomic with the AI tab's settings cards (same learning step, re-read under the repository lock).
         if (nx != s) controls.update { c2 -> val s2 = c2.settings(code); val n2 = if (s2 == s) nx else Research.learn(code, s2, t.netUsd ?: 0.0, defMax)
@@ -1739,11 +1748,14 @@ class ScalpBook(
     /** Original strategies: Dirk's price range / until-minute sliders gate new entries (v2, research and LLM have their own). */
     private fun settingsEntryFilter(t: ScalpTrade): ScalpTrade {
         if (t.state != ScalpState.PENDING_ENTRY || !t.isPrimary || ScalpV2.isV2(t.variantId) || Research.isResearch(t.variantId)) return t
-        val s = entryView(codeOf(t)) ?: return t
+        val code = codeOf(t)
+        val s = entryView(code) ?: explicit(code)
+        val hasDefault = FairGapTune.defaultMaxCents(code) != null || code == "fairh60"
+        if (s == null && !hasDefault) return t
         val close = ScalpTicker.closeMs(t.ticker)
         val px = t.signalAsk
-        val bad = px < s.minEntryCents / 100.0 - 1e-9 || (s.maxEntryCents != null && px > s.maxEntryCents / 100.0 + 1e-9) ||
-            (close != null && !s.timeOk(t.signalAtMs, close))
+        val bad = FairGapTune.priceBlocked(code, px, s) ||
+            (s != null && close != null && !s.timeOk(t.signalAtMs, close))
         return if (!bad) t else t.copy(state = ScalpState.NO_FILL, closedAtMs = t.signalAtMs, note = "${t.note}; skipped by your strategy sliders (price range / until minute)")
     }
 
@@ -1751,7 +1763,7 @@ class ScalpBook(
     private fun fairGapEntryFilter(t: ScalpTrade): ScalpTrade {
         if (t.state != ScalpState.PENDING_ENTRY || !t.isPrimary) return t
         val code = codeOf(t)
-        if (!FairGapTune.isTweaked(code)) return t
+        if (!FairGapTune.entryGated(code)) return t
         val other = if (t.side == "YES") "NO" else "YES"
         val taken = _all.value.any { it.isPrimary && it.ticker.equals(t.ticker, true) && it.side == other && it.state != ScalpState.NO_FILL && codeOf(it) == code }
         val n = if (t.contracts > 0) t.contracts else ScalpRule.CONTRACTS
@@ -1845,6 +1857,7 @@ class ScalpBook(
         if (!enabled || q.tauS <= 0 || !q.fresh()) return out
         var exposure = (mine.filter { isActive(it) } .map { o -> out.firstOrNull { it.id == o.id } ?: o }).filter { isActive(it) }.sumOf { activeCost(it) }
         for (id in Research.IDS) {
+            if (com.dirk.kalshiodds.decision.insights.ScalpFreeze.blocksRestored(id, cfg.benchOverrides[id])) continue
             if (!cfg.permits(id) || mine.any { it.variantId == id }) continue
             val s = StrategyAlgo.view(cfg, id)
             val edge = (s.edgeCents ?: Research.defaultEdge(id)).toDouble()

@@ -41,9 +41,11 @@ class ScreenRegressionSmokeTest {
         val missing = visibleThen.filter { it !in now }
         assertTrue("strategies removed since scalp-v1.0.13: $missing", missing.isEmpty())
         assertTrue(
-            "more strategies hidden than in 1.0.13: ${ScalpModels.REMOVED_CODES - HIDDEN_SINCE_1010}",
-            ScalpModels.REMOVED_CODES == HIDDEN_SINCE_1010
+            "1.0.21 un-hides the 1.0.10 removals instead of hiding more: ${ScalpModels.REMOVED_CODES}",
+            ScalpModels.REMOVED_CODES.isEmpty()
         )
+        val stillHidden = HIDDEN_SINCE_1010.filter { it !in now }
+        assertTrue("former removals must stay on the board: $stillHidden", stillHidden.isEmpty())
         assertTrue(ScalpModels.ALL.all { it.label.isNotBlank() })
     }
 

@@ -16,10 +16,10 @@ object Research {
     /** 1.0.14: two tweaked paper copies of r-late (the money maker): own entry window, edge gate, max gap and default band. */
     const val LATE_T1 = "r-late-t1"; const val LATE_T2 = "r-late-t2"
     data class LateSpec(val minS: Int, val maxS: Int, val edgeCents: Int, val maxGap: Double, val loCents: Int, val hiCents: Int)
-    /** t1 = tighter (2–4 min left, edge ≥ 12¢, 26–42¢); t2 = looser (1.5–6 min left, edge ≥ 8¢, gap ≤ 23¢, 22–44¢). */
+    /** 1.0.21: no settle-hold entry with under 180s left. t1 stays 26–42¢ / 12¢. t2 tightens to 22–42¢ / 10¢. */
     val LATE_SPECS: Map<String, LateSpec> = mapOf(
-        LATE_T1 to LateSpec(minS = 120, maxS = 240, edgeCents = 12, maxGap = 0.21, loCents = 26, hiCents = 42),
-        LATE_T2 to LateSpec(minS = 90, maxS = 360, edgeCents = 8, maxGap = 0.23, loCents = 22, hiCents = 44)
+        LATE_T1 to LateSpec(minS = 180, maxS = 240, edgeCents = 12, maxGap = 0.21, loCents = 26, hiCents = 42),
+        LATE_T2 to LateSpec(minS = 180, maxS = 360, edgeCents = 10, maxGap = 0.23, loCents = 22, hiCents = 42)
     )
     fun isLate(id: String): Boolean = id == LATE || id in LATE_SPECS
     /** Seconds left in the window. Spec bounds are seconds, not milliseconds. Inclusive on both ends. */
@@ -31,20 +31,39 @@ object Research {
     }
     /** Max fair-gap after fees, in dollars (21¢ is 0.21, not 21). */
     fun lateMaxGapDollars(id: String): Double = LATE_SPECS[id]?.maxGap ?: FairGapTune.MAX_GAP
-    /** Price band of a late-favourite leg: your price sliders win, else the copy's own band, else the fair-gap 24–42¢. */
+    /**
+     * Price band of a late-favourite leg. A price slider wins one side at a time.
+     * r-late with no slider uses [Params.lateLoCents]/[Params.lateHiCents] (80–95¢), not the 24–42¢ gate.
+     * Copies use [LATE_SPECS]. Anything else falls through to the fair-gap band.
+     */
     fun lateBand(id: String, s: ScalpStrategySettings?): FairGapTune.Band {
         val sp = LATE_SPECS[id]
         val manual = s != null && (s.minEntryCents > 1 || s.maxEntryCents != null)
-        return if (sp == null || manual) FairGapTune.band(s) else FairGapTune.Band(sp.loCents / 100.0, sp.hiCents / 100.0)
+        if (!manual) {
+            if (sp != null) return FairGapTune.Band(sp.loCents / 100.0, sp.hiCents / 100.0)
+            if (id == LATE) {
+                val p = Params()
+                return FairGapTune.Band(p.lateLoCents / 100.0, p.lateHiCents / 100.0)
+            }
+            return FairGapTune.band(s)
+        }
+        if (sp != null || id == LATE) {
+            val defLo = sp?.loCents ?: Params().lateLoCents
+            val defHi = sp?.hiCents ?: Params().lateHiCents
+            val lo = if (s!!.minEntryCents > 1) s.minEntryCents / 100.0 else defLo / 100.0
+            val hi = s.maxEntryCents?.div(100.0) ?: (defHi / 100.0)
+            return FairGapTune.Band(lo, maxOf(lo, hi))
+        }
+        return FairGapTune.band(s)
     }
-    /** 1.0.10: r-kelly removed from the registry (KELLY kept so old saved trades still close/decode). 1.0.14: + r-late-t1/t2. */
-    val IDS = listOf(LATE, HOLD, MAKER, LATE_T1, LATE_T2)
+    /** 1.0.21: r-kelly is visible again and frozen (no new paper trades unless Force trade). 1.0.14: + r-late-t1/t2. */
+    val IDS = listOf(LATE, HOLD, MAKER, KELLY, LATE_T1, LATE_T2)
     fun isResearch(variantId: String) = variantId.startsWith(PREFIX)
 
     /** Frozen research parameters (sliders). */
     @Serializable
     data class Params(
-        val edgeCents: Double = 2.0, val lateMinS: Int = 120, val lateMaxS: Int = 300,
+        val edgeCents: Double = 2.0, val lateMinS: Int = 180, val lateMaxS: Int = 300,
         val lateLoCents: Int = 80, val lateHiCents: Int = 95, val makerEdgeCents: Double = 3.0,
         val kellyFraction: Double = 0.25, val windowCapUsd: Double = 100.0, val clip: Int = 10,
         val kellyBankrollUsd: Double = 1000.0

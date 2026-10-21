@@ -24,13 +24,22 @@ object ScalpFreeze {
     const val MAX_NET_USD = -10.0
     const val MAX_PER_TRADE_USD = -0.25
 
-    /** 1.0.14 default: money losers in Dirk's Oct 17–19 paper history (Supabase) and v2 copies of those originals. */
+    /**
+     * 1.0.10 hid these. 1.0.21 shows them again and freezes them: history stays, no new paper trade
+     * unless Force trade. mkdip's maker variant was still booking while hidden.
+     */
+    val RESTORED: Set<String> = setOf("sf30", "sf32", "mkdip", "diph60", "dipnotp", "r-kelly")
+
+    /** True when a restored scalper must not open a new paper trade. Force trade ("ACTIVE") wins. */
+    fun blocksRestored(code: String?, override: String?): Boolean = code != null && code in RESTORED && override != "ACTIVE"
+
+    /** 1.0.14 default losers, plus the 1.0.21 restores and the scalpers that cannot trade their own rule. */
     val DEFAULT_FROZEN: Set<String> = setOf(
         "momonotp", "momo", "momoh60", "sf59", "sf60", "sf56", "sf57", "sf58", "fcride", "r-hold", "cfr", "dip",
         "sf44", "sf52", "sf53", "sf54", "sf55", "v2-sf52", "v2-sf53", "v2-sf54", "v2-sf55",
         "v2-sf30", "v2-sf32", "v2-diph60", "v2-mkdip", "v2-dipnotp", "v2-momo", "v2-momonotp", "v2-momoh60",
         "v2-sf56", "v2-sf57", "v2-sf58", "v2-sf59", "v2-sf60"
-    )
+    ) + RESTORED + setOf("xrev", "sf51", "v2-sf51")
 
     fun isFrozen(d: BenchDecision?): Boolean = d != null && !d.trading && d.reason.startsWith(BADGE)
 
@@ -45,7 +54,11 @@ object ScalpFreeze {
 
     /** Why [code] is frozen, or null. [wasFrozen] lets a numeric freeze stay put until shadow paper improves. */
     fun reason(code: String, real: List<ScalpTrade>, shadow: List<ScalpTrade> = emptyList(), wasFrozen: Boolean = false): String? {
-        if (code in DEFAULT_FROZEN) return "$BADGE · 1.0.14 default (lost money Oct 17–19) · Force trade unfreezes"
+        if (code in DEFAULT_FROZEN) {
+            val note = com.dirk.kalshiodds.decision.ScalpRetune.cardNote(code)
+            if (note != null && note.startsWith("Frozen")) return "$BADGE · $note · Force trade unfreezes"
+            return "$BADGE · 1.0.14 default (lost money Oct 17–19) · Force trade unfreezes"
+        }
         val cleared = shadowClears(shadow)
         autoFreeze(real)?.let { (net, n) ->
             if (cleared) return null
