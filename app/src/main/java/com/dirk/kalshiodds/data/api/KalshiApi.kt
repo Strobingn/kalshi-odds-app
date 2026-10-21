@@ -23,6 +23,31 @@ interface KalshiApi {
         @Query("event_ticker") eventTicker: String? = null
     ): MarketsResponse
 
+    /**
+     * Settled markets for specific tickers (`tickers` is comma-separated).
+     * The newest-settled page drops windows once they age out; this looks them up directly.
+     */
+    @GET("markets")
+    suspend fun getMarketsByTickers(
+        @Query("series_ticker") seriesTicker: String,
+        @Query("status") status: String? = "settled",
+        @Query("tickers") tickers: String,
+        @Query("limit") limit: Int? = null
+    ): MarketsResponse
+
+    /**
+     * One page of settled markets with `close_time` at or after [minCloseTs].
+     * Kalshi's `min_close_ts` is unix seconds, not milliseconds.
+     */
+    @GET("markets")
+    suspend fun getSettledSince(
+        @Query("series_ticker") seriesTicker: String,
+        @Query("status") status: String? = "settled",
+        @Query("min_close_ts") minCloseTs: Long,
+        @Query("limit") limit: Int? = null,
+        @Query("cursor") cursor: String? = null
+    ): MarketsResponse
+
     /** 1.0.5: open events of a series (Kalshi still answers status=open here). */
     @GET("events")
     suspend fun getEvents(

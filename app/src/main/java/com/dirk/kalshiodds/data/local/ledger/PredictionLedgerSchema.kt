@@ -86,7 +86,8 @@ object PredictionLedgerSchema {
 
     val INDEXES: List<String> = listOf(
         "CREATE INDEX IF NOT EXISTS idx_prediction_ledger_ticker ON $TABLE(ticker, timestamp_ms)",
-        "CREATE INDEX IF NOT EXISTS idx_prediction_ledger_settled ON $TABLE(settlement_result, timestamp_ms)"
+        "CREATE INDEX IF NOT EXISTS idx_prediction_ledger_settled ON $TABLE(settlement_result, timestamp_ms)",
+        "CREATE INDEX IF NOT EXISTS idx_prediction_ledger_close ON $TABLE(close_time_ms)"
     )
 
     fun upgradeSql(fromVersion: Int): List<String> {

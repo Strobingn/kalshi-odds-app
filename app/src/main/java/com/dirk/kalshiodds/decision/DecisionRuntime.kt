@@ -153,6 +153,9 @@ class DecisionRuntime(
         fun samplesFrom(rows: List<LedgerRow>): List<RegimeCalibration.Sample> {
             val best = LinkedHashMap<String, LedgerRow>()
             for (r in rows) {
+                // Window-forecast rows are a different model. Letting them into this fit
+                // moves the decision calibration toward the scalper's UP chance.
+                if (r.modelVersion == ScalpForecastRecorder.MODEL) continue
                 if (r.outcomeYes == null) continue
                 val raw = r.rawModelProb ?: continue
                 val mkt = r.marketMid ?: continue

@@ -110,6 +110,21 @@ class OfflineCacheRefreshTest {
 
         override suspend fun getSeries(seriesTicker: String): SeriesResponse = SeriesResponse()
 
+        override suspend fun getMarketsByTickers(
+            seriesTicker: String,
+            status: String?,
+            tickers: String,
+            limit: Int?
+        ): MarketsResponse = throw IOException("offline")
+
+        override suspend fun getSettledSince(
+            seriesTicker: String,
+            status: String?,
+            minCloseTs: Long,
+            limit: Int?,
+            cursor: String?
+        ): MarketsResponse = throw IOException("offline")
+
         override suspend fun getTrades(
             ticker: String,
             limit: Int?,

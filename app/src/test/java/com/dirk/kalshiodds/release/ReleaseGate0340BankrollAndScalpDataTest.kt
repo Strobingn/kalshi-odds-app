@@ -20,6 +20,7 @@ import com.dirk.kalshiodds.ui.ScorecardCopy
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -63,6 +64,8 @@ class ReleaseGate0340BankrollAndScalpDataTest {
         val marker = ScorecardCopy.resetMarkerLine(s)
         assertNotNull(marker)
         assertTrue(marker!!, marker.contains("10,000") && marker.contains("2 earlier fills archived"))
+        assertTrue(marker, marker.contains(" ET"))
+        assertFalse(marker, marker.contains("ET ET"))
         assertTrue(ScorecardCopy.of(emptyList(), s).allLines().any { it.startsWith("── Reset point") })
     }
 

@@ -90,6 +90,42 @@ class WindowCalibrationTest {
         assertNull(WindowCalibration.report(emptyList()).brierLabel())
     }
 
+    @Test fun lowPercentsStayInTheirBucket() {
+        val samples = listOf(0.5, 1.0, 0.4, 99.6).mapIndexed { i, p ->
+            WindowCalibration.Sample("k$i", "BTC", i.toLong(), i.toLong(), p, i % 2 == 0, null)
+        }
+        val points = ChartGallery.calibration(WindowCalibration.report(samples).pairs())
+        assertEquals(listOf("0–10%", "90–100%"), points.map { it.label })
+        assertEquals(3, points[0].n)
+        assertEquals((0.5 + 1.0 + 0.4) / 3.0, points[0].predicted, 1e-9)
+        assertEquals(99.6, points[1].predicted, 1e-9)
+        assertEquals(200.0 / 3.0, points[0].actual, 1e-9)
+        assertEquals(0.0, points[1].actual, 1e-9)
+    }
+
+    @Test fun windowCloseKeepsTheRepeatedHourOnDstFallback() {
+        val zone = java.time.ZoneId.of("America/New_York")
+        val wall = java.time.LocalDateTime.of(2026, 11, 1, 1, 30)
+        val offsets = zone.rules.getValidOffsets(wall)
+        assertEquals(2, offsets.size)
+        val earlier = wall.atOffset(offsets.maxBy { it.totalSeconds }).toInstant().toEpochMilli()
+        val later = wall.atOffset(offsets.minBy { it.totalSeconds }).toInstant().toEpochMilli()
+        assertEquals(3_600_000L, later - earlier)
+        val ticker = "KXBTC15M-26NOV010130-00"
+        assertEquals(earlier, ScalpTicker.closeMs(ticker))
+        val row = row(ticker, later - 5_000, 0.42, "yes").copy(closeTimeMs = later)
+        assertEquals(later, WindowCalibration.windowClose(row))
+        assertEquals(earlier, WindowCalibration.windowClose(row.copy(closeTimeMs = null)))
+        val first = row.copy(id = 1, closeTimeMs = earlier, timestampMs = earlier - 5_000)
+        val second = row.copy(id = 2, closeTimeMs = later, timestampMs = later - 5_000)
+        val samples = WindowCalibration.fromLedger(
+            listOf(first, second),
+            later + 1_000,
+            earlier - WindowCalibration.LOOKBACK_MS
+        )
+        assertEquals(setOf(earlier, later), samples.map { it.closeMs }.toSet())
+    }
+
     @Test fun dailyRowsSpanMoreThanOneEasternDay() {
         val m0 = ScalpModels.ALL[0]
         val m1 = ScalpModels.ALL[1]

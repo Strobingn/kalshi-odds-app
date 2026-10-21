@@ -980,12 +980,41 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
                 else -> values.put(k, v.toString())
             }
         }
-        return db.writableDatabase.insert(
+        val id = db.writableDatabase.insert(
             com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.TABLE,
             null,
             values
         )
+        if (row.modelVersion == com.dirk.kalshiodds.decision.ScalpForecastRecorder.MODEL) {
+            maybePruneWindowForecasts(row.timestampMs)
+        }
+        return id
     }
+
+    private val forecastPruneAtMs = java.util.concurrent.atomic.AtomicLong(0L)
+
+    /** At most once an hour, on a window-forecast write. Other models are never deleted. */
+    private fun maybePruneWindowForecasts(nowMs: Long) {
+        val prev = forecastPruneAtMs.get()
+        if (prev != 0L && nowMs - prev < 3_600_000L) return
+        if (!forecastPruneAtMs.compareAndSet(prev, nowMs)) return
+        runCatching { pruneWindowForecasts(nowMs) }
+    }
+
+    /**
+     * Delete [com.dirk.kalshiodds.decision.ScalpForecastRecorder.MODEL] rows older than
+     * [keepMs] (~45 days). Decision-ledger rows stay.
+     */
+    @androidx.annotation.VisibleForTesting
+    fun pruneWindowForecasts(nowMs: Long, keepMs: Long = FORECAST_KEEP_MS): Int =
+        db.writableDatabase.delete(
+            com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.TABLE,
+            "model_version = ? AND timestamp_ms < ?",
+            arrayOf(
+                com.dirk.kalshiodds.decision.ScalpForecastRecorder.MODEL,
+                (nowMs - keepMs).toString()
+            )
+        )
 
     /** 0.3.38 paper scalps: insert or replace one row by id. Never deletes. */
     override fun upsertScalp(trade: com.dirk.kalshiodds.decision.ScalpTrade) {
@@ -1283,33 +1312,55 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
     }
 
     /**
-     * Settled 15-minute ledger rows in [sinceCloseMs, untilCloseMs], reduced to the
-     * latest timestamp at or before close for each coin and window. The calibration
-     * mapper reduces again if two rows share that timestamp.
+     * Settled 15-minute window-forecast rows in [sinceCloseMs, untilCloseMs], reduced
+     * to the latest timestamp at or before close for each coin and window.
+     *
+     * Only [com.dirk.kalshiodds.decision.ScalpForecastRecorder.MODEL]. Decision-pipeline
+     * rows for the same 15-minute tickers are a different model and must not win the
+     * "last forecast" slot. `settlement_result` is stored lowercase by [settleLedger],
+     * so the predicate matches the `(settlement_result, timestamp_ms)` index.
+     * `timestamp_ms >= sinceClose - 15 min` keeps that index from walking the whole table.
      */
     fun calibrationLedgerRows(sinceCloseMs: Long, untilCloseMs: Long): List<com.dirk.kalshiodds.data.local.ledger.LedgerRow> =
         runCatching {
             val coin = coinKeySql("series", "ticker")
+            val sinceTs = sinceCloseMs - CALIBRATION_LEAD_MS
+            val model = com.dirk.kalshiodds.decision.ScalpForecastRecorder.MODEL
+            val table = com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.TABLE
             val sql = """
-                SELECT p.* FROM ${com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.TABLE} p
+                SELECT p.* FROM $table p
                 INNER JOIN (
                   SELECT coin_key, close_ms, MAX(ts) AS ts FROM (
                     SELECT $coin AS coin_key, close_time_ms AS close_ms, timestamp_ms AS ts
-                    FROM ${com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.TABLE}
-                    WHERE LOWER(settlement_result) IN ('yes','no')
+                    FROM $table
+                    WHERE settlement_result IN ('yes','no')
+                      AND model_version = ?
                       AND final_prob IS NOT NULL
                       AND close_time_ms IS NOT NULL
                       AND close_time_ms >= ? AND close_time_ms <= ?
+                      AND timestamp_ms >= ?
                       AND timestamp_ms <= close_time_ms
                       AND (UPPER(IFNULL(series, '')) LIKE '%15M%' OR UPPER(ticker) LIKE '%15M%')
                   )
                   GROUP BY coin_key, close_ms
                 ) g
                 ON p.close_time_ms = g.close_ms AND p.timestamp_ms = g.ts AND ${coinKeySql("p.series", "p.ticker")} = g.coin_key
-                WHERE LOWER(p.settlement_result) IN ('yes','no') AND p.final_prob IS NOT NULL AND p.timestamp_ms <= p.close_time_ms
+                WHERE p.settlement_result IN ('yes','no')
+                  AND p.model_version = ?
+                  AND p.final_prob IS NOT NULL
+                  AND p.timestamp_ms >= ?
+                  AND p.timestamp_ms <= p.close_time_ms
             """.trimIndent()
+            val args = arrayOf(
+                model,
+                sinceCloseMs.toString(),
+                untilCloseMs.toString(),
+                sinceTs.toString(),
+                model,
+                sinceTs.toString()
+            )
             val out = ArrayList<com.dirk.kalshiodds.data.local.ledger.LedgerRow>()
-            db.readableDatabase.rawQuery(sql, arrayOf(sinceCloseMs.toString(), untilCloseMs.toString())).use { c ->
+            db.readableDatabase.rawQuery(sql, args).use { c ->
                 while (c.moveToNext()) out += cursorToLedger(c)
             }
             out
@@ -1383,11 +1434,15 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
     fun recentLedger(limit: Int): List<com.dirk.kalshiodds.data.local.ledger.LedgerRow> =
         queryLedger(null, null, "timestamp_ms DESC", limit)
 
-    /** Settled predictions newest first, for calibration. */
+    /**
+     * Settled decision-model predictions newest first, for [com.dirk.kalshiodds.decision.RegimeCalibration.fit].
+     * Window-forecast rows are excluded so they cannot fill [com.dirk.kalshiodds.decision.DecisionRuntime.MAX_FIT_ROWS]
+     * or move the fit.
+     */
     override fun settledLedger(sinceMs: Long, limit: Int): List<com.dirk.kalshiodds.data.local.ledger.LedgerRow> =
         queryLedger(
-            "settlement_result IN ('yes','no') AND timestamp_ms >= ?",
-            arrayOf(sinceMs.toString()),
+            "settlement_result IN ('yes','no') AND timestamp_ms >= ? AND IFNULL(model_version, '') != ?",
+            arrayOf(sinceMs.toString(), com.dirk.kalshiodds.decision.ScalpForecastRecorder.MODEL),
             "timestamp_ms DESC",
             limit
         )
@@ -1550,6 +1605,12 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
             // 0.3.68: move (rename) the 0.3.67 aggregates aside; fresh tables rebuilt by the background indexer.
             if (oldVersion == 10) com.dirk.kalshiodds.data.local.paper.ScalpSchema.moveV10Sql().forEach { runCatching { db.execSQL(it) } }
             if (oldVersion < 11) createScalpTable(db)
+            if (oldVersion < 12) {
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS idx_prediction_ledger_close ON " +
+                        "${com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.TABLE}(close_time_ms)"
+                )
+            }
             applyPaperFillColumns(db)
         }
 
@@ -1723,7 +1784,11 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
 
     companion object {
         const val DB_NAME = "diphunter_results.db"
-        const val DB_VERSION = 11
+        const val DB_VERSION = 12
+        /** A 15-minute window. Calibration ignores ledger rows written earlier than this before the close range. */
+        const val CALIBRATION_LEAD_MS = 900_000L
+        /** Window-forecast rows older than this are the only ledger rows prune deletes. */
+        const val FORECAST_KEEP_MS = 45L * 86_400_000L
         const val TABLE_SETTINGS = "settings_history"
         const val TABLE_SESSION = "sessions"
         const val MAX_SETTINGS = 400

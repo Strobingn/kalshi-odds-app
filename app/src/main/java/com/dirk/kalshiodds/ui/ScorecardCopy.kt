@@ -346,15 +346,19 @@ object ScorecardCopy {
         )
     }
 
-    /** "── Paper bankroll reset to $10,000 · Oct 9, 2026 12:30 PM ET · … ──" for the latest reset, else null. */
+    /** "── Paper bankroll reset to $10,000 · Oct 9, 2026, 12:30 PM ET · … ──" for the latest reset, else null. */
     fun resetMarkerLine(paper: com.dirk.kalshiodds.signal.paper.PaperBookState, zoneId: ZoneId = ET_ZONE): String? {
         val last = paper.archived.maxByOrNull { it.archivedAtMs } ?: return null
-        val at = if (zoneId == com.dirk.kalshiodds.domain.EtTime.ZONE) com.dirk.kalshiodds.domain.EtTime.fullDateClock(last.archivedAtMs)
-        else java.time.Instant.ofEpochMilli(last.archivedAtMs).atZone(zoneId)
-            .format(java.time.format.DateTimeFormatter.ofPattern("MMM d, yyyy h:mm a", Locale.US))
+        // fullDateClock already ends in "ET". Appending it again rendered "ET ET".
+        val at = if (zoneId == com.dirk.kalshiodds.domain.EtTime.ZONE) {
+            com.dirk.kalshiodds.domain.EtTime.fullDateClock(last.archivedAtMs)
+        } else {
+            java.time.Instant.ofEpochMilli(last.archivedAtMs).atZone(zoneId)
+                .format(java.time.format.DateTimeFormatter.ofPattern("MMM d, yyyy h:mm a", Locale.US)) + " ET"
+        }
         val to = last.resetToUsd ?: paper.startingUsd
         return String.format(
-            Locale.US, "── Reset point: paper bankroll set to $%,.0f · %s ET · %d earlier fills archived (kept) · %s ──",
+            Locale.US, "── Reset point: paper bankroll set to $%,.0f · %s · %d earlier fills archived (kept) · %s ──",
             to, at, last.fills.size, last.note
         )
     }

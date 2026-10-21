@@ -579,13 +579,7 @@ class ScalpBook(
         val primaries = ScalpStrategy.values().map { paramsFor(coin, it) } + (ScalpParams.HOLD60_SIBLINGS + ScalpParams.QUEUED_COPIES).filter { !ScalpModels.isRemoved(ScalpModels.modelOf(it).code) } + ScalpParams.fairTweaksFor(coin)
         val primaryIds = primaries.map { it.id }.toSet()
         val key = q.ticker.uppercase()
-        val hist = history.getOrPut(key) { ArrayDeque() }
-        val recent = hist.toList()
-        hist.addLast(ScalpRule.Snap(q.nowMs, q.yesBid, q.yesAsk, ScalpRule.fairYes(q.spot, q.strike, q.sigmaPerSec, q.tauS)))
-        while (hist.isNotEmpty() && q.nowMs - hist.first().atMs > maxOf(2 * ScalpRule.LOOKBACK_MS, controls.state.value.windowSeconds * 1000L)) hist.removeFirst()
-        if (q.nowMs >= q.closeMs) history.remove(key)
-        // 0.3.50: bounded — forget closed windows' history/marks (they used to accumulate forever).
-        if (history.size > ScalpMemory.MAX_TICKERS) history.keys.filter { it != key && (ScalpTicker.closeMs(it) ?: Long.MAX_VALUE) < q.nowMs }.forEach { history.remove(it) }
+        val recent = recordHistory(q)
         stepShadows(q, null)
         val mineAll = _all.value.filter { it.ticker.equals(q.ticker, true) }
         // Step every open scalp first (one per market side per variant).
@@ -1133,6 +1127,29 @@ class ScalpBook(
 
     /** Per-strategy window-start entry limit for original sf strategies: 2–5 minutes after the open (distinct by code). */
     fun sfOpenMin(code: String): Double = ScalpV2.sfOpenMin(code)
+
+    /**
+     * YES mid history for [dm60], with no entry, exit, or size.
+     * ETH and SOL forecasts need this. They must not go through [onQuote].
+     */
+    fun noteMidHistory(q: ScalpRule.Quote) {
+        synchronized(lock) { recordHistory(q) }
+    }
+
+    /** Caller holds [lock]. Same book memory [onQuote] keeps for the traded coin. */
+    private fun recordHistory(q: ScalpRule.Quote): List<ScalpRule.Snap> {
+        val key = q.ticker.uppercase()
+        val hist = history.getOrPut(key) { ArrayDeque() }
+        val recent = hist.toList()
+        hist.addLast(ScalpRule.Snap(q.nowMs, q.yesBid, q.yesAsk, ScalpRule.fairYes(q.spot, q.strike, q.sigmaPerSec, q.tauS)))
+        while (hist.isNotEmpty() && q.nowMs - hist.first().atMs > maxOf(2 * ScalpRule.LOOKBACK_MS, controls.state.value.windowSeconds * 1000L)) hist.removeFirst()
+        if (q.nowMs >= q.closeMs) history.remove(key)
+        // 0.3.50: bounded — forget closed windows' history/marks (they used to accumulate forever).
+        if (history.size > ScalpMemory.MAX_TICKERS) {
+            history.keys.filter { it != key && (ScalpTicker.closeMs(it) ?: Long.MAX_VALUE) < q.nowMs }.forEach { history.remove(it) }
+        }
+        return recent
+    }
 
     /** 1.0.4: [dm60] under the book lock, for readers outside the quote path (home AI banner). */
     fun dm60Snapshot(key: String, nowMs: Long): Double = synchronized(lock) { dm60(key, nowMs) }

@@ -25,6 +25,7 @@ class ScalpForecastRecorder(
      */
     fun observe(quotes: List<ScalpRule.Quote>, pYes: (ScalpRule.Quote) -> Double?) {
         if (quotes.isEmpty()) return
+        pruneClosed(quotes.maxOf { it.nowMs })
         val open = quotes.filter { isFifteen(it.ticker) && it.closeMs > it.nowMs }
         if (open.isEmpty()) return
         for ((coin, rows) in open.groupBy { ScalpParams.coinOf(it.ticker) }) {
@@ -65,6 +66,19 @@ class ScalpForecastRecorder(
             else -> null
         }
     }
+
+    /** Drop cadence keys once that window's close is no longer in the future. */
+    private fun pruneClosed(nowMs: Long) {
+        val it = lastWriteMs.keys.iterator()
+        while (it.hasNext()) {
+            val close = it.next().substringAfter('|', "").toLongOrNull() ?: continue
+            if (close <= nowMs) it.remove()
+        }
+    }
+
+    @androidx.annotation.VisibleForTesting
+    internal fun trackedCloses(): Set<Long> =
+        lastWriteMs.keys.mapNotNull { it.substringAfter('|', "").toLongOrNull() }.toSet()
 
     private fun due(key: String, nowMs: Long, secondsLeft: Double): Boolean {
         val prev = lastWriteMs[key] ?: return true
