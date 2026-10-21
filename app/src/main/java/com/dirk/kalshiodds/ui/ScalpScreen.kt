@@ -33,7 +33,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.domain.KalshiQuoteDisplay
-import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.paper.PaperArchive
 import com.dirk.kalshiodds.signal.paper.PaperFill
 import com.dirk.kalshiodds.signal.paper.ScalpReview
@@ -323,12 +322,12 @@ private fun ScalpControlCard(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            ScalpStat("Start", money(SignalConstants.PAPER_START_USD), colors.textPrimary)
+            ScalpStat("Start", money(state.paper.startingUsd), colors.textPrimary)
             ScalpStat("Open", money(openStake), colors.accentOrange)
             ScalpStat("P&L", signedMoney(realized), pnlColor(realized, colors))
         }
         Text(
-            "Paper only: \$100,000 starting balance, unrestricted synthetic credit, and each fill uses the displayed touch quantity. No action on this tab can place a Kalshi order.",
+            "Paper and scalp share one ledger; reset starts it at \$100. Synthetic credit is unrestricted, and each fill uses the displayed touch quantity. No action on this tab can place a Kalshi order.",
             style = MaterialTheme.typography.bodySmall,
             color = colors.textSecondary
         )
@@ -344,7 +343,7 @@ private fun ScalpControlCard(
             )
         }
         OutlinedButton(onClick = onResetPaper) {
-            Text("Reset paper to \$100,000")
+            Text("Reset paper to \$100")
         }
     }
 }

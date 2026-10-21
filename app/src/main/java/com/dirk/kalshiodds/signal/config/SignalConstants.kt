@@ -39,7 +39,7 @@ object SignalConstants {
      * Isolated paper book — never hits Kalshi. $100k is a legible starting
      * reference; paper execution itself may use unlimited synthetic credit.
      */
-    const val PAPER_START_USD = 100_000.0
+    const val PAPER_START_USD = 100.0
     const val PAPER_STAKE_USD = 5.0
     const val DEFAULT_PAPER_TRADING = true
 

@@ -22,7 +22,7 @@ import org.junit.Test
 class PaperBookTest {
 
     @Test
-    fun startsAtOneHundredThousandAndPapersFiveDollarAiFill() {
+    fun startsAtOneHundredAndPapersFiveDollarAiFill() {
         val book = PaperBook(idFactory = { "p1" }, nowMs = { 10L })
         assertEquals(SignalConstants.PAPER_START_USD, book.snapshot().cashUsd, 1e-9)
         val fill = book.considerTicket(hunterTicket(), enabled = true)
@@ -39,14 +39,17 @@ class PaperBookTest {
     }
 
     @Test
-    fun hydrateMigratesTheOldTwentyThousandSeedWithoutErasingPnl() {
+    fun hydratePreservesExistingRunAndResetUsesNewSeed() {
         val book = PaperBook()
 
         book.hydrate(PaperBookState(startingUsd = 20_000.0, cashUsd = 20_237.50))
 
-        assertEquals(100_000.0, book.snapshot().startingUsd, 1e-9)
-        assertEquals(100_237.50, book.snapshot().cashUsd, 1e-9)
-        assertTrue(book.snapshot().lastMessage!!.contains("migrated to \$100,000"))
+        assertEquals(20_000.0, book.snapshot().startingUsd, 1e-9)
+        assertEquals(20_237.50, book.snapshot().cashUsd, 1e-9)
+        book.reset()
+        assertEquals(100.0, book.snapshot().startingUsd, 1e-9)
+        assertEquals(100.0, book.snapshot().cashUsd, 1e-9)
+        assertEquals(20_237.50, book.snapshot().archived.single().cashUsd, 1e-9)
     }
 
     @Test

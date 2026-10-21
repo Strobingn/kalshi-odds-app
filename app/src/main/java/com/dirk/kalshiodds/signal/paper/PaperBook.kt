@@ -105,7 +105,7 @@ class PaperBook(
             )
             publish(
                 PaperBookState(
-                    lastMessage = "Paper book reset to \$100,000 — prior run archived",
+                    lastMessage = "Paper book reset to \$100 — prior run archived",
                     archived = cur.archived + archive
                 )
             )
@@ -114,19 +114,8 @@ class PaperBook(
 
     fun hydrate(next: PaperBookState) {
         synchronized(lock) {
-            // Upgrade older $100 and $20k paper seeds without erasing the
-            // user's existing ledger or changing historical P&L. New and
-            // reset books start at $100k; unlimited synthetic credit still
-            // permits a balance below zero during the paper-only experiment.
-            _state.value = if (next.startingUsd == 100.0 || next.startingUsd == 20_000.0) {
-                next.copy(
-                    startingUsd = SignalConstants.PAPER_START_USD,
-                    cashUsd = next.cashUsd + (SignalConstants.PAPER_START_USD - next.startingUsd),
-                    lastMessage = "Paper starting balance migrated to \$100,000 · unlimited synthetic credit · never Kalshi"
-                )
-            } else {
-                next
-            }
+            // Keep the existing run intact; the new seed applies on reset.
+            _state.value = next
         }
     }
 

@@ -710,14 +710,14 @@ fun SettingsContent(
             Section("AI paper scalper")
             Text(
                 "Isolated from live money. The Scalp tab shows twenty parallel hypotheses, entries, exits, and a full paper ledger. " +
-                    "Paper fills use the displayed touch quantity with unrestricted synthetic credit and never call Kalshi. Reset starts a fresh \$100,000 ledger. " +
+                    "Paper fills use the displayed touch quantity with unrestricted synthetic credit and never call Kalshi. Reset starts a fresh \$100 shared paper and scalp ledger. " +
                     "Paper trading ON does not swallow Live Approve after a Kalshi key is saved — use the Paper button for manual simulated fills.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
             ToggleRow("Paper autopilot (unlimited synthetic credit)", s.paperTradingEnabled, { viewModel?.setPaperTrading(it) })
             OutlinedButton(onClick = { viewModel?.resetPaperBook() }, modifier = Modifier.height(44.dp)) {
-                Text("Reset paper book to $100,000")
+                Text("Reset paper book to $100")
             }
 
             Section("Live Approve tickets (Kalshi V2)")
