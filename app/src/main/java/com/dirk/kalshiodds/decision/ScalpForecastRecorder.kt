@@ -15,8 +15,8 @@ import java.util.concurrent.ConcurrentHashMap
  * ([WindowCalibration.HORIZON]).
  */
 class ScalpForecastRecorder(
-    private val insert: (LedgerRow) -> Boolean,
-    private val insertBatch: ((List<LedgerRow>) -> Int)? = null
+    private val insertBatch: ((List<LedgerRow>) -> Int)? = null,
+    private val insert: (LedgerRow) -> Boolean
 ) {
     private val lastWriteMs = ConcurrentHashMap<String, Long>()
 
