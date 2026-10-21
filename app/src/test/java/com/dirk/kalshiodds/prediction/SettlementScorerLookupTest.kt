@@ -25,15 +25,17 @@ class SettlementScorerLookupTest {
         val api = api { name, args ->
             calls += name
             if (name == "getMarketsByTickers") {
-                assertTrue(args[2].toString().contains(old))
-                MarketsResponse(markets = listOf(MarketDto(ticker = old, result = "yes", status = "settled")))
+                // Other suites share the prediction log, so the batch may include their open tickers.
+                val requested = args[2].toString().split(',').map { it.trim() }
+                assertTrue(requested.any { it.equals(old, true) })
+                MarketsResponse(markets = requested.map { MarketDto(ticker = it, result = if (it.equals(old, true)) "yes" else "no", status = "settled") })
             } else {
                 MarketsResponse(markets = listOf(MarketDto(ticker = "KXBTC15M-OTHER", result = "no", status = "settled")))
             }
         }
         val settled = ArrayList<Pair<String, String>>()
         scorer(api, setOf(old), now - 2 * 3_600_000L) { t, r -> settled += t to r }.maybeScore(now, 0L)
-        assertEquals(listOf(old to "yes"), settled)
+        assertEquals("yes", settled.first { it.first.equals(old, true) }.second)
         assertEquals(listOf("getMarketsByTickers"), calls)
     }
 

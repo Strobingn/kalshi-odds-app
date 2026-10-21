@@ -145,7 +145,7 @@ class SettlementScorer(
     /**
      * Direct ticker lookup for windows the newest page has already scrolled past.
      * One batch per pass; the rest stay due and go out on a later poll.
-     * If the ticker filter returns none of them, walk one `min_close_ts` page.
+     * Tickers missing from that response get one `min_close_ts` page.
      */
     private suspend fun pollStale(series: String, tickers: List<String>, nowMs: Long) {
         val batch = tickers.take(SettlementPollPolicy.STALE_BATCH)
