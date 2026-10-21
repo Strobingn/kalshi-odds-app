@@ -95,8 +95,8 @@ class UpDownSymmetryTest {
         assertEquals("YES", SidePick.onlyMaxBy(down) { it.second }?.first)
         assertNull(SidePick.onlyMaxBy(listOf("YES" to 0.08, "NO" to 0.08)) { it.second })
 
-        assertEquals("NO", researchHoldSide(0.40))
-        assertEquals("YES", researchHoldSide(0.60))
+        assertNull(researchHoldSide(0.40))
+        assertNull(researchHoldSide(0.60))
         assertNull(researchHoldSide(0.50))
     }
 

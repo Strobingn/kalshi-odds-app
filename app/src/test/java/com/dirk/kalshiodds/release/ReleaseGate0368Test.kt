@@ -5,6 +5,7 @@ import com.dirk.kalshiodds.decision.ScalpRule
 import com.dirk.kalshiodds.decision.ScalpV2
 import com.dirk.kalshiodds.decision.ShockFav
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -26,11 +27,13 @@ class ReleaseGate0368Test {
         val tweaks = ScalpV2.EXTRA_SPECS.filter { !it.walk }
         assertEquals(tweaks.size, tweaks.map { Triple(it.maxAsk, it.trail, it.stop) }.toSet().size) // every tweak differs
         ScalpV2.EXTRA_SPECS.forEach { sp ->
-            val m = ScalpModels.modelByCode(sp.id)!!
-            assertTrue(ScalpModels.isV2(m)); assertEquals(sp.base, ScalpModels.originalOf(m)!!.code)
-            assertTrue(ScalpModels.leaderboardFromStats(emptyList()).any { it.model == m })
+            assertTrue(sp.id, ScalpModels.modelByCode(sp.id) == null)
+            assertTrue(ScalpModels.leaderboardFromStats(emptyList()).none { it.model.code == sp.id })
         }
-        bases.forEach { b -> assertEquals(ScalpModels.modelByCode("v2-$b"), ScalpModels.v2Of(ScalpModels.modelByCode(b)!!)) }
+        assertNull(ScalpModels.modelByCode("v2-sf41"))
+        assertNull(ScalpModels.modelByCode("v2-sf42"))
+        assertNull(ScalpModels.v2Of(ScalpModels.Model.SF41))
+        assertNull(ScalpModels.v2Of(ScalpModels.Model.SF42))
         assertEquals(listOf(5, 10), ScalpV2.EXTRA_SPECS.filter { it.walk && it.base == "sf41" }.map { it.clip })
     }
 

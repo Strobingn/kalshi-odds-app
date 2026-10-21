@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.llm
 
+import com.dirk.kalshiodds.decision.KeptScalpers
 import com.dirk.kalshiodds.decision.ScalpControls
 import com.dirk.kalshiodds.decision.ScalpModels
 import org.junit.Assert.*
@@ -9,8 +10,7 @@ import org.junit.Test
 class SettingToolsTest {
     private val c = ScalpControls()
     private val code = ScalpModels.ALL.first { ScalpModels.isV2(it) && it != ScalpModels.Model.V2_LLM }.code
-    private val original = ScalpModels.ALL.first { !ScalpModels.isV2(it) && !ScalpModels.isResearch(it) }.code
-    private val research = ScalpModels.ALL.first { ScalpModels.isResearch(it) }.code
+    private val original = KeptScalpers.FAIR_ID
 
     @Test fun allowlistCoversPaperSettings() {
         assertNull(SettingTools.specFor("trailCents")) // hard 3¢ trail
@@ -73,8 +73,8 @@ class SettingToolsTest {
         assertNull(SettingTools.specFor("strategy.$original.enabled")) // original entries never consult disabledStrategies
         assertNull(SettingTools.specFor("strategy.$original.cadenceSeconds"))
         assertNotNull(SettingTools.specFor("strategy.$original.maxEntryCents"))
-        assertNotNull(SettingTools.specFor("strategy.$research.edgeCents"))
-        assertNull(SettingTools.specFor("strategy.$research.stopCents"))
+        assertNull(SettingTools.specFor("strategy.r-late.edgeCents"))
+        assertNull(SettingTools.specFor("strategy.r-kelly.stopCents"))
         assertNull(SettingTools.specFor("strategy.$code.trailCents")) // 3¢ trail is a hard rule
     }
 

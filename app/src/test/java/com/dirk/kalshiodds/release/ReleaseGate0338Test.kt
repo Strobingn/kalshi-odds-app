@@ -4,6 +4,7 @@ import com.dirk.kalshiodds.data.local.paper.ScalpSchema
 import com.dirk.kalshiodds.decision.AutopilotMinStake
 import com.dirk.kalshiodds.decision.InMemoryScalpPersistence
 import com.dirk.kalshiodds.decision.ScalpBook
+import com.dirk.kalshiodds.decision.ScalpParams
 import com.dirk.kalshiodds.decision.ScalpRule
 import com.dirk.kalshiodds.decision.ScalpState
 import com.dirk.kalshiodds.decision.ScalpStats
@@ -109,7 +110,7 @@ class ReleaseGate0338Test {
         // 0.3.40: pin the classic v1 params (no shadow variants) so these 0.3.38 gates keep testing the same rule.
         return ScalpBook(
             InMemoryScalpPersistence(),
-            emptyList(),
+            listOf(ScalpParams.CLASSIC),
             com.dirk.kalshiodds.decision.InMemoryScalpTuneStore(
                 com.dirk.kalshiodds.decision.ScalpTuneState(paramsByCoin = mapOf("BTC" to com.dirk.kalshiodds.decision.ScalpParams.CLASSIC.id))
             )

@@ -32,7 +32,7 @@ class ReleaseGate0361Test {
     @Test
     fun labelsDuplicatesAndZeroTradeVariantsWithoutRemovingThem() {
         val codes = ScalpModels.ALL.map { it.code }
-        listOf("sf01", "sf09", "sf10", "sf11").forEach { assertTrue(it in codes) }
+        listOf("sf01", "sf09", "sf10", "sf11").forEach { assertFalse(it, it in codes) }
         assertTrue(ShockFav.TAGS.getValue("sf01").startsWith("duplicate"))
         assertTrue(ShockFav.TAGS.getValue("sf09").startsWith("duplicate"))
         assertTrue(ShockFav.TAGS.getValue("sf10").startsWith("zero trades"))

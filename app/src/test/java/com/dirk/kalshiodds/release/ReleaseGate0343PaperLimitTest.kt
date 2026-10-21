@@ -1,6 +1,7 @@
 package com.dirk.kalshiodds.release
 
 import com.dirk.kalshiodds.decision.ScalpBook
+import com.dirk.kalshiodds.decision.ScalpModels
 import com.dirk.kalshiodds.decision.ScalpParams
 import com.dirk.kalshiodds.decision.ScalpRule
 import com.dirk.kalshiodds.decision.ScalpState
@@ -209,7 +210,8 @@ class ReleaseGate0343PaperLimitTest {
     fun cfRepriceHasItsOwnGridAndScorecardLine() {
         assertTrue(ScalpParams.STRATEGY_GRID.count { it.strategy == ScalpStrategy.CF_REPRICE } >= 4)
         assertTrue(ScalpParams.byId(cfr.id) != null)
-        assertTrue(ScalpRule.rulesText().contains("CF-reprice"))
+        assertTrue(ScalpRule.rulesText().contains("removed strategy"))
+        assertFalse(ScalpModels.ALL.any { it.code == "cfr" })
     }
 }
 

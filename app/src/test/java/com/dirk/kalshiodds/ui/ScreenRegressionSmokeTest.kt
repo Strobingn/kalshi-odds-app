@@ -9,6 +9,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performScrollToNode
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.dirk.kalshiodds.chart.BidPoint
+import com.dirk.kalshiodds.decision.KeptScalpers
 import com.dirk.kalshiodds.decision.ScalpModels
 import com.dirk.kalshiodds.decision.ScalpRule
 import com.dirk.kalshiodds.decision.ScalpState
@@ -18,6 +19,7 @@ import com.dirk.kalshiodds.llm.AiLiveSnapshot
 import com.dirk.kalshiodds.llm.ChatMessage
 import com.dirk.kalshiodds.signal.engine.BookLevelSnapshot
 import com.dirk.kalshiodds.ui.theme.KalshiOddsTheme
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -35,18 +37,12 @@ import org.robolectric.annotation.Config
 class ScreenRegressionSmokeTest {
     @get:Rule val compose = createComposeRule()
 
-    @Test fun strategyCodesFrom1013AreStillPresent() {
-        val now = ScalpModels.ALL.map { it.code }.toSet()
-        val visibleThen = CODES_1013.filter { it !in HIDDEN_SINCE_1010 }
-        val missing = visibleThen.filter { it !in now }
-        assertTrue("strategies removed since scalp-v1.0.13: $missing", missing.isEmpty())
-        assertTrue(
-            "1.0.21 un-hides the 1.0.10 removals instead of hiding more: ${ScalpModels.REMOVED_CODES}",
-            ScalpModels.REMOVED_CODES.isEmpty()
-        )
-        val stillHidden = HIDDEN_SINCE_1010.filter { it !in now }
-        assertTrue("former removals must stay on the board: $stillHidden", stillHidden.isEmpty())
+    @Test fun liveBoardIsTheTwelveKeptScalpers() {
+        assertEquals(KeptScalpers.ALL.map { it.id }, ScalpModels.ALL.map { it.code })
+        assertTrue(ScalpModels.ALL.size <= KeptScalpers.MAX_SLOTS)
+        assertTrue(ScalpModels.REMOVED_CODES.containsAll(HIDDEN_SINCE_1010))
         assertTrue(ScalpModels.ALL.all { it.label.isNotBlank() })
+        assertTrue(ScalpModels.ALL.none { it.code in CODES_1013 && it.code !in KeptScalpers.IDS })
     }
 
     @Test fun navRoutesFrom1013AreStillPresent() {

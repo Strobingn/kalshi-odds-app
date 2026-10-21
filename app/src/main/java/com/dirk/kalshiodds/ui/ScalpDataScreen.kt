@@ -54,14 +54,16 @@ object ScalpData {
     fun makerLines(all: List<ScalpTrade>): List<String> {
         val done = all.filter { it.state == com.dirk.kalshiodds.decision.ScalpState.CLOSED && it.netUsd?.isFinite() == true }
         fun avg(xs0: List<Double>) = xs0.filter { it.isFinite() }.let { xs -> if (xs.isEmpty()) "—" else String.format(Locale.US, "%+.1f¢", xs.average() * 100) }
-        return com.dirk.kalshiodds.decision.ScalpStrategy.values().flatMap { s ->
-            listOf(true, false).map { mk ->
-                val rows = done.filter { it.strategyOrNull == s && it.isMaker == mk }
-                val fills = all.filter { it.strategyOrNull == s && it.isMaker == mk && it.entryAtMs != null }
-                val noFill = all.count { it.strategyOrNull == s && it.isMaker == mk && it.state == com.dirk.kalshiodds.decision.ScalpState.NO_FILL }
+        // One line per label that actually traded. Removed scalpers collapse to "removed strategy" and empty families are omitted.
+        return all.map { it.algoLabel }.distinct().sorted().flatMap { label ->
+            listOf(true, false).mapNotNull { mk ->
+                val rows = done.filter { it.algoLabel == label && it.isMaker == mk }
+                val fills = all.filter { it.algoLabel == label && it.isMaker == mk && it.entryAtMs != null }
+                val noFill = all.count { it.algoLabel == label && it.isMaker == mk && it.state == com.dirk.kalshiodds.decision.ScalpState.NO_FILL }
+                if (rows.isEmpty() && fills.isEmpty() && noFill == 0) return@mapNotNull null
                 String.format(
                     Locale.US, "%s %s: %d trips · net %s/ct · AS30 %s · AS60 %s · no-fill %d",
-                    s.label, if (mk) "maker" else "taker", rows.size,
+                    label, if (mk) "maker" else "taker", rows.size,
                     avg(rows.map { it.netUsd!! / it.contracts.coerceAtLeast(1) }),
                     avg(fills.mapNotNull { it.adverse30 }), avg(fills.mapNotNull { it.adverse60 }), noFill
                 )

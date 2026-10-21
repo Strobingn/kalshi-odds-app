@@ -5,6 +5,7 @@ import com.dirk.kalshiodds.ui.ScalpTabState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -12,24 +13,20 @@ import org.junit.Test
 class ScalpTweakVariantsTest {
     private fun trade(vid: String) = ScalpTrade("t-$vid", "KXBTC15M-26OCT181200-00", "YES", ScalpState.CLOSED, 0L, 0.40, 0.55, ruleVersion = "v|$vid|P")
 
-    @Test fun newIdsAreUniqueAndResolve() {
+    @Test fun tweakCopiesAreOffTheBoardAndTheKeptFairIdStays() {
         val codes = ScalpModels.ALL.map { it.code }
         assertEquals(codes.size, codes.toSet().size)
-        listOf("fair-t1", "fair-t2", "r-late-t1", "r-late-t2").forEach { assertTrue(it, it in codes) }
+        listOf("fair-t1", "fair-t2", "r-late-t1", "r-late-t2", "fair", "r-late").forEach { assertFalse(it, it in codes) }
         val (t1, t2) = ScalpParams.FAIR_TWEAKS
         assertEquals("g12-t10-s08-d15-w300", t1.id); assertEquals("g16-t14-s08-d15-w300", t2.id)
         assertNotEquals(ScalpParams.seedFor("BTC").id, t1.id)
-        assertEquals(ScalpModels.Model.FAIR_T1, ScalpModels.modelOf(t1)); assertEquals(ScalpModels.Model.FAIR_T2, ScalpModels.modelOf(t2))
-        assertEquals(ScalpModels.Model.FAIR_T1, ScalpModels.modelOf(trade(t1.id)))
-        assertEquals(ScalpModels.Model.FAIR_T2, ScalpModels.modelOf(trade(t2.id)))
         assertEquals(t1, ScalpParams.byId(t1.id))
-        assertEquals(ScalpModels.Model.R_LATE_T1, ScalpModels.modelOf(trade("r-late-t1")))
-        assertEquals(ScalpModels.Model.R_LATE_T2, ScalpModels.modelOf(trade("r-late-t2")))
-        // Originals unchanged.
-        assertEquals(ScalpModels.Model.FAIR_GAP, ScalpModels.modelOf(trade(ScalpParams.seedFor("BTC").id)))
-        assertEquals(ScalpModels.Model.FAIR_GAP, ScalpModels.modelOf(trade("g10-t12-s08-d15-w300-mk")))
-        assertEquals(ScalpModels.Model.R_LATE, ScalpModels.modelOf(trade("r-late")))
-        assertEquals("stop 8¢", ScalpModels.stopLabel(ScalpModels.Model.FAIR_T1))
+        assertNull(ScalpModels.modelOf(trade(t1.id)))
+        assertNull(ScalpModels.modelOf(trade("r-late-t1")))
+        assertEquals(ScalpModels.Model.G14, ScalpModels.modelOf(trade(ScalpParams.seedFor("BTC").id)))
+        assertNull(ScalpModels.modelOf(trade("g10-t12-s08-d15-w300-mk")))
+        assertEquals(KeptScalpers.REMOVED_LABEL, trade("r-late").algoLabel)
+        assertEquals("stop 8¢", ScalpModels.stopLabel(ScalpModels.Model.G14))
     }
 
     @Test fun researchCopiesRunWithTheirOwnRules() {
@@ -98,11 +95,13 @@ class ScalpTweakVariantsTest {
         ruleVersion = "v|$vid|P"
     )
 
-    @Test fun newVariantsGetTheirOwnCardsOnTheScalpTab() {
+    @Test fun tweakCopiesAreNotArenaRows() {
         val originals = KashiArenaData.rows(ScalpTabState(), v2 = false).map { it.model }
         val research = KashiArenaData.rows(ScalpTabState(), v2 = true).map { it.model }
-        assertTrue(ScalpModels.Model.FAIR_T1 in originals && ScalpModels.Model.FAIR_T2 in originals)
-        assertTrue(ScalpModels.Model.R_LATE_T1 in research && ScalpModels.Model.R_LATE_T2 in research)
-        assertTrue(ScalpModels.Model.FAIR_GAP in originals && ScalpModels.Model.R_LATE in research)
+        assertFalse(ScalpModels.Model.FAIR_T1 in originals || ScalpModels.Model.FAIR_T2 in originals)
+        assertFalse(ScalpModels.Model.R_LATE_T1 in research || ScalpModels.Model.R_LATE_T2 in research)
+        assertFalse(ScalpModels.Model.FAIR_GAP in originals || ScalpModels.Model.R_LATE in research)
+        assertTrue(ScalpModels.Model.G14 in originals)
+        assertTrue(ScalpModels.modelByCode(KeptScalpers.V2_FAIR_ID) in research)
     }
 }

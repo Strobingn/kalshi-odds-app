@@ -1,6 +1,7 @@
 package com.dirk.kalshiodds.release
 
 import com.dirk.kalshiodds.decision.ForecastScalp
+import com.dirk.kalshiodds.decision.KeptScalpers
 import com.dirk.kalshiodds.decision.LeadForecaster
 import com.dirk.kalshiodds.decision.ScalpBreakdown
 import com.dirk.kalshiodds.decision.ScalpModels
@@ -41,9 +42,9 @@ class ReleaseGate0354Test {
             signalAtMs = 1L, signalAsk = 0.5, fairAtSignal = 0.55, contracts = 10, entryPrice = 0.5, entryAtMs = 1L,
             soldContracts = 10, proceedsUsd = 5.5, closedAtMs = 2L, netUsd = 0.4,
             ruleVersion = "x|${ForecastScalp.variantId(true, 600)}|P")
-        assertEquals("Forecast ride", t.algoLabel)
+        assertEquals(KeptScalpers.REMOVED_LABEL, t.algoLabel)
         val rows = ScalpBreakdown.byStrategy(listOf(t))
-        assertEquals(listOf("Forecast ride"), rows.map { it.key })
+        assertEquals(listOf(KeptScalpers.REMOVED_LABEL), rows.map { it.key })
         assertTrue(ScalpBreakdown.lines(listOf(t)).none { it.startsWith("Fair-gap ·") && !it.contains("no closed") })
     }
 }

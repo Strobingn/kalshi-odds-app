@@ -395,15 +395,10 @@ object ScalpRule {
     }
 
     fun rulesText(): String =
-        "Scalp $VERSION (PAPER). Five strategies run side by side — " +
-            ScalpStrategy.values().joinToString("; ") { "${it.label}: ${it.blurb}" } +
-            " — each with one open scalp per market side, its own per-coin params and walk-forward tuning. " +
-            "Total open scalp cost is capped by the paper bankroll. Fair-gap: enter when the ask is below spot-implied fair by the coin's gap threshold after " +
-            "the entry fee AND the expected move beats spread + both fees, inside the coin's time window, spread ≤ 2¢, " +
-            "Buy price ≤ 50¢ for every scalper. 10 contracts, displayed depth only, fill on the next fresh book (≥ 3 s). Several round trips per window: " +
-            "one open scalp per strategy per market side, 15 s cooldown after an exit. Exit at the bid on the profit target, the stop, " +
-            "gap close or turn-down, and always by 60 s left. Per-coin params come from the walk-forward tuner. " +
-            "Taker fee on both legs. $BACKTEST_LABEL"
+        "Scalp $VERSION (PAPER). Live board: ${KeptScalpers.ALL.joinToString(", ") { it.id }}. " +
+            "Removed scalpers do not run and are not listed on the Scalp tab, in settings, or on the arena. " +
+            "Past trades of a removed scalper stay in history as \"${KeptScalpers.REMOVED_LABEL}\". " +
+            "Nothing in this rule places a live order. $BACKTEST_LABEL"
 }
 
 enum class ScalpState { PENDING_ENTRY, OPEN, PENDING_EXIT, CLOSED, NO_FILL }
@@ -452,13 +447,7 @@ data class ScalpTrade(
     val coin: String get() = ScalpParams.coinOf(ticker)
     val strategy: ScalpStrategy get() = ScalpParams.byId(variantId)?.strategy ?: ScalpStrategy.FAIR_GAP
     /** 0.3.54: display/breakdown label — forecast trades are their own algos, never "Fair-gap". */
-    val algoLabel: String get() = when {
-        ScalpV2.isV2(variantId) -> ScalpModels.modelOf(this)?.label ?: "v2"
-        variantId.startsWith(ForecastScalp.RIDE_PREFIX) -> ScalpModels.Model.FORECAST_RIDE.label
-        variantId.startsWith(ForecastScalp.FADE_PREFIX) -> ScalpModels.Model.FORECAST_FADE.label
-        ShockFav.isShockFav(variantId) -> ShockFav.byVariantId(variantId)?.let { "${it.code} ${it.label}" } ?: variantId
-        else -> strategy.label
-    }
+    val algoLabel: String get() = ScalpModels.labelFor(variantId)
     /** Strategy for per-strategy grouping, null for forecast trades (grouped separately). */
     val strategyOrNull: ScalpStrategy? get() = if (ForecastScalp.isForecast(this) || ShockFav.isShockFav(variantId) || ScalpV2.isV2(variantId)) null else strategy
 
@@ -480,7 +469,8 @@ data class ScalpTrade(
 class ScalpBook(
     private val store: ScalpPersistence = InMemoryScalpPersistence(),
     /** 0.3.40: shadow tuning variants run beside the primary params (paper only). */
-    private val variants: List<ScalpParams> = ScalpParams.ALL_VARIANTS,
+    /** Default book runs only the kept fair-gap param. Tests may pass an explicit list. */
+    private val variants: List<ScalpParams> = emptyList(),
     private val tuneStore: ScalpTuneStore = InMemoryScalpTuneStore(),
     /** Paper bankroll: total open primary scalp cost (entries + fees, pending included) never exceeds it. */
     private val bankrollUsd: () -> Double = { com.dirk.kalshiodds.signal.config.SignalConstants.PAPER_START_USD },
@@ -574,9 +564,11 @@ class ScalpBook(
         val changed = ArrayList<ScalpTrade>()
         val coin = ScalpParams.coinOf(q.ticker)
         val primary = paramsFor(coin)
-        // 0.3.50: six paper models = five strategy primaries + maker-first dip (buy the dip at the bid, sell the rebound at the ask).
-        // 1.0.10: Dip-hunter maker / hold / no-TP copies removed (ScalpModels.REMOVED_CODES). 1.0.14: + fair-t1/t2 Fair-gap copies.
-        val primaries = ScalpStrategy.values().map { paramsFor(coin, it) } + (ScalpParams.HOLD60_SIBLINGS + ScalpParams.QUEUED_COPIES).filter { !ScalpModels.isRemoved(ScalpModels.modelOf(it).code) } + ScalpParams.fairTweaksFor(coin)
+        // Kept roster: BTC fair-gap g14-t12-s08-d15-w300 only. Other strategy primaries no longer open.
+        val fairKept = if (coin == ShockFav.TRADE_COIN) ScalpParams.byId(KeptScalpers.FAIR_ID) else null
+        // A variant list that includes the tuned primary (fill tests) keeps that primary. The app passes none.
+        val pinned = paramsFor(coin).takeIf { p -> variants.any { it.id == p.id } }
+        val primaries = listOfNotNull(fairKept, pinned).distinctBy { it.id }
         val primaryIds = primaries.map { it.id }.toSet()
         val key = q.ticker.uppercase()
         val recent = recordHistory(q)
@@ -652,10 +644,33 @@ class ScalpBook(
                     )
                 }
             }
+            if (liveExtras && coin == ShockFav.TRADE_COIN) enterKeptV2(q, recent)
         }
         changed.forEach { save(it) }
         if (changed.any { it.state == ScalpState.CLOSED }) maybeTune(q.nowMs)
         changed.filter { it.isPrimary }
+    }
+
+    /** Open the two kept v2 configs from their base signal. The losing original is not saved. */
+    private fun enterKeptV2(q: ScalpRule.Quote, recent: List<ScalpRule.Snap>) {
+        val bases = listOf(
+            ScalpParams.byId(KeptScalpers.V2_DIP_BASE) to KeptScalpers.V2_DIP_ID,
+            ScalpParams.byId(KeptScalpers.V2_FAIR_BASE) to KeptScalpers.V2_FAIR_ID
+        )
+        for ((p, v2Id) in bases) {
+            if (p == null) continue
+            if (_all.value.any { it.ticker.equals(q.ticker, true) && it.variantId == v2Id && isActive(it) }) continue
+            val sig = if (p.strategy == ScalpStrategy.FAIR_GAP) ScalpRule.entrySignal(q, p).first
+                else ScalpRule.strategySignal(q, p, listOf("YES", "NO"), recent).first
+            if (sig == null) continue
+            val px = if (p.maker) q.bid(sig.side) ?: continue else sig.ask
+            if (!ScalpRule.buyPriceOk(px)) continue
+            spawnV2(ScalpTrade(
+                id = "v2src-$v2Id", ticker = q.ticker.uppercase(), side = sig.side, state = ScalpState.PENDING_ENTRY,
+                signalAtMs = q.nowMs, signalAsk = px, fairAtSignal = sig.fair, note = "kept v2 source ${p.id}",
+                ruleVersion = "${ScalpRule.VERSION}|${p.id}|P"
+            ))
+        }
     }
 
     // ---- 0.3.53 Forecast ride / fade (paper only) ----
@@ -700,32 +715,34 @@ class ScalpBook(
         // 0.3.56: stale/missing lead → no forecast. No entries, and open trades HOLD (only TP/horizon/close exits)
         // instead of reading a fake 0 forecast as "forecast turned".
         val pred = pred54 ?: Double.NaN
-        val enabledNow = enabled && pred54 != null
         val changed = ArrayList<ScalpTrade>()
-        for (ride in listOf(true, false)) {
+        val openFc = _all.value.filter { it.ticker == key && ForecastScalp.isForecast(it) && isActive(it) }
+        for (active in openFc) {
+            val ride = active.variantId.startsWith(ForecastScalp.RIDE_PREFIX)
             val f = if (ride) pred else -pred
-            val vid = ForecastScalp.variantId(ride, h54)
-            val prefix = if (ride) ForecastScalp.RIDE_PREFIX else ForecastScalp.FADE_PREFIX
-            val active = _all.value.firstOrNull { it.ticker == key && it.variantId.startsWith(prefix) && isActive(it) }
-            if (active != null) {
-                fcStep(active, q, f, h54)?.let { changed += it }
-                continue
+            fcStep(active, q, f, h54)?.let { changed += it }
+        }
+        // Kept fade is horizon 600 only. Forecast ride does not open.
+        val fadeOpen = openFc.any { it.variantId.startsWith(ForecastScalp.FADE_PREFIX) }
+        val predFade = x54?.let { LeadForecaster.predict(coin, KeptScalpers.FADE_HORIZON_S, it) }
+        if (predFade != null && enabled && q.nowMs < q.closeMs && q.fresh() && !fadeOpen) {
+            val f = -predFade
+            val side = ForecastScalp.sideOf(f)
+            val ask = side?.let { q.ask(it) }
+            val band = ForecastScalp.entryBand(KeptScalpers.FADE_ID, entryView(ForecastScalp.FADE_PREFIX) ?: explicit(ForecastScalp.FADE_PREFIX))
+            if (side != null && ask != null && ForecastScalp.wantsEntry(mid, ya - yb, ask, kotlin.math.abs(f), q.tauS, cfg.marginUsd, band.first, band.second)) {
+                val vid = ForecastScalp.variantId(false, KeptScalpers.FADE_HORIZON_S)
+                val cost = ask * ScalpRule.CONTRACTS + ScalpRule.orderFee(ScalpRule.CONTRACTS, ask)
+                if (vid == KeptScalpers.FADE_ID && openCostUsd() + cost <= bankrollUsd() + 1e-9) {
+                    changed += ScalpTrade(
+                        id = idFactory(), ticker = key, side = side, state = ScalpState.PENDING_ENTRY, signalAtMs = q.nowMs,
+                        signalAsk = ask, fairAtSignal = mid + f, restingLimit = ask, restingSinceMs = q.nowMs,
+                        note = String.format(Locale.US, "Forecast fade · forecast %+.1f¢ over %s · %s",
+                            f * 100, ShortHorizonForecaster.horizonLabel(KeptScalpers.FADE_HORIZON_S), LeadForecaster.VERSION),
+                        ruleVersion = "${ScalpRule.VERSION}|$vid|P"
+                    )
+                }
             }
-            if (!enabledNow || q.nowMs >= q.closeMs || !q.fresh()) continue
-            val side = ForecastScalp.sideOf(f) ?: continue
-            val ask = q.ask(side) ?: continue
-            val band = ForecastScalp.entryBand(prefix, entryView(prefix) ?: explicit(prefix))
-            if (!ForecastScalp.wantsEntry(mid, ya - yb, ask, kotlin.math.abs(f), q.tauS, cfg.marginUsd, band.first, band.second)) continue
-            val model = if (ride) ScalpModels.Model.FORECAST_RIDE else ScalpModels.Model.FORECAST_FADE
-            val cost = ask * ScalpRule.CONTRACTS + ScalpRule.orderFee(ScalpRule.CONTRACTS, ask)
-            if (openCostUsd() + cost > bankrollUsd() + 1e-9) continue
-            changed += ScalpTrade(
-                id = idFactory(), ticker = key, side = side, state = ScalpState.PENDING_ENTRY, signalAtMs = q.nowMs,
-                signalAsk = ask, fairAtSignal = mid + f, restingLimit = ask, restingSinceMs = q.nowMs,
-                note = String.format(Locale.US, "%s · forecast %+.1f¢ over %s · %s", if (ride) "Forecast ride" else "Forecast fade",
-                    f * 100, ShortHorizonForecaster.horizonLabel(h54), LeadForecaster.VERSION),
-                ruleVersion = "${ScalpRule.VERSION}|$vid|P"
-            )
         }
         changed.forEach { save(it) }
         changed
@@ -1035,6 +1052,7 @@ class ScalpBook(
             val bankroll = bankrollUsd()
             var brtiFair: Double? = null
             for (raw in ShockFav.VARIANTS) {
+                if (raw.code !in KeptScalpers.SHOCK_FAMILIES) continue
                 val p = StrategyAlgo.overlayShock(raw, algoOf(raw.code))
                 if (ScalpModels.isRemoved(p.code) || com.dirk.kalshiodds.decision.insights.ScalpFreeze.blocksRestored(p.code, controls.state.value.benchOverrides[p.code])) continue
                 if (p.kind == ShockFav.Kind.OPEN50) {
@@ -1174,8 +1192,9 @@ class ScalpBook(
                         openCost: Double, bankroll: Double, what: String): ScalpTrade? {
         // Fade makers choose their purchase bid after the delay; the post/fill paths enforce the ceiling.
         if (p.kind != ShockFav.Kind.FADE_MAKER && !FairGapTune.askAllowed(p.code, if (p.o50 == ShockFav.O50.MAKER) ShockFav.O50_MAKER_PX else ask, ShockFav.isFavLeg(vid))) return null
-        // Window-start entries only. Simple-dip counts after its 4-min history; late-favourite legs are exempt.
-        if (!ShockFav.isFavLeg(vid) && 15.0 - q.tauS / 60.0 > ShockFav.entryOpenMin(p, sfOpenMin(p.code))) return null
+        // Kept shock variants use their own tau window (sf15 is mid-window). Simple-dip still waits for its 4-min history.
+        val keptOwnWindow = vid in KeptScalpers.IDS && p.kind == ShockFav.Kind.SHOCK_FAV && p.shock
+        if (!ShockFav.isFavLeg(vid) && !keptOwnWindow && 15.0 - q.tauS / 60.0 > ShockFav.entryOpenMin(p, sfOpenMin(p.code))) return null
         val want = StrategyAlgo.clip(controls.state.value, p.code, ShockFav.CLIP)
         val n = if (p.kind == ShockFav.Kind.FADE_MAKER) want else minOf(want, kotlin.math.floor((q.askSize(side) ?: 0.0) + 1e-9).toInt())
         if (n <= 0) return null
@@ -1646,16 +1665,16 @@ class ScalpBook(
     private fun spawnV2(t: ScalpTrade) {
         if (!t.isPrimary || ScalpV2.isV2(t.variantId) || t.coin != ShockFav.TRADE_COIN) return
         if (t.state != ScalpState.PENDING_ENTRY && t.state != ScalpState.OPEN) return
-        val m = ScalpModels.modelOf(t) ?: return
-        ScalpModels.v2Of(m) ?: return
-        // 0.3.68: plain v2 copy + (for sf41–44) tweak and size copies; each carries its own params in the note.
-        for (seed in listOf(ScalpV2.spec(ScalpV2.v2Id(t.variantId))) + ScalpV2.extrasFor(t.variantId)) {
-            val model = ScalpModels.modelOf(t.copy(ruleVersion = "${ScalpRule.VERSION}|${seed.id}|P"))
+        val seeds = (listOf(ScalpV2.spec(ScalpV2.v2Id(t.variantId))) + ScalpV2.extrasFor(t.variantId)).filter { it.id in KeptScalpers.IDS }
+        if (seeds.isEmpty()) return
+        val origin = ScalpModels.modelOf(t)?.label ?: t.variantId
+        for (seed in seeds) {
+            val model = ScalpModels.modelByCode(seed.id) ?: continue
             // A closed contract is not complete evidence while this model still awaits an exit/settlement.
             val unfinished = _all.value.asSequence().filter { isActive(it) && ScalpModels.modelOf(it) == model }
                 .map { it.windowKey }.toSet()
             val cfg = controls.state.value
-            if (model == null || !cfg.permits(model.code)) continue
+            if (!cfg.permits(model.code)) continue
             val learned = ScalpV2.plan(seed.id, if (cfg.adaptive && !cfg.manual) v2Evidence else emptyList(), t.signalAtMs, model.code, unfinished)
             val feedback = controls.feedback(model.code)
             // Every completed trade updates this EWMA; completed-window evidence still controls promotion.
@@ -1688,7 +1707,7 @@ class ScalpBook(
             save(ScalpTrade(id = idFactory(), ticker = t.ticker.uppercase(), side = t.side, state = ScalpState.PENDING_ENTRY,
                 signalAtMs = t.signalAtMs, signalAsk = t.signalAsk, fairAtSignal = t.fairAtSignal,
                 note = String.format(Locale.US, "v2 copy of %s (%s)%s · ask ≤ %.0f¢ · trail %.0f¢ · clip %d%s · v2stop=%.4f",
-                    m.label, t.variantId, if (sp.tag.isNotEmpty()) " " + sp.tag else "", sp.maxAsk * 100, sp.trail * 100, sp.clip,
+                    origin, t.variantId, if (sp.tag.isNotEmpty()) " " + sp.tag else "", sp.maxAsk * 100, sp.trail * 100, sp.clip,
                     if (sp.walk) " depth-walk" else "", stop) +
                     String.format(Locale.US, " · v2ask=%.4f · v2trail=%.4f · v2arm=%.4f · %s", sp.maxAsk, sp.trail, plan.arm, plan.note + "; learned ${feedback.trades} closed; recent net/ct ${feedback.recentNetPerContract}") +
                     String.format(Locale.US, " · v2tp=%.4f · v2hold=%d · v2clip=%d", (knobs.takeProfitCents ?: if (cfg.manual) cfg.takeProfitCents else 0) / 100.0, knobs.maxHoldSeconds ?: cfg.maxHoldSeconds, sp.clip) +
@@ -1703,29 +1722,21 @@ class ScalpBook(
      * start (≤ 3 min), ask ≤ 55¢, one entry per window, and the V2 exit rules (3¢ peak trail, >95% hold gate).
      * Returns a rejection reason, or null when a paper entry was queued. PAPER ONLY.
      */
-    fun llmEntry(q: ScalpRule.Quote, side: String, conf: Double): String? = synchronized(lock) {
-        if (side != "YES" && side != "NO") return@synchronized "bad side"
-        val minuteIn = 15.0 - q.tauS / 60.0
-        if (minuteIn < 0 || minuteIn > 3.0) return@synchronized "not window start"
-        val ask = q.ask(side) ?: return@synchronized "no ask"
-        if (!ScalpV2.entryOk(ask, ScalpV2.MAX_ASK)) return@synchronized "ask above 55¢"
-        if (conf < ScalperBrain.minConf("v2-llm")) return@synchronized "confidence below learned minimum"
-        if (_all.value.any { it.variantId == "v2-llm" && it.ticker.equals(q.ticker, true) }) return@synchronized "already traded this window"
-        val bx = ScalperBrain.features(ask, conf, minuteIn)
-        save(ScalpTrade(id = idFactory(), ticker = q.ticker.uppercase(), side = side, state = ScalpState.PENDING_ENTRY,
-            signalAtMs = q.nowMs, signalAsk = ask, fairAtSignal = conf,
-            note = String.format(Locale.US, "LLM paper entry · conf=%.3f · v2stop=%.4f · v2ask=%.4f · v2trail=%.4f · v2arm=%.4f · v2tp=0 · v2hold=0 · v2clip=%d · v2peakrule=1 · v2stopPct=20 · %s · v2min=0.01 · v2until=3 · v2sidecap=1 · v2cadence=0",
-                conf, 0.10, ScalpV2.MAX_ASK, ScalpV2.TRAIL, 0.10, ScalpV2.CLIP, ScalperBrain.tag(bx)),
-            ruleVersion = "${ScalpRule.VERSION}|v2-llm|P"))
-        null
-    }
+    /** The v2-llm paper card is removed. AI chat and the on-device forecast do not use this. */
+    fun llmEntry(@Suppress("UNUSED_PARAMETER") q: ScalpRule.Quote, @Suppress("UNUSED_PARAMETER") side: String, @Suppress("UNUSED_PARAMETER") conf: Double): String? =
+        KeptScalpers.REMOVED_LABEL
 
     // ---------------- Kalshi Scalper 1.0.2: Research lane + per-strategy sliders for every strategy ----------------
     private val _researchStatus = MutableStateFlow("Research: waiting for a BTC quote")
     /** Fair value source, BRTI-vs-Binance gap and current settlement-aware p(YES), for the Research cards. */
     val researchStatus: StateFlow<String> = _researchStatus.asStateFlow()
 
-    private fun codeOf(t: ScalpTrade) = ScalpModels.modelOf(t)?.code ?: t.variantId
+    private fun codeOf(t: ScalpTrade): String {
+        ScalpModels.modelOf(t)?.code?.let { return it }
+        // Fair-gap params that are not a live card still use the fair family's own entry and exit, not the loser gate.
+        if (ScalpParams.byId(t.variantId)?.strategy == ScalpStrategy.FAIR_GAP) return ScalpModels.Model.FAIR_GAP.code
+        return t.variantId
+    }
     private fun explicit(code: String): ScalpStrategySettings? = controls.state.value.strategySettings[code]?.normalized()
 
     /** "AI learns": nudge one slider of this strategy from its own closed paper trades (bounded; see [Research.learn]). */
@@ -1857,6 +1868,7 @@ class ScalpBook(
         if (!enabled || q.tauS <= 0 || !q.fresh()) return out
         var exposure = (mine.filter { isActive(it) } .map { o -> out.firstOrNull { it.id == o.id } ?: o }).filter { isActive(it) }.sumOf { activeCost(it) }
         for (id in Research.IDS) {
+            if (id !in KeptScalpers.IDS) continue
             if (com.dirk.kalshiodds.decision.insights.ScalpFreeze.blocksRestored(id, cfg.benchOverrides[id])) continue
             if (!cfg.permits(id) || mine.any { it.variantId == id }) continue
             val s = StrategyAlgo.view(cfg, id)

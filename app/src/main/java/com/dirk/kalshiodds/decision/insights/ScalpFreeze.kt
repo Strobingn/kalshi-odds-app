@@ -28,18 +28,14 @@ object ScalpFreeze {
      * 1.0.10 hid these. 1.0.21 shows them again and freezes them: history stays, no new paper trade
      * unless Force trade. mkdip's maker variant was still booking while hidden.
      */
-    val RESTORED: Set<String> = setOf("sf30", "sf32", "mkdip", "diph60", "dipnotp", "r-kelly")
+    /** 10-21: former restores are removed from the registry, not frozen. */
+    val RESTORED: Set<String> = emptySet()
 
     /** True when a restored scalper must not open a new paper trade. Force trade ("ACTIVE") wins. */
     fun blocksRestored(code: String?, override: String?): Boolean = code != null && code in RESTORED && override != "ACTIVE"
 
-    /** 1.0.14 default losers, plus the 1.0.21 restores and the scalpers that cannot trade their own rule. */
-    val DEFAULT_FROZEN: Set<String> = setOf(
-        "momonotp", "momo", "momoh60", "sf59", "sf60", "sf56", "sf57", "sf58", "fcride", "r-hold", "cfr", "dip",
-        "sf44", "sf52", "sf53", "sf54", "sf55", "v2-sf52", "v2-sf53", "v2-sf54", "v2-sf55",
-        "v2-sf30", "v2-sf32", "v2-diph60", "v2-mkdip", "v2-dipnotp", "v2-momo", "v2-momonotp", "v2-momoh60",
-        "v2-sf56", "v2-sf57", "v2-sf58", "v2-sf59", "v2-sf60"
-    ) + RESTORED + setOf("xrev", "sf51", "v2-sf51")
+    /** No default freeze list. Losers are removed. A kept scalper can still auto-freeze on its own paper. */
+    val DEFAULT_FROZEN: Set<String> = emptySet()
 
     fun isFrozen(d: BenchDecision?): Boolean = d != null && !d.trading && d.reason.startsWith(BADGE)
 
@@ -86,6 +82,7 @@ object ScalpFreeze {
     ): Map<String, BenchDecision> {
         val out = LinkedHashMap(decisions)
         for (code in DEFAULT_FROZEN + real.keys + shadow.keys + previous.keys) {
+            if (com.dirk.kalshiodds.decision.ScalpModels.modelByCode(code) == null) continue
             if (overrides[code] == "ACTIVE" || overrides[code] == "BENCHED") continue
             val rows = real[code].orEmpty()
             val was = isFrozen(previous[code]) && code !in DEFAULT_FROZEN

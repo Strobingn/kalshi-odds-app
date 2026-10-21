@@ -316,15 +316,23 @@ internal fun AlgoCard(
         com.dirk.kalshiodds.decision.ScalpRetune.cardNote(m.code)?.let { note ->
             Text(note, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = c.textSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
-        all?.let { com.dirk.kalshiodds.decision.ScalpRetune.netPerBetUsd(it.netUsd, it.roundTrips) }?.let { per ->
-            Text("Net per bet ${ScalpTabCopy.money(per)}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold,
-                color = if (per >= 0) c.up else c.down, maxLines = 1)
+        run {
+            val n = all?.roundTrips ?: 0
+            val per = all?.let { com.dirk.kalshiodds.decision.ScalpRetune.netPerBetUsd(it.netUsd, it.roundTrips) }
+            val perText = per?.let { ScalpTabCopy.money(it) } ?: "—"
+            val tone = when {
+                per == null -> c.textSecondary
+                per >= 0 -> c.up
+                else -> c.down
+            }
+            Text("Net per bet $perText · n $n · win ${ScalpTabCopy.pct(all?.winRate)}",
+                style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = tone, maxLines = 1)
         }
         com.dirk.kalshiodds.decision.ShockFav.byVariantId(m.code)?.let { p ->
             Text(p.summary(), style = MaterialTheme.typography.labelSmall, color = c.textSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text("Backtest (test days): " + p.oos, style = MaterialTheme.typography.labelSmall, color = c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        if (m == ScalpModels.Model.FORECAST_RIDE || m == ScalpModels.Model.FORECAST_FADE) {
+        if (m == ScalpModels.Model.FORECAST_RIDE || m == ScalpModels.Model.FORECAST_FADE || m == ScalpModels.Model.FCFADE_H600) {
             Text("Horizon: " + com.dirk.kalshiodds.decision.ForecastScalp.horizonNote(), style = MaterialTheme.typography.labelSmall,
                 color = c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }

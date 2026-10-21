@@ -1,55 +1,90 @@
 package com.dirk.kalshiodds.decision
 
 import com.dirk.kalshiodds.decision.insights.ScalpFreeze
+import com.dirk.kalshiodds.ui.KashiArenaData
+import com.dirk.kalshiodds.ui.ScalpTabState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** 1.0.21: the 1.0.10 removals are visible again and frozen. History still resolves to their cards. */
+/** 10-21 ranking: the registry is the 12 net-positive variant ids. Losers are gone from the board. */
 class ScalpRemovedStrategiesTest {
-    private fun old(id: String, vid: String) = ScalpTrade(id = id, ticker = "KXBTC15M-26OCT181200-00", side = "YES", state = ScalpState.CLOSED,
-        signalAtMs = 0L, signalAsk = 0.40, fairAtSignal = 0.50, ruleVersion = "old|$vid|P")
-    private val restored = listOf("sf30", "sf32", "mkdip", "diph60", "dipnotp", "r-kelly")
+    private val kept = listOf(
+        "sf42",
+        "v2-g10-t12-s08-d15-w300-mk",
+        "g14-t12-s08-d15-w300",
+        "sf16f",
+        "sf15",
+        "sf17f",
+        "v2-dip-g05-t08-s06-d10-w180",
+        "sf07",
+        "sf04",
+        "sf08",
+        "fcfade-h600",
+        "sf41"
+    )
 
-    @Test fun restoredIdsStayOnTheBoardAndAreFrozen() {
-        assertTrue(ScalpModels.REMOVED_CODES.isEmpty())
-        val codes = ScalpModels.ALL.map { it.code }.toSet()
-        restored.forEach {
-            assertTrue(it, it in codes)
-            assertNotNull(it, ScalpModels.modelByCode(it))
-            assertTrue(it, it in ScalpFreeze.DEFAULT_FROZEN)
-            assertTrue(it, ScalpFreeze.blocksRestored(it, null))
-            assertFalse(it, ScalpFreeze.blocksRestored(it, "ACTIVE"))
+    private fun old(id: String) = ScalpTrade(
+        id = id, ticker = "KXBTC15M-26OCT181200-00", side = "YES", state = ScalpState.CLOSED,
+        signalAtMs = 0L, signalAsk = 0.40, fairAtSignal = 0.50, ruleVersion = "old|$id|P"
+    )
+
+    @Test fun registryIsExactlyTheTwelveKeptIds() {
+        assertEquals(kept, ScalpModels.ALL.map { it.code })
+        assertEquals(kept, KeptScalpers.ALL.map { it.id })
+        assertTrue(ScalpModels.ALL.size <= KeptScalpers.MAX_SLOTS)
+        assertTrue(ScalpModels.REMOVED_CODES.containsAll(listOf(
+            "sf32", "sf30", "r-kelly", "r-late", "r-late-t1", "r-late-t2", "r-hold", "r-maker",
+            "dip", "momo", "cfr", "xrev", "v2-llm", "sf51", "sf60", "fair", "v2-fair", "v2-dip"
+        )))
+        kept.forEach { id ->
+            assertFalse(id, ScalpModels.isRemoved(id))
+            assertEquals(id, ScalpModels.modelByCode(id)?.code)
         }
-        assertTrue(Research.KELLY in Research.IDS)
-        assertEquals(restored.toSet(), ScalpFreeze.RESTORED)
     }
 
-    @Test fun keptStrategiesStay() {
-        val codes = ScalpModels.ALL.map { it.code }.toSet()
-        listOf("fair", "fairh60", "dip", "momo", "momoh60", "momonotp", "cfr", "fcride", "r-late", "r-hold", "r-maker",
-            "sf31", "sf51", "v2-sf30", "v2-sf32", "v2-mkdip", "v2-diph60", "v2-dipnotp", "v2-llm").forEach { assertTrue(it, it in codes) }
-        assertTrue(Research.LATE in Research.IDS && Research.MAKER in Research.IDS)
+    @Test fun settingsArenaAndLeaderboardListOnlyTheKeptIds() {
+        val settings = ScalpModels.ALL.map { it.code }
+        val arena = (KashiArenaData.rows(ScalpTabState(), v2 = true) + KashiArenaData.rows(ScalpTabState(), v2 = false))
+            .map { it.model.code }
+        val board = ScalpModels.leaderboardFromStats(listOf(
+            ScalpStat("sf42", n = 9, wins = 5, netUsd = 5.47),
+            ScalpStat("sf32", n = 544, wins = 100, netUsd = -209.15),
+            ScalpStat("dip", n = 10, netUsd = -3.0)
+        )).map { it.model.code }
+        assertEquals(kept.toSet(), settings.toSet())
+        assertEquals(kept.toSet(), arena.toSet())
+        assertEquals(kept, board)
+        assertFalse(board.contains("sf32"))
+        assertFalse(board.contains("dip"))
+        assertEquals(12, board.size)
     }
 
-    @Test fun oldRecordsResolveOntoTheirCards() {
-        val dipSeed = ScalpParams.STRATEGY_SEEDS.getValue(ScalpStrategy.DIP_HUNTER)
-        assertEquals("sf30", ScalpModels.modelOf(old("a", "sf30"))?.code)
-        assertEquals("r-kelly", ScalpModels.modelOf(old("b", "r-kelly"))?.code)
-        assertEquals("mkdip", ScalpModels.modelOf(old("c", ScalpModels.MAKER_DIP_PARAMS.id))?.code)
-        assertEquals("diph60", ScalpModels.modelOf(old("d", dipSeed.copy(hold60 = true).id))?.code)
-        assertEquals("dipnotp", ScalpModels.modelOf(old("e", dipSeed.copy(target = ScalpParams.NO_TP).id))?.code)
-        val board = ScalpModels.leaderboardFromStats(restored.map { ScalpStat(it, n = 2, netUsd = -1.0) })
-        restored.forEach { code -> assertEquals(2, board.first { it.model.code == code }.roundTrips) }
-        assertEquals(ScalpModels.ALL.size, board.size)
+    @Test fun eachKeptScalperStillFiresItsEntryOnAFixture() {
+        kept.forEach { id -> assertTrue(id, KeptScalpers.entryFires(id)) }
+        assertEquals(KeptScalpers.FAIR_ID, ScalpParams.seedFor("BTC").id)
+        assertEquals(KeptScalpers.V2_FAIR_BASE, ScalpParams.seedFor("ETH").copy(maker = true).id)
+        assertEquals(KeptScalpers.V2_DIP_BASE, ScalpParams.seedFor("BTC", ScalpStrategy.DIP_HUNTER).id)
+        assertEquals("sf16f", ShockFav.v("sf16").favId)
+        assertEquals("sf17f", ShockFav.v("sf17").favId)
+        assertEquals(KeptScalpers.FADE_ID, ForecastScalp.variantId(false, 600))
     }
 
-    @Test fun keptIdsStillResolve() {
-        val dipSeed = ScalpParams.STRATEGY_SEEDS.getValue(ScalpStrategy.DIP_HUNTER)
-        assertEquals(ScalpModels.Model.DIP_HUNTER, ScalpModels.modelOf(old("a", dipSeed.id)))
-        assertEquals(ScalpModels.Model.R_LATE, ScalpModels.modelOf(old("b", "r-late")))
-        assertNotNull(ScalpModels.modelOf(old("c", "v2-sf30")))
+    @Test fun removedTradesStayInHistoryWithoutACard() {
+        listOf("sf32", "sf30", "r-kelly", "r-late", "dip-g05-t08-s06-d10-w180", "v2-llm", "sf16", "g10-t12-s08-d15-w300-mk").forEach { id ->
+            val t = old(id)
+            assertNull(id, ScalpModels.modelOf(t))
+            assertEquals(id, KeptScalpers.REMOVED_LABEL, t.algoLabel)
+        }
+        assertEquals(ScalpModels.Model.G14, ScalpModels.modelOf(old(KeptScalpers.FAIR_ID)))
+        assertEquals(ScalpModels.Model.SF16F, ScalpModels.modelOf(old("sf16f")))
+        assertEquals("sf16f", ScalpModels.modelOf(old("sf16f"))?.code)
+        val board = ScalpModels.leaderboardFromStats(listOf(ScalpStat("sf16", n = 6, wins = 3, netUsd = 1.72)))
+        assertEquals(6, board.first { it.model.code == "sf16f" }.roundTrips)
+        assertTrue(ScalpFreeze.DEFAULT_FROZEN.isEmpty())
+        assertNull(ScalpRetune.cardNote("sf32"))
+        assertNull(ScalpRetune.cardNote("sf42"))
     }
 }

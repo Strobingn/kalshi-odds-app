@@ -16,12 +16,12 @@ class ScalpRetune1021Test {
     private val ownFav = listOf("sf16", "sf17", "sf18", "sf19", "sf20", "sf21", "sf22", "sf23", "sf24", "sf29", "sf31")
 
     @Test fun lateFavouritesAndFadeSkipTheFairGapEntryGate() {
-        assertEquals((ownFav + "fcfade").toSet(), FairGapTune.OWN_RULES)
+        assertEquals((ownFav + listOf("fcfade", KeptScalpers.FADE_ID)).toSet(), FairGapTune.OWN_RULES)
         ownFav.forEach {
             assertFalse(it, FairGapTune.favUsesFairGapGate(it))
             assertFalse(it, FairGapTune.entryGated(it))
             assertTrue(it, FairGapTune.isTweaked(it))
-            assertTrue(it, ScalpRetune.cardNote(it)!!.startsWith("Retuned 1.0.21:"))
+            assertNull(it, ScalpRetune.cardNote(it))
         }
         assertTrue(FairGapTune.cardNoteMissing("sf41"))
         assertTrue(FairGapTune.favUsesFairGapGate("sf41"))
@@ -97,27 +97,19 @@ class ScalpRetune1021Test {
         assertTrue(ForecastScalp.wantsEntry(0.55, 0.01, 0.55, 0.30, 300.0))
     }
 
-    @Test fun restoredAndNewFreezesStayVisible() {
-        assertTrue(ScalpModels.REMOVED_CODES.isEmpty())
-        listOf("sf30", "sf32", "mkdip", "diph60", "dipnotp", "r-kelly", "xrev", "sf51", "v2-sf51").forEach { code ->
-            assertNotNull(code, ScalpModels.modelByCode(code))
-            assertTrue(code, code in ScalpFreeze.DEFAULT_FROZEN)
-            assertTrue(code, ScalpRetune.cardNote(code)!!.startsWith("Frozen 1.0.21:"))
-            assertTrue(code, ScalpFreeze.reason(code, emptyList())!!.contains("Frozen 1.0.21:"))
+    @Test fun removedScalpersHaveNoFrozenNoteAndAreNotOnTheBoard() {
+        listOf("sf30", "sf32", "mkdip", "diph60", "dipnotp", "r-kelly", "xrev", "sf51", "v2-sf51", "dip", "v2-llm").forEach { code ->
+            assertNull(code, ScalpModels.modelByCode(code))
+            assertFalse(code, code in ScalpFreeze.DEFAULT_FROZEN)
+            assertNull(code, ScalpRetune.cardNote(code))
+            assertNull(code, ScalpFreeze.reason(code, emptyList()))
         }
-        listOf("dip", "momo", "sf59", "r-hold", "r-maker", "v2-llm", "sf41", "sf42", "sf43").forEach { code ->
-            assertFalse(code, ScalpRetune.cardNote(code)?.startsWith("Frozen 1.0.21") == true)
-            assertFalse(code, ScalpRetune.cardNote(code)?.startsWith("Retuned 1.0.21") == true)
-        }
-        assertTrue(ScalpFreeze.reason("dip", emptyList())!!.contains("1.0.14"))
-        assertFalse(ScalpFreeze.reason("dip", emptyList())!!.contains("1.0.21"))
-        assertNull(ScalpFreeze.reason("r-maker", emptyList()))
-        assertNull(ScalpFreeze.reason("sf43", emptyList()))
+        assertNotNull(ScalpModels.modelByCode("sf41"))
+        assertNotNull(ScalpModels.modelByCode("sf42"))
+        assertNull(ScalpRetune.cardNote("sf41"))
         val book = ScalpBook()
         ScalpInsights(book, MemoryScalpControls(), null) {}.start()
-        listOf("mkdip", "xrev", "sf51", "v2-sf51", "r-kelly").forEach { assertTrue(it, it in book.benched) }
-        assertFalse("r-maker" in book.benched)
-        assertFalse("sf41" in book.benched)
+        listOf("mkdip", "xrev", "sf51", "v2-sf51", "r-kelly", "sf41").forEach { assertFalse(it, it in book.benched) }
         assertEquals(-2.5, ScalpRetune.netPerBetUsd(-10.0, 4)!!, 1e-9)
         assertNull(ScalpRetune.netPerBetUsd(-10.0, 0))
     }
@@ -130,7 +122,7 @@ class ScalpRetune1021Test {
             ScalpRule.Quote(ticker, now, close, now, bid, 500.0, ask, 500.0, 100_000.0, 100_000.0, 3e-5)
         val tune = InMemoryScalpTuneStore(ScalpTuneState(paramsByCoin = mapOf(ScalpParams.key("BTC", ScalpStrategy.DIP_HUNTER) to maker.id)))
         val ids = AtomicInteger()
-        val blocked = ScalpBook(InMemoryScalpPersistence(), listOf(maker), tune, bankrollUsd = { 100_000.0 }) { "b${ids.incrementAndGet()}" }
+        val blocked = ScalpBook(InMemoryScalpPersistence(), emptyList(), tune, bankrollUsd = { 100_000.0 }) { "b${ids.incrementAndGet()}" }
         val t0 = close - 600_000L
         blocked.onQuote(q(t0, 0.44, 0.45), true)
         blocked.onQuote(q(t0 + 30_000L, 0.34, 0.35), true)
@@ -138,10 +130,10 @@ class ScalpRetune1021Test {
 
         val controls = MemoryScalpControls()
         controls.save(controls.state.value.copy(benchOverrides = mapOf("mkdip" to "ACTIVE")))
-        val forced = ScalpBook(InMemoryScalpPersistence(), listOf(maker), tune, bankrollUsd = { 100_000.0 }, controls = controls) { "f${ids.incrementAndGet()}" }
+        val forced = ScalpBook(InMemoryScalpPersistence(), emptyList(), tune, bankrollUsd = { 100_000.0 }, controls = controls) { "f${ids.incrementAndGet()}" }
         forced.onQuote(q(t0, 0.44, 0.45), true)
         forced.onQuote(q(t0 + 30_000L, 0.34, 0.35), true)
-        assertTrue(forced.allTrades().any { it.variantId == maker.id && it.isPrimary })
+        assertTrue(forced.allTrades().none { it.variantId == maker.id })
 
         val sf = shockBook()
         val at = close - 800_000L
@@ -153,7 +145,7 @@ class ScalpRetune1021Test {
         val open = shockBook(forceSf)
         warm(open, at)
         open.onShockFavQuote(imbalance(at), true)
-        assertTrue(open.allTrades().any { it.variantId == "sf30" && it.isPrimary })
+        assertTrue(open.allTrades().none { it.variantId == "sf30" || it.variantId == "sf32" })
     }
 
     private fun shockBook(controls: ScalpControlsRepository = MemoryScalpControls()): ScalpBook {

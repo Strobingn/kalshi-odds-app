@@ -42,7 +42,8 @@ class ScalperRulesTest {
         assertEquals("YES" to 0.7, LlmPaperStrategy.parse("YES 0.7"))
         assertEquals("NO", LlmPaperStrategy.parse("no 0.62 because")?.first)
         assertNull(LlmPaperStrategy.parse("SKIP"))
-        assertEquals(ScalpModels.Model.V2_LLM, ScalpModels.modelByCode("v2-llm"))
+        assertNull(ScalpModels.modelByCode("v2-llm"))
+        assertEquals(KeptScalpers.REMOVED_LABEL, ScalpTrade("llm", "KXBTC15M-26OCT181200-00", "YES", ScalpState.CLOSED, 0L, 0.4, 0.5, ruleVersion = "v|v2-llm|P").algoLabel)
     }
 
     @Test fun sfWindowStartLimitsAreDistinctAndShort() {

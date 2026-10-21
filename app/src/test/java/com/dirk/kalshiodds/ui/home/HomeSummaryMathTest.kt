@@ -112,7 +112,7 @@ class HomeSummaryMathTest {
         assertEquals("1 trade", HomeSummaryCopy.tradeCount(1))
         assertEquals(HomeSummaryCopy.EMPTY_WINDOW, HomeSummaryCopy.windowLine(null))
         assertEquals("sf41", HomeSummaryCopy.displayName("sf41"))
-        assertEquals("not-a-model", HomeSummaryCopy.displayName("not-a-model"))
+        assertEquals("removed strategy", HomeSummaryCopy.displayName("not-a-model"))
     }
 
     @Test fun todayEtSumsNetBestWorstAndSettingsOnThatDateOnly() {
