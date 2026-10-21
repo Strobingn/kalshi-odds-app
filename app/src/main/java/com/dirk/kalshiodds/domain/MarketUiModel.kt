@@ -313,7 +313,7 @@ fun formatCloseTimeLocal(iso: String?): String? {
     if (iso.isNullOrBlank()) return null
     return try {
         val instant = Instant.parse(iso)
-        localTimeFormatter.format(instant.atZone(ZoneId.systemDefault()))
+        localTimeFormatter.format(instant.atZone(ZoneId.of("America/New_York")))
     } catch (_: Exception) {
         iso
     }

@@ -40,7 +40,6 @@ import com.dirk.kalshiodds.signal.trade.ScalpSignal
 import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TradeTicket
 import com.dirk.kalshiodds.ui.theme.DipTheme
-import java.text.DateFormat
 import java.util.Date
 import java.util.Locale
 
@@ -575,7 +574,7 @@ private fun signed(value: Double): String = String.format(Locale.US, "%+.4f", va
 
 private fun timeLeft(seconds: Long): String = "%d:%02d".format(Locale.US, seconds / 60L, seconds % 60L)
 
-private fun timeLabel(epochMs: Long): String = DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(epochMs))
+private fun timeLabel(epochMs: Long): String = com.dirk.kalshiodds.domain.EasternTime.short(epochMs)
 
 private fun pnlColor(value: Double, colors: com.dirk.kalshiodds.ui.theme.DipPalette): Color = when {
     value > 0.0 -> colors.up

@@ -165,18 +165,18 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                         val snapshot = "Time ${System.currentTimeMillis()}; current 15m ticker=${market.ticker}; close=${market.closeTimeEpochMs}; YES=${market.yesProbabilityPercent}%.\n" + paperMarketFeed.render() + "\n" + withContext(Dispatchers.Default) { paperTuning.snapshot(fills) }
                         val response = paperChat.askWithFallback(paperChatKeys, provider, "Review the active 15-minute window and all paper tracks. Propose paper-only exit adjustments, including experiments; distinguish tentative ideas from evidence-supported findings.", snapshot)
                         val result = withContext(Dispatchers.IO) { paperTuning.applyResponse(response.text, paperBook.snapshot().fills, automatic = true) }
-                        val reviewTime = java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date())
+                        val reviewTime = com.dirk.kalshiodds.domain.EasternTime.short(System.currentTimeMillis())
                         _state.update { it.copy(paperAiReview = "$reviewTime · ${response.provider.label}\n$result") }
                     } else {
                         _state.update { it.copy(paperAiReview = if (!s.settings.paperTradingEnabled) "Paper trading is off. Enable it to start automatic reviews." else "Waiting for an open BTC 15-minute window.") }
                     }
                 } catch (e: kotlinx.coroutines.CancellationException) { throw e }
                 catch (e: com.dirk.kalshiodds.llm.PaperChatException) {
-                    val time = java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date())
+                    val time = com.dirk.kalshiodds.domain.EasternTime.short(System.currentTimeMillis())
                     _state.update { it.copy(paperAiReview = "$time · Automatic review failed\n${e.message ?: "Provider request failed"}") }
                 }
                 catch (_: Exception) {
-                    val time = java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date())
+                    val time = com.dirk.kalshiodds.domain.EasternTime.short(System.currentTimeMillis())
                     _state.update { it.copy(paperAiReview = "$time · Automatic review failed\nInternal error while preparing or applying the paper review.") }
                 }
                 delay((60_000L - (android.os.SystemClock.elapsedRealtime() - reviewStart)).coerceAtLeast(1_000L))

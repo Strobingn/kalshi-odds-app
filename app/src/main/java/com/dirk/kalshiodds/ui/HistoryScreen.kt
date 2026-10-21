@@ -50,7 +50,6 @@ import com.dirk.kalshiodds.data.local.history.HistorySession
 import com.dirk.kalshiodds.data.local.history.SettingsChange
 import com.dirk.kalshiodds.ui.components.SignalSummaryCard
 import com.dirk.kalshiodds.domain.MarketUiModel
-import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import com.dirk.kalshiodds.ui.theme.DipTheme
@@ -367,6 +366,5 @@ private fun MarketRow(row: SettledWindowRow, onOpen: () -> Unit) {
 }
 
 internal fun historyTime(ms: Long): String {
-    val fmt = SimpleDateFormat("MMM d, h:mm a", Locale.US)
-    return fmt.format(Date(ms))
+    return com.dirk.kalshiodds.domain.EasternTime.date(ms)
 }
