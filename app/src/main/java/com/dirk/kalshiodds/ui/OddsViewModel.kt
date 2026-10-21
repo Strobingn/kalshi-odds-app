@@ -69,6 +69,8 @@ data class OddsUiState(
     /** V3 is a local, shadow-only scorecard and never an order route. */
     val v3: V3ShadowState = V3ShadowState(),
     val paperAiReview: String = "Waiting for paper trading and a saved provider key.",
+    val paperLiveFeed: String = "Market feed unavailable: waiting for an open BTC 15-minute window.",
+    val paperFeedChart: List<com.dirk.kalshiodds.llm.PaperMarketFeed.Sample> = emptyList(),
     val positions: List<LivePosition> = emptyList(),
     val positionsNote: String? = null,
     /** Live Kalshi cash from GET /portfolio/balance, if the key can read it. */
@@ -91,6 +93,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     private val ticketSession = container.tickets
     private val paperBook = container.paper.book
     private val paperTuning = com.dirk.kalshiodds.llm.PaperTuning(application)
+    private val paperMarketFeed = com.dirk.kalshiodds.llm.PaperMarketFeed()
     private val paperChatKeys = com.dirk.kalshiodds.llm.PaperChatKeys(application)
     private val paperChat = com.dirk.kalshiodds.llm.PaperChatClient()
     private val v3Book = container.v3.book
@@ -127,21 +130,45 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(paper = paperBook.snapshot(), v3 = v3Book.snapshot()) }
         viewModelScope.launch {
             while (isActive) {
+                val now = System.currentTimeMillis()
+                val market = _state.value.snapshot?.allMarkets.orEmpty().filter {
+                    it.ticker.startsWith("KXBTC15M", true) && (it.closeTimeEpochMs ?: 0L) > now &&
+                        (it.openTimeEpochMs ?: ((it.closeTimeEpochMs ?: 0L) - 900_000L)) <= now
+                }.minByOrNull { it.closeTimeEpochMs ?: Long.MAX_VALUE }
+                if (market == null) paperMarketFeed.clear() else {
+                    val tick = hub.scoring.book.lastTick(market.ticker)
+                    val age = tick?.receiveElapsedNanos?.let { ((android.os.SystemClock.elapsedRealtimeNanos() - it) / 1_000_000L).takeIf { a -> a >= 0 } }
+                    val paper = paperBook.snapshot()
+                    paperMarketFeed.record(com.dirk.kalshiodds.llm.PaperMarketFeed.Sample(
+                        market.ticker, now, market.closeTimeEpochMs ?: now, market.yesBid, market.yesAsk, market.noBid, market.noAsk,
+                        market.spotUsd, market.floorStrike, market.aiYesPercent, age, paper.openCount, paper.realizedPnlUsd
+                    ))
+                }
+                val (feed, chart) = withContext(Dispatchers.Default) { paperMarketFeed.render() to paperMarketFeed.chartSamples() }
+                _state.update { it.copy(paperLiveFeed = feed, paperFeedChart = chart) }
+                delay(1_000L)
+            }
+        }
+        viewModelScope.launch {
+            while (isActive) {
                 val reviewStart = android.os.SystemClock.elapsedRealtime()
                 try {
                     val s = _state.value
-                    val market = s.snapshot?.allMarkets?.firstOrNull {
-                        it.ticker.startsWith("KXBTC15M", true) && (it.closeTimeEpochMs ?: 0L) > System.currentTimeMillis()
-                    }
+                    val now = System.currentTimeMillis()
+                    val market = s.snapshot?.allMarkets.orEmpty().filter {
+                        it.ticker.startsWith("KXBTC15M", true) && (it.closeTimeEpochMs ?: 0L) > now &&
+                            (it.openTimeEpochMs ?: ((it.closeTimeEpochMs ?: 0L) - 900_000L)) <= now
+                    }.minByOrNull { it.closeTimeEpochMs ?: Long.MAX_VALUE }
                     if (s.settings.paperTradingEnabled && market != null) {
                         val provider = withContext(Dispatchers.IO) { paperChatKeys.selectedProvider() }
                         val anyKey = withContext(Dispatchers.IO) { com.dirk.kalshiodds.llm.PaperChatProvider.values().any { paperChatKeys.load(it) != null } }
                         if (anyKey) {
                             val fills = paperBook.snapshot().fills
-                            val snapshot = "Time ${System.currentTimeMillis()}; current 15m ticker=${market.ticker}; close=${market.closeTimeEpochMs}; YES=${market.yesProbabilityPercent}%.\n" + withContext(Dispatchers.Default) { paperTuning.snapshot(fills) }
+                            val snapshot = "Time ${System.currentTimeMillis()}; current 15m ticker=${market.ticker}; close=${market.closeTimeEpochMs}; YES=${market.yesProbabilityPercent}%.\n" + paperMarketFeed.render() + "\n" + withContext(Dispatchers.Default) { paperTuning.snapshot(fills) }
                             val response = paperChat.askWithFallback(paperChatKeys, provider, "Review the active 15-minute window and negative after-fee paper tracks. Propose only evidence-supported paper exit adjustments.", snapshot)
-                            val result = withContext(Dispatchers.IO) { paperTuning.applyResponse(response.text, fills, automatic = true) }
-                            _state.update { it.copy(paperAiReview = "Last review ${System.currentTimeMillis()} (${response.provider.label}): $result") }
+                            val result = withContext(Dispatchers.IO) { paperTuning.applyResponse(response.text, paperBook.snapshot().fills, automatic = true) }
+                            val reviewTime = java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date())
+                            _state.update { it.copy(paperAiReview = "$reviewTime · ${response.provider.label}\n$result") }
                         }
                     }
                 } catch (e: kotlinx.coroutines.CancellationException) { throw e }

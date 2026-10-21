@@ -28,6 +28,12 @@ class PaperTuning(context: Context) {
             val s = settings(track.formulaVersion)
             appendLine("${track.formulaVersion}: open=${rows.count { !it.settled }}, settled=${result.settledFills}, days=${result.distinctDays}, pnl=${result.realizedPnlUsd}, decision=${result.decision}, trailing_retrace=${s.trailingRetrace}, fair_buffer=${s.fairValueBuffer}, max_net_loss=${s.maxNetLossPerContract}, changed_at=$changed")
         }
+        val open = fills.filter { !it.settled && it.source.startsWith("AI ") }
+        appendLine("OPEN PAPER POSITIONS: ${open.size}; each row is a position, not a live order.")
+        open.take(100).forEach { f ->
+            appendLine("${f.strategyVersion ?: "unknown"} ${f.ticker} ${f.side} contracts=${f.contracts} entry=${f.limitPrice} cost=${f.stakeUsd} fee=${f.feeUsd} high_bid=${f.highWaterMarkPrice}")
+        }
+        if (open.size > 100) appendLine("${open.size - 100} additional open positions omitted from prompt; track totals above include them.")
     }
 
     fun audit(): String = prefs.getString("audit", "No paper adjustments yet.") ?: "No paper adjustments yet."
@@ -45,7 +51,7 @@ class PaperTuning(context: Context) {
             if (ScalpSignal.Track.values().none { it.formulaVersion == version }) continue
             val changedAt = prefs.getLong("changed:$version", 0L)
             val review = ScalpReview.assess(fills.filter { it.strategyVersion == version && it.createdAtMs >= changedAt })
-            if (automatic && (review.settledFills < ScalpReview.MIN_SETTLED_FILLS || review.distinctDays < ScalpReview.MIN_DISTINCT_DAYS || review.realizedPnlUsd >= 0.0)) continue
+            if (automatic && (review.settledFills == 0 || review.realizedPnlUsd >= 0.0)) continue
             val old = settings(version)
             fun value(name: String, previous: Double): Double? {
                 if (!change.has(name)) return previous
@@ -65,12 +71,12 @@ class PaperTuning(context: Context) {
                 .putString("audit", (detail + "\n" + prior).take(16000)).commit())
             notes += detail
         }
-        val message = json.optString("message").take(1000)
+        val message = json.optString("message").take(4000)
         return listOfNotNull(message.takeIf { it.isNotBlank() }, notes.joinToString("\n").takeIf { it.isNotBlank() }
             ?: "No supported paper settings changed.").joinToString("\n")
     }
 
     companion object {
-        const val INSTRUCTIONS = "Return ONLY JSON: {\"message\":\"brief explanation\",\"changes\":[{\"strategy\":\"exact strategy version\",\"trailing_retrace\":0.005,\"fair_buffer\":0.005,\"max_net_loss\":0.01}]}. Values are dollars per contract from 0 to 1. Include only fields you want changed. These are paper exit settings only. No entry, cash, live, credential, or trading settings exist here. Never claim certainty or invent results. When the user asks for information rather than a settings change, return an empty changes array. Automatic changes are accepted only for a track with negative realized after-fee P&L and at least 30 settled fills across 3 UTC days since its last change. An empty changes array means no change."
+        const val INSTRUCTIONS = "Return ONLY JSON: {\"message\":\"brief explanation\",\"changes\":[{\"strategy\":\"exact strategy version\",\"trailing_retrace\":0.005,\"fair_buffer\":0.005,\"max_net_loss\":0.01}]}. Values are dollars per contract from 0 to 1. Include only fields you want changed. These are paper exit settings only. No entry, cash, live, credential, or trading settings exist here. Never claim certainty or invent results. When the user asks for information rather than a settings change, return an empty changes array. Automatic experiments may adjust a track with negative realized after-fee P&L and at least one settled fill since its last change. Treat small samples as tentative, not proof of underperformance or profit. An empty changes array means no change."
     }
 }

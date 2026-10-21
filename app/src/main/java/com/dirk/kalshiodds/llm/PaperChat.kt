@@ -105,11 +105,12 @@ class PaperChatClient {
 
     suspend fun ask(provider: PaperChatProvider, apiKey: String, question: String, context: String, history: List<Pair<String, String>> = emptyList()): String = withContext(Dispatchers.IO) {
         val messages = JSONArray()
-            .put(JSONObject().put("role", "system").put("content", "You are a paper-trading research assistant. Treat supplied market data as a snapshot, not a continuous feed. Do not claim profits or guaranteed predictions. You cannot place orders. ${PaperTuning.INSTRUCTIONS}"))
+            .put(JSONObject().put("role", "system").put("content", "You are a paper-trading research assistant. Supplied market history consists of timestamped on-device samples sent only with each request; you cannot see updates between requests. Respect quote age and unknown freshness. Do not claim profits or guaranteed predictions. You cannot place orders. ${PaperTuning.INSTRUCTIONS}"))
         history.takeLast(6).forEach { (role, text) ->
             if (role == "user" || role == "assistant") messages.put(JSONObject().put("role", role).put("content", text.take(1200)))
         }
-        messages.put(JSONObject().put("role", "user").put("content", "Current app snapshot (may be stale):\n${context.take(8000)}\n\nQuestion: ${question.take(2000)}"))
+        val boundedContext = context.take(20000) + if (context.length > 20000) "\n[Additional data omitted because the prompt is too long.]" else ""
+        messages.put(JSONObject().put("role", "user").put("content", "Current app data (observe timestamps and freshness):\n$boundedContext\n\nQuestion: ${question.take(2000)}"))
         val json = JSONObject().put("model", provider.model).put("messages", messages).put("max_tokens", 600)
         val request = Request.Builder().url(provider.endpoint)
             .header("Authorization", "Bearer $apiKey")

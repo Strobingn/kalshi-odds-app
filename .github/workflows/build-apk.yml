@@ -42,6 +42,7 @@ jobs:
             --tests 'com.dirk.kalshiodds.signal.v3.V3ShadowExperimentTest' \
             --tests 'com.dirk.kalshiodds.llm.PaperChatProviderTest' \
             --tests 'com.dirk.kalshiodds.llm.PaperTuningTest' \
+            --tests 'com.dirk.kalshiodds.llm.PaperMarketFeedTest' \
             --no-daemon --stacktrace
 
       - name: Rename APK
