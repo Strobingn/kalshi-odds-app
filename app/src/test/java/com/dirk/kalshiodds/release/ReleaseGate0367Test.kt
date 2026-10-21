@@ -1,6 +1,7 @@
 package com.dirk.kalshiodds.release
 
 import com.dirk.kalshiodds.decision.*
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -20,11 +21,13 @@ class ReleaseGate0367Test {
         val closed = ScalpTrade(id = "c1", ticker = tk, side = "YES", state = ScalpState.CLOSED,
             signalAtMs = t0, signalAsk = 0.5, fairAtSignal = 0.5, contracts = 10, entryPrice = 0.5,
             soldContracts = 10, proceedsUsd = 5.5, closedAtMs = t0 + 10_000, netUsd = 0.4,
-            ruleVersion = "${ScalpRule.VERSION}|sf31|P") // 1.0.10: sf30 removed from the registry
+            ruleVersion = "${ScalpRule.VERSION}|sf31|P")
         store.upsertScalpAndStats(closed, null)
         book.reloadStats()
         val lb = ScalpModels.leaderboardFromStats(book.stats.value)
-        assertTrue(lb.any { it.model == ScalpModels.Model.SF31 && it.roundTrips == 1 })
+        assertEquals(ScalpModels.ALL.size, lb.size)
+        assertTrue(lb.none { it.model.code == "sf31" })
+        assertEquals(KeptScalpers.REMOVED_LABEL, closed.algoLabel)
     }
 
     /** JVM benchmark: 100k closes, 115 scalpers — leaderboard < 50 ms, close+stats < 5 ms. */

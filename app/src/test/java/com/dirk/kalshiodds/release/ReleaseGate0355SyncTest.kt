@@ -9,6 +9,7 @@ import com.dirk.kalshiodds.data.prefs.DataHubSettings
 import com.dirk.kalshiodds.data.supabase.SnapshotUploadFilter
 import com.dirk.kalshiodds.data.supabase.SupabaseSync
 import com.dirk.kalshiodds.decision.ForecastScalp
+import com.dirk.kalshiodds.decision.KeptScalpers
 import com.dirk.kalshiodds.decision.ScalpState
 import com.dirk.kalshiodds.decision.ScalpTrade
 import com.dirk.kalshiodds.signal.paper.PaperFill
@@ -76,7 +77,7 @@ class ReleaseGate0355SyncTest {
         // compact snapshot payload: no note
         val snap = fake.posted.first { it.first == "snapshot" }.second.getJSONObject(0).getJSONObject("payload")
         assertFalse(snap.has("note"))
-        assertEquals("Forecast ride", fake.posted.first { it.first == "scalp" }.second.getJSONObject(0).getJSONObject("payload").getString("algo"))
+        assertEquals(KeptScalpers.REMOVED_LABEL, fake.posted.first { it.first == "scalp" }.second.getJSONObject(0).getJSONObject("payload").getString("algo"))
         val scalpPayload = fake.posted.first { it.first == "scalp" }.second.getJSONObject(0).getJSONObject("payload")
         val restored = com.dirk.kalshiodds.data.supabase.SyncRows.scalp(scalpPayload)!!
         assertEquals(scalp.signalAtMs, restored.signalAtMs)

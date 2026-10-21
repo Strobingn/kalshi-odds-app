@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.llm
 
+import com.dirk.kalshiodds.decision.KeptScalpers
 import com.dirk.kalshiodds.decision.MemoryScalpControls
 import com.dirk.kalshiodds.decision.PaperTape
 import com.dirk.kalshiodds.decision.Research
@@ -26,7 +27,7 @@ class AiWindowWatchTest {
     @get:Rule val tmp = TemporaryFolder()
 
     private val code = ScalpModels.ALL.first { ScalpModels.isV2(it) && it != ScalpModels.Model.V2_LLM }.code
-    private val research = ScalpModels.ALL.first { ScalpModels.isResearch(it) }.code
+    private val research = KeptScalpers.FAIR_ID
     private var nowMs = 1_700_000_000_000L
     private var snap = WindowSnapshot("W1", 1_700_000_900_000L, "live window", "fp-1")
     private var provider = LlmProviders.XAI
@@ -34,21 +35,21 @@ class AiWindowWatchTest {
     @Test fun clampsToTheAiLearnsBandAndDoesNotRestartTheLearner() {
         val c = MemoryScalpControls(ScalpControls(strategySettings = mapOf(
             code to ScalpStrategySettings(maxEntryCents = 48, stopCents = 6, aiBaseCents = 50, aiN = 2, aiNet = 1.0, aiNote = "learning"),
-            research to ScalpStrategySettings(edgeCents = 5, aiBaseCents = 2, aiN = 1, aiNote = "learning")
+            research to ScalpStrategySettings(maxEntryCents = 40, aiBaseCents = 40, aiN = 1, aiNote = "learning")
         )))
         val w = watcher(c) { _, _ ->
             reply("""{"adjustments":[
                 {"scalper":"$code","setting":"maxEntryCents","value":30,"reason":"too wide"},
                 {"scalper":"$code","setting":"maxEntryCents","value":90,"reason":"ignored second"},
-                {"scalper":"$research","setting":"edgeCents","value":99,"reason":"need more gap"},
+                {"scalper":"$research","setting":"maxEntryCents","value":20,"reason":"tighter"},
                 {"scalper":"$code","setting":"stopCents","value":99,"reason":"wider stop"}
             ]}""")
         }
         // Direct band, same numbers either way around — no side input exists.
         assertEquals("40", AiWatchBounds.clamp(c.state.value, code, "maxEntryCents", "1", 50))
         assertEquals("50", AiWatchBounds.clamp(c.state.value, code, "maxEntryCents", "90", 50))
-        assertEquals("6", AiWatchBounds.clamp(c.state.value, research, "edgeCents", "99", 2))
-        assertEquals("2", AiWatchBounds.clamp(c.state.value, research, "edgeCents", "0", 2))
+        assertEquals("30", AiWatchBounds.clamp(c.state.value, research, "maxEntryCents", "20", 40))
+        assertEquals("40", AiWatchBounds.clamp(c.state.value, research, "maxEntryCents", "90", 40))
         assertEquals("10", AiWatchBounds.clamp(c.state.value, code, "stopCents", "99", 6))
         assertEquals(
             AiWatchBounds.clamp(c.state.value, code, "maxEntryCents", "30", 50),
@@ -61,8 +62,8 @@ class AiWindowWatchTest {
         assertEquals(50, v2.aiBaseCents)
         assertEquals(2, v2.aiN)
         assertEquals("learning", v2.aiNote)
-        assertEquals(6, edge.edgeCents) // at most +4 over the user baseline
-        assertEquals(2, edge.aiBaseCents)
+        assertEquals(40, edge.maxEntryCents)
+        assertEquals(40, edge.aiBaseCents)
         assertEquals(10, v2.stopCents) // other knobs stay inside −10..+4
         assertFalse(v2.aiNote.contains("set by you"))
     }

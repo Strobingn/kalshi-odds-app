@@ -4,6 +4,7 @@ import com.dirk.kalshiodds.decision.Open50Model
 import com.dirk.kalshiodds.decision.ScalpModels
 import com.dirk.kalshiodds.decision.ShockFav
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -18,9 +19,9 @@ class ReleaseGate0364Test {
             val p = ShockFav.v(c)
             assertEquals(ShockFav.Kind.OPEN50, p.kind); assertEquals("Open 50", p.group)
             assertEquals(10, ShockFav.stopC(p)); assertTrue(p.noEdge2s); assertTrue(ShockFav.isO50(c))
-            assertTrue(ScalpModels.ALL.any { it.code == c })
+            assertFalse(ScalpModels.ALL.any { it.code == c })
         }
-        assertTrue(ScalpModels.tag(ScalpModels.Model.SF51)!!.contains("Open 50"))
+        assertFalse(ScalpModels.ALL.any { it.code.startsWith("sf5") || it.code.startsWith("sf6") })
         assertEquals("BTC", ShockFav.TRADE_COIN)
     }
 

@@ -388,18 +388,18 @@ object ScalpBreakdown {
         fun fmt(r: Row) = String.format(Locale.US, "%s · %d trips · %d%% wins · net $%.2f · %+.2f¢/ct",
             r.key, r.n, if (r.n == 0) 0 else Math.round(100.0 * r.wins / r.n), r.netUsd, r.avgCentsPerContract)
         val pw = roundTripsPerWindow(trades)
-        val perStrategy = ScalpStrategy.values().flatMap { st ->
-            val mine = closed(trades).filter { it.strategyOrNull == st }
-            if (mine.isEmpty()) return@flatMap listOf("${st.label} · no closed round trips yet")
-            val r = rows(mine) { st.label }.single()
-            listOf(fmt(r)) + byCoin(mine).map { "  " + fmt(it) } + byHourEt(mine).map { "  " + fmt(it) }
-        } + (listOf(ScalpModels.Model.FORECAST_RIDE, ScalpModels.Model.FORECAST_FADE) + ScalpModels.SF_MODELS).flatMap { m ->
+        val perStrategy = ScalpModels.ALL.flatMap { m ->
             val mine = closed(trades).filter { ScalpModels.modelOf(it) == m }
             if (mine.isEmpty()) return@flatMap listOf("${m.label} · no closed round trips yet")
             val r = rows(mine) { m.label }.single()
             listOf(fmt(r)) + byCoin(mine).map { "  " + fmt(it) } + byHourEt(mine).map { "  " + fmt(it) }
         }
-        return listOf("By strategy (net after both fees; coin and hour ET below each)") + perStrategy +
+        val removed = closed(trades).filter { ScalpModels.modelOf(it) == null }
+        val removedLines = if (removed.isEmpty()) emptyList() else {
+            val r = rows(removed) { KeptScalpers.REMOVED_LABEL }.single()
+            listOf(fmt(r)) + byCoin(removed).map { "  " + fmt(it) } + byHourEt(removed).map { "  " + fmt(it) }
+        }
+        return listOf("By strategy (net after both fees; coin and hour ET below each)") + perStrategy + removedLines +
             listOf("By coin (net after both fees)") + byCoin(trades).map(::fmt) +
             listOf("By hour (ET, entry)") + byHourEt(trades).map(::fmt) +
             listOf("By time left at entry") + byTimeLeft(trades).map(::fmt) +

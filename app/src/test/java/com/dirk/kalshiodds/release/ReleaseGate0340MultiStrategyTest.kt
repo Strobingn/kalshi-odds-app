@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.release
 
+import com.dirk.kalshiodds.decision.KeptScalpers
 import com.dirk.kalshiodds.decision.InMemoryScalpPersistence
 import com.dirk.kalshiodds.decision.InMemoryScalpTuneStore
 import com.dirk.kalshiodds.decision.ScalpBook
@@ -89,7 +90,7 @@ class ReleaseGate0340MultiStrategyTest {
     private fun book(bankroll: Double = 1_000.0): ScalpBook {
         val ids = AtomicInteger()
         val pin = ScalpTuneState(paramsByCoin = mapOf("BTC" to ScalpParams.CLASSIC.id))
-        return ScalpBook(InMemoryScalpPersistence(), emptyList(), InMemoryScalpTuneStore(pin), bankrollUsd = { bankroll }) { "m${ids.incrementAndGet()}" }
+        return ScalpBook(InMemoryScalpPersistence(), listOf(ScalpParams.CLASSIC), InMemoryScalpTuneStore(pin), bankrollUsd = { bankroll }) { "m${ids.incrementAndGet()}" }
     }
 
     @org.junit.Ignore("Kalshi Scalper 1.0.3: pins pre-1.0.3 entries/exits of a strategy now retuned toward the fair-gap rule (24–42¢, BRTI gap 10–21¢ after fee, no stop/trail, ≈4.5 min hold); covered by ReleaseGate103FairGapTest") @Test
@@ -130,7 +131,7 @@ class ReleaseGate0340MultiStrategyTest {
         val roomy = book(bankroll = 1_000.0)
         roomy.onQuote(q(t, 0.44, 0.45), true)
         roomy.onQuote(q(t + 30_000L, 0.34, 0.35), true)
-        assertEquals(2, roomy.snapshot().count { !it.isMaker && !it.variantId.endsWith("-h60") && !it.variantId.contains("-t99-") && it.variantId !in com.dirk.kalshiodds.decision.ScalpParams.FAIR_TWEAKS.map { t -> t.id } })
+        assertEquals(1, roomy.snapshot().count { !it.isMaker && !it.variantId.endsWith("-h60") && !it.variantId.contains("-t99-") && it.variantId !in com.dirk.kalshiodds.decision.ScalpParams.FAIR_TWEAKS.map { t -> t.id } })
     }
 
     private fun closed(window: Int, variant: ScalpParams, cents: Double, i: Int): ScalpTrade {
@@ -179,12 +180,11 @@ class ReleaseGate0340MultiStrategyTest {
             closed(1, seed(ScalpStrategy.EXTREME_REVERSION), 1.0, 0)
         )
         val rows = ScalpBreakdown.byStrategy(trades).associateBy { it.key }
-        assertEquals(2, rows["Dip-hunter"]!!.n)
-        assertEquals(0, rows["Dip-hunter"]!!.wins) // breakeven after both fees is not a win
-        assertEquals(1, rows["Fair-gap"]!!.wins)
+        assertEquals(4, rows[KeptScalpers.REMOVED_LABEL]!!.n)
+        assertEquals(2, rows[KeptScalpers.REMOVED_LABEL]!!.wins)
         val lines = ScalpBreakdown.lines(trades)
-        ScalpStrategy.values().forEach { s -> assertTrue(s.label, lines.any { it.startsWith(s.label) }) }
-        assertTrue(lines.any { it.startsWith("Momentum-sniper · no closed round trips yet") })
+        assertTrue(lines.any { it.startsWith(KeptScalpers.REMOVED_LABEL) })
+        assertFalse(lines.any { it.startsWith("Momentum-sniper") })
         assertTrue(lines.any { it.startsWith("  BTC") } && lines.any { it.startsWith("  9 AM ET") } && lines.any { it.startsWith("  10 AM ET") })
     }
 }

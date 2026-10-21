@@ -29,7 +29,7 @@ class ReleaseGate0340ScalpTest {
         ScalpRule.Quote(ticker, nowMs, close, nowMs, yesBid, bidSize, yesAsk, askSize, spot, 100_000.0, 3e-5)
 
     /** Primary-only book (no shadow variants) so the assertions are about one param set. */
-    private fun book(variants: List<ScalpParams> = emptyList()): ScalpBook {
+    private fun book(variants: List<ScalpParams> = listOf(ScalpParams.CLASSIC)): ScalpBook {
         val ids = AtomicInteger()
         val pin = ScalpTuneState(paramsByCoin = mapOf("BTC" to ScalpParams.CLASSIC.id))
         return ScalpBook(InMemoryScalpPersistence(), variants, InMemoryScalpTuneStore(pin)) { "s${ids.incrementAndGet()}" }

@@ -12,7 +12,10 @@ class KashiArenaScreenshotTest {
     @get:Rule val paparazzi = Paparazzi(deviceConfig = DeviceConfig.PIXEL_6.copy(screenWidth = 1080, screenHeight = 2340, softButtons = false), theme = "android:Theme.Material3.DayNight.NoActionBar")
     private fun fixture(): ScalpTabState {
         val original = ScalpTabFixtures.state(0)
-        val v2 = original.algoAllTime.values.associate { r -> val m = ScalpModels.v2Of(r.model)!!; m to r.copy(model = m) }
+        val v2 = ScalpModels.V2_MODELS.mapIndexed { i, m ->
+            val net = listOf(12.84, 8.25)[i]
+            m to ScalpModels.rowFromStat(ScalpStat(m.code, n = 20 + i, wins = 12, netUsd = net)).copy(losses = 8 + i, winRate = 12.0 / (20 + i))
+        }.toMap()
         val ticker = "KXBTC15M-26OCT122015-15"; val close = ScalpTicker.closeMs(ticker)!!; val start = close - 900_000
         val rows = v2.values.mapIndexed { i, r -> r.copy(netUsd = listOf(12.84, 8.25, 3.42, -1.25, -4.5, -8.0)[i], roundTrips = 20 + i, wins = 12, losses = 8 + i, winRate = 12.0 / (20 + i)) }.associateBy { it.model }
         val model = rows.keys.first()

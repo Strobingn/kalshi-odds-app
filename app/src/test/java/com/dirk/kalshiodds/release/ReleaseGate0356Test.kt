@@ -5,6 +5,7 @@ import com.dirk.kalshiodds.data.supabase.SnapshotUploadFilter
 import com.dirk.kalshiodds.data.supabase.SupabaseMirror
 import com.dirk.kalshiodds.data.supabase.SupabaseSync
 import com.dirk.kalshiodds.decision.ForecastScalp
+import com.dirk.kalshiodds.decision.KeptScalpers
 import com.dirk.kalshiodds.decision.ScalpState
 import com.dirk.kalshiodds.decision.ScalpTrade
 import com.dirk.kalshiodds.signal.paper.ShadowTicket
@@ -75,7 +76,7 @@ class ReleaseGate0356Test {
             .body(arr.toString().toResponseBody("application/json".toMediaType())).build() }
         val hub = DataHubSettings(supabaseUrl = "https://x.supabase.co", supabaseAnonKey = "anon-key-anon-key-anon-key")
         val r = SupabaseMirror(OkHttpClient.Builder().addInterceptor(fake).build()).restore(hub, SeenKeys())
-        assertEquals("Forecast fade", r.scalps.single().algoLabel)
+        assertEquals(KeptScalpers.REMOVED_LABEL, r.scalps.single().algoLabel)
         assertEquals(0.2, r.scalps.single().netUsd!!, 1e-9)
         assertEquals("sh9", r.shadow.single().id)
         assertEquals(5.9, r.shadow.single().pnlUsd!!, 1e-9)

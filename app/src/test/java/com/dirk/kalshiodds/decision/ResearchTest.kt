@@ -64,11 +64,11 @@ class ResearchTest {
         assertEquals(off, Research.learn("r-late", off, -5.0, 99))
     }
 
-    @Test fun researchModelsAreLabelledAndMapped() {
+    @Test fun researchModelsAreOffTheBoard() {
         Research.IDS.forEach { id ->
-            val m = ScalpModels.modelByCode(id)!!
-            assertTrue(m.label.startsWith("Research"))
-            assertTrue(ScalpModels.isResearch(m)); assertFalse(ScalpModels.isV2(m))
+            assertNull(id, ScalpModels.modelByCode(id))
+            val t = ScalpTrade(id, "KXBTC15M-26OCT181200-00", "YES", ScalpState.CLOSED, 0L, 0.4, 0.5, ruleVersion = "v|$id|P")
+            assertEquals(KeptScalpers.REMOVED_LABEL, t.algoLabel)
         }
     }
 }

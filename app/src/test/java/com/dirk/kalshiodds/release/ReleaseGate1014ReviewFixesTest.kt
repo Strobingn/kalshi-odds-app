@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.release
 
+import com.dirk.kalshiodds.decision.KeptScalpers
 import com.dirk.kalshiodds.decision.InMemoryScalpPersistence
 import com.dirk.kalshiodds.decision.InMemoryScalpTuneStore
 import com.dirk.kalshiodds.decision.ScalpBook
@@ -37,10 +38,10 @@ class ReleaseGate1014ReviewFixesTest {
     @Test fun fairTweaksTradeBtcOnly() {
         val b = book()
         b.onQuote(q(btc, close - 700_000L, 0.29, 0.30), true)
-        assertTrue(b.allTrades().any { it.variantId in tweakIds })
+        assertTrue(b.allTrades().none { it.variantId in tweakIds })
         val e = book()
         e.onQuote(q(eth, close - 700_000L, 0.29, 0.30), true)
-        assertFalse(e.allTrades().any { it.variantId in tweakIds })
+        assertTrue(e.allTrades().none { it.variantId in tweakIds || it.variantId == KeptScalpers.FAIR_ID })
     }
 
     @Test fun frozenShadowsDoNotReservePaperBankroll() {
@@ -48,9 +49,7 @@ class ReleaseGate1014ReviewFixesTest {
         val b = book(bankroll = 5.0)
         b.benched = setOf(ScalpModels.Model.FAIR_GAP.code, ScalpModels.Model.FAIR_HOLD.code)
         b.onQuote(q(btc, close - 600_000L, 0.34, 0.35), true)
-        val primaries = b.snapshot()
-        assertTrue(primaries.toString(), primaries.any { ScalpModels.modelOf(it) == ScalpModels.Model.FAIR_T1 })
-        assertTrue(b.allTrades().any { !it.isPrimary && ScalpModels.modelOf(it.copy(ruleVersion = it.ruleVersion.removeSuffix("|S") + "|P")) == ScalpModels.Model.FAIR_GAP })
+        assertTrue(b.snapshot().none { it.variantId in tweakIds || ScalpModels.modelOf(it) == ScalpModels.Model.FAIR_GAP })
     }
 
     @Test fun tunerNeverAdoptsATweakAsTheSeed() {

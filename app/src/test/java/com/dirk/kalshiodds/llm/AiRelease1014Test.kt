@@ -1,6 +1,7 @@
 package com.dirk.kalshiodds.llm
 
 import com.dirk.kalshiodds.decision.AiBench
+import com.dirk.kalshiodds.decision.KeptScalpers
 import com.dirk.kalshiodds.decision.MemoryScalpControls
 import com.dirk.kalshiodds.decision.PaperTape
 import com.dirk.kalshiodds.decision.ScalpControls
@@ -59,7 +60,7 @@ class AiRelease1014Test {
 
     @Test fun algoStepsStayInsideBounds() {
         val controls = ScalpControls()
-        val code = "v2-fair"
+        val code = KeptScalpers.V2_FAIR_ID
         val entry = StrategyAlgo.knob(controls, code, "maxEntryCents")!!
         assertEquals(1.0, entry.min, 0.0)
         assertEquals(55.0, entry.max, 0.0)
