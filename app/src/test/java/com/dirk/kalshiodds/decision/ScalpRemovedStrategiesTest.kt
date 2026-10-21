@@ -1,23 +1,30 @@
 package com.dirk.kalshiodds.decision
 
+import com.dirk.kalshiodds.decision.insights.ScalpFreeze
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** 1.0.10: loser strategies leave the registry; saved history with their ids must still load without crashing. */
+/** 1.0.21: the 1.0.10 removals are visible again and frozen. History still resolves to their cards. */
 class ScalpRemovedStrategiesTest {
     private fun old(id: String, vid: String) = ScalpTrade(id = id, ticker = "KXBTC15M-26OCT181200-00", side = "YES", state = ScalpState.CLOSED,
         signalAtMs = 0L, signalAsk = 0.40, fairAtSignal = 0.50, ruleVersion = "old|$vid|P")
-    private val removed = listOf("sf30", "sf32", "mkdip", "diph60", "dipnotp", "r-kelly")
+    private val restored = listOf("sf30", "sf32", "mkdip", "diph60", "dipnotp", "r-kelly")
 
-    @Test fun removedIdsAreNotInRegistry() {
-        assertEquals(removed.toSet(), ScalpModels.REMOVED_CODES)
+    @Test fun restoredIdsStayOnTheBoardAndAreFrozen() {
+        assertTrue(ScalpModels.REMOVED_CODES.isEmpty())
         val codes = ScalpModels.ALL.map { it.code }.toSet()
-        removed.forEach { assertFalse(it, it in codes); assertNull(it, ScalpModels.modelByCode(it)) }
-        assertFalse(Research.KELLY in Research.IDS)
+        restored.forEach {
+            assertTrue(it, it in codes)
+            assertNotNull(it, ScalpModels.modelByCode(it))
+            assertTrue(it, it in ScalpFreeze.DEFAULT_FROZEN)
+            assertTrue(it, ScalpFreeze.blocksRestored(it, null))
+            assertFalse(it, ScalpFreeze.blocksRestored(it, "ACTIVE"))
+        }
+        assertTrue(Research.KELLY in Research.IDS)
+        assertEquals(restored.toSet(), ScalpFreeze.RESTORED)
     }
 
     @Test fun keptStrategiesStay() {
@@ -27,16 +34,15 @@ class ScalpRemovedStrategiesTest {
         assertTrue(Research.LATE in Research.IDS && Research.MAKER in Research.IDS)
     }
 
-    @Test fun oldRecordsWithRemovedIdsDoNotCrashAndAreUnattributed() {
+    @Test fun oldRecordsResolveOntoTheirCards() {
         val dipSeed = ScalpParams.STRATEGY_SEEDS.getValue(ScalpStrategy.DIP_HUNTER)
-        val oldIds = listOf("sf30", "sf32-x", "r-kelly", ScalpModels.MAKER_DIP_PARAMS.id, dipSeed.copy(hold60 = true).id, dipSeed.copy(target = ScalpParams.NO_TP).id)
-        for (vid in oldIds) {
-            val t = old("old-$vid", vid)
-            assertNull(vid, ScalpModels.modelOf(t))
-            assertNull(vid, ScalpModels.scalperIdOf(t)?.let { ScalpModels.modelByCode(it) })
-        }
-        val board = ScalpModels.leaderboardFromStats(removed.map { ScalpStat(it) })
-        assertTrue(board.none { it.model.code in removed })
+        assertEquals("sf30", ScalpModels.modelOf(old("a", "sf30"))?.code)
+        assertEquals("r-kelly", ScalpModels.modelOf(old("b", "r-kelly"))?.code)
+        assertEquals("mkdip", ScalpModels.modelOf(old("c", ScalpModels.MAKER_DIP_PARAMS.id))?.code)
+        assertEquals("diph60", ScalpModels.modelOf(old("d", dipSeed.copy(hold60 = true).id))?.code)
+        assertEquals("dipnotp", ScalpModels.modelOf(old("e", dipSeed.copy(target = ScalpParams.NO_TP).id))?.code)
+        val board = ScalpModels.leaderboardFromStats(restored.map { ScalpStat(it, n = 2, netUsd = -1.0) })
+        restored.forEach { code -> assertEquals(2, board.first { it.model.code == code }.roundTrips) }
         assertEquals(ScalpModels.ALL.size, board.size)
     }
 

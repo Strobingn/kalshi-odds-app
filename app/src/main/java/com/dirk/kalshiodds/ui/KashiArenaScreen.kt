@@ -216,6 +216,12 @@ internal fun ArenaStrategyRow(row: ScalpModels.Row, st: ScalpTabState, onOpen: (
                 if (ScalpModels.isResearch(row.model)) Text("RESEARCH", color = c.spot, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                 Text("${row.roundTrips} trades · ${ScalpTabCopy.pct(row.winRate)} won · ${row.open} open", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
                 if (row.roundTrips > 0) Text("Gross ${ScalpTabCopy.money(row.netUsd + row.feesUsd)} · fees ${ScalpTabCopy.money(-row.feesUsd)} · net ${ScalpTabCopy.money(row.netUsd)}", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
+                com.dirk.kalshiodds.decision.ScalpRetune.netPerBetUsd(row.netUsd, row.roundTrips)?.let { per ->
+                    Text("Net per bet ${ScalpTabCopy.money(per)}", color = pnlColor(per), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.testTag("NET_PER_BET_" + row.model.code))
+                }
+                com.dirk.kalshiodds.decision.ScalpRetune.cardNote(row.model.code)?.let { note ->
+                    Text(note, color = c.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 2, modifier = Modifier.testTag("RETUNE_NOTE_" + row.model.code))
+                }
                 // 1.0.9 reality check: net after fees, then after estimated slippage / thinner fills.
                 if (row.roundTrips > 0) {
                     val r = com.dirk.kalshiodds.decision.insights.ScalpNetReality.estimate(row.netUsd, row.feesUsd, row.roundTrips, com.dirk.kalshiodds.decision.ScalpRule.CONTRACTS, st.controls.slipCents)

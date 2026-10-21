@@ -16,7 +16,7 @@ object ScalpModels {
         /** 0.3.53: buy the side the short-horizon forecaster says will rise, near 50¢; exit when the forecast turns. */
         FORECAST_RIDE("fcride", "Forecast ride", "near 50¢ (40–60¢), buy the side the deterministic short-horizon forecast says rises by more than spread + both fees; hold while it keeps pointing up"),
         /** 0.3.53: exact mirror of Forecast ride — trades against the forecast with the same band, exits, sizing and fees. */
-        FORECAST_FADE("fcfade", "Forecast fade", "mirror of Forecast ride: same band, exits, sizing and fees, but takes the side the forecast says falls"),
+        FORECAST_FADE("fcfade", "Forecast fade", "mirror of Forecast ride: takes the side the forecast says falls. Entry band 40–49¢ unless a price slider is set. Paper only."),
         /** 0.3.61 siblings: paper copies next to the unchanged originals. */
         DIP_HOLD("diph60", "Dip-hunter hold", "Dip-hunter entries; stop armed after 60 s; fair-value early exit off; hold to settlement"),
         MOMO_HOLD("momoh60", "Momentum-sniper hold", "Momentum-sniper entries; stop armed after 60 s; fair-value early exit off; hold to settlement"),
@@ -80,7 +80,7 @@ object ScalpModels {
         V2_FORECAST_RIDE("v2-fcride", "v2 · Forecast ride", V2_BLURB),
         /** Kalshi Scalper: the one LLM paper strategy (needs an API key in Settings). Same hard rules, enforced in code. */
         /** Kalshi Scalper 1.0.2 Research strategies: exempt from the 3¢ trail / window-start / >95% rules. BTC, paper only. */
-        R_LATE("r-late", "Research · Late favourite settle", "1.0.3 retuned toward fair-gap: last 2–5 min, buys 24–42¢ only when BRTI settlement-aware fair value beats price by 10–21¢ after the taker fee; holds to settlement; one side per window."),
+        R_LATE("r-late", "Research · Late favourite settle", "Last 3–5 min, buys 80–95¢ when BRTI settlement-aware fair beats price by 10–21¢ after the taker fee; holds to settlement; one side per window. A price slider replaces the band. Size is unchanged. Paper only."),
         R_HOLD("r-hold", "Research · Fair-value hold", "Buys whenever fair value beats price after entry fee and expected exit fee by the edge; sells only if bid beats fair + exit fee or fair falls below entry − fee; else holds to settlement."),
         R_MAKER("r-maker", "Research · Passive maker entry", "Rests a paper bid at fair − edge; fills only when the market trades through; logs 5 s / 30 s drift after the fill; holds to settlement."),
         R_KELLY("r-kelly", "Research · Kelly-sized fair value", "Same entry gate and exits as Fair-value hold; size = quarter-Kelly (p − c)/(1 − c) of a reference bankroll, capped per window."),
@@ -155,17 +155,17 @@ object ScalpModels {
         // 1.0.14: tweaked paper copies of the two money makers (own ids, own cards).
         FAIR_T1("fair-t1", "Fair-gap tweak 1 · gap 12¢ · TP +10¢", "Fair-gap entries at gap ≥ 12¢ after fee (original 14¢), take profit +10¢ (original +12¢), stop 8¢, turn-down 15¢, from 5 min left. Paper only."),
         FAIR_T2("fair-t2", "Fair-gap tweak 2 · gap 16¢ · TP +14¢", "Fair-gap entries at gap ≥ 16¢ after fee (original 14¢), take profit +14¢ (original +12¢), stop 8¢, turn-down 15¢, from 5 min left. Paper only."),
-        R_LATE_T1("r-late-t1", "Research · Late favourite tight", "r-late copy, tighter: 2–4 min left, 26–42¢, BRTI fair beats price by 12–21¢ after the taker fee; holds to settlement; one side per window. Paper only."),
-        R_LATE_T2("r-late-t2", "Research · Late favourite loose", "r-late copy, looser: 1.5–6 min left, 22–44¢, BRTI fair beats price by 8–23¢ after the taker fee; holds to settlement; one side per window. Paper only.")
+        R_LATE_T1("r-late-t1", "Research · Late favourite tight", "r-late copy, tighter: 3–4 min left, 26–42¢, BRTI fair beats price by 12–21¢ after the taker fee; holds to settlement; one side per window. Paper only."),
+        R_LATE_T2("r-late-t2", "Research · Late favourite loose", "r-late copy: 3–6 min left, 22–42¢, BRTI fair beats price by 10–23¢ after the taker fee; holds to settlement; one side per window. Paper only.")
     }
 
     const val V2_BLURB = "v2 paper: new trades default to a 3¢ bid-peak trail active from entry and independent 20% fill-price stop. Existing trades retain saved exits. Preserve positive/inconclusive entry settings; bounded adjustments for sustained losses. Every trade has a protective stop. Exit in the final minute unless fresh CF fair ≥ 97%, bid ≥ 90¢ and holding beats selling. Decisions are estimates, never guaranteed wins. Actual stop/trail and adaptation evidence are in the trade note."
     /**
-     * 1.0.10: loser strategies removed from the Scalper registry — they no longer run or show. Their enum entries stay
-     * only so saved trades/stats with these ids still decode (history is kept, never deleted); lookups return null.
-     * sf30/sf32 = Book imbalance; mkdip/diph60/dipnotp = Dip-hunter dip-g05 maker / hold / no-target; r-kelly = Fair-gap Kelly.
+     * 1.0.10 hid sf30, sf32, mkdip, diph60, dipnotp and r-kelly. 1.0.21 puts them back on the board and freezes
+     * them ([com.dirk.kalshiodds.decision.insights.ScalpFreeze.RESTORED]): visible, history kept, no new paper trade
+     * unless Force trade. Nothing is deleted.
      */
-    val REMOVED_CODES: Set<String> = setOf("sf30", "sf32", "mkdip", "diph60", "dipnotp", "r-kelly")
+    val REMOVED_CODES: Set<String> = emptySet()
     fun isRemoved(code: String?): Boolean = code != null && code in REMOVED_CODES
     private val RAW_ALL: List<Model> = Model.values().toList()
     val ALL: List<Model> = RAW_ALL.filter { it.code !in REMOVED_CODES }
@@ -531,6 +531,8 @@ object ForecastScalp {
     const val FADE_PREFIX = "fcfade"
     const val BAND_LO = 0.40
     const val BAND_HI = 0.60
+    /** 1.0.21: fade's own ceiling. Ride stays at [BAND_HI]. A max-entry slider replaces either one. */
+    const val FADE_BAND_HI = 0.49
     const val MAX_SPREAD = 0.02
     const val MIN_TAU_ENTRY_S = 60.0
     const val EXIT_BEFORE_CLOSE_S = 30.0
@@ -553,8 +555,16 @@ object ForecastScalp {
 
     /** Entry: band, spread, edge > spread + entry fee + exit fee (1-ct rounded) + 0.5¢. */
     /** 0.3.54: predicted move must beat the full round trip (spread + entry fee + exit fee) by [marginUsd]. */
-    fun wantsEntry(mid: Double, spread: Double, ask: Double, move: Double, tauS: Double, marginUsd: Double = SAFETY): Boolean =
-        ScalpRule.buyPriceOk(ask) && mid in BAND_LO..BAND_HI && spread <= MAX_SPREAD + 1e-9 && tauS >= MIN_TAU_ENTRY_S &&
+    /** Default band for [code]. Fade is 40–49¢. Ride stays 40–60¢. A price slider replaces either edge. */
+    fun entryBand(code: String, s: ScalpStrategySettings?): Pair<Double, Double> {
+        val fade = code == FADE_PREFIX || code.startsWith("$FADE_PREFIX-")
+        val lo = if (s != null && s.minEntryCents > 1) s.minEntryCents / 100.0 else BAND_LO
+        val hi = s?.maxEntryCents?.div(100.0) ?: if (fade) FADE_BAND_HI else BAND_HI
+        return lo to maxOf(lo, hi)
+    }
+
+    fun wantsEntry(mid: Double, spread: Double, ask: Double, move: Double, tauS: Double, marginUsd: Double = SAFETY, bandLo: Double = BAND_LO, bandHi: Double = BAND_HI): Boolean =
+        ScalpRule.buyPriceOk(ask) && mid in bandLo..bandHi && spread <= MAX_SPREAD + 1e-9 && tauS >= MIN_TAU_ENTRY_S &&
             move > spread + 2 * ScalpRule.orderFee(1, ask) + marginUsd
 
     /** Exit when the forecast for the held side turns (below one exit fee), flips hard, TP, horizon reached, or close. */

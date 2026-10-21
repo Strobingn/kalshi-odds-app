@@ -26,10 +26,66 @@ object FairGapTune {
 
     /** Winners — unchanged in 1.0.3 (fair-gap family + fair-value research legs + the LLM lane, whose only change is model transparency).
      *  1.0.14: fair-t1/t2 and r-late-t1/t2 copies run their own rules.
+     *  1.0.21: r-late is back on its own 80–95¢ band, so it is not forced through 24–42¢.
      */
-    val KEEP: Set<String> = setOf("fair", "fairh60", "v2-fair", "v2-fairh60", Research.HOLD, Research.KELLY, Research.MAKER, "v2-llm", "fair-t1", "fair-t2", Research.LATE_T1, Research.LATE_T2)
+    val KEEP: Set<String> = setOf("fair", "fairh60", "v2-fair", "v2-fairh60", Research.HOLD, Research.KELLY, Research.MAKER, "v2-llm", "fair-t1", "fair-t2", Research.LATE, Research.LATE_T1, Research.LATE_T2)
+
+    /**
+     * 1.0.21: these keep their own entry rule. The 24–42¢ fair-gap gate does not apply.
+     * sf16–sf31 use [com.dirk.kalshiodds.decision.ShockFav.favEntryOk] (sf31 still checks off-US hours).
+     * fcfade uses its own 40–49¢ band.
+     */
+    val OWN_RULES: Set<String> = setOf(
+        "sf16", "sf17", "sf18", "sf19", "sf20", "sf21", "sf22", "sf23", "sf24", "sf29", "sf31",
+        "fcfade"
+    )
+
+    /** Hold-to-settlement entries need at least this many seconds left. Own-rule late favourites keep their shorter window. */
+    const val SETTLE_MIN_S = 180.0
+
+    /** Untouched fair / fair-t1 / fair-t2 highest buy. A saved slider replaces it. AI learns stays inside [this − 10¢, this]. */
+    const val FAIR_MAX_CENTS = 40
+    val FAIR_MAX_CODES: Set<String> = setOf("fair", "fair-t1", "fair-t2")
+    /** Untouched fairh60 lowest buy. A slider above 1¢ replaces it. */
+    const val FAIRH60_MIN_CENTS = 40
 
     fun isTweaked(code: String?): Boolean = code != null && code !in KEEP
+    fun ownsRules(code: String?): Boolean = code != null && code in OWN_RULES
+    /** 24–42¢ entry gate. Keep and own-rule scalpers are exempt. Exits still use [isTweaked]. */
+    fun entryGated(code: String?): Boolean = isTweaked(code) && !ownsRules(code)
+    /** Late-favourite leg uses the fair-gap ask gate only when this is true. */
+    fun favUsesFairGapGate(code: String?): Boolean = entryGated(code)
+
+    fun defaultMaxCents(code: String?): Int? = if (code != null && code in FAIR_MAX_CODES) FAIR_MAX_CENTS else null
+
+    /** Saved highest-buy wins. Otherwise the 1.0.21 per-code default, or null when this code has none. */
+    fun effectiveMaxCents(code: String?, s: ScalpStrategySettings?): Int? = s?.maxEntryCents ?: defaultMaxCents(code)
+
+    /**
+     * Saved lowest-buy wins once it is off the untouched 1¢. fairh60 with no manual floor buys from 40¢.
+     * Passing a null settings object is the untouched slider.
+     */
+    fun effectiveMinCents(code: String?, s: ScalpStrategySettings?): Int {
+        val min = s?.minEntryCents ?: 1
+        return if (code == "fairh60" && min <= 1) FAIRH60_MIN_CENTS else min
+    }
+
+    /** True when [ask] is outside the effective band. Does not apply time or fair-gap gates. */
+    fun priceBlocked(code: String?, ask: Double, s: ScalpStrategySettings?): Boolean {
+        val min = effectiveMinCents(code, s) / 100.0
+        val max = effectiveMaxCents(code, s)?.div(100.0)
+        return ask < min - 1e-9 || (max != null && ask > max + 1e-9)
+    }
+
+    /**
+     * Own-rule late-favourite legs buy up to their own ask cap (about 95–97¢).
+     * Every other entry stays under the 55¢ hard ceiling.
+     */
+    fun askAllowed(code: String?, ask: Double, favLeg: Boolean): Boolean {
+        if (!ask.isFinite() || ask <= 0.0 || ask > 0.99) return false
+        if (favLeg && ownsRules(code)) return true
+        return ScalpRule.buyPriceOk(ask)
+    }
 
     data class Band(val lo: Double, val hi: Double)
     /** Manual slider overrides the default 24–42¢ band. */
