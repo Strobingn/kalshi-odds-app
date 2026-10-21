@@ -58,6 +58,9 @@ android {
     buildTypes {
         debug {
             signingConfig = signingConfigs.getByName("debug")
+            // Keep the 1.0 release tag stable for installed updaters while
+            // showing the actual Actions run on the device and in Settings.
+            versionNameSuffix = ".${System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: "local"}"
         }
         release {
             isMinifyEnabled = false
