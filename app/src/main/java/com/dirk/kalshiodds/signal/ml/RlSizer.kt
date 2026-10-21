@@ -37,9 +37,15 @@ class RlSizer(
             actionIndex = idx,
             ready = ready,
             note = if (ready) {
-                String.format(java.util.Locale.US, "RL ×%.2f → $%.2f (advisory)", frac, stake)
+                String.format(java.util.Locale.US, "×%.2f → \$%.2f advisory", frac, stake)
             } else {
-                "RL cold — using configured stake"
+                String.format(
+                    java.util.Locale.US,
+                    "\$%.2f warming up (%d/%d)",
+                    stake,
+                    sampleCount,
+                    MIN_SAMPLES
+                )
             }
         )
     }

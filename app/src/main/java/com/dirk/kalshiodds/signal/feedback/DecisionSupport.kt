@@ -140,7 +140,10 @@ class DecisionSupport(
         if (settings.heavyMlEnabled && settings.continualFineTune) {
             scoring.heavy.applySettlements(replay, cal, enabled = true)
         }
-            scoring.extended.learnFromSettlements(replay, enabled = settings.extendedAiEnabled)
+            // Fit conformal + RL from stored settlements even when the extended-AI
+            // master is off. That switch only gates trade blocks. The checklist
+            // still needs a fitted value, or a warming-up count, instead of a dash.
+            scoring.extended.learnFromSettlements(replay, enabled = true)
         persistHeavy()
         persistScorecardRows(settled, settings)
     }

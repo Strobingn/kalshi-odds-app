@@ -469,7 +469,7 @@ class ChecklistTest {
         assertEquals("Uncertainty", items[5].label)
         assertEquals("Survival P(YES)", items[11].label)
         assertEquals("RL stake", items[14].label)
-        assertEquals("—", items[14].value)
+        assertTrue(items[14].value.contains("warming up"))
     }
 
     @Test
@@ -503,7 +503,11 @@ class ChecklistTest {
         assertEquals("—", byLabel["Confidence"])
         assertEquals("—", byLabel["Regime"])
         assertEquals("—", byLabel["TTE"])
-        assertEquals("—", byLabel["RL stake"])
+        assertTrue(byLabel["Uncertainty"]!!.contains("warming up"))
+        assertFalse(byLabel["Survival P(YES)"]!!.contains("—"))
+        assertTrue(byLabel["Conformal"]!!.contains("warming up"))
+        assertFalse(byLabel["P(edge survives)"]!!.contains("—"))
+        assertTrue(byLabel["RL stake"]!!.contains("warming up"))
         byLabel.values.forEach { v ->
             assertTrue("blank checklist value", v.isNotBlank())
         }

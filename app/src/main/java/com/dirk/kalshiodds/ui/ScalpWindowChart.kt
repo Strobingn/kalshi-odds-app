@@ -154,8 +154,8 @@ internal fun ScalpWindowChart(d: ScalpAlgoDetail, onWindow: (String) -> Unit = {
                 }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(windowTime(data.startMs), color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
-                Text(windowTime(data.closeMs) + " ET", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
+                Text(com.dirk.kalshiodds.domain.EtTime.clockSec(data.startMs), color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
+                Text(com.dirk.kalshiodds.domain.EtTime.clockSec(data.closeMs), color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
             }
             Text("○ Buy order   ▲ Buy fill   ■ Sell fill   · Signal", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
             Text("Green UP · red DOWN · both sides. Dashed 50¢ buy ceiling · tap a marker for price and time", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
@@ -171,7 +171,7 @@ internal fun ScalpWindowChart(d: ScalpAlgoDetail, onWindow: (String) -> Unit = {
             }
             selectedMarker?.let { m ->
                 val sideName = if (m.side.equals("NO", true)) "DOWN" else "UP"
-                Text("$sideName · ${markerName(m.kind)} · ${m.qty.takeIf { it > 0 }?.let { "$it ct · " }.orEmpty()}${ScalpTabCopy.cents(m.price)} · ${windowTime(m.recordedAtMs)} ET", color = c.textPrimary, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall)
+                Text("$sideName · ${markerName(m.kind)} · ${m.qty.takeIf { it > 0 }?.let { "$it ct · " }.orEmpty()}${ScalpTabCopy.cents(m.price)} · ${com.dirk.kalshiodds.domain.EtTime.clockSec(m.recordedAtMs)}", color = c.textPrimary, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall)
             }
             data.error?.let { Text(it, color = c.down, style = MaterialTheme.typography.bodySmall) }
             WindowPaperPnl(data)

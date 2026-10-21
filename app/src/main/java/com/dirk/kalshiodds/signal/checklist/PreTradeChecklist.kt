@@ -16,13 +16,33 @@ object PreTradeChecklist {
     )
 
     fun items(market: MarketUiModel): List<Item> {
-        val likely = HomeCardDetails.likelySideLabel(market) ?: "—"
-        val value = HomeCardDetails.valueSideLine(market)?.removePrefix("Value side: ") ?: "—"
-        val size = market.suggestedContracts?.let { "$it contracts max" } ?: "—"
-        val net = market.netEdgePp?.let { String.format(Locale.US, "%+.1f pp", it) }
-            ?: market.edgePp?.let { String.format(Locale.US, "%+.1f pp raw", it) }
+        val likely = HomeCardDetails.likelySideLabel(market)?.let { "$it (model)" } ?: "—"
+        val valueBase = HomeCardDetails.valueSideLine(market)?.removePrefix("Value side: ")
+        val gap = valueGapPp(market)
+        val value = when {
+            valueBase == null -> "—"
+            gap != null -> String.format(Locale.US, "%s (%+.1f pp vs ask)", valueBase, gap)
+            else -> valueBase
+        }
+        val side = ChecklistAdvisors.tradedSide(market.predictedSide)
+        val onSide = side?.let { " on $it" }.orEmpty()
+        val size = when (val n = market.suggestedContracts) {
+            null -> "—"
+            0 -> {
+                val netPp = market.netEdgePp
+                if (netPp == null || netPp <= 0.0) {
+                    val why = side?.let { "$it net ≤ 0" } ?: "net ≤ 0"
+                    "0 contracts ($why)"
+                } else {
+                    "0 contracts (Kelly rounds to 0)"
+                }
+            }
+            else -> "$n contracts max"
+        }
+        val net = market.netEdgePp?.let { String.format(Locale.US, "%+.1f pp%s", it, onSide) }
+            ?: market.edgePp?.let { String.format(Locale.US, "%+.1f pp raw%s", it, onSide) }
             ?: "—"
-        val conf = market.aiConfidence?.let { String.format(Locale.US, "%.0f%%", it * 100.0) } ?: "—"
+        val conf = market.aiConfidence?.let { String.format(Locale.US, "%.0f%% (signal)", it * 100.0) } ?: "—"
         val regime = orDash(market.regimeTag)
         val tte = orDash(market.tteRegimeLabel)
         val skip = when {
@@ -30,13 +50,17 @@ object PreTradeChecklist {
             !market.passedFilter -> market.skipReason ?: "filtered"
             else -> "cleared"
         }
-        val unc = market.uncertainty?.let { String.format(Locale.US, "%.2f%s", it, if (market.uncertaintyPassed) "" else " GATE") } ?: "—"
+        val unc = ChecklistAdvisors.uncertaintyText(
+            market.uncertainty,
+            market.uncertainty == null || market.uncertaintyPassed,
+            market.uncertaintyMethod
+        )
         val ttm = market.timeToMoveSec?.let { String.format(Locale.US, "%.0fs", it) } ?: "—"
         val fill = market.pFill?.let { String.format(Locale.US, "%.0f%%", it * 100.0) } ?: "—"
-        val surv = market.survivalYesPp?.let { String.format(Locale.US, "%.0f%%", it) } ?: "—"
-        val confSet = orDash(market.conformalSet)
-        val path = market.pathSurvive?.let { String.format(Locale.US, "%.0f%%", it * 100.0) } ?: "—"
-        val rl = orDash(market.rlNote)
+        val surv = ChecklistAdvisors.survivalText(market.survivalYesPp, market)
+        val confSet = ChecklistAdvisors.conformalText(market)
+        val path = ChecklistAdvisors.pathText(market.pathSurvive, market)
+        val rl = ChecklistAdvisors.rlText(market.rlNote)
         return listOf(
             Item("Likely side", likely),
             Item("Value side", value),
@@ -57,45 +81,32 @@ object PreTradeChecklist {
     }
 
     fun copyText(market: MarketUiModel): String {
-        val likely = HomeCardDetails.likelySideLabel(market) ?: "—"
-        val value = HomeCardDetails.valueSideLine(market) ?: "—"
-        val size = market.suggestedContracts ?: 0
         val netEv = market.netEvDollars?.let { String.format(Locale.US, "%+.3f $/ct", it) } ?: "—"
-        val netPp = market.netEdgePp?.let { String.format(Locale.US, "%+.1f pp", it) } ?: "—"
         val raw = market.edgePp?.let { String.format(Locale.US, "%+.1f pp", it) } ?: "—"
-        val conf = market.aiConfidence?.let { String.format(Locale.US, "%.0f%%", it * 100.0) } ?: "—"
-        val skip = when {
-            market.muted -> "MUTED (${market.muteReason ?: "allowlist"})"
-            !market.passedFilter -> "FILTERED (${market.skipReason ?: "weak"})"
-            else -> "cleared"
-        }
         return buildString {
             appendLine("Dip Hunter checklist (advisory — no order)")
             appendLine("Ticker: ${market.ticker}")
-            appendLine("Likely side: $likely")
-            appendLine("Value side: $value")
-            appendLine("Suggested size: $size contracts max")
-            appendLine("Net EV: $netEv ($netPp)")
+            items(market).forEach { appendLine("${it.label}: ${it.value}") }
+            appendLine("Net EV $/ct: $netEv")
             appendLine("Raw edge: $raw")
-            appendLine("Confidence: $conf")
-            market.uncertainty?.let {
-                appendLine("Uncertainty: ${String.format(Locale.US, "%.2f", it)}${if (market.uncertaintyPassed) "" else " (gated)"}")
-            }
-            market.timeToMoveSec?.let { appendLine("Time-to-move: ${String.format(Locale.US, "%.0fs", it)}") }
-            market.midVolPp?.let { appendLine("Mid vol: ${String.format(Locale.US, "%.1fpp", it)}") }
-            market.pFill?.let { appendLine("P(fill): ${String.format(Locale.US, "%.0f%%", it * 100.0)}") }
-            appendLine("Regime: ${market.regimeTag ?: "—"}")
-            market.sessionTag?.let { appendLine("Session: $it") }
-            appendLine("TTE: ${market.tteRegimeLabel ?: "—"}")
-            market.survivalYesPp?.let { appendLine("Survival P(YES): ${String.format(Locale.US, "%.0f%%", it)}") }
-            market.conformalSet?.let { appendLine("Conformal: $it${if (market.conformalAmbiguous) " (ambiguous)" else ""}") }
-            market.pathSurvive?.let { appendLine("P(edge survives): ${String.format(Locale.US, "%.0f%%", it * 100.0)}") }
-            market.rlNote?.let { appendLine("RL stake (advisory): $it") }
             market.metaNote?.let { appendLine("Meta: $it") }
             market.anomalyNote?.let { appendLine("Anomaly: $it") }
-            appendLine("Skip filter: $skip")
             HomeCardDetails.stanceLine(market)?.let { appendLine("Stance: $it") }
         }.trim()
+    }
+
+    /**
+     * Model probability of the underpriced side, minus that side's ask, in percentage points.
+     * Separate from Net EV, which is the sized side after the fee and half-spread.
+     */
+    fun valueGapPp(market: MarketUiModel): Double? {
+        val yes = HomeCardDetails.modelYesPercent(market) ?: return null
+        val ask = HomeCardDetails.valueAskCents(market) ?: return null
+        return when (HomeCardDetails.valueSide(market)) {
+            "UP" -> yes - ask
+            "DOWN" -> (100.0 - yes) - ask
+            else -> null
+        }
     }
 
     fun compactLine(items: List<Item>): String =

@@ -52,7 +52,7 @@ object ScalpCopy {
                     Locale.US,
                     "%s · %s %s ×%d · in %.0f¢ out avg %.1f¢ · fees $%.2f · net %+.2f USD · hold %ds · %s",
                     t.algoLabel, t.ticker, t.side, t.contracts, (t.entryPrice ?: 0.0) * 100,
-                    if (t.contracts > 0) t.proceedsUsd / t.contracts * 100 else 0.0,
+                    if (t.soldContracts > 0) t.proceedsUsd / t.soldContracts * 100 else 0.0,
                     t.entryFeeUsd + t.exitFeeUsd, t.netUsd ?: 0.0, ((t.holdMs ?: 0L) / 1000L).toInt(), t.exitReason ?: ""
                 )
             }

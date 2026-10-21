@@ -83,6 +83,12 @@ class ScoringEngineTest {
         assertNotNull(score)
         assertTrue(score!!.marketMidPp in 20.0..23.0)
         assertTrue(score.reason.contains("Δ"))
+        assertNotNull(score.uncertainty)
+        assertNotNull(score.uncertaintyMethod)
+        assertTrue(score.survivalYesPp!!.isFinite())
+        assertTrue(score.conformalSet!!.contains("{"))
+        assertTrue(score.pathSurvive!!.isFinite())
+        assertTrue(score.rlNote!!.contains("warming up") || score.rlNote!!.contains("advisory"))
     }
 
     @Test

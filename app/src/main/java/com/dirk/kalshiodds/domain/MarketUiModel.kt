@@ -65,6 +65,8 @@ data class MarketUiModel(
     val adapterReady: Boolean = false,
     val uncertainty: Double? = null,
     val uncertaintyPassed: Boolean = true,
+    /** How [uncertainty] was computed: ensemble, single-proxy, cold, fail-soft. */
+    val uncertaintyMethod: String? = null,
     val timeToMoveSec: Double? = null,
     val midVolPp: Double? = null,
     val pFill: Double? = null,
@@ -246,6 +248,7 @@ fun MarketUiModel.withSignalScore(
         adapterReady = score.adapterReady,
         uncertainty = score.uncertainty,
         uncertaintyPassed = score.uncertaintyPassed,
+        uncertaintyMethod = score.uncertaintyMethod,
         timeToMoveSec = score.timeToMoveSec,
         midVolPp = score.midVolPp,
         pFill = score.pFill,

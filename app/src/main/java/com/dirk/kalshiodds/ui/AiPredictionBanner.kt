@@ -60,7 +60,7 @@ fun AiPredictionBanner(f: AiDirection.Forecast, modifier: Modifier = Modifier) {
         Column(Modifier.weight(1f)) {
             Text(AiDirection.label(f), color = if (f.call == AiDirection.Call.NONE) c.textSecondary else tint,
                 style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            Text(listOfNotNull(f.confidence?.let { "${Math.round(it * 100)}% confidence" }, AiDirection.timeLeft(f.secondsLeft)).joinToString(" · "),
+            Text(listOfNotNull(AiDirection.confidenceLabel(f), AiDirection.timeLeft(f.secondsLeft)).joinToString(" · "),
                 color = c.textPrimary, style = MaterialTheme.typography.bodyMedium)
             Text("BTC 15-min window · on-phone model (paper)", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
         }

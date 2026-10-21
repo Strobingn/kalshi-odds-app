@@ -34,7 +34,7 @@ internal fun ArenaProfitChart(points: List<KashiArenaData.Point>, compact: Boole
         val p = points[selected ?: points.lastIndex]
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(ScalpTabCopy.money(p.net), style = ArenaUi.mono(MaterialTheme.typography.titleLarge), color = pnlColor(p.net))
-            Text(if (selected == null) "Drag to read" else windowTime(p.atMs), color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
+            Text(if (selected == null) "Drag to read" else com.dirk.kalshiodds.domain.EtTime.clockSec(p.atMs), color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
         }
     }
     Canvas(Modifier.fillMaxWidth().height(if (compact) 40.dp else 180.dp)

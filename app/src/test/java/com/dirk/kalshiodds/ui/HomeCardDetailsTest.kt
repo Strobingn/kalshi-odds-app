@@ -128,7 +128,7 @@ class HomeCardDetailsTest {
         assertFalse(checklist.any { it.label == "Likely side" && it.value.contains("UP") })
         assertFalse(checklist.any { it.label == "Likely side" && it.value.contains("YES") })
         assertEquals("Likely side", checklist[0].label)
-        assertEquals("DOWN 61%", checklist[0].value)
+        assertEquals("DOWN 61% (model)", checklist[0].value)
         assertEquals("Value side", checklist[1].label)
         assertTrue(checklist[1].value.contains("UP"))
         assertEquals(

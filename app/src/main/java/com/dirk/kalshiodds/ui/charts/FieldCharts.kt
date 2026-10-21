@@ -66,9 +66,12 @@ data class LineSeries(
 )
 
 
-/** Bare "1:52 PM" for axis ticks; the axis and tooltips carry the "ET" label. */
+/** Bare "1:52 PM" for callers that add the zone themselves. */
 fun chartClock(ms: Long): String = com.dirk.kalshiodds.domain.EtTime.clockBare(ms)
 fun chartDayClock(ms: Long): String = com.dirk.kalshiodds.domain.EtTime.shortDateClockBare(ms)
+
+/** Axis ticks and drag readouts always carry the Eastern label. */
+internal fun withEt(label: String): String = if (label.contains("ET")) label else "$label ET"
 
 @Composable
 fun ChartBlock(title: String, subtitle: String, content: @Composable () -> Unit) {
@@ -131,7 +134,7 @@ fun MultiLineChart(
         drawn.joinToString("   ") { s ->
             val nearest = s.points.minBy { abs(it.tMs - at) }
             "${s.name} ${yFormat(nearest.value)}"
-        } + " · " + xFormat(at)
+        } + " · " + withEt(xFormat(at))
     }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(
@@ -192,9 +195,9 @@ fun MultiLineChart(
                 drawLine(c.textSecondary.copy(alpha = 0.45f), Offset(left, yOf(0.0)), Offset(left + plotW, yOf(0.0)), 1.dp.toPx())
             }
             label.textAlign = Paint.Align.LEFT
-            drawContext.canvas.nativeCanvas.drawText(xFormat(t0), left, size.height - 4.dp.toPx(), label)
+            drawContext.canvas.nativeCanvas.drawText(withEt(xFormat(t0)), left, size.height - 4.dp.toPx(), label)
             label.textAlign = Paint.Align.RIGHT
-            drawContext.canvas.nativeCanvas.drawText(xFormat(t1) + " ET", left + plotW, size.height - 4.dp.toPx(), label)
+            drawContext.canvas.nativeCanvas.drawText(withEt(xFormat(t1)), left + plotW, size.height - 4.dp.toPx(), label)
             drawn.forEach { s -> drawSeries(s, ::xOf, ::yOf) }
             if (scrub in 0..100) {
                 val at = t0 + (t1 - t0) * scrub / 100

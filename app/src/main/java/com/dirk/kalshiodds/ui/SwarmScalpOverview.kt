@@ -73,9 +73,9 @@ internal fun SwarmScalpCurve(windows: List<ScalpModels.WindowRow>, v2: Boolean, 
                 drawPath(path, c.textPrimary, style = Stroke(3.dp.toPx()))
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                fun label(at: Long) = com.dirk.kalshiodds.domain.EtTime.dateClockBare(at)
+                fun label(at: Long) = com.dirk.kalshiodds.domain.EtTime.dateClock(at)
                 Text(label(times.first()), style = MaterialTheme.typography.labelSmall, color = c.textSecondary)
-                Text(label(times.last()) + " ET", style = MaterialTheme.typography.labelSmall, color = c.textSecondary)
+                Text(label(times.last()), style = MaterialTheme.typography.labelSmall, color = c.textSecondary)
             }
             Text("Starts at $0 for this range; excludes current-window and open P&L. Each point is the recorded result for that contract window.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
         }
