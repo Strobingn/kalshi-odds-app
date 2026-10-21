@@ -772,9 +772,11 @@ fun SettingsContent(
             ToggleRow("Paper trading (AI Kelly auto-fills)", s.paperTradingEnabled, { viewModel?.setPaperTrading(it) })
             ToggleRow("AI paper autopilot", s.aiPaperAutopilotEnabled, { viewModel?.setAiPaperAutopilot(it) })
             Text(
-                "When on (default), Autopilot looks for +EV after fees on either side, sized by half-Kelly " +
-                    "on the paper bankroll (no dollar cap; book-depth cap still applies). Flip-chance still blocks " +
-                    "lottery prints. Off = no AI paper or shadow bets. Manual Paper UP/DOWN still works.",
+                "When on (default), Autopilot looks for +EV after fees on UP, DOWN, or both in the same window. " +
+                    "Each side has to pass its own edge, fee, and flip-chance gates. There is no per-window bet cap " +
+                    "(unlimited). Size is half-Kelly on the free paper bankroll — cash not already in open fills — " +
+                    "and on displayed depth that earlier fills in that window already used. " +
+                    "Off = no AI paper or shadow bets. Manual Paper UP/DOWN still works.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )

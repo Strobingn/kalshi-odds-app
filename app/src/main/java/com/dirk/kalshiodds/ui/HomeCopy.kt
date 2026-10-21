@@ -236,7 +236,7 @@ object HomeCopy {
     fun paperPositionLine(fill: PaperFill?): String? = PaperTileBuy.positionLine(fill)
 
     fun paperPositionLine(paper: PaperBookState, ticker: String): String? =
-        PaperTileBuy.positionLine(PaperTileBuy.openFill(paper, ticker))
+        PaperTileBuy.positionLine(paper, ticker)
 
     fun paperConfirmSnackbar(side: String, sized: TenDollarWins): String =
         PaperTileBuy.confirmMessage(side, sized)

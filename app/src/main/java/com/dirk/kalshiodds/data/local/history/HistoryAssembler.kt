@@ -104,7 +104,7 @@ object HistoryAssembler {
                 ticker = f.ticker,
                 side = f.side,
                 contracts = f.contracts,
-                price = f.limitPrice,
+                price = f.shownPrice(),
                 stakeUsd = f.stakeUsd,
                 source = "paper",
                 result = paperResult(f),

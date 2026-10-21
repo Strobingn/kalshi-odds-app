@@ -11,9 +11,10 @@ import kotlinx.coroutines.launch
 import java.util.Locale
 
 /**
- * The single PAPER "LLM" strategy. At most ONE LLM call per BTC 15-minute window, in the first 3 minutes.
- * The LLM only proposes YES/NO/SKIP + confidence; code enforces every hard rule around it ([ScalpBook.llmEntry]
- * + the V2 lane: ask ≤ 55¢, window start only, 3¢ trail below peak bid, no hold to close unless > 95% confidence).
+ * The single PAPER "LLM" strategy. It may decide again through the open BTC window, except the last 60 seconds.
+ * Automatic calls run only when "AI calls on its own" is on, and only on a free provider
+ * (Mistral ministral-8b-latest, Groq, Gemini), paced to that provider's quota. A paid model never calls itself.
+ * The LLM only proposes YES/NO/SKIP + confidence; code enforces every hard rule around it.
  * Output only ever creates a paper ScalpTrade — there is no path from here to the real-order client.
  */
 class LlmPaperStrategy(
@@ -41,44 +42,44 @@ class LlmPaperStrategy(
         call = { messages -> perform(messages) },
         place = { q, side, conf -> book.llmEntry(q, side, conf) },
         onUsage = onUsage,
-        onCall = { id, dir, conf -> onCall?.invoke(id, dir, conf) }
+        onCall = { id, dir, conf -> onCall?.invoke(id, dir, conf) },
+        freeProvider = { LlmProviders.freeFamily(endpoint().provider, endpoint().model) }
     )
 
     fun start(scope: CoroutineScope) = scope.launch {
         while (isActive) {
             runCatching { loop.tick()?.let { _status.value = it } }
                 .onFailure { _status.value = "error (${settings.model}, no fallback model): ${it.message?.take(120)}" }
-            // Built-in paper strategy. Not the chat LLM's 60s cap; still one decision per window.
+            // Built-in paper strategy. Not the chat LLM's 60s cap. Decisions repeat through the window.
             delay(15_000)
         }
     }
 
     private fun perform(messages: List<Pair<String, String>>): Pair<LlmEndpoint, LlmClient.Reply>? {
         val ep = endpoint()
-        if (LlmProviders.freeFamily(ep.provider, ep.model)) {
-            return AiAutoCalls.callFree(
-                selected = ep,
-                slots = alternates(),
-                pacer = pacer,
-                nowMs = System.currentTimeMillis(),
-                messages = messages,
-                reserveCompletion = 20,
-                quotaOf = { ep ->
-                    if (!MonthlyTokenCaps.room(ep.provider, LlmPrices.monthKey(System.currentTimeMillis()))) null
-                    else quotaOf(ep)
-                },
-                allowed = { autoCalls() && LlmProviders.freeFamily(it.provider, it.model) },
-                ask = { use, msgs -> client.chatReply(msgs, 20, use, automatic = true) },
-                onBilling = onBilling
-            )
-        }
-        return ep to client.chatReply(messages, 20, ep, automatic = true)
+        if (!LlmProviders.freeFamily(ep.provider, ep.model)) return null
+        return AiAutoCalls.callFree(
+            selected = ep,
+            slots = alternates(),
+            pacer = pacer,
+            nowMs = System.currentTimeMillis(),
+            messages = messages,
+            reserveCompletion = 20,
+            quotaOf = { ep ->
+                if (!MonthlyTokenCaps.room(ep.provider, LlmPrices.monthKey(System.currentTimeMillis()))) null
+                else quotaOf(ep)
+            },
+            allowed = { autoCalls() && LlmProviders.freeFamily(it.provider, it.model) },
+            ask = { use, msgs -> client.chatReply(msgs, 20, use, automatic = true) },
+            onBilling = onBilling
+        )
     }
 
     companion object {
         const val LLM_OPEN_MIN = 3.0
-        /** Mid-window the paper strategy waits; the live feed on the card is still running. */
-        const val PAST_OPEN_STATUS = "watching this window; next paper decision when the next window opens. Live feed still running."
+        /** Last minute of the window: no new paper decision. The live feed on the card is still running. */
+        const val PAST_OPEN_STATUS = "watching this window; paper decisions pause in the last 60 seconds. Live feed still running."
+        const val FREE_ONLY_STATUS = "automatic calls stay on free providers only (Mistral, Groq, Gemini)"
         const val STRATEGY_PROMPT = "Kalshi BTC 15-minute market %s. Strike %.2f, BTC spot %.2f, minutes left %.1f. YES bid/ask %s/%s. Model fair YES %s. " +
             "Paper trade only. Rules: buy at most 55c, 3c trailing stop. Reply ONE line: 'YES <conf 0-1>' or 'NO <conf 0-1>' or 'SKIP'."
         fun parse(reply: String): Pair<String, Double>? {
@@ -89,7 +90,8 @@ class LlmPaperStrategy(
 }
 
 /**
- * One paper decision per window, and no provider call when automatic calls are off.
+ * Repeated paper decisions through the window, except the last 60 seconds.
+ * No provider call when automatic calls are off, and never an automatic paid call.
  * A free-tier pace miss does not consume the window. History of the last decision window is kept.
  */
 internal class LlmPaperLoop(
@@ -99,18 +101,18 @@ internal class LlmPaperLoop(
     private val call: (List<Pair<String, String>>) -> Pair<LlmEndpoint, LlmClient.Reply>?,
     private val place: (ScalpRule.Quote, String, Double) -> String?,
     private val onUsage: (LlmEndpoint, LlmClient.Reply) -> Unit,
-    private val onCall: (String, String, Double) -> Unit
+    private val onCall: (String, String, Double) -> Unit,
+    private val freeProvider: () -> Boolean = { true }
 ) {
     var lastWindow: String? = null
 
-    /** Null means the visible status stays as it was (same window, already decided). */
+    /** Null means the visible status stays as it was (pace miss or overlap). */
     fun tick(): String? {
         if (!autoCalls()) return AiAutoCalls.PAUSED
         if (!hasKey()) return "needs key"
+        if (!freeProvider()) return LlmPaperStrategy.FREE_ONLY_STATUS
         val q = quote() ?: return "idle: no BTC quote"
-        val minuteIn = 15.0 - q.tauS / 60.0
-        if (q.ticker == lastWindow) return null
-        if (minuteIn > LlmPaperStrategy.LLM_OPEN_MIN) return LlmPaperStrategy.PAST_OPEN_STATUS
+        if (q.tauS <= 60.0) return LlmPaperStrategy.PAST_OPEN_STATUS
         val prompt = String.format(Locale.US, LlmPaperStrategy.STRATEGY_PROMPT,
             q.ticker, q.strike ?: 0.0, q.spot ?: 0.0, q.tauS / 60, q.yesBid?.let { "%.2f".format(Locale.US, it) } ?: "-", q.yesAsk?.let { "%.2f".format(Locale.US, it) } ?: "-",
             q.fair("YES")?.let { "%.2f".format(Locale.US, it) } ?: "-")

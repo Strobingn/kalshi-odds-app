@@ -134,20 +134,17 @@ class KnownIssuesRegressionTest {
             note = "open paper fill"
         )
         assertTrue(paperOnX.ok)
-        assertTrue(
-            book.snapshot().lastMessage!!.contains("Already have an open paper fill") ||
-                book.snapshot().fills.any { !it.settled && it.ticker == ticker }
-        )
+        assertTrue(book.snapshot().fills.any { !it.settled && it.ticker == ticker })
         val secondPaper = book.explicitFill(
             ticker = ticker,
             side = "YES",
             limitPrice = 0.25,
             wantContracts = 5,
             source = "paper",
-            note = "duplicate paper"
+            note = "second paper fill"
         )
-        assertFalse("paper duplicate-order check is paper-only", secondPaper.ok)
-        assertTrue(secondPaper.message.contains("open paper fill"))
+        assertTrue("a second paper fill on the same ticker is allowed", secondPaper.ok)
+        assertEquals(2, book.snapshot().fills.count { !it.settled && it.ticker == ticker })
 
         val http = AtomicInteger(0)
         val liveSession = TicketSession(

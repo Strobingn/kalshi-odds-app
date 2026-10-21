@@ -511,8 +511,10 @@ object ScorecardCopy {
         val side = if (fill.side.equals("NO", true)) "DOWN" else "UP"
         val fee = ScorecardLedger.feeUsd(fill)
         val time = WindowLabel.of(fill.ticker, fill.createdAtMs)
-        val ask = fill.limitPrice.takeIf { it > 0.0 }?.let {
-            String.format(Locale.US, "%.0f¢", it * 100.0)
+        val shown = fill.shownPrice()
+        val ask = shown.takeIf { it > 0.0 }?.let {
+            if (fill.outcome.equals("sell", true)) com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(it)
+            else String.format(Locale.US, "%.0f¢", it * 100.0)
         } ?: EM_DASH
         val ai = fill.aiPct?.let { String.format(Locale.US, "AI %.0f%%", it) } ?: "AI $EM_DASH"
         val ev = fill.evUsd?.let { String.format(Locale.US, "EV $%.2f", it) } ?: "EV $EM_DASH"
