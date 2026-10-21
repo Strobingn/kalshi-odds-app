@@ -2,11 +2,13 @@ package com.dirk.kalshiodds.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
@@ -27,6 +29,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.domain.KalshiQuoteDisplay
@@ -59,8 +62,13 @@ fun ScalpScreen(
         V3LabScreen(
             state = state.v3,
             onBack = onBack,
-            onOpenArena = { activeTab = 0 }
+            onOpenArena = { activeTab = 0 },
+            onOpenChat = { activeTab = 2 }
         )
+        return
+    }
+    if (activeTab == 2) {
+        PaperChatScreen(state, onBack, onSelectTab = { activeTab = it })
         return
     }
     val colors = DipTheme.colors
@@ -132,6 +140,10 @@ fun ScalpScreen(
         }
 
         item {
+            ScalpPerformanceChart(scorecards)
+        }
+
+        item {
             SectionTitle("Model scoreboard", "Current paper run · realized outcomes only, not a profit forecast")
         }
         items(scorecards, key = { it.track.formulaVersion }) { scorecard ->
@@ -187,6 +199,44 @@ fun ScalpScreen(
         } else {
             items(archivedScalps, key = { "${it.archivedAtMs}-${it.fill.id}" }) { archived ->
                 ScalpFillCard(archived.fill, archivedAtMs = archived.archivedAtMs)
+            }
+        }
+    }
+}
+
+/** After-fee realized paper results, with the sample size visible for every track. */
+@Composable
+private fun ScalpPerformanceChart(scorecards: List<ScalpTrackScore>) {
+    val colors = DipTheme.colors
+    val maximum = scorecards.maxOfOrNull { kotlin.math.abs(it.realizedPnlUsd) }?.coerceAtLeast(0.01) ?: 0.01
+    Column(
+        modifier = Modifier.fillMaxWidth()
+            .border(1.dp, colors.border, RoundedCornerShape(18.dp))
+            .background(colors.surface, RoundedCornerShape(18.dp))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text("Strategy paper P&L", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary, fontWeight = FontWeight.Bold)
+        Text("Realized after fees · current run · open and void trades excluded. Small samples do not establish an edge.", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+        scorecards.sortedByDescending { it.realizedPnlUsd }.forEach { score ->
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(score.track.label, color = colors.textPrimary, style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
+                    Text(
+                        if (score.settled == 0) "No settled trades" else String.format(Locale.US, "%+.2f USD · %d settled", score.realizedPnlUsd, score.settled),
+                        color = colors.textSecondary, style = MaterialTheme.typography.labelSmall
+                    )
+                }
+                Canvas(Modifier.fillMaxWidth().height(8.dp)) {
+                    val center = size.width / 2f
+                    drawLine(colors.border, Offset(center, 0f), Offset(center, size.height), 1f)
+                    if (score.settled > 0) {
+                        val length = (kotlin.math.abs(score.realizedPnlUsd) / maximum).toFloat().coerceIn(0f, 1f) * center
+                        val start = if (score.realizedPnlUsd >= 0.0) center else center - length
+                        drawLine(if (score.realizedPnlUsd >= 0.0) colors.up else colors.down,
+                            Offset(start, size.height / 2f), Offset(start + length, size.height / 2f), size.height * 0.65f)
+                    }
+                }
             }
         }
     }
@@ -559,7 +609,7 @@ private data class ScalpTrackScore(
                 open = fills.count { !it.settled },
                 settled = settled.size,
                 wins = settled.count { it.won == true },
-                realizedPnlUsd = fills.mapNotNull { it.pnlUsd }.sum(),
+                realizedPnlUsd = settled.mapNotNull { it.pnlUsd }.sum(),
                 review = ScalpReview.assess(fills)
             )
         }

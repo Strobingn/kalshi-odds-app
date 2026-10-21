@@ -68,6 +68,7 @@ data class OddsUiState(
     val paper: PaperBookState = PaperBookState(),
     /** V3 is a local, shadow-only scorecard and never an order route. */
     val v3: V3ShadowState = V3ShadowState(),
+    val paperAiReview: String = "Waiting for paper trading and a saved provider key.",
     val positions: List<LivePosition> = emptyList(),
     val positionsNote: String? = null,
     /** Live Kalshi cash from GET /portfolio/balance, if the key can read it. */
@@ -89,6 +90,9 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     private val prefs = container.preferences
     private val ticketSession = container.tickets
     private val paperBook = container.paper.book
+    private val paperTuning = com.dirk.kalshiodds.llm.PaperTuning(application)
+    private val paperChatKeys = com.dirk.kalshiodds.llm.PaperChatKeys(application)
+    private val paperChat = com.dirk.kalshiodds.llm.PaperChatClient()
     private val v3Book = container.v3.book
 
     private val _state = MutableStateFlow(OddsUiState(isLoading = true))
@@ -121,6 +125,30 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     init {
         ticketSession.onStart()
         _state.update { it.copy(paper = paperBook.snapshot(), v3 = v3Book.snapshot()) }
+        viewModelScope.launch {
+            while (isActive) {
+                val reviewStart = android.os.SystemClock.elapsedRealtime()
+                try {
+                    val s = _state.value
+                    val market = s.snapshot?.allMarkets?.firstOrNull {
+                        it.ticker.startsWith("KXBTC15M", true) && (it.closeTimeEpochMs ?: 0L) > System.currentTimeMillis()
+                    }
+                    if (s.settings.paperTradingEnabled && market != null) {
+                        val provider = withContext(Dispatchers.IO) { paperChatKeys.selectedProvider() }
+                        val anyKey = withContext(Dispatchers.IO) { com.dirk.kalshiodds.llm.PaperChatProvider.values().any { paperChatKeys.load(it) != null } }
+                        if (anyKey) {
+                            val fills = paperBook.snapshot().fills
+                            val snapshot = "Time ${System.currentTimeMillis()}; current 15m ticker=${market.ticker}; close=${market.closeTimeEpochMs}; YES=${market.yesProbabilityPercent}%.\n" + withContext(Dispatchers.Default) { paperTuning.snapshot(fills) }
+                            val response = paperChat.askWithFallback(paperChatKeys, provider, "Review the active 15-minute window and negative after-fee paper tracks. Propose only evidence-supported paper exit adjustments.", snapshot)
+                            val result = withContext(Dispatchers.IO) { paperTuning.applyResponse(response.text, fills, automatic = true) }
+                            _state.update { it.copy(paperAiReview = "Last review ${System.currentTimeMillis()} (${response.provider.label}): $result") }
+                        }
+                    }
+                } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                catch (_: Exception) { _state.update { it.copy(paperAiReview = "Paper review failed; check provider key, connection, plan, or rate limits.") } }
+                delay((60_000L - (android.os.SystemClock.elapsedRealtime() - reviewStart)).coerceAtLeast(1_000L))
+            }
+        }
         viewModelScope.launch {
             runCatching {
                 ticketSession.state.collect { tickets ->
@@ -863,7 +891,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 fill = marked,
                 executableBid = bid,
                 fairSideProbability = fairSide,
-                nowMs = nowMs
+                nowMs = nowMs,
+                settings = paperTuning.settings(marked.strategyVersion)
             ) ?: return@forEach
             paperBook.autoSell(marked.id, exit.bid, exit.reason)
         }

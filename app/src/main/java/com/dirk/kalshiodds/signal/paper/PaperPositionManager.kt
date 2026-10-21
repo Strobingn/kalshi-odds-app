@@ -13,9 +13,11 @@ object PaperPositionManager {
     // and cut a net one-cent loss. These are exit controls only; SCALP entries
     // remain unrestricted and never route a real Kalshi order.
     private const val MIN_HOLD_MS = 0L
-    private const val TRAILING_RETRACE = 0.005
-    private const val FAIR_VALUE_EXIT_BUFFER = 0.005
-    private const val MAX_NET_LOSS_PER_CONTRACT = 0.01
+    data class ExitSettings(
+        val trailingRetrace: Double = 0.005,
+        val fairValueBuffer: Double = 0.005,
+        val maxNetLossPerContract: Double = 0.01
+    )
 
     data class Decision(val bid: Double, val reason: String)
 
@@ -23,7 +25,8 @@ object PaperPositionManager {
         fill: PaperFill,
         executableBid: Double?,
         fairSideProbability: Double?,
-        nowMs: Long
+        nowMs: Long,
+        settings: ExitSettings = ExitSettings()
     ): Decision? {
         if (fill.settled || !fill.source.startsWith("AI ") || nowMs - fill.createdAtMs < MIN_HOLD_MS) return null
         val bid = KalshiPrice.usable(executableBid) ?: return null
@@ -31,14 +34,14 @@ object PaperPositionManager {
         val entryPerContract = (fill.stakeUsd + fill.feeUsd) / fill.contracts.toDouble()
         val netGain = bid - feePerContract - entryPerContract
         val high = fill.highWaterMarkPrice.takeIf { it > 0.0 } ?: fill.limitPrice
-        if (netGain <= -MAX_NET_LOSS_PER_CONTRACT) {
+        if (netGain <= -settings.maxNetLossPerContract) {
             return Decision(bid, "loss cut: net ${pct(netGain)} per contract")
         }
         val fair = fairSideProbability?.takeIf { it.isFinite() && it in 0.0..1.0 }
-        if (fair != null && fair + FAIR_VALUE_EXIT_BUFFER <= bid) {
+        if (fair != null && fair + settings.fairValueBuffer <= bid) {
             return Decision(bid, "model fair ${pct(fair)} is below executable bid ${pct(bid)}")
         }
-        if (netGain > 0.0 && high - bid >= TRAILING_RETRACE) {
+        if (netGain > 0.0 && high - bid >= settings.trailingRetrace) {
             return Decision(bid, "trailing exit: peak ${pct(high)} → bid ${pct(bid)}")
         }
         return null

@@ -61,7 +61,12 @@ object V3ShadowExperiment {
     fun evaluate(market: MarketUiModel, nowMs: Long = System.currentTimeMillis()): Evaluation? {
         if (!market.ticker.uppercase().startsWith("KXBTC15M")) return null
         val mid = market.yesProbabilityPercent?.div(100.0)?.takeIf { it in 0.0..1.0 } ?: return null
+        // Drop inactive windows instead of retaining one deque for every market forever.
+        samples.entries.removeAll { (_, values) ->
+            values.lastOrNull()?.let { nowMs - it.atMs > 45_000L } != false
+        }
         val history = samples.getOrPut(market.ticker.uppercase()) { ArrayDeque() }
+        if (history.lastOrNull()?.atMs?.let { nowMs < it } == true) history.clear()
         val spot = market.spotUsd?.takeIf { it.isFinite() && it > 0.0 }
         val past5s = history.lastOrNull { nowMs - it.atMs in 4_000L..8_000L }
         val past15s = history.lastOrNull { nowMs - it.atMs in 12_000L..18_000L }
@@ -99,6 +104,9 @@ object V3ShadowExperiment {
         val no = candidate("NO", 1.0 - fairYes, 1.0 - mid, market.noAsk, market.spreadDollars)
         val best = listOfNotNull(yes, no).maxByOrNull { it.netEv }
         val gate = when {
+            market.closeTimeEpochMs?.let { nowMs >= it } == true ||
+                market.status?.lowercase() in setOf("closed", "settled", "finalized", "determined") ->
+                "Observe only: market is closed"
             settlementPrior == null -> "Observe only: settlement/spot prior unavailable"
             best == null -> "Observe only: no executable ask"
             best.edgeVsMid < (market.spreadDollars ?: Double.POSITIVE_INFINITY) + best.fee + SAFETY_MARGIN_USD ->
@@ -193,7 +201,8 @@ data class V3ShadowFill(
     val settled: Boolean = false,
     val outcome: String? = null,
     val won: Boolean? = null,
-    val pnlPerContract: Double? = null
+    val pnlPerContract: Double? = null,
+    val settledAtMs: Long? = null
 )
 
 @Serializable
@@ -229,6 +238,11 @@ class V3ShadowBook(
 
     fun snapshot(): V3ShadowState = _state.value
 
+    fun openTickers(): Set<String> = _state.value.fills.asSequence()
+        .filterNot { it.settled }
+        .map { it.ticker }
+        .toSet()
+
     fun observeAll(markets: Collection<MarketUiModel>, nowMs: Long = System.currentTimeMillis()) {
         markets.forEach { observe(it, nowMs) }
     }
@@ -237,7 +251,8 @@ class V3ShadowBook(
         val evaluation = V3ShadowExperiment.evaluate(market, nowMs) ?: return
         synchronized(lock) {
             val current = _state.value
-            val recentSameTicker = current.observations.lastOrNull { it.ticker.equals(evaluation.ticker, true) }
+            val recentIndex = current.observations.indexOfLast { it.ticker.equals(evaluation.ticker, true) }
+            val recentSameTicker = current.observations.getOrNull(recentIndex)
             val observation = V3Observation(
                 ticker = evaluation.ticker,
                 observedAtMs = evaluation.observedAtMs,
@@ -252,8 +267,8 @@ class V3ShadowBook(
                 quoteReturn15s = evaluation.quoteReturn15s,
                 gateReason = evaluation.gateReason
             )
-            val observations = if (recentSameTicker != null && nowMs - recentSameTicker.observedAtMs < 750L) {
-                current.observations.dropLast(1) + observation
+            val observations = if (recentSameTicker != null && nowMs - recentSameTicker.observedAtMs in 0L until 750L) {
+                current.observations.filterIndexed { index, _ -> index != recentIndex } + observation
             } else {
                 (current.observations + observation).takeLast(V3ShadowExperiment.MAX_SERIES_POINTS)
             }
@@ -287,7 +302,7 @@ class V3ShadowBook(
         }
     }
 
-    fun settle(ticker: String, result: String) {
+    fun settle(ticker: String, result: String, settledAtMs: Long = System.currentTimeMillis()) {
         val normalized = result.trim().lowercase()
         if (normalized !in setOf("yes", "no", "void")) return
         synchronized(lock) {
@@ -306,7 +321,7 @@ class V3ShadowBook(
                     won == true -> 1.0 - fill.entryAsk - fill.entryFee
                     else -> -fill.entryAsk - fill.entryFee
                 }
-                fill.copy(settled = true, outcome = normalized, won = won, pnlPerContract = pnl)
+                fill.copy(settled = true, outcome = normalized, won = won, pnlPerContract = pnl, settledAtMs = settledAtMs)
             }
             if (changed) {
                 publish(current.copy(fills = fills, lastMessage = "V3 settled $ticker · $normalized · no order sent"))

@@ -33,6 +33,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.signal.v3.V3ShadowFill
 import com.dirk.kalshiodds.signal.v3.V3ShadowState
+import com.dirk.kalshiodds.signal.v3.V3ChartData
+import com.dirk.kalshiodds.signal.v3.V3Observation
 import com.dirk.kalshiodds.ui.theme.DipTheme
 import java.util.Locale
 
@@ -41,10 +43,12 @@ import java.util.Locale
 fun V3LabScreen(
     state: V3ShadowState,
     onBack: () -> Unit,
-    onOpenArena: () -> Unit
+    onOpenArena: () -> Unit,
+    onOpenChat: () -> Unit
 ) {
     val colors = DipTheme.colors
     val settled = state.settled
+    val chartObservations = V3ChartData.currentMarket(state.observations)
     LazyVerticalGrid(
         columns = GridCells.Adaptive(minSize = 156.dp),
         modifier = Modifier.fillMaxWidth().background(colors.bg),
@@ -67,7 +71,7 @@ fun V3LabScreen(
                         Text("Market-offset test · local paper evidence · no live order path", style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
                     }
                 }
-                ScalpModeTabs(selected = 1, onSelect = { if (it == 0) onOpenArena() })
+                ScalpModeTabs(selected = 1, onSelect = { if (it == 0) onOpenArena() else if (it == 2) onOpenChat() })
             }
         }
         item { V3MetricCard("Open shadows", state.openCount.toString(), "one unit each") }
@@ -80,12 +84,15 @@ fun V3LabScreen(
         item(span = { GridItemSpan(maxLineSpan) }) {
             V3GraphCard(
                 title = "Probability trace",
-                subtitle = "Blue = Kalshi mid · green = V3 market-offset forecast · last ${state.observations.size} observations",
-                state = state
+                subtitle = "Blue = Kalshi mid · green = V3 forecast · ${chartObservations.lastOrNull()?.ticker ?: "waiting for a market"} · ${chartObservations.size} observations",
+                observations = chartObservations
             )
         }
         item(span = { GridItemSpan(maxLineSpan) }) {
             V3PnlGraphCard(settled)
+        }
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            V3GapGraphCard(chartObservations)
         }
         item(span = { GridItemSpan(maxLineSpan) }) {
             Text("Settlement ledger", style = MaterialTheme.typography.titleLarge, color = colors.textPrimary, fontWeight = FontWeight.Bold)
@@ -112,6 +119,7 @@ fun ScalpModeTabs(selected: Int, onSelect: (Int) -> Unit) {
     ) {
         Tab(selected = selected == 0, onClick = { onSelect(0) }, text = { Text("Arena V2") })
         Tab(selected = selected == 1, onClick = { onSelect(1) }, text = { Text("V3 test") })
+        Tab(selected = selected == 2, onClick = { onSelect(2) }, text = { Text("AI chat") })
     }
 }
 
@@ -148,7 +156,7 @@ private fun V3NoticeCard(message: String) {
 }
 
 @Composable
-private fun V3GraphCard(title: String, subtitle: String, state: V3ShadowState) {
+private fun V3GraphCard(title: String, subtitle: String, observations: List<V3Observation>) {
     val colors = DipTheme.colors
     Column(
         modifier = Modifier
@@ -160,20 +168,46 @@ private fun V3GraphCard(title: String, subtitle: String, state: V3ShadowState) {
     ) {
         Text(title, style = MaterialTheme.typography.titleMedium, color = colors.textPrimary, fontWeight = FontWeight.Bold)
         Text(subtitle, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
-        ProbabilityCanvas(
-            market = state.observations.map { it.marketYes },
-            model = state.observations.map { it.fairYes },
-            marketColor = colors.accentBlue,
-            modelColor = colors.up,
-            gridColor = colors.border
-        )
+        if (observations.size < 2) {
+            Text("Waiting for at least two valid quotes for this market.", color = colors.textSecondary, style = MaterialTheme.typography.bodySmall)
+        } else {
+            ProbabilityCanvas(
+                market = observations.map { it.marketYes },
+                model = observations.map { it.fairYes },
+                marketColor = colors.accentBlue,
+                modelColor = colors.up,
+                gridColor = colors.border
+            )
+        }
+    }
+}
+
+@Composable
+private fun V3GapGraphCard(observations: List<V3Observation>) {
+    val colors = DipTheme.colors
+    val gap = observations.map { (it.fairYes - it.marketYes) * 100.0 }
+    Column(
+        modifier = Modifier.fillMaxWidth()
+            .border(1.dp, colors.border, RoundedCornerShape(18.dp))
+            .background(colors.surface, RoundedCornerShape(18.dp))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text("Forecast minus market", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary, fontWeight = FontWeight.Bold)
+        Text("YES probability difference in percentage points; not an executable or after-fee edge.", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+        if (gap.size < 2) {
+            Text("Waiting for at least two valid quotes.", color = colors.textSecondary, style = MaterialTheme.typography.bodySmall)
+        } else {
+            Text(String.format(Locale.US, "Latest: %+.2f points", gap.last()), color = colors.textPrimary, style = MaterialTheme.typography.labelLarge)
+            SeriesCanvas(gap, colors.accentBlue, colors.border)
+        }
     }
 }
 
 @Composable
 private fun V3PnlGraphCard(settled: List<V3ShadowFill>) {
     val colors = DipTheme.colors
-    val values = settled.sortedBy { it.createdAtMs }.runningFold(0.0) { total, fill -> total + (fill.pnlPerContract ?: 0.0) }
+    val values = V3ChartData.settledPnl(settled)
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -183,8 +217,12 @@ private fun V3PnlGraphCard(settled: List<V3ShadowFill>) {
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text("Normalized settlement P&L", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary, fontWeight = FontWeight.Bold)
-        Text("One contract per V3 shadow entry; this is an evaluation series, not a profit forecast or stake limit.", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
-        SeriesCanvas(values, if ((values.lastOrNull() ?: 0.0) >= 0.0) colors.up else colors.down, colors.border)
+        Text("One contract per V3 shadow entry; legacy records without a settlement time use their entry time. This is not a profit forecast or stake limit.", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+        if (values.size < 2) {
+            Text("Waiting for settled V3 entries; open entries are not included.", color = colors.textSecondary, style = MaterialTheme.typography.bodySmall)
+        } else {
+            SeriesCanvas(values, if ((values.lastOrNull() ?: 0.0) >= 0.0) colors.up else colors.down, colors.border)
+        }
     }
 }
 

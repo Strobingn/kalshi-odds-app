@@ -121,7 +121,7 @@ class AppContainer(context: Context) {
         },
         model = model,
         logStore = logStore,
-        extraOpenTickers = { paper.book.openTickers() },
+        extraOpenTickers = { paper.book.openTickers() + v3.book.openTickers() },
         onMarketSettled = { ticker, result ->
             paper.book.settle(ticker, result)
             v3.book.settle(ticker, result)
