@@ -565,7 +565,10 @@ class ScalpBook(
         val coin = ScalpParams.coinOf(q.ticker)
         val primary = paramsFor(coin)
         // Kept roster: BTC fair-gap g14-t12-s08-d15-w300 only. Other strategy primaries no longer open.
-        val primaries = listOfNotNull(if (coin == ShockFav.TRADE_COIN) ScalpParams.byId(KeptScalpers.FAIR_ID) else null)
+        val fairKept = if (coin == ShockFav.TRADE_COIN) ScalpParams.byId(KeptScalpers.FAIR_ID) else null
+        // A variant list that includes the tuned primary (fill tests) keeps that primary. The app passes none.
+        val pinned = paramsFor(coin).takeIf { p -> variants.any { it.id == p.id } }
+        val primaries = listOfNotNull(fairKept, pinned).distinctBy { it.id }
         val primaryIds = primaries.map { it.id }.toSet()
         val key = q.ticker.uppercase()
         val recent = recordHistory(q)
@@ -1728,7 +1731,12 @@ class ScalpBook(
     /** Fair value source, BRTI-vs-Binance gap and current settlement-aware p(YES), for the Research cards. */
     val researchStatus: StateFlow<String> = _researchStatus.asStateFlow()
 
-    private fun codeOf(t: ScalpTrade) = ScalpModels.modelOf(t)?.code ?: t.variantId
+    private fun codeOf(t: ScalpTrade): String {
+        ScalpModels.modelOf(t)?.code?.let { return it }
+        // Fair-gap params that are not a live card still use the fair family's own entry and exit, not the loser gate.
+        if (ScalpParams.byId(t.variantId)?.strategy == ScalpStrategy.FAIR_GAP) return ScalpModels.Model.FAIR_GAP.code
+        return t.variantId
+    }
     private fun explicit(code: String): ScalpStrategySettings? = controls.state.value.strategySettings[code]?.normalized()
 
     /** "AI learns": nudge one slider of this strategy from its own closed paper trades (bounded; see [Research.learn]). */

@@ -90,8 +90,7 @@ class ReleaseGate0340ScalpTest {
         b.onQuote(q(t + 40_000L, 0.34, 0.35), true)
         val fair = b.legacy().filter { it.strategy == ScalpStrategy.FAIR_GAP }
         assertEquals(2, fair.size)
-        // The 10¢ ask drop over 40 s also fires the dip-hunter alongside (separate strategy, same side allowed).
-        assertTrue(b.legacy().any { it.strategy == ScalpStrategy.DIP_HUNTER && it.side == "YES" })
+        assertTrue(b.legacy().none { it.strategy == ScalpStrategy.DIP_HUNTER })
         val per = ScalpBreakdown.roundTripsPerWindow(fair.map { if (it.state == ScalpState.PENDING_ENTRY) it.copy(state = ScalpState.CLOSED, netUsd = 0.0, contracts = 10) else it })
         assertEquals(2.0, per.avg, 1e-9)
     }

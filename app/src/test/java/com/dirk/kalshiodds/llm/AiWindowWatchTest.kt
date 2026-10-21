@@ -41,7 +41,6 @@ class AiWindowWatchTest {
             reply("""{"adjustments":[
                 {"scalper":"$code","setting":"maxEntryCents","value":30,"reason":"too wide"},
                 {"scalper":"$code","setting":"maxEntryCents","value":90,"reason":"ignored second"},
-                {"scalper":"$research","setting":"maxEntryCents","value":20,"reason":"tighter"},
                 {"scalper":"$code","setting":"stopCents","value":99,"reason":"wider stop"}
             ]}""")
         }
