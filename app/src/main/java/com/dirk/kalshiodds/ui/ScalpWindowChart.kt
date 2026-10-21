@@ -20,6 +20,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.testTag
 import com.dirk.kalshiodds.ui.charts.CalibrationPlot
 import com.dirk.kalshiodds.ui.charts.ChartGallery
 import com.dirk.kalshiodds.ui.charts.ChartShapes
@@ -27,7 +28,11 @@ import com.dirk.kalshiodds.ui.charts.CumulativeDepthChart
 import com.dirk.kalshiodds.ui.charts.DistanceToStrikeChart
 import com.dirk.kalshiodds.ui.charts.FeeWaterfall
 import com.dirk.kalshiodds.ui.charts.KnobTimeline
+import com.dirk.kalshiodds.ui.charts.LineSeries
+import com.dirk.kalshiodds.ui.charts.MultiLineChart
 import com.dirk.kalshiodds.ui.charts.WindowTimeline
+import com.dirk.kalshiodds.ui.charts.chartClock
+import com.dirk.kalshiodds.ui.charts.chartMoney
 import com.dirk.kalshiodds.ui.theme.DipTheme
 import java.time.Instant
 import java.time.ZoneId
@@ -165,35 +170,43 @@ internal fun ScalpWindowChart(d: ScalpAlgoDetail, onWindow: (String) -> Unit = {
                 blank?.let { Text(it, color = c.textSecondary, style = MaterialTheme.typography.bodySmall) }
             }
             selectedMarker?.let { m ->
-                val sideName = if (m.side == "NO") "DOWN" else "UP"
+                val sideName = if (m.side.equals("NO", true)) "DOWN" else "UP"
                 Text("$sideName · ${markerName(m.kind)} · ${m.qty.takeIf { it > 0 }?.let { "$it ct · " }.orEmpty()}${ScalpTabCopy.cents(m.price)} · ${windowTime(m.recordedAtMs)} ET", color = c.textPrimary, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall)
             }
             data.error?.let { Text(it, color = c.down, style = MaterialTheme.typography.bodySmall) }
-            WindowTimeline(
-                data.startMs,
-                data.closeMs,
-                markers.map { m ->
-                    ChartShapes.WindowEvent(
-                        m.atMs,
-                        when (m.kind) {
-                            ScalpWindowChartData.Kind.BUY -> "entry"
-                            ScalpWindowChartData.Kind.SELL, ScalpWindowChartData.Kind.LEGACY_EXIT -> "exit"
-                            ScalpWindowChartData.Kind.SETTLEMENT -> "settle"
-                            ScalpWindowChartData.Kind.ORDER -> "order"
-                            ScalpWindowChartData.Kind.SIGNAL -> "signal"
-                        },
-                        m.side != "NO",
-                        m.price,
-                        markerName(m.kind)
-                    )
-                }
-            )
+            WindowPaperPnl(data)
+            if (markers.isNotEmpty()) {
+                WindowTimeline(
+                    data.startMs,
+                    data.closeMs,
+                    markers.map { m ->
+                        ChartShapes.WindowEvent(
+                            m.atMs,
+                            when (m.kind) {
+                                ScalpWindowChartData.Kind.BUY -> "entry"
+                                ScalpWindowChartData.Kind.SELL, ScalpWindowChartData.Kind.LEGACY_EXIT -> "exit"
+                                ScalpWindowChartData.Kind.SETTLEMENT -> "settle"
+                                ScalpWindowChartData.Kind.ORDER -> "order"
+                                ScalpWindowChartData.Kind.SIGNAL -> "signal"
+                            },
+                            !m.side.equals("NO", true),
+                            m.price,
+                            markerName(m.kind)
+                        )
+                    }
+                )
+            }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Column { Text("Window realized", color = c.textSecondary, style = MaterialTheme.typography.labelSmall); Text(ScalpTabCopy.money(data.windowNet()), color = c.textPrimary, fontWeight = FontWeight.Bold) }
             Column { Text("Open P&L · both sides", color = c.textSecondary, style = MaterialTheme.typography.labelSmall); Text(ScalpTabCopy.money(data.openNet()), color = c.textPrimary, fontWeight = FontWeight.Bold) }
-            Column { Text("Round trips", color = c.textSecondary, style = MaterialTheme.typography.labelSmall); Text("${data.trades.count { it.state == com.dirk.kalshiodds.decision.ScalpState.CLOSED }}", color = c.textPrimary, fontWeight = FontWeight.Bold) }
+            Column { Text("Round trips", color = c.textSecondary, style = MaterialTheme.typography.labelSmall); Text("${data.windowRoundTrips()}", color = c.textPrimary, fontWeight = FontWeight.Bold) }
         }
+        Text(
+            "Primary scalper paper on this market. Shadows and manual ladder fills are not included.",
+            color = c.textSecondary,
+            style = MaterialTheme.typography.labelSmall
+        )
         CumulativeDepthChart(ChartGallery.cumulativeDepth(extras.bookYes, extras.bookNo))
         run {
             val report = rememberCalibrationReport(extras.calibration)
@@ -206,5 +219,42 @@ internal fun ScalpWindowChart(d: ScalpAlgoDetail, onWindow: (String) -> Unit = {
         FeeWaterfall(ChartGallery.feeLegFromTrades("Window", data.trades), extras.dayFees)
         KnobTimeline(extras.knobs)
         DistanceToStrikeChart(ChartGallery.distanceToStrike(data.points, extras.strikeUsd))
+    }
+}
+
+/** The slot under the odds chart. A quiet window still draws both sides at $0. */
+@Composable
+private fun WindowPaperPnl(data: ScalpWindowChartData) {
+    val c = DipTheme.colors
+    val lines = remember(data.trades, data.ticker, data.startMs, data.closeMs, data.nowMs, data.points) {
+        ChartGallery.windowSidePnl(
+            data.trades, data.ticker, data.startMs, data.closeMs, data.nowMs,
+            data.bid("YES"), data.bid("NO")
+        )
+    }
+    Column(
+        Modifier.fillMaxWidth().testTag("chart_window_pnl"),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text("Window paper P&L", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
+        Text(
+            "UP green and DOWN red, after fees, on this market. Starts at $0. A flat line means no round trip has closed. The right edge includes open P&L.",
+            style = MaterialTheme.typography.bodySmall,
+            color = c.textSecondary
+        )
+        MultiLineChart(
+            lines.map { s ->
+                LineSeries(
+                    name = s.name,
+                    color = if (s.name == "UP") c.upButton else c.downButton,
+                    points = s.points
+                )
+            },
+            yFormat = { chartMoney(it) },
+            xFormat = { chartClock(it) },
+            includeZero = true,
+            height = 200.dp,
+            contentLabel = "Window paper P&L for UP and DOWN"
+        )
     }
 }

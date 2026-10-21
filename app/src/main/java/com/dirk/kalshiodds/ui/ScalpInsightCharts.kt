@@ -136,7 +136,7 @@ internal fun ScalpTradeInsightCharts(trades: List<ScalpTrade>, note: String, twe
             HistogramChart(roll.perHour, barColor = c.upButton, contentLabel = "Trades per hour")
         }
         ChartBlock("P&L by hour of day", "By close time, Eastern. $note") {
-            HourHeatmap(roll.hourPnl)
+            HourHeatmap(roll.hourPnl, countWord = "trades")
         }
         ChartBlock("Entry price", "Filled entries. $note") {
             HistogramChart(roll.entryBins, barColor = c.upButton, contentLabel = "Entry price")

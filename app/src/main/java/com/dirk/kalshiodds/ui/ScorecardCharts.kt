@@ -87,7 +87,7 @@ internal fun ScorecardDetailCharts(picks: List<ScorecardLedger.PickRow>) {
         }
         ScorecardChartCard {
             ChartBlock("P&L by hour of day", "Settled picks, Eastern time.") {
-                HourHeatmap(hours)
+                HourHeatmap(hours, countWord = "picks")
             }
         }
         ScorecardChartCard {

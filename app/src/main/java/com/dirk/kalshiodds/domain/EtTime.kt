@@ -23,6 +23,7 @@ object EtTime {
     private val YEAR_CLOCK = DateTimeFormatter.ofPattern("MMM d, yyyy, h:mm a", Locale.US).withZone(ZONE)
     private val YEAR_CLOCK_SEC = DateTimeFormatter.ofPattern("MMM d, yyyy, h:mm:ss a", Locale.US).withZone(ZONE)
     private val SHORT_DAY_CLOCK = DateTimeFormatter.ofPattern("M/d h:mm a", Locale.US).withZone(ZONE)
+    private val DAY = DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.US).withZone(ZONE)
 
     private fun at(ms: Long): Instant = Instant.ofEpochMilli(ms)
 
@@ -41,6 +42,9 @@ object EtTime {
 
     /** "Oct 20, 2026, 1:52:07 PM ET" */
     fun fullDateClockSec(ms: Long): String = "${YEAR_CLOCK_SEC.format(at(ms))} $LABEL"
+
+    /** "2026-10-20", the Eastern calendar date. No clock, so callers add the ET label. */
+    fun day(ms: Long): String = DAY.format(at(ms))
 
     /** "1:52 PM" without the label, for chart ticks where one "ET" sits on the axis. */
     fun clockBare(ms: Long): String = CLOCK.format(at(ms))

@@ -254,17 +254,17 @@ fun CumulativeDepthChart(series: List<ChartGallery.DepthSeries>, modifier: Modif
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         Text("Order book depth", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
-        Text("Cumulative size. Solid is bids, dashed is asks. UP and DOWN are on the same scale.", style = MaterialTheme.typography.bodySmall, color = c.textSecondary)
+        Text("Cumulative contracts. Solid is bids, dashed is asks. UP and DOWN share the scale. Size is contracts, not cents times contracts.", style = MaterialTheme.typography.bodySmall, color = c.textSecondary)
         if (series.isEmpty()) {
             ChartEmptyState(height = 160.dp)
             return
         }
         val maxSize = series.maxOf { it.size.maxOrNull() ?: 0.0 }.coerceAtLeast(1.0)
         Text(
-            series.joinToString(" · ") { "${it.name} ${it.size.lastOrNull()?.roundToInt() ?: 0}" },
+            ChartGallery.depthSummary(series),
             color = c.textPrimary,
             style = MaterialTheme.typography.labelMedium,
-            maxLines = 3,
+            maxLines = 4,
             overflow = TextOverflow.Ellipsis
         )
         Canvas(Modifier.fillMaxWidth().height(200.dp)) {
@@ -380,7 +380,11 @@ fun FamilyStackChart(
 
 /** Trailing win rate. The line is empty until 30 closed trades exist. */
 @Composable
-fun RollingWinRateChart(samples: List<ChartShapes.Sample>, modifier: Modifier = Modifier) {
+fun RollingWinRateChart(
+    samples: List<ChartShapes.Sample>,
+    modifier: Modifier = Modifier,
+    closedCount: Int = 0
+) {
     val c = DipTheme.colors
     Column(
         modifier.fillMaxWidth().testTag("chart_rolling")
@@ -389,7 +393,10 @@ fun RollingWinRateChart(samples: List<ChartShapes.Sample>, modifier: Modifier = 
     ) {
         Text("Rolling 30-trade win rate", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
         Text("Share of the last 30 closed trades that finished above zero. UP and DOWN are in the same line.", style = MaterialTheme.typography.bodySmall, color = c.textSecondary)
-        MultiLineChart(
+        val holdback = ChartGallery.rollingHoldback(closedCount)
+        if (samples.isEmpty() && holdback != null) {
+            Text(holdback, color = c.textPrimary, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(vertical = 28.dp))
+        } else MultiLineChart(
             if (samples.isEmpty()) emptyList() else listOf(LineSeries("Win rate", c.upButton, samples)),
             yFormat = { "${it.roundToInt()}%" },
             xFormat = { chartDayClock(it) },
@@ -666,7 +673,7 @@ fun EquitySparkGrid(lines: List<ChartGallery.SparkLine>, modifier: Modifier = Mo
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text("Equity curves", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
-        Text("One line per strategy, from recorded window nets. Starts at $0.", style = MaterialTheme.typography.bodySmall, color = c.textSecondary)
+        Text("Starts at $0. Recent windows when we have them. Otherwise a straight line from $0 to the all-time net.", style = MaterialTheme.typography.bodySmall, color = c.textSecondary)
         if (lines.isEmpty()) {
             ChartEmptyState(height = 120.dp)
             return

@@ -75,6 +75,11 @@ class ChartGalleryTest {
         assertTrue(lines[0].values.size >= 2)
         assertTrue(lines[1].values.isEmpty() && lines[1].frozen)
         assertTrue(ChartGallery.equitySparks(windows, day, emptyList()).isEmpty())
+        val filled = ChartGallery.equitySparks(windows, day + 1_000, listOf(m1 to false), mapOf(m1 to -2.5))
+        assertEquals(listOf(0.0, -2.5), filled.single().values)
+        assertEquals("12 of 30 closed trades. The line starts at 30.", ChartGallery.rollingHoldback(12))
+        assertEquals(null, ChartGallery.rollingHoldback(0))
+        assertEquals(null, ChartGallery.rollingHoldback(30))
     }
 
     @Test fun dailyCorrelationNeedsTwoMovers() {
@@ -216,6 +221,48 @@ class ChartGalleryTest {
         assertTrue(ChartGallery.distanceToStrike(points, null).isEmpty())
         assertTrue(ChartGallery.distanceToStrike(emptyList(), 110.0).isEmpty())
         assertTrue(ChartGallery.distanceToStrike(points, Double.NaN).isEmpty())
+    }
+
+    @Test fun quietWindowStillDrawsBothSidesAtZero() {
+        val start = 1_700_000_000_000L
+        val lines = ChartGallery.windowSidePnl(emptyList(), "KXBTC15M-26OCT210930-30", start, start + 900_000, start + 60_000, 0.42, 0.58)
+        assertEquals(listOf("UP", "DOWN"), lines.map { it.name })
+        assertTrue(lines.all { it.points.size >= 2 && it.points.all { p -> p.value == 0.0 } })
+        assertTrue(ChartGallery.windowSidePnl(emptyList(), "KXBTC", 10, 10, 12, null, null).isEmpty())
+    }
+
+    @Test fun windowPnlStepsOnlyTheClosedSide() {
+        val start = 1_700_000_000_000L
+        val close = start + 900_000
+        val up = trade("up", "yes", "v|v2-fair|P", 1.25).copy(closedAtMs = start + 120_000)
+        val other = trade("eth", "YES", "v|v2-fair|P", 4.0).copy(ticker = "KXETH15M-26OCT181500-00")
+        val lines = ChartGallery.windowSidePnl(listOf(up, other), up.ticker, start, close, start + 200_000, 0.40, 0.55)
+        val upLine = lines.first { it.name == "UP" }
+        val downLine = lines.first { it.name == "DOWN" }
+        assertEquals(0.0, upLine.points.first().value, 0.0)
+        assertEquals(1.25, upLine.points.last().value, 1e-9)
+        assertTrue(downLine.points.all { it.value == 0.0 })
+    }
+
+    @Test fun openMarkSitsOnTheRightEdge() {
+        val start = 1_700_000_000_000L
+        val close = start + 900_000
+        val open = trade("o", "YES", "v|v2-fair|P", 0.0).copy(state = ScalpState.OPEN, netUsd = null, closedAtMs = null)
+        val lines = ChartGallery.windowSidePnl(listOf(open), open.ticker, start, close, start + 60_000, 0.55, 0.40)
+        assertEquals(open.unrealizedUsd(0.55)!!, lines.first { it.name == "UP" }.points.last().value, 1e-6)
+        assertEquals(0.0, lines.first { it.name == "DOWN" }.points.last().value, 0.0)
+    }
+
+    @Test fun depthTotalsAreContractsNotCentsTimesContracts() {
+        val series = ChartGallery.cumulativeDepth(listOf(0.40 to 100.0, 0.30 to 50.0), listOf(0.60 to 80.0))
+        val upBid = series.first { it.name == "UP bid" }
+        assertEquals(listOf(100.0, 150.0), upBid.size)
+        assertEquals("150 ct", ChartGallery.contractText(upBid.size.last()))
+        assertEquals("1,528,863 ct", ChartGallery.contractText(1_528_863.0))
+        val summary = ChartGallery.depthSummary(series)
+        assertTrue(summary.contains("150 ct"))
+        assertTrue(summary.contains("80 ct"))
+        assertTrue(!summary.contains("4000") && !summary.contains("4,000"))
     }
 
     private fun trade(id: String, side: String, rule: String, net: Double) = ScalpTrade(

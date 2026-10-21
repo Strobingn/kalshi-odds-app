@@ -65,6 +65,29 @@ class ScalpWindowChartTest {
         assertEquals(close + 12_000, marker.recordedAtMs)
     }
 
+    @Test fun lowercaseTickerAndCentAskStillPlotAndOtherMarketsDoNotCount() {
+        val raw = trade().copy(
+            ticker = tk.lowercase(), side = "yes", signalAsk = 40.0,
+            state = ScalpState.CLOSED, netUsd = 0.50, closedAtMs = start + 80_000,
+            soldContracts = 10, proceedsUsd = 5.0
+        )
+        val other = trade().copy(id = "else", ticker = "OTHER", state = ScalpState.CLOSED, netUsd = 9.0, closedAtMs = start + 90_000)
+        val data = ScalpWindowChartData(tk, close, close, trades = listOf(raw, other))
+        val signal = data.markers("YES").first { it.kind == ScalpWindowChartData.Kind.SIGNAL }
+        assertEquals(0.40, signal.price, 1e-9)
+        assertEquals(1, data.windowRoundTrips())
+        assertEquals(0.50, data.windowNet(), 1e-9)
+        assertTrue(data.markers("NO").isEmpty())
+    }
+
+    @Test fun openPnlUsesTheYesBidForAnUpPosition() {
+        val held = trade().copy(side = "yes")
+        val data = ScalpWindowChartData(tk, close, close, points = listOf(BidPoint(start, 60f, 39f)), trades = listOf(held))
+        assertEquals(held.unrealizedUsd(0.60)!!, data.openNet(), 1e-9)
+        assertEquals(0, data.windowRoundTrips())
+        assertEquals(0.0, data.windowNet(), 0.0)
+    }
+
     @Test fun pickerKeepsLiveWindowAndOnlyRecentWindowsWithRecordedQuotes() {
         val live = ScalpTabMarket(tk, "BTC", close, "Live")
         val old = ScalpTabMarket("older", "BTC", close - 900_000, "Older")

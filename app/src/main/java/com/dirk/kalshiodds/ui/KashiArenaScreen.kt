@@ -46,7 +46,10 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
     val rows = remember(st.algoAllTime, v2, sort) { KashiArenaData.rows(st, v2, sort) }
     val models = rows.map { it.model }.toSet()
     val active = st.activeScalps.filter { ScalpModels.modelOf(it) in models && it.isPrimary }
-    val liveTrades = st.arenaChart.trades.filter { ScalpModels.modelOf(it) in models && it.isPrimary }
+    // The live window is the market, not the V2/Originals chip. Filtering here left the
+    // chart and the realized / round-trip numbers at zero whenever the other group traded.
+    val windowTrades = st.arenaChart.trades.filter { it.isPrimary }
+    val groupTrades = windowTrades.filter { ScalpModels.modelOf(it) in models }
     val curve = remember(st.windows, v2, st.updatedAtMs) { KashiArenaData.curve(st.windows, st.updatedAtMs, models) }
     val daily = remember(st.windows, v2, st.updatedAtMs) { ChartSeries.dailyNet(st.windows, st.updatedAtMs, models) }
     // Ledger scan for the analysis charts. The LazyColumn builder is not a composable, so the
@@ -97,7 +100,7 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
                     DailyNetBars(daily, Modifier.fillMaxWidth())
                 } }
                 item(key = "live") {
-                    ScalpWindowChart(ScalpAlgoDetail(chart = st.arenaChart.copy(trades = liveTrades)), title = "Live window", extras = extras) { id -> liveTrades.firstOrNull { it.id == id }?.let { ScalpModels.modelOf(it)?.let(onOpen) } }
+                    ScalpWindowChart(ScalpAlgoDetail(chart = st.arenaChart.copy(trades = windowTrades)), title = "Live window", extras = extras) { id -> windowTrades.firstOrNull { it.id == id }?.let { ScalpModels.modelOf(it)?.let(onOpen) } }
                 }
                 item(key = "top-header") { ArenaSectionHeader("Top strategies", "See all") { tabName = KashiArenaTab.STRATEGIES.name } }
                 items(rows.filter { it.roundTrips > 0 }.sortedByDescending { it.netUsd }.take(5), key = { "top-${it.model.code}" }) { r -> ArenaStrategyRow(r, st) { onOpen(r.model) } }
@@ -131,7 +134,8 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
                     rows.mapNotNull { row ->
                         val frozen = com.dirk.kalshiodds.decision.insights.ScalpFreeze.isFrozen(bench[row.model.code])
                         if (row.roundTrips > 0 || frozen) row.model to frozen else null
-                    }
+                    },
+                    rows.filter { it.roundTrips > 0 }.associate { it.model to it.netUsd }
                 )
                 item(key = "race") { ArenaCard {
                     Text("Strategy race", style = MaterialTheme.typography.titleMedium, color = c.textPrimary, fontWeight = FontWeight.SemiBold)
@@ -182,7 +186,7 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
                 items(active.sortedByDescending { it.signalAtMs }, key = { "open-${it.id}" }) { t ->
                     ArenaTradeCard(t, st.scalpBids[t.id]) { ScalpModels.modelOf(t)?.let(onOpen) }
                 }
-                val closed = liveTrades.filter { it.state == ScalpState.CLOSED }.sortedByDescending { it.closedAtMs }
+                val closed = groupTrades.filter { it.state == ScalpState.CLOSED }.sortedByDescending { it.closedAtMs }
                 item(key = "closed-head") { ArenaSectionHeader("Closed in this window · ${closed.size}", "All history", onHistory) }
                 if (closed.isEmpty()) item(key = "none-closed") { Text("No closed trades in the live window for this group.", color = c.textSecondary) }
                 items(closed, key = { "closed-${it.id}" }) { t -> ArenaTradeCard(t, null) { ScalpModels.modelOf(t)?.let(onOpen) } }

@@ -150,6 +150,66 @@ object ChartGallery {
         ScatterDot(entry * 100.0, exit * 100.0, (t.netUsd ?: 0.0) > 0.0)
     }
 
+    /**
+     * Paper P&L of one 15-minute window, UP and DOWN together.
+     * Always at least two points per side when the window is real, including a flat $0
+     * when nobody has closed a round trip. The last point adds open mark-to-bid P&L.
+     * Empty only when the window bounds are unusable.
+     */
+    fun windowSidePnl(
+        trades: List<ScalpTrade>,
+        ticker: String,
+        startMs: Long,
+        closeMs: Long,
+        nowMs: Long,
+        upBid: Double?,
+        downBid: Double?
+    ): List<ChartShapes.NamedSeries> {
+        if (closeMs <= startMs) return emptyList()
+        val tip = nowMs.coerceIn(startMs, closeMs).let { t ->
+            if (t <= startMs) (startMs + 1L).coerceAtMost(closeMs) else t
+        }
+        fun series(up: Boolean): ChartShapes.NamedSeries {
+            val rows = trades.filter { t ->
+                (ticker.isEmpty() || t.ticker.equals(ticker, true)) && isUp(t.side) == up
+            }
+            val steps = rows.mapNotNull { t ->
+                if (t.state != ScalpState.CLOSED) return@mapNotNull null
+                val net = t.netUsd?.takeIf { it.isFinite() } ?: return@mapNotNull null
+                val at = (t.closedAtMs ?: t.entryAtMs ?: t.signalAtMs).coerceIn(startMs, closeMs)
+                at to net
+            }.sortedBy { it.first }
+            var acc = 0.0
+            val pts = ArrayList<ChartShapes.Sample>(steps.size + 2)
+            pts += ChartShapes.Sample(startMs, 0.0)
+            for ((at, v) in steps) {
+                acc += v
+                pts += ChartShapes.Sample(at, acc)
+            }
+            val bid = if (up) upBid else downBid
+            val open = rows.sumOf { t -> t.unrealizedUsd(bid)?.takeIf { it.isFinite() } ?: 0.0 }
+            val endValue = acc + open
+            if (pts.last().tMs < tip || pts.last().value != endValue) pts += ChartShapes.Sample(tip, endValue)
+            if (pts.size < 2) pts += ChartShapes.Sample(tip, endValue)
+            return ChartShapes.NamedSeries(if (up) "UP" else "DOWN", pts)
+        }
+        return listOf(series(true), series(false))
+    }
+
+    /** Whole-book contract count. Level sizes are contracts, never cents times contracts. */
+    fun contractText(n: Double): String {
+        if (!n.isFinite()) return "0 ct"
+        return String.format(Locale.US, "%,d ct", n.roundToInt().toLong())
+    }
+
+    /** Touch size is the first cumulative point. Book size is the last. */
+    fun depthSummary(series: List<DepthSeries>): String = series.joinToString(" · ") { s ->
+        val book = s.size.lastOrNull() ?: 0.0
+        val touch = s.size.firstOrNull() ?: book
+        if (s.size.size <= 1 || abs(touch - book) < 0.5) "${s.name} ${contractText(book)}"
+        else "${s.name} ${contractText(touch)} at touch, ${contractText(book)} book"
+    }
+
     /** Spot minus strike, in dollars. Empty when the strike or the prints are missing. */
     fun distanceToStrike(points: List<BidPoint>, strike: Double?): List<ChartShapes.Sample> {
         val strikeUsd = strike?.takeIf { it.isFinite() && it > 0.0 } ?: return emptyList()
@@ -320,21 +380,31 @@ object ChartGallery {
 
     data class SparkLine(val label: String, val values: List<Double>, val frozen: Boolean = false)
 
-    /** One equity curve per strategy. A strategy with no recorded windows keeps an empty line. */
+    /**
+     * One equity curve per strategy. Recent windows win. When those windows do not
+     * contain a strategy that has an all-time net, the line is $0 to that net so the
+     * cell is not empty while the leaderboard shows a result.
+     */
     fun equitySparks(
         windows: List<ScalpModels.WindowRow>,
         nowMs: Long,
-        models: List<Pair<ScalpModels.Model, Boolean>>
+        models: List<Pair<ScalpModels.Model, Boolean>>,
+        allTimeNet: Map<ScalpModels.Model, Double> = emptyMap()
     ): List<SparkLine> {
         if (models.isEmpty()) return emptyList()
         val lines = ChartShapes.equityFromWindows(windows, nowMs, models.map { it.first }).associateBy { it.name }
         return models.map { (model, frozen) ->
-            SparkLine(
-                model.label,
-                lines[model.label]?.points?.map { it.value }?.filter { it.isFinite() } ?: emptyList(),
-                frozen
-            )
+            val fromWindows = lines[model.label]?.points?.map { it.value }?.filter { it.isFinite() }.orEmpty()
+            val values = if (fromWindows.size >= 2) fromWindows
+            else allTimeNet[model]?.takeIf { it.isFinite() }?.let { listOf(0.0, it) } ?: fromWindows
+            SparkLine(model.label, values, frozen)
         }
+    }
+
+    /** Shown instead of an empty chart when some closes exist but not yet [window]. */
+    fun rollingHoldback(closedCount: Int, window: Int = 30): String? {
+        if (window <= 1 || closedCount <= 0 || closedCount >= window) return null
+        return "$closedCount of $window closed trades. The line starts at $window."
     }
 
     data class LeaderRow(val label: String, val net: Double, val frozen: Boolean)

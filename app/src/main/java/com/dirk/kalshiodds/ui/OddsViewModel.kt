@@ -332,14 +332,18 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             arenaChartReadAtMs = now
             val end = live?.closeMs ?: 0L
             val mine = if (liveTicker.isEmpty()) emptyList() else
-                (container.scalp.windowPrimaryTrades(liveTicker) + trades.filter { it.ticker == liveTicker && it.isPrimary })
+                (container.scalp.windowPrimaryTrades(liveTicker) + trades.filter { it.ticker.equals(liveTicker, true) && it.isPrimary })
                     .associateBy { it.id }.values.sortedBy { it.signalAtMs }
             val points = if (liveTicker.isEmpty()) emptyList() else
                 com.dirk.kalshiodds.chart.ChartDownsampler.downsample(com.dirk.kalshiodds.chart.ChartSeriesMerge.merge(
                     container.archive.chartTicks(liveTicker, end - 900_000, end, 2000).map { it.toBidPoint() },
                     hub.scoring.book.bidHistory(liveTicker)).filter { it.tMs in (end - 900_000)..now }, 360)
-            next = next.copy(arenaChart = ScalpWindowChartData(liveTicker, end, now, marks[liveTicker]?.bookAtMs, points, mine))
-        } else next = next.copy(arenaChart = next.arenaChart.copy(nowMs = now, bookAtMs = marks[liveTicker]?.bookAtMs))
+            val quote = marks[liveTicker] ?: marks[liveTicker.uppercase()]
+            next = next.copy(arenaChart = ScalpWindowChartData(liveTicker, end, now, quote?.bookAtMs, points, mine))
+        } else {
+            val quote = marks[liveTicker] ?: marks[liveTicker.uppercase()]
+            next = next.copy(arenaChart = next.arenaChart.copy(nowMs = now, bookAtMs = quote?.bookAtMs))
+        }
         _scalpTab.value = next
     }
 
@@ -1722,7 +1726,9 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     fun displayStrike(ticker: String, snapshotStrike: Double?): Double? {
         snapshotStrike?.takeIf { it.isFinite() && it > 0.0 }?.let { return it }
         runCatching { hub.scoring.book.strike(ticker) }.getOrNull()?.takeIf { it.isFinite() && it > 0.0 }?.let { return it }
-        return container.scalp.marks.value[ticker]?.strike?.takeIf { it.isFinite() && it > 0.0 }
+        runCatching { hub.scoring.book.strike(ticker.uppercase()) }.getOrNull()?.takeIf { it.isFinite() && it > 0.0 }?.let { return it }
+        val marks = container.scalp.marks.value
+        return (marks[ticker] ?: marks[ticker.uppercase()])?.strike?.takeIf { it.isFinite() && it > 0.0 }
     }
 
     private fun runScalp(live: List<MarketUiModel>, s: com.dirk.kalshiodds.signal.config.SignalSettings) {

@@ -330,7 +330,8 @@ fun HistogramChart(
 fun HourHeatmap(
     cells: List<ChartShapes.HourCell>,
     modifier: Modifier = Modifier,
-    height: Dp = 220.dp
+    height: Dp = 220.dp,
+    countWord: String = "windows"
 ) {
     val c = DipTheme.colors
     if (cells.isEmpty()) {
@@ -343,7 +344,7 @@ fun HourHeatmap(
     val pick = ordered.getOrNull(scrub)
     Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(
-            pick?.let { "${com.dirk.kalshiodds.domain.EtTime.hour(it.hour)} ET · ${chartMoney(it.net)} · ${it.trades} windows" }
+            pick?.let { "${com.dirk.kalshiodds.domain.EtTime.hour(it.hour)} ET · ${chartMoney(it.net)} · ${it.trades} $countWord" }
                 ?: "Drag an hour · green gain, red loss",
             style = MaterialTheme.typography.labelMedium,
             color = c.textPrimary
