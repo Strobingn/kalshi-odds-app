@@ -37,7 +37,6 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
     aiPanel: AiWatchPanelModel? = null, onAiFollows: (Boolean) -> Unit = {}, extras: LiveWindowExtras = LiveWindowExtras()) {
     val c = DipTheme.colors
     val openAi = LocalOpenAiTab.current
-    val chartHistory = rememberScalpChartHistory()
     var tabName by rememberSaveable { mutableStateOf(initialTab.name) }
     val tab = KashiArenaTab.valueOf(tabName)
     var v2 by rememberSaveable { mutableStateOf(true) }
@@ -50,6 +49,9 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
     val liveTrades = st.arenaChart.trades.filter { ScalpModels.modelOf(it) in models && it.isPrimary }
     val curve = remember(st.windows, v2, st.updatedAtMs) { KashiArenaData.curve(st.windows, st.updatedAtMs, models) }
     val daily = remember(st.windows, v2, st.updatedAtMs) { ChartSeries.dailyNet(st.windows, st.updatedAtMs, models) }
+    // Ledger scan for the analysis charts. The LazyColumn builder is not a composable, so the
+    // subscription lives here and starts only while the Analysis tab is selected.
+    val chartHistory = if (tab == KashiArenaTab.ANALYSIS) rememberScalpChartHistory() else null
     LazyColumn(Modifier.fillMaxSize().background(c.bg), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (aiPanel != null) item(key = "ai-watch") { AiWatchPanel(aiPanel, onAiFollows) }
         item(key = "arena-header") {
@@ -111,7 +113,7 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
                 items(rows, key = { "strategy-${it.model.code}" }) { r -> ArenaStrategyRow(r, st) { onOpen(r.model) } }
             }
             KashiArenaTab.ANALYSIS -> {
-                val history = chartHistory
+                val history = chartHistory ?: com.dirk.kalshiodds.decision.ScalpChartFeed.Snapshot()
                 val galleryTrades = run {
                     val live = (st.arenaChart.trades + st.activeScalps).distinctBy { it.id }
                     if (history.closed.isEmpty()) live else (history.closed + live).distinctBy { it.id }

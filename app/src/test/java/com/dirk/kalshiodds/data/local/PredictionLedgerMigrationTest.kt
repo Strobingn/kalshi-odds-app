@@ -122,7 +122,13 @@ class PredictionLedgerMigrationTest {
         assertTrue(csv.contains("KXBTC15M-OLD"))
         assertFalse(csv.contains("BEGIN PRIVATE KEY"))
         val again = SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READONLY)
-        assertEquals(11, again.version)
+        assertEquals(SqliteResultsStore.DB_VERSION, again.version)
+        val idx = again.rawQuery(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_prediction_ledger_close'",
+            null
+        )
+        assertTrue(idx.moveToFirst())
+        idx.close()
         // 0.3.38: the additive scalp_trades table exists after upgrading an old DB.
         val scalp = again.rawQuery("SELECT COUNT(*) FROM scalp_trades", null)
         assertTrue(scalp.moveToFirst())

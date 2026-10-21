@@ -47,6 +47,18 @@ class ScalpForecastRecorderTest {
         assertTrue(rows.isEmpty())
     }
 
+    @Test fun closedWindowsDropOutOfTheCadenceMap() {
+        val recorder = ScalpForecastRecorder { true }
+        val openAt = close - 120_000L
+        recorder.observe(listOf(quote("KXBTC15M-26OCT181530-30", openAt, strike = 100.0, spot = 101.0))) { 0.5 }
+        assertEquals(setOf(close), recorder.trackedCloses())
+        val nextClose = close + 900_000L
+        recorder.observe(
+            listOf(quote("KXBTC15M-26OCT181545-45", close + 60_000L, strike = 100.0, spot = 101.0).copy(closeMs = nextClose))
+        ) { 0.5 }
+        assertEquals(setOf(nextClose), recorder.trackedCloses())
+    }
+
     @Test fun failedInsertDoesNotBurnTheCadence() {
         var ok = false
         val rows = ArrayList<LedgerRow>()

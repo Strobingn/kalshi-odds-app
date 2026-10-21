@@ -18,9 +18,18 @@ import retrofit2.HttpException
  */
 object SettlementPollPolicy {
 
-    // 0.3.49: no 60 s waits anywhere — settlement retries step 5/10/15 s.
+    // 0.3.49: no 60 s waits on the fresh path — settlement retries step 5/10/15 s.
     val BACKOFF_MS: LongArray = longArrayOf(5_000L, 10_000L, 15_000L)
     const val MAX_BACKOFF_MS = 15_000L
+    /** Closed longer than this: the newest settled page no longer contains the ticker. */
+    const val STALE_AFTER_MS = 60L * 60L * 1000L
+    /** Tickers per direct lookup, so one miss does not turn into a request per window. */
+    const val STALE_BATCH = 20
+    /**
+     * Gap before asking again for a window that is still unsettled after a direct lookup.
+     * The fresh 5/10/15 s ladder stays for windows that just closed.
+     */
+    val STALE_LOOKUP_GAP_MS: LongArray = longArrayOf(120_000L, 300_000L, 900_000L)
     const val SERIES = "KXBTC15M"
     const val D3_SERIES = com.dirk.kalshiodds.signal.d3.D3Constants.SERIES
 
@@ -82,6 +91,14 @@ object SettlementPollPolicy {
 
     fun nextIndex(backoffIndex: Int): Int =
         (backoffIndex + 1).coerceAtMost(BACKOFF_MS.lastIndex)
+
+    fun afterStaleMiss(schedule: Schedule, nowMs: Long): Schedule {
+        val wait = STALE_LOOKUP_GAP_MS[schedule.backoffIndex.coerceIn(0, STALE_LOOKUP_GAP_MS.lastIndex)]
+        return Schedule(
+            nextAttemptMs = nowMs + wait,
+            backoffIndex = (schedule.backoffIndex + 1).coerceAtMost(STALE_LOOKUP_GAP_MS.lastIndex)
+        )
+    }
 
     fun afterMiss(schedule: Schedule, nowMs: Long, retryAfterMs: Long? = null): Schedule {
         val wait = delayMs(schedule.backoffIndex, retryAfterMs)

@@ -1734,8 +1734,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             val series = com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(market.ticker)
             if (series !in com.dirk.kalshiodds.domain.CryptoMarkets.FIFTEEN_SERIES) return@forEach
             // 0.3.59: scalpers trade Bitcoin only (ETH/SOL markets only to wind down positions opened before 0.3.59).
-            val tradeThis = com.dirk.kalshiodds.decision.ScalpParams.coinOf(market.ticker) == com.dirk.kalshiodds.decision.ShockFav.TRADE_COIN ||
-                market.ticker.uppercase() in openScalps
+            val tradeThis = com.dirk.kalshiodds.decision.ScalpTradeGate.trades(market.ticker, openScalps)
             if (!tradeThis && !s.paperTradingEnabled) return@forEach
             val book = hub.scoring.book.snapshotBook(market.ticker) ?: return@forEach
             val spot = settlementFor(market.ticker, now).spot
@@ -1780,6 +1779,9 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 // 0.3.57 sf57: twenty shock / late-favourite paper scalpers on the same conflated quote (paper lane).
                 runCatching { container.scalp.onShockFavQuote(qq, enabled = s.paperTradingEnabled) }
+            } else if (s.paperTradingEnabled) {
+                // ETH/SOL stay off the trade paths. The forecast still needs 60s of YES mid.
+                runCatching { container.scalp.noteMidHistory(qq) }
             }
             if (s.paperTradingEnabled) forecastQuotes += qq
             if (coin == "BTC") cardSnaps += liveSnap(market, qq, now)

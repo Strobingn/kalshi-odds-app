@@ -21,9 +21,6 @@ import com.dirk.kalshiodds.decision.ScalpBreakdown
 import com.dirk.kalshiodds.decision.ScalpState
 import com.dirk.kalshiodds.decision.ScalpTrade
 import com.dirk.kalshiodds.ui.theme.DipTheme
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /**
@@ -32,8 +29,6 @@ import java.util.Locale
  */
 object ScalpData {
     const val TITLE = "Scalp Data (PAPER)"
-    private val ET: ZoneId = ZoneId.of("America/New_York")
-    private val TIME = DateTimeFormatter.ofPattern("MMM d HH:mm:ss", Locale.US)
 
     data class Summary(
         val roundTrips: Int,

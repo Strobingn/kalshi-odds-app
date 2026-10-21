@@ -66,6 +66,19 @@ class SettlementPollPolicyTest {
     }
 
     @Test
+    fun staleLookupWaitsLongerThanTheFreshLadder() {
+        val first = SettlementPollPolicy.afterStaleMiss(SettlementPollPolicy.Schedule(), close)
+        assertEquals(close + 120_000L, first.nextAttemptMs)
+        val second = SettlementPollPolicy.afterStaleMiss(first, first.nextAttemptMs)
+        assertEquals(first.nextAttemptMs + 300_000L, second.nextAttemptMs)
+        val third = SettlementPollPolicy.afterStaleMiss(second, second.nextAttemptMs)
+        assertEquals(second.nextAttemptMs + 900_000L, third.nextAttemptMs)
+        val held = SettlementPollPolicy.afterStaleMiss(third, third.nextAttemptMs)
+        assertEquals(third.nextAttemptMs + 900_000L, held.nextAttemptMs)
+        assertTrue(SettlementPollPolicy.STALE_AFTER_MS >= 60L * 60L * 1000L)
+    }
+
+    @Test
     fun honors429RetryAfterAndDedupe() {
         assertEquals(12_000L, SettlementPollPolicy.retryAfterHeader("12"))
         assertEquals(null, SettlementPollPolicy.retryAfterHeader("  "))

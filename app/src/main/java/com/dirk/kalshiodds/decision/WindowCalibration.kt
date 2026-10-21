@@ -60,7 +60,13 @@ object WindowCalibration {
             }
         }
 
-        fun pairs(): List<Pair<Double, Boolean>> = samples.map { it.aiUp to it.settledUp }
+        /**
+         * AI UP as a 0–1 fraction. Samples store percent (0.4 means 0.4%).
+         * [com.dirk.kalshiodds.ui.charts.ChartGallery.calibration] runs values through
+         * `scalePct`, which treats anything ≤ 1 as a fraction, so passing the percent
+         * straight through put 0.4% in the 40% bucket and 1% in the 100% bucket.
+         */
+        fun pairs(): List<Pair<Double, Boolean>> = samples.map { (it.aiUp / 100.0) to it.settledUp }
     }
 
     fun report(samples: List<Sample>): Report {
@@ -238,7 +244,12 @@ object WindowCalibration {
         return if (n == 0) null else sum / n
     }
 
-    fun windowClose(row: LedgerRow): Long? = ScalpTicker.closeMs(row.ticker) ?: row.closeTimeMs
+    /**
+     * Prefer the stored epoch. Ticker text is a wall clock (`yyMMMddHHmm`) zoned in
+     * ET, and [java.time.LocalDateTime.atZone] keeps only the first 1 AM–2 AM when
+     * clocks fall back, so the repeated hour would share one close.
+     */
+    fun windowClose(row: LedgerRow): Long? = row.closeTimeMs ?: ScalpTicker.closeMs(row.ticker)
 
     fun isFifteen(series: String?, ticker: String): Boolean {
         val blob = "${series.orEmpty()} $ticker".uppercase()
