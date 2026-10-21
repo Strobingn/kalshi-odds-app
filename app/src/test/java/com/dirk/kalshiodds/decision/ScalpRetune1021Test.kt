@@ -16,7 +16,7 @@ class ScalpRetune1021Test {
     private val ownFav = listOf("sf16", "sf17", "sf18", "sf19", "sf20", "sf21", "sf22", "sf23", "sf24", "sf29", "sf31")
 
     @Test fun lateFavouritesAndFadeSkipTheFairGapEntryGate() {
-        assertEquals((ownFav + "fcfade").toSet(), FairGapTune.OWN_RULES)
+        assertEquals((ownFav + listOf("fcfade", KeptScalpers.FADE_ID)).toSet(), FairGapTune.OWN_RULES)
         ownFav.forEach {
             assertFalse(it, FairGapTune.favUsesFairGapGate(it))
             assertFalse(it, FairGapTune.entryGated(it))
