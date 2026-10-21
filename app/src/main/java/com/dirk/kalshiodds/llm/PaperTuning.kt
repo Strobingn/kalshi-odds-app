@@ -25,9 +25,12 @@ class PaperTuning(context: Context) {
             val changed = prefs.getLong("changed:${track.formulaVersion}", 0L)
             val rows = fills.filter { it.strategyVersion == track.formulaVersion }
             val result = ScalpReview.assess(rows)
-            val afterChange = ScalpReview.assess(rows.filter { it.createdAtMs >= changed })
+            val afterChange = if (changed == 0L) result else ScalpReview.assess(rows.filter { it.createdAtMs >= changed })
+            val eligible = rows.filter { it.settled && !it.outcome.equals("void", true) && it.pnlUsd?.isFinite() == true && it.contracts > 0 }
+            val perWindow = eligible.groupBy { it.ticker }.values.map { window -> window.map { it.pnlUsd!! / it.contracts }.average() }
+            val equalWindow = perWindow.takeIf { it.isNotEmpty() }?.average()
             val s = settings(track.formulaVersion)
-            appendLine("${track.formulaVersion}: open=${rows.count { !it.settled }}, settled=${result.settledFills}, days=${result.distinctDays}, pnl=${result.realizedPnlUsd}, decision=${result.decision}, since_change_settled=${afterChange.settledFills}, since_change_pnl=${afterChange.realizedPnlUsd}, trailing_retrace=${s.trailingRetrace}, fair_buffer=${s.fairValueBuffer}, max_net_loss=${s.maxNetLossPerContract}, changed_at=$changed")
+            appendLine("${track.formulaVersion}: ${if (track in ScalpSignal.ACTIVE_TRACKS) "ACTIVE" else "RETIRED"}, open=${rows.count { !it.settled }}, settled=${result.settledFills}, days=${result.distinctDays}, unique_windows=${perWindow.size}, equal_window_pnl_per_contract=${equalWindow ?: "unknown"}, pnl=${result.realizedPnlUsd}, decision=${result.decision}, since_change_settled=${afterChange.settledFills}, since_change_pnl=${afterChange.realizedPnlUsd}, trailing_retrace=${s.trailingRetrace}, fair_buffer=${s.fairValueBuffer}, max_net_loss=${s.maxNetLossPerContract}, changed_at=$changed")
         }
         val open = fills.filter { !it.settled && it.source.startsWith("AI ") }
         appendLine("OPEN PAPER POSITIONS: ${open.size}; each row is a position, not a live order.")

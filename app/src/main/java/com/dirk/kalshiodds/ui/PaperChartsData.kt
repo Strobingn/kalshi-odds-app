@@ -8,7 +8,7 @@ import com.dirk.kalshiodds.signal.trade.ScalpSignal
 internal object PaperChartsData {
     data class Point(val timeMs: Long, val values: List<Double?>)
     data class Chart(val title: String, val unit: String, val labels: List<String>, val points: List<Point>, val note: String)
-    data class Track(val label: String, val open: Int, val settled: Int, val pnl: Double?, val fees: Double)
+    data class Track(val label: String, val active: Boolean, val open: Int, val settled: Int, val pnl: Double?, val fees: Double, val windows: Int, val equalWindowPerContract: Double?, val wins: Int, val losses: Int)
 
     fun market(samples: List<PaperMarketFeed.Sample>): List<Chart> {
         fun quote(sample: PaperMarketFeed.Sample, value: Double?): Double? =
@@ -53,8 +53,11 @@ internal object PaperChartsData {
     fun tracks(fills: List<PaperFill>): List<Track> = ScalpSignal.Track.values().map { track ->
         val rows = fills.filter { it.strategyVersion == track.formulaVersion }
         val settled = rows.filter { it.settled && !it.outcome.equals("void", true) && it.pnlUsd?.isFinite() == true }
-        Track(track.label, rows.count { !it.settled }, settled.size,
+        val windows = settled.filter { it.contracts > 0 }.groupBy { it.ticker }.values
+            .map { window -> window.map { it.pnlUsd!! / it.contracts }.average() }
+        Track(track.label, track in ScalpSignal.ACTIVE_TRACKS, rows.count { !it.settled }, settled.size,
             settled.takeIf { it.isNotEmpty() }?.sumOf { it.pnlUsd ?: 0.0 },
-            settled.sumOf { (it.feeUsd.takeIf(Double::isFinite) ?: 0.0) + (it.exitFeeUsd.takeIf(Double::isFinite) ?: 0.0) })
+            settled.sumOf { (it.feeUsd.takeIf(Double::isFinite) ?: 0.0) + (it.exitFeeUsd.takeIf(Double::isFinite) ?: 0.0) },
+            windows.size, windows.takeIf { it.isNotEmpty() }?.average(), settled.count { (it.pnlUsd ?: 0.0) > 0.0 }, settled.count { (it.pnlUsd ?: 0.0) < 0.0 })
     }
 }

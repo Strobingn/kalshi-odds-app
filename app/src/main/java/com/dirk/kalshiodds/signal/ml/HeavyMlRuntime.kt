@@ -172,8 +172,8 @@ class HeavyMlRuntime(
         }
 
         val snap = input.bookSnap
-        val microZ = if (snap != null) ae.surprise(snap) else 0.0
         val microLatent = snap?.let { ae.encode(it) }
+        val microZ = if (snap != null && microLatent != null) ae.reconstructionErrorFromLatent(snap, microLatent) else 0.0
         val microFeat = microLatent?.average()?.toDouble() ?: 0.0
 
         val cnnForGbm = cnnYes ?: mlp ?: 0.5

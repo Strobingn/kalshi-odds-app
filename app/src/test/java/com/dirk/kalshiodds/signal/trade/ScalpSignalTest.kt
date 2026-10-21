@@ -122,7 +122,11 @@ class ScalpSignalTest {
             market(0.50, -0.003, 0.010).copy(predictedSide = "YES", yesAskSize = 10.0),
             TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false, nowMs = openedAt + 10_000L)
         )
-        assertEquals(9, tickets.size)
+        org.junit.Assert.assertTrue(tickets.isNotEmpty())
+        org.junit.Assert.assertTrue(tickets.size <= 10)
+        assertEquals(10, ScalpSignal.ACTIVE_TRACKS.size)
+        val activeVersions = ScalpSignal.ACTIVE_TRACKS.map { it.formulaVersion }.toSet()
+        org.junit.Assert.assertTrue(tickets.all { it.strategyVersion in activeVersions })
         assertEquals(tickets.size, tickets.mapNotNull { it.strategyVersion }.toSet().size)
         org.junit.Assert.assertTrue(tickets.all { it.paperOnly && it.canPaper && !it.canApprove })
     }

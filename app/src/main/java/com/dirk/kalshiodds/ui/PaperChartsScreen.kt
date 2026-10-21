@@ -62,7 +62,53 @@ fun PaperChartsScreen(state: OddsUiState, onBack: () -> Unit, onSelectTab: (Int)
             }
         }
         items(charts.size) { index -> MarketChart(charts[index]) }
+        item(span = { GridItemSpan(maxLineSpan) }) { StrategyEvidenceChart(tracks) }
+        item(span = { GridItemSpan(maxLineSpan) }) { StrategyOutcomeChart(tracks) }
         item(span = { GridItemSpan(maxLineSpan) }) { StrategyChart(tracks) }
+    }
+}
+
+@Composable
+private fun StrategyOutcomeChart(tracks: List<PaperChartsData.Track>) {
+    val colors = DipTheme.colors
+    ChartSurface {
+        Text("Wins, losses and flat exits", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary, fontWeight = FontWeight.SemiBold)
+        Text("After-fee settled paper exits only · bar length shows the share of each outcome, not profitability.", color = colors.textSecondary, style = MaterialTheme.typography.bodySmall)
+        tracks.forEach { track ->
+            val flat = (track.settled - track.wins - track.losses).coerceAtLeast(0)
+            Text("${track.label} · ${track.wins} win / ${track.losses} loss / $flat flat", color = colors.textPrimary, style = MaterialTheme.typography.bodySmall)
+            Canvas(Modifier.fillMaxWidth().height(9.dp).semantics { contentDescription = "${track.label}: ${track.wins} wins, ${track.losses} losses, $flat flat exits" }) {
+                if (track.settled > 0) {
+                    val winWidth = size.width * track.wins / track.settled
+                    val lossWidth = size.width * track.losses / track.settled
+                    drawLine(colors.up, Offset(0f, size.height / 2), Offset(winWidth, size.height / 2), 6.dp.toPx())
+                    drawLine(colors.down, Offset(winWidth, size.height / 2), Offset(winWidth + lossWidth, size.height / 2), 6.dp.toPx())
+                    drawLine(colors.textSecondary, Offset(winWidth + lossWidth, size.height / 2), Offset(size.width, size.height / 2), 6.dp.toPx())
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StrategyEvidenceChart(tracks: List<PaperChartsData.Track>) {
+    val colors = DipTheme.colors
+    val max = tracks.mapNotNull { it.equalWindowPerContract?.let(::abs) }.maxOrNull()?.coerceAtLeast(0.001) ?: 0.001
+    ChartSurface {
+        Text("P&L per contract · equal-window average", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary, fontWeight = FontWeight.SemiBold)
+        Text("Each market window counts equally; after fees. Win/loss counts are paper exits, not independent windows. Small samples are provisional.", color = colors.textSecondary, style = MaterialTheme.typography.bodySmall)
+        tracks.forEach { track ->
+            val value = track.equalWindowPerContract
+            Text("${track.label} · ${track.windows} windows · ${track.wins}W/${track.losses}L · ${value?.let { String.format(Locale.US, "%+.3f USD/ct", it) } ?: "no data"}", color = colors.textPrimary, style = MaterialTheme.typography.bodySmall)
+            Canvas(Modifier.fillMaxWidth().height(8.dp).semantics { contentDescription = "${track.label}, ${track.windows} windows, ${value?.let { number(it) } ?: "no result"} dollars per contract" }) {
+                val center = size.width / 2f
+                drawLine(colors.border, Offset(center, 0f), Offset(center, size.height), 1.dp.toPx())
+                if (value != null) {
+                    val width = (abs(value) / max).toFloat().coerceIn(0f, 1f) * center
+                    drawLine(if (value >= 0.0) colors.up else colors.down, Offset(if (value >= 0.0) center else center - width, size.height / 2f), Offset(if (value >= 0.0) center + width else center, size.height / 2f), 4.dp.toPx())
+                }
+            }
+        }
     }
 }
 
@@ -124,11 +170,11 @@ private fun StrategyChart(tracks: List<PaperChartsData.Track>) {
     val colors = DipTheme.colors
     val max = tracks.mapNotNull { it.pnl?.let(::abs) }.maxOrNull()?.coerceAtLeast(0.01) ?: 0.01
     ChartSurface {
-        Text("20 strategy results", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary, fontWeight = FontWeight.SemiBold)
+        Text("Strategy results · 10 active", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary, fontWeight = FontWeight.SemiBold)
         Text("Current shared paper run · settled, non-void, after-fee P&L. Open positions are not profits; small samples prove nothing.", color = colors.textSecondary, style = MaterialTheme.typography.bodySmall)
         tracks.forEach { track ->
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text(track.label, color = colors.textPrimary, style = MaterialTheme.typography.labelLarge)
+                Text("${track.label} · ${if (track.active) "active" else "retired"}", color = colors.textPrimary, style = MaterialTheme.typography.labelLarge)
                 Text("${track.pnl?.let { String.format(Locale.US, "%+.2f USD", it) } ?: "No settled P&L"} · ${track.settled} settled · ${track.open} open · fees ${number(track.fees)} USD", color = colors.textSecondary, style = MaterialTheme.typography.bodySmall)
                 val pnl = track.pnl
                 Canvas(Modifier.fillMaxWidth().height(10.dp).semantics { contentDescription = "${track.label}: ${pnl?.let { number(it) + " dollars" } ?: "no settled result"}; ${track.open} open, ${track.settled} settled" }) {

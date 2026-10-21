@@ -40,6 +40,17 @@ object ScalpSignal {
         SPOT_TARGET("scalp-v5-spot-target", "Spot vs Target", "Settlement proxy")
     }
 
+    /** Provisional 2026-10-21 equal-window, after-fee per-contract ranking.
+     * Only new paper entries are restricted; the other identities remain for
+     * historical ledgers and open-position exit handling. Not a profit claim.
+     */
+    val ACTIVE_TRACKS: Set<Track> = setOf(
+        Track.FAIR_VALUE_DISLOCATION, Track.DUAL_HORIZON_REVERSAL,
+        Track.EXTREME_REVERSAL, Track.GBM_CHANNEL, Track.CNN_CHANNEL,
+        Track.IMPORTED_MODEL, Track.FAIR_VALUE_FOLLOWER, Track.MOMENTUM_SNIPER,
+        Track.BOOK_PRESSURE, Track.DIP_HUNTER
+    )
+
     data class Candidate(
         val track: Track,
         /** Null means this hypothesis has no valid observation, never a hidden fallback. */

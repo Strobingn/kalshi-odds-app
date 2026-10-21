@@ -39,6 +39,9 @@ class PaperChartsDataTest {
         assertEquals(1, result.settled)
         assertEquals(-1.0, result.pnl!!, 1e-9)
         assertEquals(0.3, result.fees, 1e-9)
+        assertEquals(1, result.windows)
+        assertEquals(-0.1, result.equalWindowPerContract!!, 1e-9)
+        assertEquals(1, result.losses)
         assertEquals(20, PaperChartsData.tracks(rows).size)
     }
 }

@@ -24,6 +24,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -42,6 +43,8 @@ import com.dirk.kalshiodds.signal.trade.TradeTicket
 import com.dirk.kalshiodds.ui.theme.DipTheme
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Dedicated audit surface for the paper-only scalp experiment. It has no buy
@@ -88,8 +91,11 @@ fun ScalpScreen(
     val candidates = state.tickets.proposals
         .filter { it.kind == TicketKind.SCALP }
         .sortedBy { it.strategyVersion.orEmpty() }
-    val scorecards = ScalpSignal.Track.values().map { track ->
-        ScalpTrackScore.from(track, scalpFills.filter { it.strategyVersion == track.formulaVersion })
+    val scorecards by produceState(initialValue = emptyList<ScalpTrackScore>(), key1 = state.paper.fills) {
+        value = withContext(Dispatchers.Default) {
+            val byTrack = state.paper.fills.filter(PaperFill::isScalp).groupBy { it.strategyVersion }
+            ScalpSignal.Track.values().map { track -> ScalpTrackScore.from(track, byTrack[track.formulaVersion].orEmpty()) }
+        }
     }
     val reviewReady = scorecards.count { it.review.decision != ScalpReview.Decision.COLLECT }
 
@@ -117,7 +123,7 @@ fun ScalpScreen(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        "Twenty concurrent paper-only hypotheses on each 15-minute contract.",
+                        "Ten provisional paper-only hypotheses per 15-minute contract.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = colors.textSecondary
                     )
@@ -162,7 +168,7 @@ fun ScalpScreen(
                     if (state.settings.paperTradingEnabled) {
                         "Waiting for an open BTC window with an executable displayed ask. This is a quote requirement, not a stake or time cap."
                     } else {
-                        "Paper autopilot is paused. Turn it on above to allow all twenty tracks to open paper positions."
+                        "Paper autopilot is paused. Turn it on above to allow the ten selected tracks to open paper positions."
                     }
                 )
             }
@@ -309,7 +315,7 @@ private fun ScalpControlCard(
                 )
                 Text(
                     if (state.settings.paperTradingEnabled) {
-                        "All twenty tracks may fill independently on the same 15-minute contract."
+                        "The ten selected tracks may fill independently on the same 15-minute contract."
                     } else {
                         "No new paper positions will open until the autopilot is switched back on."
                     },
@@ -414,7 +420,7 @@ private fun ScalpScorecard(scorecard: ScalpTrackScore) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
                 Text(scorecard.track.label, style = MaterialTheme.typography.titleSmall, color = colors.textPrimary, fontWeight = FontWeight.Bold)
-                Text(scorecard.track.family, style = MaterialTheme.typography.labelSmall, color = colors.textSecondary)
+                Text("${scorecard.track.family} · ${if (scorecard.track in ScalpSignal.ACTIVE_TRACKS) "active" else "retired; history retained"}", style = MaterialTheme.typography.labelSmall, color = colors.textSecondary)
             }
             Text(
                 if (scorecard.settled == 0) "NO RESULT YET" else signedMoney(pnl),

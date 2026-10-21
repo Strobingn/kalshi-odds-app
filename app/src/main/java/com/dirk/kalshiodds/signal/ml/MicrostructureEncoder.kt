@@ -27,7 +27,12 @@ class MicrostructureEncoder(
     }
 
     fun reconstructionError(x: FloatArray): Double {
-        val y = reconstruct(encode(x))
+        return reconstructionErrorFromLatent(x, encode(x))
+    }
+
+    /** Reuse a previously encoded snapshot without changing the feature math. */
+    fun reconstructionErrorFromLatent(x: FloatArray, latent: FloatArray): Double {
+        val y = reconstruct(latent)
         var s = 0.0
         val n = minOf(x.size, y.size)
         for (i in 0 until n) {

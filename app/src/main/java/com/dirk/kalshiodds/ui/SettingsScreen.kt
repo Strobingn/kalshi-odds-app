@@ -709,7 +709,7 @@ fun SettingsContent(
 
             Section("AI paper scalper")
             Text(
-                "Isolated from live money. The Scalp tab shows twenty parallel hypotheses, entries, exits, and a full paper ledger. " +
+                "Isolated from live money. The Scalp tab shows ten selected hypotheses and the full historical paper ledger. " +
                     "Paper fills use the displayed touch quantity with unrestricted synthetic credit and never call Kalshi. Reset starts a fresh \$100 shared paper and scalp ledger. " +
                     "Paper trading ON does not swallow Live Approve after a Kalshi key is saved — use the Paper button for manual simulated fills.",
                 style = MaterialTheme.typography.labelMedium,
