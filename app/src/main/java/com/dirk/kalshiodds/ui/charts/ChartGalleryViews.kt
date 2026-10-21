@@ -254,17 +254,17 @@ fun CumulativeDepthChart(series: List<ChartGallery.DepthSeries>, modifier: Modif
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         Text("Order book depth", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
-        Text("Cumulative size. Solid is bids, dashed is asks. UP and DOWN are on the same scale.", style = MaterialTheme.typography.bodySmall, color = c.textSecondary)
+        Text("Cumulative contracts. Solid is bids, dashed is asks. UP and DOWN share the scale. Size is contracts, not cents times contracts.", style = MaterialTheme.typography.bodySmall, color = c.textSecondary)
         if (series.isEmpty()) {
             ChartEmptyState(height = 160.dp)
             return
         }
         val maxSize = series.maxOf { it.size.maxOrNull() ?: 0.0 }.coerceAtLeast(1.0)
         Text(
-            series.joinToString(" · ") { "${it.name} ${it.size.lastOrNull()?.roundToInt() ?: 0}" },
+            ChartGallery.depthSummary(series),
             color = c.textPrimary,
             style = MaterialTheme.typography.labelMedium,
-            maxLines = 3,
+            maxLines = 4,
             overflow = TextOverflow.Ellipsis
         )
         Canvas(Modifier.fillMaxWidth().height(200.dp)) {
