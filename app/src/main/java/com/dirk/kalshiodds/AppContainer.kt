@@ -54,10 +54,15 @@ class AppContainer(context: Context) {
     val predictionLedger: com.dirk.kalshiodds.data.local.results.SqliteResultsStore? =
         resultsImpl as? com.dirk.kalshiodds.data.local.results.SqliteResultsStore
     /** Paper only. One on-device UP forecast per coin per 15-minute window, stored on the prediction ledger. */
-    val forecastRecorder = com.dirk.kalshiodds.decision.ScalpForecastRecorder { row ->
-        val store = predictionLedger ?: return@ScalpForecastRecorder false
-        store.insertLedger(row) >= 0L
-    }
+    val forecastRecorder = com.dirk.kalshiodds.decision.ScalpForecastRecorder(
+        insert = { row ->
+            val store = predictionLedger ?: return@ScalpForecastRecorder false
+            store.insertLedger(row) >= 0L
+        },
+        insertBatch = predictionLedger?.let { store ->
+            { rows: List<com.dirk.kalshiodds.data.local.ledger.LedgerRow> -> store.insertLedgerBatch(rows) }
+        }
+    )
     val archive: com.dirk.kalshiodds.data.local.archive.DataArchive = resultsImpl
     val sessionId: String = java.util.UUID.randomUUID().toString()
     val dataPrefs = com.dirk.kalshiodds.data.prefs.DataPrefs(app)

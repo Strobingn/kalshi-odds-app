@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.util.concurrent.ConcurrentHashMap
 
 data class HistoryUiState(
     val tab: Int = 0,
@@ -41,6 +42,10 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
     private val container = KalshiOddsApp.from(app).container
     private val _state = MutableStateFlow(HistoryUiState())
     val state: StateFlow<HistoryUiState> = _state.asStateFlow()
+    private val chartCache = ConcurrentHashMap<String, MarketUiModel>()
+    private val chartLoading = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val _chartMarket = MutableStateFlow<MarketUiModel?>(null)
+    val chartMarket: StateFlow<MarketUiModel?> = _chartMarket.asStateFlow()
 
     init { load(0) }
 
@@ -87,22 +92,44 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Placeholder immediately. Bids load on [Dispatchers.IO] and publish through [chartMarket]. */
     fun marketModel(ticker: String): MarketUiModel {
-        val row = runCatching {
-            container.archive.recentSettled(null, 400).firstOrNull { it.ticker == ticker }
-        }.getOrNull() ?: com.dirk.kalshiodds.data.local.archive.SettledWindowRow(
-            ticker = ticker,
-            series = com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(ticker),
-            result = "unknown"
+        chartCache[ticker]?.let { cached ->
+            _chartMarket.value = cached
+            return cached
+        }
+        return marketModel(
+            com.dirk.kalshiodds.data.local.archive.SettledWindowRow(
+                ticker = ticker,
+                series = com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(ticker),
+                result = ""
+            )
         )
-        return marketModel(row)
     }
 
     fun marketModel(row: SettledWindowRow): MarketUiModel {
-        val bids = runCatching {
-            container.archive.bidHistory(row.ticker, (row.closeMs ?: 0L) - 3_600_000L, 240)
-        }.getOrElse { emptyList() }
-        return settledToMarket(row, bids)
+        chartCache[row.ticker]?.let { cached ->
+            _chartMarket.value = cached
+            return cached
+        }
+        val placeholder = settledToMarket(row, emptyList())
+        _chartMarket.value = placeholder
+        if (chartLoading.add(row.ticker)) {
+            viewModelScope.launch(Dispatchers.IO) {
+                try {
+                    val stored = runCatching { container.archive.settledWindow(row.ticker) }.getOrNull() ?: row
+                    val bids = runCatching {
+                        container.archive.bidHistory(stored.ticker, (stored.closeMs ?: 0L) - 3_600_000L, 240)
+                    }.getOrElse { emptyList() }
+                    val full = settledToMarket(stored, bids)
+                    chartCache[row.ticker] = full
+                    _chartMarket.value = full
+                } finally {
+                    chartLoading.remove(row.ticker)
+                }
+            }
+        }
+        return placeholder
     }
 
     private fun betsPage(cur: HistoryUiState, offset: Int, page: Int): HistoryUiState {

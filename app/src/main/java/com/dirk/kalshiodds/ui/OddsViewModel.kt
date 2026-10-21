@@ -23,8 +23,6 @@ import com.dirk.kalshiodds.signal.trade.PositionParser
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
 import com.dirk.kalshiodds.signal.trade.TicketUiState
 import com.dirk.kalshiodds.chart.ChartWindowService
-import com.dirk.kalshiodds.chart.hasQuote
-import com.dirk.kalshiodds.chart.hasSpot
 import com.dirk.kalshiodds.data.backfill.CoinbaseSpotBackfill
 import com.dirk.kalshiodds.data.backfill.LiveWindowBackfill
 import com.dirk.kalshiodds.data.backfill.OkHttpHistoryTransport
@@ -138,6 +136,10 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     }
     private val backfillStarted = ConcurrentHashMap<String, Long>()
     private var backfillJob: Job? = null
+    private val seriesCache = com.dirk.kalshiodds.chart.CardSeriesCache()
+    private val seriesDirty = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val seriesLock = Any()
+    private var seriesJob: Job? = null
     private var lastWsState: WsConnectionState? = null
     private var rolloverBound = false
     private var lastRecordedTicketError: String? = null
@@ -225,9 +227,9 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         if (!visible) { scalpTabJob?.cancel(); scalpTabJob = null; return }
         if (visible) ensureScalpMigration()
         if (visible && scalpTabJob?.isActive != true) {
-            scalpTabJob = vmScope.launch(Dispatchers.Default) {
+            scalpTabJob = vmScope.launch(Dispatchers.IO) {
                 while (isActive && scalpTabVisible) {
-                    runCatching { container.scalp.flushWrites(); refreshScalpTab() }
+                    ioCatching { container.scalp.flushWrites(); refreshScalpTab() }
                     delay(SCALP_TAB_REFRESH_MS)
                 }
             }
@@ -257,7 +259,17 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
 
     private var arenaChartReadAtMs = 0L
 
-    private fun refreshScalpTab(now: Long = container.clock.nowMs()) {
+    private suspend fun ioCatching(block: suspend () -> Unit) {
+        try {
+            block()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+        }
+    }
+
+    /** Arena chartTicks and the rest of this read run on [Dispatchers.IO], never the main thread. */
+    private suspend fun refreshScalpTab(now: Long = container.clock.nowMs()) = withContext(Dispatchers.IO) {
         val cur = _scalpTab.value
         val markets = _state.value.snapshot?.allMarkets.orEmpty()
             .filter { com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(it.ticker) in com.dirk.kalshiodds.domain.CryptoMarkets.FIFTEEN_SERIES }
@@ -418,9 +430,10 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun followScalpChartLive() { _scalpAlgo.update { it.copy(followLive = true) } }
 
-    private fun refreshScalpAlgo() {
+    /** Chart ticks for the algo page are read on [Dispatchers.IO]. */
+    private suspend fun refreshScalpAlgo() = withContext(Dispatchers.IO) {
         val selected = _scalpAlgo.value
-        val model = selected.model ?: return
+        val model = selected.model ?: return@withContext
         val now = container.clock.nowMs()
         container.scalp.flushWrites()
         val active = container.scalp.all.value.filter { com.dirk.kalshiodds.decision.ScalpModels.scalperIdOf(it) == model.code }
@@ -469,12 +482,12 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val st = _scalpTab.value
         val t = st.selectedTicker ?: return
         submitPaperOrder(t, st.side, if (buy) "BUY" else "SELL", cents.toDouble(), qty, market = false)
-        vmScope.launch(paperLane) { runCatching { refreshScalpTab() } }
+        vmScope.launch(paperLane) { ioCatching { refreshScalpTab() } }
     }
 
-    fun ladderCancel(id: String) { cancelPaperOrder(id); vmScope.launch(paperLane) { runCatching { refreshScalpTab() } } }
+    fun ladderCancel(id: String) { cancelPaperOrder(id); vmScope.launch(paperLane) { ioCatching { refreshScalpTab() } } }
 
-    fun ladderReprice(id: String, cents: Int) { editPaperOrder(id, cents.toDouble(), null); vmScope.launch(paperLane) { runCatching { refreshScalpTab() } } }
+    fun ladderReprice(id: String, cents: Int) { editPaperOrder(id, cents.toDouble(), null); vmScope.launch(paperLane) { ioCatching { refreshScalpTab() } } }
 
     /** One tap: sell everything held on the selected side at entry + [plusCents]. */
     fun sellOwnedAt(plusCents: Int) {
@@ -486,7 +499,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         submitPaperOrder(t, st.side, "SELL", px * 100.0, st.heldContracts, market = false)
-        vmScope.launch(paperLane) { runCatching { refreshScalpTab() } }
+        vmScope.launch(paperLane) { ioCatching { refreshScalpTab() } }
     }
 
     private fun feedStatusLine(now: Long = System.currentTimeMillis()): String {
@@ -565,8 +578,10 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         }
         vmScope.launch {
             runCatching {
-                hub.applyCalibration(Calibrator.fitEntries(container.logStore.readAll()))
-                container.support.bootstrap(_state.value.settings)
+                withContext(Dispatchers.IO) {
+                    hub.applyCalibration(Calibrator.fitEntries(container.logStore.readAll()))
+                    container.support.bootstrap(_state.value.settings)
+                }
                 publishSupportState()
             }
         }
@@ -596,6 +611,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                         )
                     }
                     scheduleRebuildTickets()
+                    scheduleCardSeriesRefresh()
                 }
             }
         }
@@ -683,13 +699,15 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun restorePersistedState() {
-        val hydrated = runCatching { prefs.hydrate() }.getOrNull()
+        val hydrated = withContext(Dispatchers.IO) { runCatching { prefs.hydrate() }.getOrNull() }
         if (hydrated != null) {
             hub.settings = hydrated
             _state.update { it.copy(settings = hydrated) }
         }
-        seedOddsHistory()
-        seedChartWindows()
+        withContext(Dispatchers.IO) {
+            seedOddsHistory()
+            seedChartWindows()
+        }
         val cached = runCatching { repository.cachedSnapshot.first() }.getOrNull()
         if (cached != null && (_state.value.snapshot == null || _state.value.snapshot!!.allMarkets.isEmpty())) {
             val overlaid = attachHistory(
@@ -702,7 +720,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                     modelScoreLabel = scoreLabel(overlaid)
                 )
             }
-            seedChartWindows()
+            withContext(Dispatchers.IO) { seedChartWindows() }
+            scheduleCardSeriesRefresh()
         }
         val rows = withContext(Dispatchers.IO) { container.resultsStore.recentSnapshots(24) }
         _state.update {
@@ -780,6 +799,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             )
             cur.copy(snapshot = overlaid, isLoading = false)
         }
+        scheduleCardSeriesRefresh()
         if (event.droppedTickers.isNotEmpty()) {
             ticketSession.voidTickers(event.droppedTickers)
             vmScope.launch {
@@ -964,6 +984,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         }
         publishSupportState()
         scheduleRebuildTickets()
+        scheduleCardSeriesRefresh()
         scheduleChartBackfill(overlaid)
     }
 
@@ -1316,6 +1337,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 )
             }
+            scheduleCardSeriesRefresh()
             scheduleRebuildTickets()
             refreshPositionMarks()
         }
@@ -1330,13 +1352,17 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun applyRolloverCharts(event: com.dirk.kalshiodds.signal.market.MarketRollover.Event) {
-        val now = container.clock.nowMs()
-        for (ticker in event.addedTickers) {
-            val market = event.active.values.firstOrNull { it.ticker == ticker }
-            val end = market?.closeTimeEpochMs ?: now + ChartWindowService.WINDOW_MS
-            chartWindows.restoreWindow(ticker, end - ChartWindowService.WINDOW_MS, end)
+        event.addedTickers.forEach { seriesCache.invalidate(it) }
+        vmScope.launch(Dispatchers.IO) {
+            val now = container.clock.nowMs()
+            for (ticker in event.addedTickers) {
+                val market = event.active.values.firstOrNull { it.ticker == ticker }
+                val end = market?.closeTimeEpochMs ?: now + ChartWindowService.WINDOW_MS
+                chartWindows.restoreWindow(ticker, end - ChartWindowService.WINDOW_MS, end)
+            }
+            chartWindows.trimActive(event.activeTickers, now - ChartWindowService.WINDOW_MS)
+            scheduleCardSeriesRefresh()
         }
-        chartWindows.trimActive(event.activeTickers, now - ChartWindowService.WINDOW_MS)
     }
 
     private fun rebuildTickets() {
@@ -2186,18 +2212,21 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun scheduleChartBackfill(snap: MarketsSnapshot) {
+        if (backfillJob?.isActive == true) return
         val now = System.currentTimeMillis()
-        val targets = snap.allMarkets.filter { m ->
-            val end = m.closeTimeEpochMs ?: now
-            val start = end - ChartWindowService.WINDOW_MS
-            val last = backfillStarted[m.ticker]
-            if (last != null && now - last < 60_000L) return@filter false
-            chartWindows.needsBackfill(m.ticker, start, end)
-        }
-        if (targets.isEmpty()) return
-        targets.forEach { backfillStarted[it.ticker] = now }
-        backfillJob?.cancel()
         backfillJob = vmScope.launch(Dispatchers.IO) {
+            val targets = snap.allMarkets.filter { m ->
+                val end = m.closeTimeEpochMs ?: now
+                val start = end - ChartWindowService.WINDOW_MS
+                val last = backfillStarted[m.ticker]
+                if (last != null && now - last < 60_000L) return@filter false
+                chartWindows.needsBackfill(m.ticker, start, end)
+            }
+            if (targets.isEmpty()) return@launch
+            targets.forEach {
+                backfillStarted[it.ticker] = now
+                seriesCache.invalidate(it.ticker)
+            }
             for (m in targets) {
                 if (!isActive) break
                 val end = m.closeTimeEpochMs ?: now
@@ -2211,9 +2240,75 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
             }
-            val latest = _state.value.snapshot ?: return@launch
-            val overlaid = attachHistory(latest)
-            _state.update { it.copy(snapshot = overlaid) }
+            scheduleCardSeriesRefresh()
+        }
+    }
+
+    /**
+     * Memory only: cached prints plus the in-memory book. SQLite runs in [refreshCardSeries].
+     */
+    private fun cardBids(m: MarketUiModel, now: Long): List<com.dirk.kalshiodds.chart.BidPoint> {
+        val end = m.closeTimeEpochMs ?: now
+        val start = end - ChartWindowService.WINDOW_MS
+        val cached = seriesCache.get(m.ticker, end)?.bids.orEmpty()
+        val live = runCatching { hub.scoring.book.bidHistory(m.ticker) }.getOrElse { emptyList() }
+        val merged = com.dirk.kalshiodds.chart.ChartSeriesMerge.merge(cached, live)
+        val headed = com.dirk.kalshiodds.chart.ChartSeriesMerge.withLiveHead(
+            merged,
+            now.coerceAtMost(end),
+            m.yesBid,
+            m.noBid,
+            m.spotUsd
+        )
+        return com.dirk.kalshiodds.chart.ChartDownsampler.downsample(
+            com.dirk.kalshiodds.chart.ChartSeriesMerge.inWindow(headed, start, end),
+            com.dirk.kalshiodds.chart.ChartDownsampler.CARD_POINTS
+        )
+    }
+
+    /** One IO job. A burst of score emissions sets [seriesDirty] and the job reads the latest snapshot once. */
+    private fun scheduleCardSeriesRefresh() {
+        seriesDirty.set(true)
+        synchronized(seriesLock) {
+            if (seriesJob?.isActive == true) return
+            seriesJob = vmScope.launch(Dispatchers.IO) {
+                while (isActive) {
+                    if (!seriesDirty.getAndSet(false)) break
+                    delay(CARD_SERIES_DEBOUNCE_MS)
+                    if (!isActive) break
+                    seriesDirty.set(false)
+                    refreshCardSeries()
+                }
+            }
+        }
+    }
+
+    private suspend fun refreshCardSeries() {
+        val snap = _state.value.snapshot ?: return
+        val now = System.currentTimeMillis()
+        val stale = snap.allMarkets.filter { m ->
+            val end = m.closeTimeEpochMs ?: now
+            !seriesCache.fresh(m.ticker, end, now)
+        }
+        if (stale.isEmpty()) return
+        val settledBySeries = HashMap<String, List<Boolean>>()
+        for (m in stale) {
+            if (!kotlin.coroutines.coroutineContext.isActive) return
+            val end = m.closeTimeEpochMs ?: now
+            val series = com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(m.ticker)
+            val past = settledBySeries.getOrPut(series) {
+                runCatching {
+                    container.archive.recentSettled(series, 8).map { it.result.equals("yes", true) }
+                }.getOrElse { emptyList() }
+            }
+            val bids = runCatching { chartWindows.seriesForCard(m) }.getOrElse { emptyList() }
+            seriesCache.put(m.ticker, end, bids, past, now)
+        }
+        withContext(Dispatchers.Main.immediate) {
+            _state.update { cur ->
+                val base = cur.snapshot ?: return@update cur
+                cur.copy(snapshot = attachHistory(base))
+            }
         }
     }
 
@@ -2232,27 +2327,9 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                     pts
                 }
             )
-            val bids = runCatching { chartWindows.seriesForCard(m) }.getOrElse {
-                val liveBids = runCatching { hub.scoring.book.bidHistory(m.ticker) }.getOrElse { emptyList() }
-                val stored = runCatching {
-                    container.archive.bidHistory(
-                        m.ticker,
-                        (m.closeTimeEpochMs ?: System.currentTimeMillis()) - 3_600_000L,
-                        240
-                    )
-                }.getOrElse { emptyList() }
-                com.dirk.kalshiodds.chart.ChartDownsampler.downsample(
-                    (stored + liveBids)
-                        .filter { it.hasQuote() || it.hasSpot() }
-                        .sortedBy { it.tMs }
-                        .distinctBy { it.tMs },
-                    com.dirk.kalshiodds.chart.ChartDownsampler.CARD_POINTS
-                )
-            }
-            val past = runCatching {
-                container.archive.recentSettled(com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(m.ticker), 8)
-                    .map { it.result.equals("yes", true) }
-            }.getOrElse { emptyList() }
+            val now = System.currentTimeMillis()
+            val bids = cardBids(m, now)
+            val past = m.closeTimeEpochMs?.let { seriesCache.get(m.ticker, it)?.settledYes }.orEmpty()
             val withOdds = if (merged.isEmpty() && m.oddsHistory.isEmpty()) m else m.copy(oddsHistory = merged.ifEmpty { m.oddsHistory })
             val withBids = if (bids.isEmpty() && withOdds.bidHistory.isEmpty()) withOdds else withOdds.copy(bidHistory = bids.ifEmpty { withOdds.bidHistory })
             if (past.isEmpty()) withBids else withBids.copy(pastSettlements = past)
@@ -2298,6 +2375,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         const val SCORE_OVERLAY_THROTTLE_MS = 250L
         const val HOME_LIVE_THROTTLE_MS = 250L
         const val SCALP_TAB_REFRESH_MS = 500L
+        const val CARD_SERIES_DEBOUNCE_MS = 200L
         const val SCALP_TAB_BOARDS_MS = 10_000L
         const val SCALP_TAB_CI_MS = 60_000L
     }

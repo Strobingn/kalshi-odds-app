@@ -34,6 +34,15 @@ class KalshiOddsApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        if (BuildConfig.DEBUG) {
+            android.os.StrictMode.setThreadPolicy(
+                android.os.StrictMode.ThreadPolicy.Builder()
+                    .detectDiskReads()
+                    .detectDiskWrites()
+                    .penaltyLog()
+                    .build()
+            )
+        }
         runCatching { CrashBreadcrumb.install(this) }
         runCatching { com.dirk.kalshiodds.crash.CrashLog.install(this, BuildConfig.VERSION_NAME) } // 0.3.47
         // 0.3.40 (owner): Autopilot/Scalp are paper-only — delete any persisted live arming (idempotent).

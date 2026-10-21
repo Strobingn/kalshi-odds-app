@@ -59,6 +59,52 @@ class ScalpForecastRecorderTest {
         assertEquals(setOf(nextClose), recorder.trackedCloses())
     }
 
+    @Test fun batchesDueCoinsIntoOneInsert() {
+        var calls = 0
+        val batches = ArrayList<List<LedgerRow>>()
+        val recorder = ScalpForecastRecorder(
+            insert = { error("single insert") },
+            insertBatch = { rows ->
+                calls++
+                batches += rows
+                rows.size
+            }
+        )
+        val now = close - 200_000L
+        recorder.observe(
+            listOf(
+                quote("KXBTC15M-26OCT181530-30", now, strike = 100.0, spot = 101.0),
+                quote("KXETH15M-26OCT181530-30", now, strike = 200.0, spot = 200.0),
+                quote("KXSOL15M-26OCT181530-30", now, strike = 150.0, spot = 150.0)
+            )
+        ) { 0.55 }
+        assertEquals(1, calls)
+        assertEquals(listOf("BTC", "ETH", "SOL"), batches.single().map { ScalpParams.coinOf(it.ticker) }.sorted())
+        recorder.observe(listOf(quote("KXBTC15M-26OCT181530-30", now + 5_000, strike = 100.0, spot = 101.0))) { 0.2 }
+        assertEquals(1, calls)
+    }
+
+    @Test fun failedBatchDoesNotBurnTheCadence() {
+        var ok = false
+        val batches = ArrayList<List<LedgerRow>>()
+        val recorder = ScalpForecastRecorder(
+            insert = { false },
+            insertBatch = { rows ->
+                if (!ok) 0 else {
+                    batches += rows
+                    rows.size
+                }
+            }
+        )
+        val now = close - 90_000L
+        val q = quote("KXSOL15M-26OCT181530-30", now, strike = 150.0, spot = 150.0)
+        recorder.observe(listOf(q)) { 0.4 }
+        assertTrue(batches.isEmpty())
+        ok = true
+        recorder.observe(listOf(q.copy(nowMs = now + 1_000))) { 0.4 }
+        assertEquals(1, batches.single().size)
+    }
+
     @Test fun failedInsertDoesNotBurnTheCadence() {
         var ok = false
         val rows = ArrayList<LedgerRow>()

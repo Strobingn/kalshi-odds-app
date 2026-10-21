@@ -102,14 +102,17 @@ class SupabaseSync(
         var paperOk = true
         for ((kind, batch) in deduped.groupBy { it.kind }) {
             if (kind == "paper") sawPaper = true
-            try {
-                restUpsert(settings, TABLE, batchBody(batch))
-                pushed += batch.size
-            } catch (t: Throwable) {
-                val reason = t.message?.takeIf { it.isNotBlank() } ?: "sync failed"
-                errors += "$TABLE $kind: $reason"
-                failed += kind
-                if (kind == "paper") paperOk = false
+            for (chunk in batch.chunked(PUSH_CHUNK)) {
+                try {
+                    restUpsert(settings, TABLE, batchBody(chunk))
+                    pushed += chunk.size
+                } catch (t: Throwable) {
+                    val reason = t.message?.takeIf { it.isNotBlank() } ?: "sync failed"
+                    errors += "$TABLE $kind: $reason"
+                    failed += kind
+                    if (kind == "paper") paperOk = false
+                    break
+                }
             }
         }
         if (!sawPaper) paperOk = true
@@ -389,6 +392,8 @@ class SupabaseSync(
         /** 0.3.60: kinds merged back on pull (everything except snapshot / scalp / shadow, which are push-only). */
         val PULL_KINDS = listOf("alert", "paper", "ticket", "settings", "settings_snapshot")
         const val PULL_LIMIT_PER_KIND = 1000
+        /** One POST body. Larger kinds are split so a sync cannot allocate one giant JSON array. */
+        const val PUSH_CHUNK = 80
         const val KEY_PREFIX = "scalp:"
         /** PostgREST `like` filter. `*` is the wildcard. */
         const val PULL_FILTER = "key=like.scalp:*"
@@ -474,6 +479,7 @@ object SnapshotUploadFilter {
     const val MIN_GAP_MS = 60_000L
     const val HEARTBEAT_MS = 300_000L
     const val EDGE_MOVE_PP = 3.0
+    const val MAX_SELECTED = 800
     private data class Last(val atMs: Long, val side: String, val edgePp: Double)
     private val last = java.util.concurrent.ConcurrentHashMap<String, Last>()
 
@@ -488,20 +494,46 @@ object SnapshotUploadFilter {
     fun select(rows: List<ScoredSnapshotRow>): List<ScoredSnapshotRow> {
         val last = HashMap(this.last)
         val out = ArrayList<ScoredSnapshotRow>()
-        for (s in rows.sortedBy { it.createdAtMs }) {
-            val prev = last[s.ticker]
-            val keep = prev == null || run {
-                val dt = s.createdAtMs - prev.atMs
-                dt < 0L || dt >= HEARTBEAT_MS ||
-                    (s.side != prev.side && (dt >= MIN_GAP_MS || dt == 0L)) || // YES+NO rows of one score both go
-                    (dt >= MIN_GAP_MS && s.edgePp.isFinite() && kotlin.math.abs(s.edgePp - prev.edgePp) >= EDGE_MOVE_PP)
-            }
-            if (keep) {
-                last[s.ticker] = Last(s.createdAtMs, s.side, s.edgePp)
-                out += s
+        for (s in rows.sortedBy { it.createdAtMs }) accept(s, last, out, Int.MAX_VALUE)
+        return out
+    }
+
+    /**
+     * Walk pages already in time order. Holds one page plus the rows actually uploaded.
+     * Stops after [MAX_SELECTED] so a sync payload stays bounded; the rest upload next time.
+     */
+    fun selectStreaming(nextPage: () -> List<ScoredSnapshotRow>?): List<ScoredSnapshotRow> {
+        val last = HashMap(this.last)
+        val out = ArrayList<ScoredSnapshotRow>()
+        while (out.size < MAX_SELECTED) {
+            val page = nextPage() ?: break
+            if (page.isEmpty()) break
+            for (s in page.sortedBy { it.createdAtMs }) {
+                if (!accept(s, last, out, MAX_SELECTED)) break
             }
         }
         return out
+    }
+
+    private fun accept(
+        s: ScoredSnapshotRow,
+        last: MutableMap<String, Last>,
+        out: MutableList<ScoredSnapshotRow>,
+        cap: Int
+    ): Boolean {
+        if (out.size >= cap) return false
+        val prev = last[s.ticker]
+        val keep = prev == null || run {
+            val dt = s.createdAtMs - prev.atMs
+            dt < 0L || dt >= HEARTBEAT_MS ||
+                (s.side != prev.side && (dt >= MIN_GAP_MS || dt == 0L)) || // YES+NO rows of one score both go
+                (dt >= MIN_GAP_MS && s.edgePp.isFinite() && kotlin.math.abs(s.edgePp - prev.edgePp) >= EDGE_MOVE_PP)
+        }
+        if (keep) {
+            last[s.ticker] = Last(s.createdAtMs, s.side, s.edgePp)
+            out += s
+        }
+        return true
     }
 
     /** Record [uploaded] as the new per-ticker upload state (newest row per ticker wins). */
