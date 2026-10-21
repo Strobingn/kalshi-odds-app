@@ -100,6 +100,8 @@ fun DataScreen(
 
             StatsCard(state)
 
+            PaperRichCharts("Data")
+
             Button(
                 onClick = onOpenHistory,
                 modifier = Modifier.fillMaxWidth().height(52.dp)

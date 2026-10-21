@@ -267,6 +267,7 @@ fun ScorecardScreen(
                     SettledPickRow(row.value)
                 }
             }
+            item(key = "paper-rich-charts") { PaperRichCharts("Scorecard") }
             item { Spacer(Modifier.height(8.dp)) }
         }
     }
