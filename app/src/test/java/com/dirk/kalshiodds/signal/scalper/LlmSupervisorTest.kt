@@ -17,7 +17,10 @@ import org.junit.Test
 /** The AI supervisor: bounded settings changes, no cooldown, and learning from every closed trade. */
 class LlmSupervisorTest {
 
-    private val st = ScalpStrategy.DIP_HUNTER
+    /** A strategy that still runs (the dip-hunter and friends are retired) with a small target and stop. */
+    private val st = ScalpStrategy.ACTIVE.first {
+        it.fav == null && it.targetDollars * 100.0 in 1.0..20.0 && it.stopDollars * 100.0 in 1.0..20.0
+    }
     private val ticker = "KXBTC15M-26OCT091215-15"
 
     private fun applied(c: SupervisorBounds.Change) = c as SupervisorBounds.Change.Applied
@@ -86,7 +89,7 @@ class LlmSupervisorTest {
         val seen = ArrayList<String>()
         val answers = ArrayDeque(
             listOf(
-                """{"changes":[{"strategy":"DIP_HUNTER","param":"targetCents","value":12,"reason":"wider target"}],"lesson":"dips bounce"}""",
+                """{"changes":[{"strategy":"${st.name}","param":"targetCents","value":25,"reason":"wider target"}],"lesson":"dips bounce"}""",
                 """{"changes":[]}"""
             )
         )
@@ -127,7 +130,7 @@ class LlmSupervisorTest {
         val seen = ArrayList<String>()
         val answers = ArrayDeque(
             listOf(
-                """{"changes":[{"strategy":"DIP_HUNTER","param":"stopCents","value":3,"reason":"tight stop"}]}""",
+                """{"changes":[{"strategy":"${st.name}","param":"stopCents","value":30,"reason":"wider stop"}]}""",
                 """{"changes":[]}"""
             )
         )
