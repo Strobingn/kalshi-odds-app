@@ -380,7 +380,11 @@ fun FamilyStackChart(
 
 /** Trailing win rate. The line is empty until 30 closed trades exist. */
 @Composable
-fun RollingWinRateChart(samples: List<ChartShapes.Sample>, modifier: Modifier = Modifier) {
+fun RollingWinRateChart(
+    samples: List<ChartShapes.Sample>,
+    modifier: Modifier = Modifier,
+    closedCount: Int = 0
+) {
     val c = DipTheme.colors
     Column(
         modifier.fillMaxWidth().testTag("chart_rolling")
@@ -389,7 +393,10 @@ fun RollingWinRateChart(samples: List<ChartShapes.Sample>, modifier: Modifier = 
     ) {
         Text("Rolling 30-trade win rate", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
         Text("Share of the last 30 closed trades that finished above zero. UP and DOWN are in the same line.", style = MaterialTheme.typography.bodySmall, color = c.textSecondary)
-        MultiLineChart(
+        val holdback = ChartGallery.rollingHoldback(closedCount)
+        if (samples.isEmpty() && holdback != null) {
+            Text(holdback, color = c.textPrimary, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(vertical = 28.dp))
+        } else MultiLineChart(
             if (samples.isEmpty()) emptyList() else listOf(LineSeries("Win rate", c.upButton, samples)),
             yFormat = { "${it.roundToInt()}%" },
             xFormat = { chartDayClock(it) },
@@ -666,7 +673,7 @@ fun EquitySparkGrid(lines: List<ChartGallery.SparkLine>, modifier: Modifier = Mo
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text("Equity curves", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
-        Text("One line per strategy, from recorded window nets. Starts at $0.", style = MaterialTheme.typography.bodySmall, color = c.textSecondary)
+        Text("Starts at $0. Recent windows when we have them. Otherwise a straight line from $0 to the all-time net.", style = MaterialTheme.typography.bodySmall, color = c.textSecondary)
         if (lines.isEmpty()) {
             ChartEmptyState(height = 120.dp)
             return

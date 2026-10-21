@@ -50,8 +50,6 @@ import com.dirk.kalshiodds.data.local.history.HistorySession
 import com.dirk.kalshiodds.data.local.history.SettingsChange
 import com.dirk.kalshiodds.ui.components.SignalSummaryCard
 import com.dirk.kalshiodds.domain.MarketUiModel
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 import com.dirk.kalshiodds.ui.theme.DipTheme
 
@@ -256,9 +254,15 @@ private fun CumulativePnlChart(points: List<Pair<Long, Double>>) {
                 val y = size.height * (1f - ((p.second - minY) / spanY).toFloat()).coerceIn(0f, 1f)
                 if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
             }
-            drawPath(path, color, style = Stroke(width = 3f, cap = StrokeCap.Round))
+            val last = points.last().second
+            val ink = if (last > 0.004) colors.upButton else if (last < -0.004) colors.downButton else color
+            drawPath(path, ink, style = Stroke(width = 3f, cap = StrokeCap.Round))
             val zero = size.height * (1f - ((0.0 - minY) / spanY).toFloat()).coerceIn(0f, 1f)
             drawLine(color.copy(alpha = 0.25f), Offset(0f, zero), Offset(size.width, zero), strokeWidth = 1f)
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(com.dirk.kalshiodds.domain.EtTime.dateClock(points.first().first), color = colors.textSecondary, style = MaterialTheme.typography.labelSmall)
+            Text(com.dirk.kalshiodds.domain.EtTime.dateClock(points.last().first), color = colors.textSecondary, style = MaterialTheme.typography.labelSmall)
         }
     }
 }

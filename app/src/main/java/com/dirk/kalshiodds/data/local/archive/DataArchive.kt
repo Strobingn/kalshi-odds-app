@@ -65,9 +65,7 @@ data class DataStats(
         get() = if (minCloseMs == null || maxCloseMs == null) {
             "no labeled windows yet"
         } else {
-            val fmt = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
-            fmt.timeZone = java.util.TimeZone.getTimeZone("UTC")
-            "${fmt.format(java.util.Date(minCloseMs))} → ${fmt.format(java.util.Date(maxCloseMs))}"
+            "${com.dirk.kalshiodds.domain.EtTime.day(minCloseMs)} → ${com.dirk.kalshiodds.domain.EtTime.day(maxCloseMs)} ET"
         }
 }
 

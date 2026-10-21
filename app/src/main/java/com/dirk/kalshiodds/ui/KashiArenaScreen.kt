@@ -134,7 +134,8 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
                     rows.mapNotNull { row ->
                         val frozen = com.dirk.kalshiodds.decision.insights.ScalpFreeze.isFrozen(bench[row.model.code])
                         if (row.roundTrips > 0 || frozen) row.model to frozen else null
-                    }
+                    },
+                    rows.filter { it.roundTrips > 0 }.associate { it.model to it.netUsd }
                 )
                 item(key = "race") { ArenaCard {
                     Text("Strategy race", style = MaterialTheme.typography.titleMedium, color = c.textPrimary, fontWeight = FontWeight.SemiBold)

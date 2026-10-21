@@ -380,21 +380,31 @@ object ChartGallery {
 
     data class SparkLine(val label: String, val values: List<Double>, val frozen: Boolean = false)
 
-    /** One equity curve per strategy. A strategy with no recorded windows keeps an empty line. */
+    /**
+     * One equity curve per strategy. Recent windows win. When those windows do not
+     * contain a strategy that has an all-time net, the line is $0 to that net so the
+     * cell is not empty while the leaderboard shows a result.
+     */
     fun equitySparks(
         windows: List<ScalpModels.WindowRow>,
         nowMs: Long,
-        models: List<Pair<ScalpModels.Model, Boolean>>
+        models: List<Pair<ScalpModels.Model, Boolean>>,
+        allTimeNet: Map<ScalpModels.Model, Double> = emptyMap()
     ): List<SparkLine> {
         if (models.isEmpty()) return emptyList()
         val lines = ChartShapes.equityFromWindows(windows, nowMs, models.map { it.first }).associateBy { it.name }
         return models.map { (model, frozen) ->
-            SparkLine(
-                model.label,
-                lines[model.label]?.points?.map { it.value }?.filter { it.isFinite() } ?: emptyList(),
-                frozen
-            )
+            val fromWindows = lines[model.label]?.points?.map { it.value }?.filter { it.isFinite() }.orEmpty()
+            val values = if (fromWindows.size >= 2) fromWindows
+            else allTimeNet[model]?.takeIf { it.isFinite() }?.let { listOf(0.0, it) } ?: fromWindows
+            SparkLine(model.label, values, frozen)
         }
+    }
+
+    /** Shown instead of an empty chart when some closes exist but not yet [window]. */
+    fun rollingHoldback(closedCount: Int, window: Int = 30): String? {
+        if (window <= 1 || closedCount <= 0 || closedCount >= window) return null
+        return "$closedCount of $window closed trades. The line starts at $window."
     }
 
     data class LeaderRow(val label: String, val net: Double, val frozen: Boolean)

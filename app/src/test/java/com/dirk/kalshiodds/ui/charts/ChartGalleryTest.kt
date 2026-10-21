@@ -75,6 +75,11 @@ class ChartGalleryTest {
         assertTrue(lines[0].values.size >= 2)
         assertTrue(lines[1].values.isEmpty() && lines[1].frozen)
         assertTrue(ChartGallery.equitySparks(windows, day, emptyList()).isEmpty())
+        val filled = ChartGallery.equitySparks(windows, day + 1_000, listOf(m1 to false), mapOf(m1 to -2.5))
+        assertEquals(listOf(0.0, -2.5), filled.single().values)
+        assertEquals("12 of 30 closed trades. The line starts at 30.", ChartGallery.rollingHoldback(12))
+        assertEquals(null, ChartGallery.rollingHoldback(0))
+        assertEquals(null, ChartGallery.rollingHoldback(30))
     }
 
     @Test fun dailyCorrelationNeedsTwoMovers() {

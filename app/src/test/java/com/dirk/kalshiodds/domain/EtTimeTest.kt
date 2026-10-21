@@ -20,6 +20,18 @@ class EtTimeTest {
         assertEquals("1:52:07.000 PM ET", EtTime.clockMillis(t))
         assertEquals("1:52 PM", EtTime.clockBare(t))
         assertEquals("10/20 1:52 PM", EtTime.shortDateClockBare(t))
+        assertEquals("2026-10-20", EtTime.day(t))
+    }
+
+    @Test fun dayIsEasternNotUtc() {
+        val justAfterUtcMidnight = ms("2026-10-21T02:00:00Z")
+        assertEquals("2026-10-20", EtTime.day(justAfterUtcMidnight))
+        val stats = com.dirk.kalshiodds.data.local.archive.DataStats(
+            settledCount = 1,
+            minCloseMs = justAfterUtcMidnight,
+            maxCloseMs = justAfterUtcMidnight
+        )
+        assertEquals("2026-10-20 → 2026-10-20 ET", stats.dateRangeLabel)
     }
 
     @Test fun winterUsesEst() {

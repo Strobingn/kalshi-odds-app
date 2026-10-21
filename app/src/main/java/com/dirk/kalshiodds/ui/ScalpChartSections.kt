@@ -124,10 +124,13 @@ internal fun AnalysisGallery(
 @Composable
 internal fun StrategyDetailCharts(trades: List<ScalpTrade>) {
     val rolling = remember(trades) { ChartGallery.rollingWinRate(trades) }
+    val closedCount = remember(trades) {
+        trades.count { it.state == ScalpState.CLOSED && it.netUsd?.isFinite() == true }
+    }
     val bins = remember(trades) { ChartGallery.pnlBins(trades) }
     val dots = remember(trades) { ChartGallery.entryExit(trades) }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        ArenaCard { RollingWinRateChart(rolling) }
+        ArenaCard { RollingWinRateChart(rolling, closedCount = closedCount) }
         ArenaCard { PnlHistogram(bins) }
         ArenaCard { EntryExitScatter(dots) }
     }
