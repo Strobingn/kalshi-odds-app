@@ -122,7 +122,7 @@ fun PaperChatScreen(state: OddsUiState, onBack: () -> Unit, onSelectTab: (Int) -
                 item {
                     ChatCard {
                         Text("PROVIDER SETTINGS", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
-                        Text("A saved key is required. Free-tier availability and charges depend on your account. Rate-limit fallback requires keys for both providers.", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                        Text("A saved key is required. Free-tier availability and charges depend on your account. If one provider fails, the app tries the other saved key; failures never display keys.", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
                         Row {
                             PaperChatProvider.values().forEach { option ->
                                 TextButton(enabled = !busy && provider != option, onClick = {

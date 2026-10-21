@@ -23,10 +23,11 @@ class PaperTuning(context: Context) {
     fun snapshot(fills: List<PaperFill>): String = buildString {
         ScalpSignal.Track.values().forEach { track ->
             val changed = prefs.getLong("changed:${track.formulaVersion}", 0L)
-            val rows = fills.filter { it.strategyVersion == track.formulaVersion && it.createdAtMs >= changed }
+            val rows = fills.filter { it.strategyVersion == track.formulaVersion }
             val result = ScalpReview.assess(rows)
+            val afterChange = ScalpReview.assess(rows.filter { it.createdAtMs >= changed })
             val s = settings(track.formulaVersion)
-            appendLine("${track.formulaVersion}: open=${rows.count { !it.settled }}, settled=${result.settledFills}, days=${result.distinctDays}, pnl=${result.realizedPnlUsd}, decision=${result.decision}, trailing_retrace=${s.trailingRetrace}, fair_buffer=${s.fairValueBuffer}, max_net_loss=${s.maxNetLossPerContract}, changed_at=$changed")
+            appendLine("${track.formulaVersion}: open=${rows.count { !it.settled }}, settled=${result.settledFills}, days=${result.distinctDays}, pnl=${result.realizedPnlUsd}, decision=${result.decision}, since_change_settled=${afterChange.settledFills}, since_change_pnl=${afterChange.realizedPnlUsd}, trailing_retrace=${s.trailingRetrace}, fair_buffer=${s.fairValueBuffer}, max_net_loss=${s.maxNetLossPerContract}, changed_at=$changed")
         }
         val open = fills.filter { !it.settled && it.source.startsWith("AI ") }
         appendLine("OPEN PAPER POSITIONS: ${open.size}; each row is a position, not a live order.")
@@ -38,7 +39,7 @@ class PaperTuning(context: Context) {
 
     fun audit(): String = prefs.getString("audit", "No paper adjustments yet.") ?: "No paper adjustments yet."
 
-    /** Parse an allowlisted structured response. Automatic edits need fresh negative evidence. */
+    /** Parse an allowlisted structured response; settings only affect paper exits. */
     @Synchronized
     fun applyResponse(raw: String, fills: List<PaperFill>, automatic: Boolean): String {
         val json = runCatching { JSONObject(raw.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()) }.getOrNull()
@@ -49,9 +50,6 @@ class PaperTuning(context: Context) {
             val change = changes.optJSONObject(i) ?: continue
             val version = change.optString("strategy")
             if (ScalpSignal.Track.values().none { it.formulaVersion == version }) continue
-            val changedAt = prefs.getLong("changed:$version", 0L)
-            val review = ScalpReview.assess(fills.filter { it.strategyVersion == version && it.createdAtMs >= changedAt })
-            if (automatic && (review.settledFills == 0 || review.realizedPnlUsd >= 0.0)) continue
             val old = settings(version)
             fun value(name: String, previous: Double): Double? {
                 if (!change.has(name)) return previous
@@ -77,6 +75,6 @@ class PaperTuning(context: Context) {
     }
 
     companion object {
-        const val INSTRUCTIONS = "Return ONLY JSON: {\"message\":\"brief explanation\",\"changes\":[{\"strategy\":\"exact strategy version\",\"trailing_retrace\":0.005,\"fair_buffer\":0.005,\"max_net_loss\":0.01}]}. Values are dollars per contract from 0 to 1. Include only fields you want changed. These are paper exit settings only. No entry, cash, live, credential, or trading settings exist here. Never claim certainty or invent results. When the user asks for information rather than a settings change, return an empty changes array. Automatic experiments may adjust a track with negative realized after-fee P&L and at least one settled fill since its last change. Treat small samples as tentative, not proof of underperformance or profit. An empty changes array means no change."
+        const val INSTRUCTIONS = "Return ONLY JSON: {\"message\":\"brief explanation\",\"changes\":[{\"strategy\":\"exact strategy version\",\"trailing_retrace\":0.005,\"fair_buffer\":0.005,\"max_net_loss\":0.01}]}. Values are dollars per contract from 0 to 1. Include only fields you want changed. These are paper exit settings only. No entry, cash, live, credential, or trading settings exist here. Never claim certainty or invent results. When the user asks for information rather than a settings change, return an empty changes array. Paper-only experimental adjustments need not wait for settled trades or losses. Treat small samples as tentative, not proof of underperformance or profit. An empty changes array means no change."
     }
 }

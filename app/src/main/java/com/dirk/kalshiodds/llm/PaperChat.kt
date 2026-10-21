@@ -5,12 +5,15 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import java.security.KeyStore
+import java.io.IOException
+import java.net.SocketTimeoutException
 import java.util.concurrent.TimeUnit
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -79,28 +82,13 @@ class PaperChatClient {
 
     data class Answer(val text: String, val provider: PaperChatProvider)
 
-    /** Fail over only on a provider rate limit; both keys must already be saved locally. */
+    /** Try the selected provider first; a bad key or failed request does not mask the other. */
     suspend fun askWithFallback(keys: PaperChatKeys, selected: PaperChatProvider, question: String, context: String, history: List<Pair<String, String>> = emptyList()): Answer {
-        val key = withContext(Dispatchers.IO) { keys.load(selected) }
-        if (key == null) {
-            val alternate = PaperChatProvider.values().first { it != selected }
-            val alternateKey = withContext(Dispatchers.IO) { keys.load(alternate) }
-                ?: throw PaperChatException("Save a Groq or Mistral API key first.")
-            val answer = ask(alternate, alternateKey, question, context, history)
-            withContext(Dispatchers.IO) { keys.select(alternate) }
-            return Answer(answer, alternate)
-        }
-        return try {
-            Answer(ask(selected, key, question, context, history), selected)
-        } catch (e: PaperChatException) {
-            if (e.httpCode != 429) throw e
-            val alternate = PaperChatProvider.values().first { it != selected }
-            val alternateKey = withContext(Dispatchers.IO) { keys.load(alternate) }
-                ?: throw PaperChatException("${selected.label} is rate-limited; save a ${alternate.label} key for automatic fallback.", 429)
-            val answer = ask(alternate, alternateKey, question, context, history)
-            withContext(Dispatchers.IO) { keys.select(alternate) }
-            Answer(answer, alternate)
-        }
+        val answer = runProviderFallback(selected,
+            load = { provider -> withContext(Dispatchers.IO) { keys.load(provider) } },
+            request = { provider, key -> ask(provider, key, question, context, history) })
+        if (answer.provider != selected) withContext(Dispatchers.IO) { runCatching { keys.select(answer.provider) } }
+        return answer
     }
 
     suspend fun ask(provider: PaperChatProvider, apiKey: String, question: String, context: String, history: List<Pair<String, String>> = emptyList()): String = withContext(Dispatchers.IO) {
@@ -116,7 +104,7 @@ class PaperChatClient {
             .header("Authorization", "Bearer $apiKey")
             .post(json.toString().toRequestBody("application/json".toMediaType())).build()
         http.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) throw PaperChatException("${provider.label} request failed (HTTP ${response.code}). Check key, plan, model availability, or rate limit.", response.code)
+            if (!response.isSuccessful) throw PaperChatException(httpFailure(provider, response.code, response.header("Retry-After")), response.code)
             val content = JSONObject(response.body?.string().orEmpty()).getJSONArray("choices")
                 .getJSONObject(0).getJSONObject("message").optString("content").trim()
             check(content.isNotEmpty()) { "${provider.label} returned an empty answer." }
@@ -126,3 +114,44 @@ class PaperChatClient {
 }
 
 class PaperChatException(message: String, val httpCode: Int? = null) : Exception(message)
+
+internal fun httpFailure(provider: PaperChatProvider, code: Int, retryAfter: String?): String {
+    val reason = when (code) {
+        400 -> "invalid request; check model or prompt size"
+        401 -> "key rejected"
+        403 -> "access denied; check account, model, or plan"
+        404 -> "model or endpoint unavailable"
+        413 -> "request too large"
+        429 -> "rate limit or quota reached"
+        in 500..599 -> "provider server error"
+        else -> "request rejected"
+    }
+    val retry = retryAfter?.toLongOrNull()?.takeIf { it in 1..86_400 }?.let { "; retry after $it seconds" }.orEmpty()
+    return "${provider.label}: HTTP $code ($reason$retry)"
+}
+
+/** Never expose provider bodies, keys, URLs, or arbitrary exception messages to the UI. */
+internal fun safeFailure(provider: PaperChatProvider, error: Exception): String = when (error) {
+    is PaperChatException -> error.message ?: "${provider.label}: request failed"
+    is SocketTimeoutException -> "${provider.label}: connection timed out"
+    is IOException -> "${provider.label}: network connection failed"
+    else -> "${provider.label}: invalid or unreadable provider response"
+}
+
+internal suspend fun runProviderFallback(
+    selected: PaperChatProvider,
+    load: suspend (PaperChatProvider) -> String?,
+    request: suspend (PaperChatProvider, String) -> String
+): PaperChatClient.Answer {
+    val failures = mutableListOf<String>()
+    val providers = listOf(selected) + PaperChatProvider.values().filter { it != selected }
+    for (provider in providers) {
+        val key = try { load(provider) } catch (e: CancellationException) { throw e }
+        catch (_: Exception) { failures += "${provider.label}: saved key unreadable; re-enter it"; continue }
+        if (key.isNullOrBlank()) { failures += "${provider.label}: no saved key"; continue }
+        try { return PaperChatClient.Answer(request(provider, key), provider) }
+        catch (e: CancellationException) { throw e }
+        catch (e: Exception) { failures += safeFailure(provider, e) }
+    }
+    throw PaperChatException(failures.joinToString(" · "))
+}
