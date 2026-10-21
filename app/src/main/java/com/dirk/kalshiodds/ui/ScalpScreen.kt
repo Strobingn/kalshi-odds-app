@@ -19,7 +19,7 @@ object ScalpCopy {
     data class Line(val key: String, val text: String, val positive: Boolean?)
 
     const val TITLE = "Scalp (PAPER)"
-    const val BANNER = "PAPER ONLY — no Kalshi orders. 4 strategies side by side: fair-gap, dip-hunter, momentum-sniper, extreme-reversion."
+    const val BANNER = "PAPER ONLY — no Kalshi orders. The board is the scalpers that are ahead after fees."
 
     fun openLines(trades: List<ScalpTrade>, marks: Map<String, ScalpRule.Quote>): List<Line> =
         trades.filter { it.state == ScalpState.OPEN || it.state == ScalpState.PENDING_EXIT || it.state == ScalpState.PENDING_ENTRY }
@@ -66,16 +66,8 @@ object ScalpCopy {
             if (t.lastRunAtMs > 0) "last run " + com.dirk.kalshiodds.domain.EtTime.dateClock(t.lastRunAtMs)
             else "not run yet (needs ${com.dirk.kalshiodds.decision.ScalpTuner.RETUNE_EVERY} closed paper round trips)"
         )
-        val coins = com.dirk.kalshiodds.decision.ScalpStrategy.values().flatMap { st ->
-            com.dirk.kalshiodds.decision.ScalpParams.COINS.map { c ->
-                val k = com.dirk.kalshiodds.decision.ScalpParams.key(c, st)
-                val p = t.paramsFor(c, st)
-                val oos = t.oosCentsByCoin[k]?.let { String.format(Locale.US, "out-of-sample %+.2f¢/ct (n=%d)", it, t.oosNByCoin[k] ?: 0) }
-                    ?: "out-of-sample: not enough data yet"
-                "${st.label} $c: ${p.label()} · $oos"
-            }
-        }
-        return listOf(head) + coins + t.notes
+        val kept = com.dirk.kalshiodds.decision.KeptScalpers.ALL.joinToString(" · ") { it.id }
+        return listOf(head, "Live board: $kept") + t.notes
     }
 
     fun statsLines(s: ScalpStats.Summary): List<String> {

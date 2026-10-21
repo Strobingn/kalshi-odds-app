@@ -173,7 +173,9 @@ object HomeSummaryCopy {
     const val NOTIFY_TITLE = "Paper summary · today ET"
     const val SETTINGS_SHOWN = 4
 
-    fun displayName(scalperId: String): String = ScalpModels.modelByCode(scalperId)?.code ?: scalperId
+    fun displayName(scalperId: String): String =
+        ScalpModels.modelByCode(com.dirk.kalshiodds.decision.KeptScalpers.canonical(scalperId))?.code
+            ?: com.dirk.kalshiodds.decision.KeptScalpers.REMOVED_LABEL
 
     fun tradeCount(n: Int): String = if (n == 1) "1 trade" else "$n trades"
 

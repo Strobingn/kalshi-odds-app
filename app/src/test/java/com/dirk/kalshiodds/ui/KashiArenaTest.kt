@@ -5,7 +5,7 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class KashiArenaTest {
-    private val v2 = ScalpModels.Model.V2_SF41
+    private val v2 = ScalpModels.modelByCode(KeptScalpers.V2_DIP_ID)!!
     private val original = ScalpModels.Model.SF41
     @Test fun completedWindowsStayInTheirOwnGroupAndStartAtZero() {
         val windows = listOf(

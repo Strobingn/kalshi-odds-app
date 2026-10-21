@@ -1307,17 +1307,23 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
 
     /** Keyset paging, newest first, index (scalper_id, closed_at_ms DESC). */
     override fun pageTrades(scalperId: String, afterClosedAtMs: Long?, afterId: String?, limit: Int): List<com.dirk.kalshiodds.decision.ScalpTrade> = runCatching {
-        if (afterClosedAtMs == null) scalpRows("SELECT * FROM ${ST.TABLE} WHERE scalper_id = ? AND state = 'CLOSED' ORDER BY closed_at_ms DESC, id DESC LIMIT $limit", arrayOf(scalperId))
-        else scalpRows("SELECT * FROM ${ST.TABLE} WHERE scalper_id = ? AND state = 'CLOSED' AND (closed_at_ms < ? OR (closed_at_ms = ? AND id < ?)) ORDER BY closed_at_ms DESC, id DESC LIMIT $limit",
-            arrayOf(scalperId, afterClosedAtMs.toString(), afterClosedAtMs.toString(), afterId ?: ""))
+        val ids = com.dirk.kalshiodds.decision.KeptScalpers.storedIds(scalperId)
+        val marks = ids.joinToString(",") { "?" }
+        if (afterClosedAtMs == null) scalpRows("SELECT * FROM ${ST.TABLE} WHERE scalper_id IN ($marks) AND state = 'CLOSED' ORDER BY closed_at_ms DESC, id DESC LIMIT $limit", ids.toTypedArray())
+        else scalpRows("SELECT * FROM ${ST.TABLE} WHERE scalper_id IN ($marks) AND state = 'CLOSED' AND (closed_at_ms < ? OR (closed_at_ms = ? AND id < ?)) ORDER BY closed_at_ms DESC, id DESC LIMIT $limit",
+            (ids + afterClosedAtMs.toString() + afterClosedAtMs.toString() + (afterId ?: "")).toTypedArray())
     }.getOrDefault(emptyList())
 
     override fun windowPrimaryTrades(ticker: String, limit: Int): List<com.dirk.kalshiodds.decision.ScalpTrade> =
         scalpRows("SELECT * FROM ${ST.TABLE} INDEXED BY idx_scalp_ticker WHERE ticker = ? AND scalper_id IS NOT NULL AND scalper_id != '' ORDER BY signal_at_ms DESC LIMIT ${limit.coerceIn(1, 600)}", arrayOf(ticker.uppercase()))
             .filter { it.isPrimary }.sortedBy { it.signalAtMs }
 
-    override fun windowTrades(scalperId: String, ticker: String): List<com.dirk.kalshiodds.decision.ScalpTrade> =
-        scalpRows("SELECT * FROM ${ST.TABLE} INDEXED BY idx_scalp_ticker WHERE ticker = ? AND scalper_id = ? ORDER BY signal_at_ms", arrayOf(ticker.uppercase(), scalperId))
+    override fun windowTrades(scalperId: String, ticker: String): List<com.dirk.kalshiodds.decision.ScalpTrade> {
+        val ids = com.dirk.kalshiodds.decision.KeptScalpers.storedIds(scalperId)
+        val marks = ids.joinToString(",") { "?" }
+        return scalpRows("SELECT * FROM ${ST.TABLE} INDEXED BY idx_scalp_ticker WHERE ticker = ? AND scalper_id IN ($marks) ORDER BY signal_at_ms",
+            arrayOf(ticker.uppercase(), *ids.toTypedArray()))
+    }
 
     /** Uploader: unsynced closed primaries by index (synced, closed_at_ms), oldest first. */
     override fun unsyncedClosed(limit: Int): List<com.dirk.kalshiodds.decision.ScalpTrade> = runCatching {

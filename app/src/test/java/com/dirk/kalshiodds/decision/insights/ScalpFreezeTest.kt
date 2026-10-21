@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.decision.insights
 
+import com.dirk.kalshiodds.decision.KeptScalpers
 import com.dirk.kalshiodds.decision.MemoryScalpControls
 import com.dirk.kalshiodds.decision.ScalpBook
 import com.dirk.kalshiodds.decision.ScalpModels
@@ -25,51 +26,37 @@ class ScalpFreezeTest {
         signalAtMs = i * 1000L, signalAsk = 0.40, fairAtSignal = 0.50, contracts = 1, entryPrice = 0.40, closedAtMs = i * 1000L + 500, netUsd = net,
         ruleVersion = "v|$code|P")
 
-    private val kept = listOf("r-late", "fair", "r-maker", "fcfade", "fairh60", "sf41", "sf42", "sf43", "v2-dip", "v2-fcride",
-        "fair-t1", "fair-t2", "r-late-t1", "r-late-t2", "v2-llm")
-
-    @Test fun frozenStrategiesStayInTheRegistryAndOldRecordsStillLoad() {
-        val codes = ScalpModels.ALL.map { it.code }.toSet()
-        ScalpFreeze.DEFAULT_FROZEN.forEach { assertTrue("$it still listed", it in codes); assertNotNull(it, ScalpModels.modelByCode(it)) }
-        assertTrue("1.0.21 shows former removals instead of hiding them", ScalpModels.REMOVED_CODES.isEmpty())
-        ScalpFreeze.RESTORED.forEach { assertTrue("$it visible", it in codes); assertTrue("$it frozen", it in ScalpFreeze.DEFAULT_FROZEN) }
-        listOf("xrev", "sf51", "v2-sf51").forEach { assertTrue("$it frozen", it in ScalpFreeze.DEFAULT_FROZEN) }
-        val dip = ScalpParams.STRATEGY_SEEDS.getValue(ScalpStrategy.DIP_HUNTER)
-        val old = mapOf(dip.id to "dip", "sf44" to "sf44", "r-hold" to "r-hold", "fcride-h600" to "fcride", "sf56n" to "sf56", "sf60" to "sf60",
-            ScalpParams.STRATEGY_SEEDS.getValue(ScalpStrategy.MOMENTUM).id to "momo", ScalpParams.STRATEGY_SEEDS.getValue(ScalpStrategy.CF_REPRICE).id to "cfr")
-        old.forEach { (vid, code) -> assertEquals(vid, code, ScalpModels.modelOf(closed(vid, 1, -1.0))?.code) }
-        // History still shows on the board / scorecards.
-        val board = ScalpModels.leaderboardFromStats(listOf(ScalpStat("dip", n = 5, wins = 1, netUsd = -3.0), ScalpStat("sf44", n = 2, netUsd = -1.0)))
-        assertEquals(5, board.first { it.model.code == "dip" }.roundTrips)
-        assertEquals(-1.0, board.first { it.model.code == "sf44" }.netUsd, 1e-9)
+    @Test fun removedStrategiesAreOffTheBoardAndNotFrozen() {
+        assertTrue(ScalpFreeze.DEFAULT_FROZEN.isEmpty())
+        assertTrue(ScalpFreeze.RESTORED.isEmpty())
+        listOf("dip", "sf44", "r-hold", "xrev", "sf51", "v2-llm").forEach { code ->
+            assertNull(code, ScalpModels.modelByCode(code))
+            assertNull(code, ScalpModels.modelOf(closed(code, 1, -1.0)))
+            assertEquals(KeptScalpers.REMOVED_LABEL, closed(code, 1, -1.0).algoLabel)
+            assertNull(code, ScalpFreeze.reason(code, emptyList()))
+        }
+        val board = ScalpModels.leaderboardFromStats(listOf(ScalpStat("dip", n = 5, wins = 1, netUsd = -3.0), ScalpStat("sf41", n = 2, netUsd = 1.0)))
+        assertFalse(board.any { it.model.code == "dip" })
+        assertEquals(2, board.first { it.model.code == "sf41" }.roundTrips)
         assertEquals(ScalpModels.ALL.size, board.size)
-        assertTrue("r-hold keeps running (frozen, not removed)", com.dirk.kalshiodds.decision.Research.HOLD in com.dirk.kalshiodds.decision.Research.IDS)
     }
 
-    @Test fun defaultsAreFrozenOnStartAndWinnersAreNot() {
+    @Test fun defaultsDoNotFreezeTheKeptBoard() {
         val book = ScalpBook()
         ScalpInsights(book, MemoryScalpControls(), null) {}.start()
-        ScalpFreeze.DEFAULT_FROZEN.forEach { code ->
-            assertTrue("$code benched", code in book.benched)
-            assertTrue(code, ScalpFreeze.isFrozen(BenchRegistry.decisions.value[code]))
-        }
-        kept.forEach { assertFalse("$it must keep trading", it in book.benched) }
-        assertTrue(BenchRegistry.decisions.value.getValue("dip").reason.startsWith("FROZEN - losing"))
+        ScalpModels.ALL.forEach { assertFalse(it.code, it.code in book.benched) }
+        assertFalse(book.benched.contains("dip"))
     }
 
-    @Test fun forceTradeUnfreezesAndAutoRefreezes() {
+    @Test fun forceTradeOnARemovedCodeDoesNotCreateACard() {
         val controls = MemoryScalpControls()
         val book = ScalpBook()
         val insights = ScalpInsights(book, controls, null) {}
         insights.start()
         controls.save(controls.state.value.copy(benchOverrides = mapOf("dip" to "ACTIVE")))
         insights.recompute()
-        assertFalse("manual Force trade wins", "dip" in book.benched)
-        assertEquals(BenchStatus.FORCED_ACTIVE, BenchRegistry.decisions.value.getValue("dip").status)
-        controls.save(controls.state.value.copy(benchOverrides = emptyMap()))
-        insights.recompute()
-        assertTrue("dip" in book.benched)
-        assertTrue(ScalpFreeze.isFrozen(BenchRegistry.decisions.value["dip"]))
+        assertNull(ScalpModels.modelByCode("dip"))
+        assertFalse("dip" in book.benched)
     }
 
     @Test fun autoFreezeNeedsThirtyClearlyLosingTrades() {
@@ -123,7 +110,7 @@ class ScalpFreezeTest {
         assertTrue(ScalpFreeze.reason("sf41", deep)!!.contains("last 30 trades"))
         val shadow = List(30) { closed("sf41", 200 + it, 0.40) }
         assertNull("shadow improvement unfreezes a numeric freeze", ScalpFreeze.reason("sf41", deep, shadow, wasFrozen = true))
-        assertTrue(ScalpFreeze.reason("dip", deep, shadow, wasFrozen = true)!!.startsWith(ScalpFreeze.BADGE))
+        assertNull("a removed code is not kept frozen by the old default list", ScalpFreeze.reason("dip", deep, shadow, wasFrozen = true))
         val forced = ScalpFreeze.apply(
             mapOf("sf41" to BenchDecision("sf41", BenchStatus.FORCED_ACTIVE, 0, 0.0, 0.0, "forced active")),
             mapOf("sf41" to mild),

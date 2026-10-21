@@ -121,7 +121,7 @@ class ReleaseGate0343MakerTest {
         assertEquals(-0.035, tr.adverse30!!, 1e-9)
         assertTrue(tr.note.contains("AS30 -3.5¢"))
         assertNull(tr.adverse60)
-        assertTrue(com.dirk.kalshiodds.ui.ScalpData.makerLines(book.allTrades()).any { it.startsWith("CF-reprice maker") && it.contains("AS30 -3.5¢") })
+        assertTrue(com.dirk.kalshiodds.ui.ScalpData.makerLines(book.allTrades()).any { it.startsWith("removed strategy maker") && it.contains("AS30 -3.5¢") })
     }
 
     @Test

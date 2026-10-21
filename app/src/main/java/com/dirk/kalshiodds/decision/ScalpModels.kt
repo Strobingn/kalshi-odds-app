@@ -156,19 +156,30 @@ object ScalpModels {
         FAIR_T1("fair-t1", "Fair-gap tweak 1 · gap 12¢ · TP +10¢", "Fair-gap entries at gap ≥ 12¢ after fee (original 14¢), take profit +10¢ (original +12¢), stop 8¢, turn-down 15¢, from 5 min left. Paper only."),
         FAIR_T2("fair-t2", "Fair-gap tweak 2 · gap 16¢ · TP +14¢", "Fair-gap entries at gap ≥ 16¢ after fee (original 14¢), take profit +14¢ (original +12¢), stop 8¢, turn-down 15¢, from 5 min left. Paper only."),
         R_LATE_T1("r-late-t1", "Research · Late favourite tight", "r-late copy, tighter: 3–4 min left, 26–42¢, BRTI fair beats price by 12–21¢ after the taker fee; holds to settlement; one side per window. Paper only."),
-        R_LATE_T2("r-late-t2", "Research · Late favourite loose", "r-late copy: 3–6 min left, 22–42¢, BRTI fair beats price by 10–23¢ after the taker fee; holds to settlement; one side per window. Paper only.")
+        R_LATE_T2("r-late-t2", "Research · Late favourite loose", "r-late copy: 3–6 min left, 22–42¢, BRTI fair beats price by 10–23¢ after the taker fee; holds to settlement; one side per window. Paper only."),
+        /** 10-21 ranking: recorded variant ids that are not an older model code. Only these twelve run. */
+        G14("g14-t12-s08-d15-w300", "Fair-gap", "Fair-gap gap ≥ 14¢, target +12¢, stop 8¢, turn-down 15¢, from 5 min left. Paper only."),
+        SF16F("sf16f", "sf16 Late fav base", ShockFav.v("sf16").summary()),
+        SF17F("sf17f", "sf17 Late fav 60s-avg fair", ShockFav.v("sf17").summary()),
+        V2_G10_MK("v2-g10-t12-s08-d15-w300-mk", "v2 · Fair-gap", "v2 exits on maker fair-gap g10-t12-s08-d15-w300. Paper only."),
+        V2_DIP_SEED("v2-dip-g05-t08-s06-d10-w180", "v2 · Dip-hunter", "v2 exits on dip-hunter dip-g05-t08-s06-d10-w180. Paper only."),
+        FCFADE_H600("fcfade-h600", "Forecast fade", "Forecast fade, horizon 600s, entry band 40–49¢. Paper only.")
     }
 
     const val V2_BLURB = "v2 paper: new trades default to a 3¢ bid-peak trail active from entry and independent 20% fill-price stop. Existing trades retain saved exits. Preserve positive/inconclusive entry settings; bounded adjustments for sustained losses. Every trade has a protective stop. Exit in the final minute unless fresh CF fair ≥ 97%, bid ≥ 90¢ and holding beats selling. Decisions are estimates, never guaranteed wins. Actual stop/trail and adaptation evidence are in the trade note."
     /**
-     * 1.0.10 hid sf30, sf32, mkdip, diph60, dipnotp and r-kelly. 1.0.21 puts them back on the board and freezes
-     * them ([com.dirk.kalshiodds.decision.insights.ScalpFreeze.RESTORED]): visible, history kept, no new paper trade
-     * unless Force trade. Nothing is deleted.
+     * 10-21: losers are off the board (not frozen, not hidden). History of those variant ids still loads
+     * and is labeled [KeptScalpers.REMOVED_LABEL]. Stored rows are not deleted.
+     * Order matches the ranking, best net first. At most [KeptScalpers.MAX_SLOTS]; empty slots stay empty.
      */
-    val REMOVED_CODES: Set<String> = emptySet()
-    fun isRemoved(code: String?): Boolean = code != null && code in REMOVED_CODES
+    val ALL: List<Model> = listOf(
+        Model.SF42, Model.V2_G10_MK, Model.G14, Model.SF16F, Model.SF15, Model.SF17F,
+        Model.V2_DIP_SEED, Model.SF07, Model.SF04, Model.SF08, Model.FCFADE_H600, Model.SF41
+    )
     private val RAW_ALL: List<Model> = Model.values().toList()
-    val ALL: List<Model> = RAW_ALL.filter { it.code !in REMOVED_CODES }
+    private val KEPT_CODES: Set<String> = ALL.map { it.code }.toSet()
+    val REMOVED_CODES: Set<String> = RAW_ALL.map { it.code }.filter { it !in KEPT_CODES }.toSet()
+    fun isRemoved(code: String?): Boolean = code != null && code !in KEPT_CODES
     /** 0.3.65: v2 copy of an original model (null when none, e.g. sf29 or a v2 itself). */
     fun v2Of(m: Model): Model? = V2_BY_ORIG[m]
     fun originalOf(v2: Model): Model? = ORIG_BY_CODE[ScalpV2.baseOf(v2.code)]?.takeIf { isV2(v2) }
@@ -179,9 +190,39 @@ object ScalpModels {
     fun dayEt(atMs: Long): String = java.time.Instant.ofEpochMilli(atMs).atZone(java.time.ZoneId.of("America/New_York")).toLocalDate().toString()
     fun modelByCode(code: String): Model? = BY_CODE[code]
     private val BY_CODE: Map<String, Model> by lazy { ALL.associateBy { it.code } }
+    private val RAW_BY_CODE: Map<String, Model> by lazy { RAW_ALL.associateBy { it.code } }
+    fun canonicalScalperId(id: String): String = KeptScalpers.canonical(id)
+    /** Card label. Unknown and removed variant ids stay readable and do not throw. */
+    fun labelFor(variantId: String): String = modelByCode(variantId)?.label ?: KeptScalpers.REMOVED_LABEL
+    private fun mergeStat(a: ScalpStat?, b: ScalpStat): ScalpStat {
+        if (a == null) return b
+        return a.copy(
+            n = a.n + b.n, wins = a.wins + b.wins, netUsd = a.netUsd + b.netUsd, feesUsd = a.feesUsd + b.feesUsd,
+            bestUsd = listOfNotNull(a.bestUsd, b.bestUsd).maxOrNull(),
+            worstUsd = listOfNotNull(a.worstUsd, b.worstUsd).minOrNull(),
+            sumSq = a.sumSq + b.sumSq,
+            lastClosedAtMs = listOfNotNull(a.lastClosedAtMs, b.lastClosedAtMs).maxOrNull(),
+            openN = a.openN + b.openN, sumWin = a.sumWin + b.sumWin, sumLoss = a.sumLoss + b.sumLoss,
+            nLoss = a.nLoss + b.nLoss, negSum = a.negSum + b.negSum, negN = a.negN + b.negN,
+            costSum = a.costSum + b.costSum, stopSavedSum = a.stopSavedSum + b.stopSavedSum,
+            stopSavedN = a.stopSavedN + b.stopSavedN, noFills = a.noFills + b.noFills
+        )
+    }
+    /** Fold legacy alias ids (sf16 → sf16f) into the kept card. Does not drop the source rows. */
+    fun statsById(stats: List<ScalpStat>): Map<String, ScalpStat> {
+        val out = LinkedHashMap<String, ScalpStat>()
+        for (st in stats) {
+            val id = canonicalScalperId(st.scalperId)
+            out[id] = mergeStat(out[id], st.copy(scalperId = id))
+        }
+        return out
+    }
+    fun dailyById(rows: Collection<ScalpDaily>): Map<String, ScalpStat> =
+        statsById(rows.map { it.asStat() })
     /** Build a Row from the incremental stats (+ exit counts). No trade scan, no bootstrap. */
     fun rowFromStat(st: ScalpStat, openN: Int = st.openN, exits: List<ScalpExitAgg> = emptyList(), unrealizedUsd: Double = 0.0): Row {
-        val m = modelByCode(st.scalperId) ?: Model.FAIR_GAP // leaderboardFromStats only passes registry ids
+        val id = canonicalScalperId(st.scalperId)
+        val m = modelByCode(id) ?: RAW_BY_CODE[st.scalperId] ?: ALL.first()
         val ci = st.perTradeCi()
         return Row(
             model = m, netUsd = st.netUsd, roundTrips = st.n, wins = st.wins,
@@ -196,8 +237,8 @@ object ScalpModels {
     }
     fun leaderboardFromStats(stats: List<ScalpStat>, openBy: Map<String, Int> = emptyMap(), exits: List<ScalpExitAgg> = emptyList(),
                              unrealBy: Map<String, Double> = emptyMap()): List<Row> {
-        val byId = stats.associateBy { it.scalperId }
-        val ex = exits.groupBy { it.scalperId }
+        val byId = statsById(stats)
+        val ex = exits.groupBy { canonicalScalperId(it.scalperId) }
         return ALL.map { m ->
             val st = byId[m.code] ?: ScalpStat(m.code)
             rowFromStat(st, openN = openBy[m.code] ?: st.openN, exits = ex[m.code].orEmpty(), unrealizedUsd = unrealBy[m.code] ?: 0.0)
@@ -225,9 +266,9 @@ object ScalpModels {
     /** 0.3.54: no per-model split — every scalper draws from the whole shared free paper bankroll. */
     fun sliceUsd(bankrollUsd: Double): Double = (bankrollUsd.takeIf { it.isFinite() } ?: 0.0).coerceAtLeast(0.0)
 
-    /** 1.0.14: fair-t1 / fair-t2 param ids → their own models. */
+    /** 1.0.14: fair-t1 / fair-t2 param ids → their own models. Kept ids win when the param id is one of the twelve. */
     private val FAIR_TWEAK_MODELS: Map<String, Model> by lazy { mapOf(ScalpParams.FAIR_TWEAKS[0].id to Model.FAIR_T1, ScalpParams.FAIR_TWEAKS[1].id to Model.FAIR_T2) }
-    fun modelOf(p: ScalpParams): Model = FAIR_TWEAK_MODELS[p.id] ?:
+    fun modelOf(p: ScalpParams): Model = BY_CODE[p.id] ?: FAIR_TWEAK_MODELS[p.id] ?:
         if (p.hold60 && p.strategy == ScalpStrategy.FAIR_GAP) Model.FAIR_HOLD
         else if (p.target >= ScalpParams.NO_TP - 1e-9) (if (p.strategy == ScalpStrategy.MOMENTUM) Model.MOMO_NOTP else Model.DIP_NOTP)
         else if (p.hold60) (if (p.strategy == ScalpStrategy.MOMENTUM) Model.MOMO_HOLD else Model.DIP_HOLD) else if (p.maker && p.strategy == ScalpStrategy.DIP_HUNTER) Model.MAKER_DIP else modelOf(p.strategy)
@@ -245,28 +286,20 @@ object ScalpModels {
         if (!t.isPrimary) return null
         // 0.3.66: no per-trade copy for v2 rows (was t.copy() per trade per board pass); cached per variant id.
         // 1.0.10: saved trades of removed strategies resolve to no model (kept in history, not shown/attributed).
-        return MODEL_BY_VARIANT.getOrPut(t.variantId) { modelOfVariant(t.variantId)?.takeIf { it.code !in REMOVED_CODES } ?: NONE } as? Model
+        return MODEL_BY_VARIANT.getOrPut(t.variantId) { modelOfVariant(t.variantId) ?: NONE } as? Model
     }
     private val NONE = Any()
     private val MODEL_BY_VARIANT = java.util.concurrent.ConcurrentHashMap<String, Any>()
-    private fun modelOfVariant(vid: String): Model? {
-        if (vid == "v2-llm") return Model.V2_LLM
-        if (Research.isResearch(vid)) return RAW_ALL.firstOrNull { it.code == vid }
-        if (ScalpV2.isExtra(vid)) return ALL.firstOrNull { it.code == vid }
-        if (ScalpV2.isV2(vid)) return modelOfVariant(vid.removePrefix(ScalpV2.PREFIX))?.let { v2Of(it) }
-        if (vid.startsWith(ForecastScalp.RIDE_PREFIX)) return Model.FORECAST_RIDE
-        if (vid.startsWith(ForecastScalp.FADE_PREFIX)) return Model.FORECAST_FADE
-        if (ShockFav.isShockFav(vid)) return SF_BY_CODE[vid.take(4)]
-        val p = ScalpParams.byId(vid) ?: return Model.FAIR_GAP
-        return modelOf(p)
-    }
+    /** Exact recorded variant id only. Other ids stay in history and are not attributed to a live card. */
+    private fun modelOfVariant(vid: String): Model? = BY_CODE[vid]
 
     /** 0.3.61: per-bet stop shown on each card / leaderboard row. */
     fun stopLabel(m: Model): String {
         if (isV2(m)) return "stop per trade · default 20% fill stop + 3¢ peak trail; saved rules in trade note; 60s close check"
+        if (m.code == KeptScalpers.FAIR_ID) return "stop 8¢"
         ShockFav.byVariantId(m.code)?.let { p -> return "stop ${ShockFav.stopC(p)}¢" + if (ShockFav.stopTrainChosen(p)) "" else " (default)" }
         return when (m) {
-            Model.FORECAST_RIDE, Model.FORECAST_FADE -> "stop ${ForecastScalp.STOP_C}¢ (default)"
+            Model.FORECAST_RIDE, Model.FORECAST_FADE, Model.FCFADE_H600 -> "stop ${ForecastScalp.STOP_C}¢ (default)"
             Model.DIP_HOLD -> "stop ${Math.round(ScalpParams.HOLD60_SIBLINGS[0].stop * 100)}¢ after 60s"
             Model.MOMO_HOLD -> "stop ${Math.round(ScalpParams.HOLD60_SIBLINGS[1].stop * 100)}¢ after 60s"
             Model.FAIR_GAP -> "stop per-coin tuned"
@@ -426,15 +459,21 @@ object ScalpModels {
     /** 0.3.68: window list from the per-window aggregate table. */
     fun windowsFromAgg(aggs: List<ScalpWindowAgg>, limit: Int = 48): List<WindowRow> =
         aggs.groupBy { it.windowKey }.map { (w, rows) ->
-            val net = rows.mapNotNull { r -> modelByCode(r.scalperId)?.let { it to r.netUsd } }.groupBy({ it.first }, { it.second }).mapValues { it.value.sum() }
-            val n = rows.mapNotNull { r -> modelByCode(r.scalperId)?.let { it to r.n } }.groupBy({ it.first }, { it.second }).mapValues { it.value.sum() }
+            val net = rows.mapNotNull { r -> modelByCode(canonicalScalperId(r.scalperId))?.let { it to r.netUsd } }.groupBy({ it.first }, { it.second }).mapValues { it.value.sum() }
+            val n = rows.mapNotNull { r -> modelByCode(canonicalScalperId(r.scalperId))?.let { it to r.n } }.groupBy({ it.first }, { it.second }).mapValues { it.value.sum() }
             WindowRow(w, rows.firstNotNullOfOrNull { it.closeMs }, net, n, net.maxByOrNull { it.value }?.key)
         }.sortedByDescending { it.closeMs ?: 0L }.take(limit)
 
     /** 0.3.68: one window's leaderboard from the per-window aggregate (net + trips only). */
     fun windowBoardFromAgg(aggs: List<ScalpWindowAgg>, windowKey: String): List<Row> {
-        val mine = aggs.filter { it.windowKey == windowKey }.associateBy { it.scalperId }
-        return ALL.map { m -> val a = mine[m.code]; rowFromStat(ScalpStat(m.code, n = a?.n ?: 0, netUsd = a?.netUsd ?: 0.0), openN = 0) }
+        val mine = HashMap<String, Pair<Int, Double>>()
+        for (a in aggs) {
+            if (a.windowKey != windowKey) continue
+            val id = canonicalScalperId(a.scalperId)
+            val prev = mine[id]
+            mine[id] = if (prev == null) a.n to a.netUsd else (prev.first + a.n) to (prev.second + a.netUsd)
+        }
+        return ALL.map { m -> val a = mine[m.code]; rowFromStat(ScalpStat(m.code, n = a?.first ?: 0, netUsd = a?.second ?: 0.0), openN = 0) }
             .sortedWith(compareByDescending<Row> { it.netUsd }.thenByDescending { it.roundTrips })
     }
 

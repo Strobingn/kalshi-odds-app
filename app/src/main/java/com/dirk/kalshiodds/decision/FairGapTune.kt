@@ -28,7 +28,7 @@ object FairGapTune {
      *  1.0.14: fair-t1/t2 and r-late-t1/t2 copies run their own rules.
      *  1.0.21: r-late is back on its own 80–95¢ band, so it is not forced through 24–42¢.
      */
-    val KEEP: Set<String> = setOf("fair", "fairh60", "v2-fair", "v2-fairh60", Research.HOLD, Research.KELLY, Research.MAKER, "v2-llm", "fair-t1", "fair-t2", Research.LATE, Research.LATE_T1, Research.LATE_T2)
+    val KEEP: Set<String> = setOf("fair", "fairh60", "v2-fair", "v2-fairh60", Research.HOLD, Research.KELLY, Research.MAKER, "v2-llm", "fair-t1", "fair-t2", Research.LATE, Research.LATE_T1, Research.LATE_T2, KeptScalpers.FAIR_ID, KeptScalpers.V2_FAIR_ID)
 
     /**
      * 1.0.21: these keep their own entry rule. The 24–42¢ fair-gap gate does not apply.
@@ -37,7 +37,7 @@ object FairGapTune {
      */
     val OWN_RULES: Set<String> = setOf(
         "sf16", "sf17", "sf18", "sf19", "sf20", "sf21", "sf22", "sf23", "sf24", "sf29", "sf31",
-        "fcfade"
+        "fcfade", KeptScalpers.FADE_ID
     )
 
     /** Hold-to-settlement entries need at least this many seconds left. Own-rule late favourites keep their shorter window. */

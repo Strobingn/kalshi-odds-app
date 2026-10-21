@@ -300,11 +300,11 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             val unrealBy = trades.groupBy { M.scalperIdOf(it) ?: "" }.mapValues { (_, ts) -> ts.sumOf { t -> t.unrealizedUsd(bidFor(t))?.takeIf { it.isFinite() } ?: 0.0 } }
             val exits = container.scalp.loadExits()
             val windowsAgg = container.scalp.loadWindows(48)
-            val today = container.scalp.loadDaily(M.dayEt(now)).associateBy { it.scalperId }
+            val today = M.dailyById(container.scalp.loadDaily(M.dayEt(now)))
             val allTime = M.leaderboardFromStats(statsSnap, openBy, exits, unrealBy)
             val allByModel = allTime.associateBy { it.model }
             val todayRows = M.ALL.associateWith { m ->
-                M.rowFromStat((today[m.code]?.asStat() ?: com.dirk.kalshiodds.decision.ScalpStat(m.code)), openN = openBy[m.code] ?: 0, unrealizedUsd = unrealBy[m.code] ?: 0.0)
+                M.rowFromStat(today[m.code] ?: com.dirk.kalshiodds.decision.ScalpStat(m.code), openN = openBy[m.code] ?: 0, unrealizedUsd = unrealBy[m.code] ?: 0.0)
             }
             next = next.copy(
                 leaderAllTime = allTime,
@@ -461,16 +461,16 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 container.archive.chartTicks(ticker, end - 900_000, end, 2000).map { it.toBidPoint() },
                 hub.scoring.book.bidHistory(ticker)).filter { it.tMs in (end - 900_000)..minOf(end, now) }, 360)
         val marks = container.scalp.marks.value
-        val st = container.scalp.stats.value.firstOrNull { it.scalperId == model.code } ?: com.dirk.kalshiodds.decision.ScalpStat(model.code)
-        val td = container.scalp.loadDaily(com.dirk.kalshiodds.decision.ScalpModels.dayEt(now)).firstOrNull { it.scalperId == model.code }
+        val st = com.dirk.kalshiodds.decision.ScalpModels.statsById(container.scalp.stats.value)[model.code] ?: com.dirk.kalshiodds.decision.ScalpStat(model.code)
+        val tdStat = com.dirk.kalshiodds.decision.ScalpModels.dailyById(container.scalp.loadDaily(com.dirk.kalshiodds.decision.ScalpModels.dayEt(now)))[model.code]
         val open = active.filter { it.state == com.dirk.kalshiodds.decision.ScalpState.OPEN || it.state == com.dirk.kalshiodds.decision.ScalpState.PENDING_EXIT }
-        val allRow = com.dirk.kalshiodds.decision.ScalpModels.rowFromStat(st, exits = container.scalp.loadExits().filter { it.scalperId == model.code })
+        val allRow = com.dirk.kalshiodds.decision.ScalpModels.rowFromStat(st, exits = container.scalp.loadExits().filter { com.dirk.kalshiodds.decision.ScalpModels.canonicalScalperId(it.scalperId) == model.code })
             .copy(open = active.count { it.state in listOf(com.dirk.kalshiodds.decision.ScalpState.PENDING_ENTRY, com.dirk.kalshiodds.decision.ScalpState.OPEN, com.dirk.kalshiodds.decision.ScalpState.PENDING_EXIT) }, unrealizedUsd = open.sumOf { it.unrealizedUsd(marks[it.ticker]?.bid(it.side)) ?: 0.0 })
         val chart = ScalpWindowChartData(ticker, end, now, marks[ticker]?.bookAtMs, points, chartTrades)
         _scalpAlgo.update { current ->
             if (current.model != model || current.followLive != selected.followLive || current.chart.ticker != selected.chart.ticker) current
             else current.copy(allTime = allRow,
-                today = com.dirk.kalshiodds.decision.ScalpModels.rowFromStat(td?.asStat() ?: com.dirk.kalshiodds.decision.ScalpStat(model.code)),
+                today = com.dirk.kalshiodds.decision.ScalpModels.rowFromStat(tdStat ?: com.dirk.kalshiodds.decision.ScalpStat(model.code)),
                 trades = (active + page).distinctBy { it.id }.sortedByDescending { it.entryAtMs ?: it.signalAtMs },
                 equity = page.asReversed().runningFold(0.0) { a, t -> a + (t.netUsd ?: 0.0) }.drop(1),
                 chart = chart, chartMarkets = markets)
