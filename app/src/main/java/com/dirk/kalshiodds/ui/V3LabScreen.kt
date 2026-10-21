@@ -44,7 +44,8 @@ fun V3LabScreen(
     state: V3ShadowState,
     onBack: () -> Unit,
     onOpenArena: () -> Unit,
-    onOpenChat: () -> Unit
+    onOpenChat: () -> Unit,
+    onOpenCharts: () -> Unit
 ) {
     val colors = DipTheme.colors
     val settled = state.settled
@@ -71,7 +72,7 @@ fun V3LabScreen(
                         Text("Market-offset test · local paper evidence · no live order path", style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
                     }
                 }
-                ScalpModeTabs(selected = 1, onSelect = { if (it == 0) onOpenArena() else if (it == 2) onOpenChat() })
+                ScalpModeTabs(selected = 1, onSelect = { if (it == 0) onOpenArena() else if (it == 2) onOpenChat() else if (it == 3) onOpenCharts() })
             }
         }
         item { V3MetricCard("Open shadows", state.openCount.toString(), "one unit each") }
@@ -120,6 +121,7 @@ fun ScalpModeTabs(selected: Int, onSelect: (Int) -> Unit) {
         Tab(selected = selected == 0, onClick = { onSelect(0) }, text = { Text("Arena V2") })
         Tab(selected = selected == 1, onClick = { onSelect(1) }, text = { Text("V3 test") })
         Tab(selected = selected == 2, onClick = { onSelect(2) }, text = { Text("AI chat") })
+        Tab(selected = selected == 3, onClick = { onSelect(3) }, text = { Text("Charts") })
     }
 }
 

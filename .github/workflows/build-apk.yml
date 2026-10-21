@@ -43,6 +43,7 @@ jobs:
             --tests 'com.dirk.kalshiodds.llm.PaperChatProviderTest' \
             --tests 'com.dirk.kalshiodds.llm.PaperTuningTest' \
             --tests 'com.dirk.kalshiodds.llm.PaperMarketFeedTest' \
+            --tests 'com.dirk.kalshiodds.ui.PaperChartsDataTest' \
             --tests 'com.dirk.kalshiodds.ui.AppVersionTest' \
             --no-daemon --stacktrace
 

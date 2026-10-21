@@ -61,12 +61,17 @@ fun ScalpScreen(
             state = state.v3,
             onBack = onBack,
             onOpenArena = { activeTab = 0 },
-            onOpenChat = { activeTab = 2 }
+            onOpenChat = { activeTab = 2 },
+            onOpenCharts = { activeTab = 3 }
         )
         return
     }
     if (activeTab == 2) {
         PaperChatScreen(state, onBack, onSelectTab = { activeTab = it })
+        return
+    }
+    if (activeTab == 3) {
+        PaperChartsScreen(state, onBack, onSelectTab = { activeTab = it })
         return
     }
     val colors = DipTheme.colors
