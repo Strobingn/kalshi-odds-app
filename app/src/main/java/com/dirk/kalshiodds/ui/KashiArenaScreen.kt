@@ -177,6 +177,7 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
                     AnalysisGallery(galleryTrades, leaders, sparks, corrWindows, st.updatedAtMs, rows.map { it.model })
                 }
                 item(key = "analysis-data") { OutlinedButton(onClick = onHistory, modifier = Modifier.fillMaxWidth()) { Text("Detailed results & comparison") } }
+                item(key = "rich-scalp-charts") { ScalpRichCharts(seed = galleryTrades) }
             }
             KashiArenaTab.CHAT -> item(key = "chat") { LlmChatPanel(rows) }
             KashiArenaTab.TRADES -> {

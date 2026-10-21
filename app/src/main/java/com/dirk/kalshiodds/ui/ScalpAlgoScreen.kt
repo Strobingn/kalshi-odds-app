@@ -175,6 +175,7 @@ fun ScalpAlgoContent(d: ScalpAlgoDetail, onBack: () -> Unit = {}, paged: android
             if (paged != null) items(count = paged.itemCount, key = paged.itemKey { "history-${it.id}" }) { i -> paged[i]?.let { ScalpWindowTrade(it, false, null) } }
             else items(d.trades.filter { it.ticker != d.chart.ticker }, key = { "history-${it.id}" }) { ScalpWindowTrade(it, false, null) }
         }
+        item(key = "rich-scalper-charts") { ScalpRichCharts(focusScalperId = d.model?.code, seed = d.trades) }
         item(key = "end") { Spacer(Modifier.height(16.dp)) }
     }
 }

@@ -105,6 +105,7 @@ fun HistoryScreen(
                     0 -> {
                         item { BetFilters(state, viewModel) }
                         item { TotalsCard(state.totals) }
+                        item(key = "paper-rich") { PaperRichCharts("History") }
                         if (state.pnl.size >= 2) {
                             item { CumulativePnlChart(state.pnl) }
                         }

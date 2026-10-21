@@ -2,6 +2,8 @@ package com.dirk.kalshiodds.ui
 
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -78,6 +80,7 @@ fun LiveApproveScreen(viewModel: OddsViewModel) {
             Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .verticalScroll(rememberScrollState())
                 .padding(com.dirk.kalshiodds.ui.theme.FieldMetrics.screenPadding)
         ) {
             LiveDecisionStatus(state.cfFeedLines, state.decisionLines)
@@ -98,6 +101,7 @@ fun LiveApproveScreen(viewModel: OddsViewModel) {
                 onCancelOrder = { viewModel.cancelWorkingOrder(it) },
                 onLimitCents = { id, text -> viewModel.reviseTicketLimit(id, text) }
             )
+            PaperRichCharts("Live")
         }
     }
 }
