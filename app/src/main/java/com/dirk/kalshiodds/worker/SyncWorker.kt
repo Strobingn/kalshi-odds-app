@@ -29,24 +29,34 @@ class SyncWorker(
     params: WorkerParameters
 ) : CoroutineWorker(context, params) {
 
-    @Volatile private var stopRequested = false
-
     private val http = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(25, TimeUnit.SECONDS)
         .build()
 
-    /** WorkManager delivers [onStopped] on the main thread. Cancel the HTTP call and return. */
-    override fun onStopped() {
-        stopRequested = true
-        http.dispatcher.cancelAll()
-        super.onStopped()
-    }
-
-    private fun halted(): Boolean = stopRequested || isStopped
+    private fun halted(): Boolean = isStopped
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
-        if (halted()) return@withContext Result.retry()
+        // CoroutineWorker.onStopped is final. A daemon polls isStopped and cancels the socket
+        // so a blocked upload cannot keep SystemJobService from finishing onStopJob.
+        val watch = Thread({
+            while (!Thread.currentThread().isInterrupted) {
+                if (isStopped) {
+                    http.dispatcher.cancelAll()
+                    break
+                }
+                try {
+                    Thread.sleep(200)
+                } catch (_: InterruptedException) {
+                    break
+                }
+            }
+        }, "sync-stop-watch").apply { isDaemon = true; start() }
+        if (halted()) {
+            watch.interrupt()
+            return@withContext Result.retry()
+        }
+        try {
         val container = runCatching { KalshiOddsApp.from(applicationContext).container }
             .getOrElse { return@withContext Result.failure() }
         val hub = container.dataPrefs.hydrate()
@@ -140,6 +150,9 @@ class SyncWorker(
             container.dataPrefs.updateSyncStatus(status.message, atMs)
         }
         if (status.ok) Result.success() else Result.retry()
+        } finally {
+            watch.interrupt()
+        }
     }
 
     /** Page the newest snapshots. One page is in memory at a time; the filter keeps the upload set. */

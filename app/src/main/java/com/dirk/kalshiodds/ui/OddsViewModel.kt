@@ -44,7 +44,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.update
 import com.dirk.kalshiodds.data.api.KalshiPollBudget
 import com.dirk.kalshiodds.data.api.KalshiRequestStatus
@@ -677,7 +676,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         }
         vmScope.launch {
             runCatching {
-                hub.scores.conflate().collect { scores ->
+                hub.scores.collect { scores ->
                     when (overlayThrottle.onEvent(scores)) {
                         OverlayThrottle.Decision.APPLY_NOW -> {
                             scoreOverlayJob?.cancel()
@@ -2294,7 +2293,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         if (stale.isEmpty()) return
         val settledBySeries = HashMap<String, List<Boolean>>()
         for (m in stale) {
-            if (!isActive) return
+            if (!kotlin.coroutines.coroutineContext.isActive) return
             val end = m.closeTimeEpochMs ?: now
             val series = com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(m.ticker)
             val past = settledBySeries.getOrPut(series) {
