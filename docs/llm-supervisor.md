@@ -6,9 +6,12 @@ are stored encrypted; Groq is tried first, Mistral is the fallback).
 
 - **What it changes:** the Arena per-strategy settings (`ScalpKnobs`, the same ones as Arena → strategy →
   Settings): enabled, contracts, target, stop, timeout, max per side, entry band, cadence, max spread, bid
-  wait, main trigger. The engine already reads these on every decision, so a change takes effect at once.
+  wait, main trigger, minute window, seconds-left window and edge (late favourites), orders per window,
+  per-strategy cooldown, daily loss pause. Only strategies the arena still runs can be tuned: today those are
+  the 7 late buy-and-hold ones; every target/stop scalper (dip-hunter, momentum-sniper, extreme reversion,
+  ...) is retired in the arena and stays off. The engine already reads these on every decision, so a change takes effect at once.
 - **Hard bounds:** every value is clamped to a fixed range and to 25 % of that range per change. The entry
-  band stays inside 10–90¢ (no long shots). **No cooldown:** a knob can move again on the next tick.
+  band stays inside 10–98¢ (never a long shot). **No cooldown:** a knob can move again on the next tick.
 - **Learns from every trade:** each closed trade is recorded the moment it closes, with the settings it
   ran under. The last 25 go to the model every minute. A change is scored (better / worse) after 8 more
   trades on that strategy and the model sees the verdict, plus its own notes (kept across restarts).

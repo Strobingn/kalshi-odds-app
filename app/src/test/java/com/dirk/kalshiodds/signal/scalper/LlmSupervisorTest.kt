@@ -17,10 +17,8 @@ import org.junit.Test
 /** The AI supervisor: bounded settings changes, no cooldown, and learning from every closed trade. */
 class LlmSupervisorTest {
 
-    /** A strategy that still runs (the dip-hunter and friends are retired) with a small target and stop. */
-    private val st = ScalpStrategy.ACTIVE.first {
-        it.fav == null && it.targetDollars * 100.0 in 1.0..20.0 && it.stopDollars * 100.0 in 1.0..20.0
-    }
+    /** A strategy that still runs: only the late buy-and-hold ones do (every target/stop scalper is retired). */
+    private val st = ScalpStrategy.KASHI_FAV_BASE
     private val ticker = "KXBTC15M-26OCT091215-15"
 
     private fun applied(c: SupervisorBounds.Change) = c as SupervisorBounds.Change.Applied
@@ -54,14 +52,25 @@ class LlmSupervisorTest {
     }
 
     @Test
-    fun theEntryBandNeverLeavesTenToNinetyCents() {
+    fun theEntryBandNeverLeavesTenToNinetyEightCents() {
         val t = ScalpTuning()
         repeat(6) { SupervisorBounds.apply(t, st.name, "entryMinCents", 1.0) }
-        repeat(6) { SupervisorBounds.apply(t, st.name, "entryMaxCents", 99.0) }
+        repeat(6) { SupervisorBounds.apply(t, st.name, "entryMaxCents", 120.0) }
         val tn = t.tuned(st)
         assertTrue(tn.entryMin * 100.0 >= 10.0 - 1e-9)
-        assertTrue(tn.entryMax * 100.0 <= 90.0 + 1e-9)
+        assertTrue(tn.entryMax * 100.0 <= 98.0 + 1e-9)
         assertTrue(tn.entryMin < tn.entryMax)
+    }
+
+    @Test
+    fun lateFavouriteSettingsMoveOnlyOnTheStrategiesThatHaveThem() {
+        val t = ScalpTuning()
+        assertTrue(SupervisorBounds.apply(t, ScalpStrategy.LATE_COMEBACK.name, "edgeCents", 5.0) is SupervisorBounds.Change.Rejected)
+        val edge = applied(SupervisorBounds.apply(t, st.name, "edgeCents", 9.0))
+        assertEquals(edge.new, t.tuned(st).favGap!! * 100.0, 0.01)
+        val before = t.tuned(st).secondsLeft!!
+        applied(SupervisorBounds.apply(t, st.name, "secondsLeftMax", 400.0))
+        assertTrue(t.tuned(st).secondsLeft!!.last > before.last)
     }
 
     @Test

@@ -45,9 +45,9 @@ object SupervisorBounds {
 
     data class Range(val lo: Double, val hi: Double, val integer: Boolean)
 
-    private val band = Range(PrintGrid.MIN_PRICE * 100.0, PrintGrid.MAX_PRICE * 100.0, false)
+    private val band = Range(PrintGrid.MIN_PRICE * 100.0, 98.0, false)
 
-    /** Knobs with one fixed range for every strategy. The entry band never leaves the arena's 10–90¢ (no long shots). */
+    /** Knobs with one fixed range for every strategy. The entry band stays inside 10–98¢ (never a long shot; the late favourites buy up to 98¢). */
     private val fixed: Map<String, Range> = linkedMapOf(
         "contracts" to Range(1.0, ScalpTuning.MAX_CONTRACTS.toDouble(), true),
         "targetCents" to Range(1.0, 30.0, false),
@@ -58,8 +58,19 @@ object SupervisorBounds {
         "entryMaxCents" to band,
         "cadenceSeconds" to Range(1.0, 60.0, true),
         "maxSpreadCents" to Range(1.0, 15.0, false),
-        "bidWaitSeconds" to Range(5.0, 120.0, true)
+        "bidWaitSeconds" to Range(5.0, 120.0, true),
+        "fromMinute" to Range(0.0, 14.0, true),
+        "untilMinute" to Range(1.0, 15.0, true),
+        "maxOrdersPerWindow" to Range(1.0, 10.0, true),
+        "cooldownSeconds" to Range(0.0, 300.0, true),
+        "dailyLossUsd" to Range(1.0, 200.0, false),
+        "secondsLeftMin" to Range(5.0, 899.0, true),
+        "secondsLeftMax" to Range(5.0, 899.0, true),
+        "edgeCents" to Range(0.0, 10.0, false)
     )
+
+    /** Settings only the late-favourite strategies ([ScalpStrategy.fav]) have. */
+    private val favOnly = setOf("secondsLeftMin", "secondsLeftMax", "edgeCents")
 
     /** Every name the model may pass as `param`. */
     val params: List<String> = fixed.keys.toList() + listOf("trigger", "enabled")
@@ -80,6 +91,14 @@ object SupervisorBounds {
         "maxSpreadCents" -> k.maxSpreadCents
         "bidWaitSeconds" -> k.bidWaitSeconds?.toDouble()
         "trigger" -> k.trigger ?: ScalpTriggers.of(st)?.default?.takeIf { it.isFinite() }
+        "fromMinute" -> tn.fromSecond / 60.0
+        "untilMinute" -> tn.untilSecond / 60.0
+        "maxOrdersPerWindow" -> k.maxOrdersPerWindow?.toDouble()
+        "cooldownSeconds" -> tn.cooldownMs / 1000.0
+        "dailyLossUsd" -> k.dailyLossUsd
+        "secondsLeftMin" -> tn.secondsLeft?.first?.toDouble()
+        "secondsLeftMax" -> tn.secondsLeft?.last?.toDouble()
+        "edgeCents" -> tn.favGap?.times(100.0)
         else -> null
     }
 
@@ -95,6 +114,14 @@ object SupervisorBounds {
         "maxSpreadCents" -> k.copy(maxSpreadCents = v)
         "bidWaitSeconds" -> k.copy(bidWaitSeconds = v.roundToInt())
         "trigger" -> k.copy(trigger = v)
+        "fromMinute" -> k.copy(fromMinute = v.roundToInt())
+        "untilMinute" -> k.copy(untilMinute = v.roundToInt())
+        "maxOrdersPerWindow" -> k.copy(maxOrdersPerWindow = v.roundToInt())
+        "cooldownSeconds" -> k.copy(cooldownSeconds = v.roundToInt())
+        "dailyLossUsd" -> k.copy(dailyLossUsd = v)
+        "secondsLeftMin" -> k.copy(secondsLeftMin = v.roundToInt())
+        "secondsLeftMax" -> k.copy(secondsLeftMax = v.roundToInt())
+        "edgeCents" -> k.copy(edgeCents = v)
         else -> k
     }
 
@@ -132,6 +159,7 @@ object SupervisorBounds {
         }
 
         val range = rangeOf(st, param) ?: return no("unknown param")
+        if (param in favOnly && st.fav == null) return no("only the late-favourite strategies have this")
         val cur = current(st, param, tuning.tuned(st), k)
         var v = value
         if (cur != null) {
@@ -142,9 +170,15 @@ object SupervisorBounds {
         if (cur != null && abs(v - cur) < 1e-9) return no("no change")
 
         val next = with(k, param, v)
-        if (param == "entryMinCents" || param == "entryMaxCents") {
-            val tn = Tuned(st, next, tuning.defaultContracts)
-            if (tn.entryMin >= tn.entryMax) return no("entry band would be empty")
+        val after = Tuned(st, next, tuning.defaultContracts)
+        if ((param == "entryMinCents" || param == "entryMaxCents") && after.entryMin >= after.entryMax) {
+            return no("entry band would be empty")
+        }
+        if ((param == "secondsLeftMin" || param == "secondsLeftMax") && after.secondsLeft?.isEmpty() == true) {
+            return no("seconds-left window would be empty")
+        }
+        if ((param == "fromMinute" || param == "untilMinute") && after.noMinutes) {
+            return no("minute window would be empty")
         }
         tuning.set(st, next)
         return Change.Applied(strategy, param, cur, v, value)
@@ -465,7 +499,11 @@ class LlmSupervisor(
                         put("targetCents", rounded(tn.targetDollars * 100.0))
                         put("stopCents", rounded(tn.stopDollars * 100.0))
                         put("timeoutSeconds", tn.timeoutMs / 1000L)
+                        put("holdsToSettlement", st.hold)
                         put("entryBandCents", "${rounded(tn.entryMin * 100.0)}-${rounded(tn.entryMax * 100.0)}")
+                        put("minutes", "${tn.fromSecond / 60}-${tn.untilSecond / 60}")
+                        tn.secondsLeft?.let { put("secondsLeft", "${it.first}-${it.last}") }
+                        tn.favGap?.let { put("edgeCents", rounded(it * 100.0)) }
                         SupervisorBounds.current(st, "trigger", tn, k)?.let { put("trigger", rounded(it)) }
                         SupervisorBounds.rangeOf(st, "trigger")?.let {
                             put("triggerRange", "${rounded(it.lo)}-${rounded(it.hi)}")
@@ -518,12 +556,15 @@ class LlmSupervisor(
             Every minute you get the live feed, each strategy's settings and results, the last closed trades
             together with the exact settings each ran under, your earlier changes with their measured result
             (better/worse), and your own notes.
+            Most running strategies buy late and hold to settlement; their targetCents / stopCents matter little,
+            while the entry band, minutes, secondsLeft, edgeCents, trigger and size matter most. Strategies
+            that retired are not offered to you.
             Rules:
             - Learn from every trade: what won, what lost, and which settings were in force.
             - There is no cooldown. You may change anything on any tick, but a single trade is weak evidence;
               act harder on patterns across several trades.
             - Undo changes marked "worse". Push further on changes marked "better".
-            - Never open long shots: keep entryBandCents inside 10-90 and prefer sides priced near the middle.
+            - Never open long shots: keep entryBandCents inside 10-98 and never go below 10.
             - Turn off (enabled=0) strategies that keep losing after fees; turn winners up (contracts, maxPerSide).
             - Tighten stops and shrink size near the window close.
             - Each change is clamped to a quarter of the knob's range, so repeat over ticks to move further.
