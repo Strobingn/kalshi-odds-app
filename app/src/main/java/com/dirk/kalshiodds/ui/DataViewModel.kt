@@ -38,6 +38,9 @@ data class DataUiState(
     val days: Int = 30,
     val credPassphrase: String = "",
     val githubTokenDraft: String = "",
+    val groqKeyDraft: String = "",
+    val mistralKeyDraft: String = "",
+    val supervisorOn: Boolean = false,
     val syncLine: String? = null,
     val modelBusy: Boolean = false
 )
@@ -48,8 +51,35 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
     private val dataPrefs = container.dataPrefs
     private val modelStore = container.importedModel
 
-    private val _state = MutableStateFlow(DataUiState())
+    private val _state = MutableStateFlow(DataUiState(supervisorOn = container.extraSecrets.supervisorEnabled))
     val state: StateFlow<DataUiState> = _state.asStateFlow()
+
+    /** AI supervisor (signal/scalper/LlmSupervisor.kt): last tick, and its newest journal lines. */
+    val supervisorStatus: StateFlow<String> = container.llmSupervisor.status
+    val supervisorLog: StateFlow<List<String>> = container.llmSupervisor.log
+
+    fun setGroqKeyDraft(v: String) = _state.update { it.copy(groqKeyDraft = v) }
+
+    fun setMistralKeyDraft(v: String) = _state.update { it.copy(mistralKeyDraft = v) }
+
+    fun saveSupervisorKeys() {
+        val g = _state.value.groqKeyDraft.trim()
+        val m = _state.value.mistralKeyDraft.trim()
+        if (g.isNotEmpty()) container.extraSecrets.groqApiKey = g
+        if (m.isNotEmpty()) container.extraSecrets.mistralApiKey = m
+        _state.update {
+            it.copy(
+                groqKeyDraft = "",
+                mistralKeyDraft = "",
+                message = if (g.isEmpty() && m.isEmpty()) "Nothing to save" else "AI supervisor keys stored (encrypted)"
+            )
+        }
+    }
+
+    fun setSupervisorOn(on: Boolean) {
+        container.extraSecrets.supervisorEnabled = on
+        _state.update { it.copy(supervisorOn = on) }
+    }
 
     init {
         refreshStats()

@@ -26,6 +26,26 @@ class SecureExtraStore(context: Context) {
             prefs.edit().putString(KEY_GITHUB, value.trim()).commit()
         }
 
+    /** Groq / Mistral keys for the AI supervisor (signal/scalper/LlmSupervisor.kt). Encrypted like the rest. */
+    var groqApiKey: String
+        get() = prefs.getString(KEY_GROQ, "").orEmpty()
+        set(value) {
+            prefs.edit().putString(KEY_GROQ, value.trim()).commit()
+        }
+
+    var mistralApiKey: String
+        get() = prefs.getString(KEY_MISTRAL, "").orEmpty()
+        set(value) {
+            prefs.edit().putString(KEY_MISTRAL, value.trim()).commit()
+        }
+
+    /** The AI supervisor tunes the paper scalper every minute while this is on and a key is saved. */
+    var supervisorEnabled: Boolean
+        get() = prefs.getBoolean(KEY_SUPERVISOR_ON, false)
+        set(value) {
+            prefs.edit().putBoolean(KEY_SUPERVISOR_ON, value).commit()
+        }
+
     var demoApiKeyId: String
         get() = prefs.getString(KEY_DEMO_ID, "").orEmpty()
         set(value) {
@@ -63,6 +83,9 @@ class SecureExtraStore(context: Context) {
         private const val PREFS_NAME = "diphunter_extra_secrets"
         private const val FALLBACK_NAME = "diphunter_extra_secrets_fallback"
         private const val KEY_GITHUB = "github_token"
+        private const val KEY_GROQ = "groq_api_key"
+        private const val KEY_MISTRAL = "mistral_api_key"
+        private const val KEY_SUPERVISOR_ON = "ai_supervisor_enabled"
         private const val KEY_DEMO_ID = "kalshi_demo_key_id"
         private const val KEY_DEMO_PEM = "kalshi_demo_private_key_pem"
 

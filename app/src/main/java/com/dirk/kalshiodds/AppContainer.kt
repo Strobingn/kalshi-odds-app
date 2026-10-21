@@ -34,6 +34,7 @@ import com.dirk.kalshiodds.signal.market.MarketRollover
 import com.dirk.kalshiodds.signal.trade.TicketSession
 import java.io.File
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.put
 
 class AppContainer(context: Context) {
     private val app = context.applicationContext
@@ -208,6 +209,81 @@ class AppContainer(context: Context) {
 
     /** Coinbase prints kept like the index, for the arena's fair price while the index is stale. */
     val coinbaseIndex = com.dirk.kalshiodds.signal.external.CfIndexBook()
+
+    /**
+     * AI supervisor: a Groq / Mistral chat LLM that reads the live 15-minute feed every 60 s and tunes the
+     * paper scalper's settings, learning from every closed trade. It changes only the Arena settings
+     * ([ScalpKnobs], within hard bounds, no cooldown). Paper only; it cannot reach an order. On while
+     * Data → "AI supervisor" is on and a key is saved.
+     */
+    private val supervisorPrefs = app.getSharedPreferences("bitcoin_claude_supervisor", Context.MODE_PRIVATE)
+    val supervisorLog = com.dirk.kalshiodds.signal.scalper.SupervisorLog(java.io.File(app.filesDir, "supervisor"))
+    val llmSupervisor = com.dirk.kalshiodds.signal.scalper.LlmSupervisor(
+        tuning = scalperStore.tuning,
+        chat = com.dirk.kalshiodds.signal.scalper.HttpLlmChat(
+            providers = listOf(
+                com.dirk.kalshiodds.signal.scalper.LlmProvider(
+                    "groq", "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile"
+                ) { extraSecrets.groqApiKey },
+                com.dirk.kalshiodds.signal.scalper.LlmProvider(
+                    "mistral", "https://api.mistral.ai/v1", "mistral-large-latest"
+                ) { extraSecrets.mistralApiKey }
+            ),
+            onError = { msg -> supervisorLog.append("errors", "{\"ts\":${System.currentTimeMillis()},\"error\":\"$msg\"}") }
+        ),
+        feed = { supervisorFeed() },
+        stats = { name -> scalperStore.ledger.snapshot().stats(name) },
+        sink = { kind, line -> supervisorLog.append(kind, line) },
+        persistMemory = { json -> supervisorPrefs.edit().putString("memory_json", json).apply() },
+        initialMemory = runCatching {
+            supervisorPrefs.getString("memory_json", null)?.let {
+                kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+                    .decodeFromString(com.dirk.kalshiodds.signal.scalper.SupervisorMemory.serializer(), it)
+            }
+        }.getOrNull() ?: com.dirk.kalshiodds.signal.scalper.SupervisorMemory()
+    )
+    private val supervisorScope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO
+    )
+
+    init {
+        scalper.onClosed = { llmSupervisor.onClosed(it) }
+        supervisorScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(60_000L)
+                if (extraSecrets.supervisorEnabled) runCatching { llmSupervisor.tick() }
+            }
+        }
+    }
+
+    /** The live 15-minute window as the supervisor sees it: moves, book, spot, open positions. */
+    private fun supervisorFeed(): kotlinx.serialization.json.JsonObject {
+        val now = System.currentTimeMillis()
+        val w = scalper.liveWindow(now)
+            ?: return kotlinx.serialization.json.buildJsonObject { put("window", "none: no live 15-minute market yet") }
+        val secIn = ((now - w.openMs) / 1000L).toInt()
+        val last = w.mids.lastOrNull()?.second
+        fun cents(v: Double?): Double? = v?.let { Math.round(it * 10_000.0) / 100.0 }
+        fun midAgo(s: Int): Double? = w.mids.lastOrNull { it.first <= secIn - s }?.second
+        val book = scoring.book.topOfBook(w.ticker)
+        val coin = com.dirk.kalshiodds.signal.scalper.ScalperState.coinOf(w.ticker)
+        return kotlinx.serialization.json.buildJsonObject {
+            put("ticker", w.ticker)
+            put("secondsIntoWindow", secIn)
+            put("secondsLeft", 900 - secIn)
+            cents(last)?.let { put("yesMidCents", it) }
+            for ((label, s) in listOf("change10sCents" to 10, "change30sCents" to 30, "change60sCents" to 60, "change180sCents" to 180)) {
+                val a = midAgo(s)
+                if (last != null && a != null) cents(last - a)?.let { put(label, it) }
+            }
+            book?.yesBid?.let { put("yesBidCents", cents(it)) }
+            book?.yesAsk?.let { put("yesAskCents", cents(it)) }
+            book?.noBid?.let { put("noBidCents", cents(it)) }
+            book?.noAsk?.let { put("noAskCents", cents(it)) }
+            cfIndex.fresh(coin, now)?.value?.let { put("spot", it) }
+            put("openPaperPositions", w.open.size)
+        }
+    }
 
     /**
      * Account changes pushed by Kalshi's WebSocket (a fill, an order update,

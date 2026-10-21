@@ -377,6 +377,10 @@ class PaperScalper(
     private var lossDay: Long = -1L
     private val dayPnl = DoubleArray(ScalpStrategy.values().size)
 
+    /** Told of every closed scalp the moment it is booked (the AI supervisor learns from each one). Must be quick. */
+    @Volatile
+    var onClosed: ((ClosedScalp) -> Unit)? = null
+
     private fun utcDay(ms: Long): Long = Math.floorDiv(ms, 86_400_000L)
 
     /** Book [events] in the ledger, keeping today's per-strategy P&L. */
@@ -389,6 +393,8 @@ class PaperScalper(
         for (e in events) if (e is ScalpEvent.Closed && utcDay(e.scalp.closedAtMs) == today) {
             dayPnl[e.scalp.order.strategy.ordinal] += e.scalp.pnlUsd
         }
+        val hook = onClosed
+        if (hook != null) for (e in events) if (e is ScalpEvent.Closed) runCatching { hook(e.scalp) }
         ledger.apply(events, forcePersist)
     }
 

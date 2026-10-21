@@ -33,6 +33,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -44,6 +45,8 @@ import com.dirk.kalshiodds.ui.theme.DipTheme
 fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -> Unit) {
     val colors = DipTheme.colors
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val supervisorStatus by viewModel.supervisorStatus.collectAsStateWithLifecycle()
+    val supervisorLog by viewModel.supervisorLog.collectAsStateWithLifecycle()
     val importFile = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? -> uri?.let(viewModel::importUri) }
@@ -95,6 +98,49 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
                 onClick = onOpenHistory,
                 modifier = Modifier.fillMaxWidth().height(52.dp)
             ) { Text("History") }
+
+            Section("AI supervisor (paper)")
+            Text(
+                "A Groq / Mistral chat LLM watches the live 15-minute feed every 60 s and changes the paper scalper's settings on the fly, learning from every closed trade (no cooldown). Paper only: it never places an order. Groq is tried first, then Mistral. Keys are stored encrypted.",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+            OutlinedTextField(
+                value = state.groqKeyDraft,
+                onValueChange = viewModel::setGroqKeyDraft,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Groq API key") },
+                visualTransformation = PasswordVisualTransformation(),
+                singleLine = true
+            )
+            OutlinedTextField(
+                value = state.mistralKeyDraft,
+                onValueChange = viewModel::setMistralKeyDraft,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Mistral API key") },
+                visualTransformation = PasswordVisualTransformation(),
+                singleLine = true
+            )
+            OutlinedButton(
+                onClick = viewModel::saveSupervisorKeys,
+                modifier = Modifier.fillMaxWidth().height(48.dp)
+            ) { Text("Save keys") }
+            Button(
+                onClick = { viewModel.setSupervisorOn(!state.supervisorOn) },
+                modifier = Modifier.fillMaxWidth().height(52.dp)
+            ) { Text(if (state.supervisorOn) "AI supervisor: ON (tap to stop)" else "AI supervisor: OFF (tap to start)") }
+            Text(
+                supervisorStatus,
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+            supervisorLog.take(5).forEach { line ->
+                Text(
+                    line,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.textSecondary
+                )
+            }
 
             Section("Market-data recordings")
             RecordingsExportSection(onExport = viewModel::exportRecordings)
