@@ -1718,9 +1718,8 @@ class ScalpBook(
     }
 
     /**
-     * Kalshi Scalper LLM paper strategy entry. The LLM's side/confidence is only a proposal: this enforces window
-     * start (≤ 3 min), ask ≤ 55¢, one entry per window, and the V2 exit rules (3¢ peak trail, >95% hold gate).
-     * Returns a rejection reason, or null when a paper entry was queued. PAPER ONLY.
+     * Kalshi Scalper LLM paper strategy entry. The loop may propose again through the window
+     * (not the last 60 seconds). This card is removed, so the call does not queue a trade. PAPER ONLY.
      */
     /** The v2-llm paper card is removed. AI chat and the on-device forecast do not use this. */
     fun llmEntry(@Suppress("UNUSED_PARAMETER") q: ScalpRule.Quote, @Suppress("UNUSED_PARAMETER") side: String, @Suppress("UNUSED_PARAMETER") conf: Double): String? =

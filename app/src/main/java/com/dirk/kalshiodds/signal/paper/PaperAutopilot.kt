@@ -21,9 +21,11 @@ import kotlin.math.min
  * the window. Never calls Kalshi. Never places a live order.
  *
  * Side is chosen by EV at the ask (`p − ask − fee`), not by favorite /
- * spot-vs-strike. Flip-chance still blocks near-impossible lottery prints.
- * A re-entry guard skips the identical ticker+side when price and EV have
- * not moved enough to justify another clip.
+ * spot-vs-strike. UP and DOWN may both be open in the same window; each
+ * side still has to clear its own edge, fee, NO BET, and flip-chance gates.
+ * There is no per-window count cap. The same ask on the same book snapshot
+ * does not print another fill, and each new fill has to re-qualify for
+ * [EDGE_HOLDS] consecutive evaluations.
  */
 object PaperAutopilot {
     /** 0.3.40: paper Autopilot always sizes half-Kelly on the paper bankroll. */
@@ -48,13 +50,16 @@ object PaperAutopilot {
     const val LAST_WINDOW_MS = 60_000L
 
     private data class Hold(val side: String, val count: Int)
+    private data class Snap(val ask: Double, val book: String)
 
     private val edgeHolds = ConcurrentHashMap<String, Hold>()
+    private val lastSnap = ConcurrentHashMap<String, Snap>()
     private val clampWindows = ConcurrentHashMap.newKeySet<String>()
 
     /** Test hook. Production ticks share one process-lifetime streak. */
     fun resetSession() {
         edgeHolds.clear()
+        lastSnap.clear()
         clampWindows.clear()
     }
 
@@ -102,7 +107,33 @@ object PaperAutopilot {
     fun spentInWindow(fills: List<PaperFill>, ticker: String): Double =
         fills.filter { it.ticker.equals(ticker, ignoreCase = true) }.sumOf { it.stakeUsd }
 
-    /** First paper fill in the window locks the side. */
+    /**
+     * Displayed ask depth minus contracts our own open fills on this side
+     * already took. Paper does not remove those contracts from the live book,
+     * so the next clip must not size as if the size were still all available.
+     */
+    fun depthRemaining(fills: List<PaperFill>, ticker: String, side: String, displayed: Int?): Int? {
+        if (displayed == null) return null
+        val used = fills.filter {
+            !it.settled &&
+                it.ticker.equals(ticker, ignoreCase = true) &&
+                it.side.equals(side, ignoreCase = true)
+        }.sumOf { it.contracts }
+        return (displayed - used).coerceAtLeast(0)
+    }
+
+    /** Stable fingerprint of a book snapshot. Null and empty are the same quote. */
+    fun bookKey(book: BookLevelSnapshot?): String {
+        if (book == null || book.isEmpty()) return ""
+        fun fmt(levels: List<Pair<Double, Double>>) =
+            levels.joinToString(";") { (p, s) -> String.format(java.util.Locale.US, "%.6f@%.4f", p, s) }
+        return fmt(book.yes) + "|" + fmt(book.no)
+    }
+
+    /**
+     * First paper fill in the window. Shadow mode still refuses the other side.
+     * Paper mode does not: UP and DOWN may both be open.
+     */
     fun committedSide(fills: List<PaperFill>, ticker: String): String? =
         fills.filter { it.ticker.equals(ticker, ignoreCase = true) }
             .minByOrNull { it.createdAtMs }
@@ -144,20 +175,27 @@ object PaperAutopilot {
      * Pick the side whose EV at the ask is higher. Skip when both
      * `p − ask − fee` are ≤ [margin].
      */
+    fun qualifyingSides(
+        pYes: Double,
+        yesAsk: Double?,
+        noAsk: Double?,
+        feeRate: Double = SignalConstants.DEFAULT_FEE_RATE,
+        margin: Double = 0.0
+    ): List<SideEv> {
+        if (!pYes.isFinite()) return emptyList()
+        return listOfNotNull(
+            sideEv("YES", "UP", pYes.coerceIn(0.0, 1.0), yesAsk, feeRate),
+            sideEv("NO", "DOWN", (1.0 - pYes).coerceIn(0.0, 1.0), noAsk, feeRate)
+        ).filter { it.evPerContract > margin + 1e-12 }
+    }
+
     fun pickSide(
         pYes: Double,
         yesAsk: Double?,
         noAsk: Double?,
         feeRate: Double = SignalConstants.DEFAULT_FEE_RATE,
         margin: Double = 0.0
-    ): SideEv? {
-        if (!pYes.isFinite()) return null
-        val yes = sideEv("YES", "UP", pYes.coerceIn(0.0, 1.0), yesAsk, feeRate)
-        val no = sideEv("NO", "DOWN", (1.0 - pYes).coerceIn(0.0, 1.0), noAsk, feeRate)
-        val best = listOfNotNull(yes, no).maxByOrNull { it.evPerContract } ?: return null
-        if (best.evPerContract <= margin + 1e-12) return null
-        return best
-    }
+    ): SideEv? = qualifyingSides(pYes, yesAsk, noAsk, feeRate, margin).maxByOrNull { it.evPerContract }
 
     fun modelYes(market: MarketUiModel): Double? {
         val lm = market.lastMinute?.pUp?.takeIf { it.isFinite() && !com.dirk.kalshiodds.signal.lastminute.LastMinuteRetired.retired }
@@ -196,7 +234,10 @@ object PaperAutopilot {
         noAsk: Double? = market.noAsk,
         yesDepth: Int? = null,
         noDepth: Int? = null,
-        assessment: com.dirk.kalshiodds.decision.DecisionPipeline.Assessment? = null
+        assessment: com.dirk.kalshiodds.decision.DecisionPipeline.Assessment? = null,
+        book: BookLevelSnapshot? = null,
+        /** Shadow still refuses the other side. Paper does not. */
+        lockOppositeSide: Boolean = false
     ): Decision {
         if (!settings.paperTradingEnabled) {
             return Decision(skip = true, reason = "Paper trading off")
@@ -211,7 +252,7 @@ object PaperAutopilot {
             return Decision(skip = true, reason = "Paper skip — window closed")
         }
         if (assessment != null) {
-            return evaluateGated(market, settings, paper, nowMs, yesDepth, noDepth, assessment)
+            return evaluateGated(market, settings, paper, nowMs, yesDepth, noDepth, assessment, book, lockOppositeSide)
         }
         val left = secondsLeft(market, nowMs)
         if (left != null && left <= LAST_WINDOW_MS) {
@@ -226,14 +267,20 @@ object PaperAutopilot {
         val marketP = marketYes(market, yesAsk, noAsk)
             ?: return Decision(skip = true, reason = "Paper skip — no market probability")
         val pYes = anchoredYes(rawYes, marketP)
-        val picked = pickSide(pYes, yesAsk, noAsk, settings.feeRate, margin = MIN_EDGE)
-            ?: return Decision(skip = true, reason = "Paper skip — edge under 4pp after fees").also {
-                edgeHolds.remove(market.ticker)
-            }
-        if (picked.ask + 1e-12 < MIN_ASK || picked.ask - 1e-12 > MAX_ASK) {
-            return Decision(skip = true, reason = "Paper skip — ask outside 10¢–90¢", side = picked)
+        val edged = qualifyingSides(pYes, yesAsk, noAsk, settings.feeRate, MIN_EDGE)
+        if (edged.isEmpty()) {
+            clearHolds(market.ticker)
+            return Decision(skip = true, reason = "Paper skip — edge under 4pp after fees")
         }
-        return guardAndSize(market, settings, paper, nowMs, picked, yesDepth, noDepth, MIN_EDGE)
+        val inBand = edged.filter { it.ask + 1e-12 >= MIN_ASK && it.ask - 1e-12 <= MAX_ASK }
+        if (inBand.isEmpty()) {
+            return Decision(
+                skip = true,
+                reason = "Paper skip — ask outside 10¢–90¢",
+                side = edged.maxByOrNull { it.evPerContract }
+            )
+        }
+        return chooseEntry(market, settings, paper, nowMs, inBand, yesDepth, noDepth, MIN_EDGE, book, lockOppositeSide)
     }
 
     /**
@@ -249,7 +296,9 @@ object PaperAutopilot {
         nowMs: Long,
         yesDepth: Int?,
         noDepth: Int?,
-        a: com.dirk.kalshiodds.decision.DecisionPipeline.Assessment
+        a: com.dirk.kalshiodds.decision.DecisionPipeline.Assessment,
+        book: BookLevelSnapshot?,
+        lockOppositeSide: Boolean
     ): Decision {
         val c = a.chosen
         val picked = c?.let {
@@ -263,111 +312,163 @@ object PaperAutopilot {
             )
         }
         if (!a.allow || picked == null) {
-            edgeHolds.remove(market.ticker)
+            clearHolds(market.ticker)
             return Decision(skip = true, reason = a.reason ?: "NO BET", side = picked)
         }
-        return guardAndSize(market, settings, paper, nowMs, picked, yesDepth, noDepth, MIN_NET)
+        return chooseEntry(
+            market, settings, paper, nowMs, listOf(picked), yesDepth, noDepth, MIN_NET, book, lockOppositeSide
+        )
     }
 
-    private fun guardAndSize(
+    /**
+     * Every side that clears its own gates can be the fill this tick.
+     * At most one fill is returned; the other side, if it is also ready,
+     * waits until the next evaluation.
+     */
+    private fun chooseEntry(
         market: MarketUiModel,
         settings: SignalSettings,
         paper: PaperBookState,
         nowMs: Long,
-        picked: SideEv,
+        sides: List<SideEv>,
         yesDepth: Int?,
         noDepth: Int?,
-        minEdge: Double
+        minEdge: Double,
+        book: BookLevelSnapshot?,
+        lockOppositeSide: Boolean
     ): Decision {
-        val locked = committedSide(paper.fills, market.ticker)
-        if (locked != null && !locked.equals(picked.side, ignoreCase = true)) {
-            return Decision(skip = true, reason = "Paper skip — opposite side already filled", side = picked)
+        var pool = sides
+        if (lockOppositeSide) {
+            val locked = committedSide(paper.fills, market.ticker)
+            if (locked != null) {
+                val kept = pool.filter { it.side.equals(locked, ignoreCase = true) }
+                if (kept.isEmpty()) {
+                    return Decision(
+                        skip = true,
+                        reason = "Paper skip — opposite side already filled",
+                        side = pool.maxByOrNull { it.evPerContract }
+                    )
+                }
+                pool = kept
+            }
         }
-        if (picked.evPerContract + 1e-12 < minEdge) {
-            edgeHolds.remove(market.ticker)
-            return Decision(skip = true, reason = if (minEdge == MIN_EDGE) "Paper skip — edge under 4pp after fees" else "NO BET — expected net under 2¢ per contract", side = picked)
-        }
-        val held = noteEdge(market.ticker, picked.side)
-        if (held < EDGE_HOLDS) {
-            return Decision(
-                skip = true,
-                reason = "Paper skip — edge needs 2 consecutive evaluations",
-                side = picked
-            )
-        }
-        if (!FlipCheck.allowsRealisticMarketSide(
-                market = market,
-                side = picked.side,
+        val ready = ArrayList<Decision>()
+        var fallback: Decision? = null
+        for (picked in pool.sortedByDescending { it.evPerContract }) {
+            if (picked.evPerContract + 1e-12 < minEdge) {
+                edgeHolds.remove(holdKey(market.ticker, picked.side))
+                fallback = fallback ?: Decision(
+                    skip = true,
+                    reason = if (minEdge == MIN_EDGE) "Paper skip — edge under 4pp after fees" else "NO BET — expected net under 2¢ per contract",
+                    side = picked
+                )
+                continue
+            }
+            val held = noteEdge(market.ticker, picked.side)
+            if (held < EDGE_HOLDS) {
+                fallback = fallback ?: Decision(
+                    skip = true,
+                    reason = "Paper skip — edge needs 2 consecutive evaluations",
+                    side = picked
+                )
+                continue
+            }
+            if (!FlipCheck.allowsRealisticMarketSide(
+                    market = market,
+                    side = picked.side,
+                    ask = picked.ask,
+                    nowMs = nowMs
+                )
+            ) {
+                fallback = fallback ?: Decision(
+                    skip = true,
+                    reason = "Paper skip — flip-chance / lottery block",
+                    side = picked
+                )
+                continue
+            }
+            val free = freeBankroll(paper)
+            val shown = if (picked.side.equals("NO", true)) noDepth else yesDepth
+            val depth = depthRemaining(paper.fills, market.ticker, picked.side, shown)
+            val sized = PaperKellySizer.size(
+                winProb = picked.winProb,
                 ask = picked.ask,
-                nowMs = nowMs
+                bankrollUsd = free,
+                kellyFraction = PAPER_AI_KELLY_FRACTION,
+                feeRate = settings.feeRate,
+                depthContracts = depth,
+                maxStakeUsd = null,
+                capFullKelly = false
             )
-        ) {
-            return Decision(skip = true, reason = "Paper skip — flip-chance / lottery block", side = picked)
-        }
-        val free = freeBankroll(paper)
-        // 0.3.40 owner decision: on PAPER the AI has full control of sizing — half-Kelly on the free
-        // paper bankroll, limited only by that bankroll, displayed depth and the $5 floor.
-        // (The old 5%-per-window budget and 10% full-Kelly cap no longer apply to paper.)
-        val room: Double? = null
-        val depth = if (picked.side.equals("NO", true)) noDepth else yesDepth
-        val sized = PaperKellySizer.size(
-            winProb = picked.winProb,
-            ask = picked.ask,
-            bankrollUsd = free,
-            kellyFraction = PAPER_AI_KELLY_FRACTION,
-            feeRate = settings.feeRate,
-            depthContracts = depth,
-            maxStakeUsd = null,
-            capFullKelly = false
-        )
-        if (!sized.ok) {
-            return Decision(
-                skip = true,
-                reason = sized.reason ?: "Paper skip — Kelly ≤ 0 after fees",
+            if (!sized.ok) {
+                fallback = fallback ?: Decision(
+                    skip = true,
+                    reason = sized.reason ?: "Paper skip — Kelly ≤ 0 after fees",
+                    side = picked,
+                    kellyF = sized.kellyF,
+                    freeBankrollUsd = free
+                )
+                continue
+            }
+            if (com.dirk.kalshiodds.decision.AutopilotMinStake.below(sized.allInUsd)) {
+                fallback = fallback ?: Decision(
+                    skip = true,
+                    reason = com.dirk.kalshiodds.decision.AutopilotMinStake.REASON,
+                    side = picked,
+                    kellyF = sized.kellyF,
+                    freeBankrollUsd = free
+                )
+                continue
+            }
+            if (sameQuote(market.ticker, picked.side, picked.ask, book)) {
+                fallback = fallback ?: Decision(
+                    skip = true,
+                    reason = "Paper skip — same quote snapshot",
+                    side = picked,
+                    kellyF = sized.kellyF,
+                    freeBankrollUsd = free
+                )
+                continue
+            }
+            ready += Decision(
+                skip = false,
                 side = picked,
                 kellyF = sized.kellyF,
-                freeBankrollUsd = free,
-                maxStakeUsd = room
+                freeBankrollUsd = free
             )
         }
-        // 0.3.40: the 0.3.37 "$5 floor" sized with depthContracts = null, which PaperKellySizer
-        // always skips ("unknown ask depth"), so the floor never fired. Check the real,
-        // depth-capped Kelly stake instead.
-        if (com.dirk.kalshiodds.decision.AutopilotMinStake.below(sized.allInUsd)) {
-            return Decision(
-                skip = true,
-                reason = com.dirk.kalshiodds.decision.AutopilotMinStake.REASON,
-                side = picked,
-                kellyF = sized.kellyF,
-                freeBankrollUsd = free,
-                maxStakeUsd = room
-            )
-        }
-        val last = lastSameSide(paper.fills, market.ticker, picked.side)
-        if (!materiallyChanged(last, picked.side, picked.ask, picked.winProb, sized.kellyF)) {
-            return Decision(
-                skip = true,
-                reason = "Paper skip — same side / price / EV as last fill",
-                side = picked,
-                kellyF = sized.kellyF,
-                freeBankrollUsd = free,
-                maxStakeUsd = room
-            )
-        }
-        return Decision(
-            skip = false,
-            side = picked,
-            kellyF = sized.kellyF,
-            freeBankrollUsd = free,
-            maxStakeUsd = room
-        )
+        return ready.maxByOrNull { it.side?.evPerContract ?: Double.NEGATIVE_INFINITY }
+            ?: fallback
+            ?: Decision(skip = true, reason = "Paper skip — edge under 4pp after fees")
+    }
+
+    private fun holdKey(ticker: String, side: String): String =
+        ticker.uppercase() + "|" + side.uppercase()
+
+    private fun clearHolds(ticker: String) {
+        val prefix = ticker.uppercase() + "|"
+        edgeHolds.keys.filter { it.startsWith(prefix) || it.equals(ticker, ignoreCase = true) }
+            .forEach { edgeHolds.remove(it) }
     }
 
     private fun noteEdge(ticker: String, side: String): Int {
-        val prev = edgeHolds[ticker]
-        val count = if (prev != null && prev.side.equals(side, ignoreCase = true)) prev.count + 1 else 1
-        edgeHolds[ticker] = Hold(side, count)
+        val key = holdKey(ticker, side)
+        val count = (edgeHolds[key]?.count ?: 0) + 1
+        edgeHolds[key] = Hold(side, count)
         return count
+    }
+
+    private fun forgetHold(ticker: String, side: String) {
+        edgeHolds.remove(holdKey(ticker, side))
+    }
+
+    private fun sameQuote(ticker: String, side: String, ask: Double, book: BookLevelSnapshot?): Boolean {
+        val prev = lastSnap[holdKey(ticker, side)] ?: return false
+        return abs(prev.ask - ask) <= 1e-9 && prev.book == bookKey(book)
+    }
+
+    private fun rememberSnap(ticker: String, side: String, ask: Double, book: BookLevelSnapshot?) {
+        lastSnap[holdKey(ticker, side)] = Snap(ask, bookKey(book))
     }
 
     data class Tick(val decision: Decision, val fill: PaperFill?)
@@ -400,24 +501,31 @@ object PaperAutopilot {
         } else {
             noAsk
         }
+        val snap = paperBook.snapshot()
         val decision = evaluate(
             market = market,
             settings = settings,
-            paper = paperBook.snapshot(),
+            paper = snap,
             nowMs = nowMs,
             yesAsk = liveYes,
             noAsk = liveNo,
             yesDepth = yesDepth,
             noDepth = noDepth,
-            assessment = assessment
+            assessment = assessment,
+            book = book,
+            lockOppositeSide = !bookPaper
         )
         if (!decision.ok) {
             decision.reason?.let { paperBook.rememberMessage(it) }
             return Tick(decision, null)
         }
-        if (!bookPaper) return Tick(decision, null)
         val picked = decision.side ?: return Tick(decision, null)
-        val depth = if (picked.side.equals("NO", true)) noDepth else yesDepth
+        if (!bookPaper) {
+            rememberSnap(market.ticker, picked.side, picked.ask, book)
+            return Tick(decision, null)
+        }
+        val rawDepth = if (picked.side.equals("NO", true)) noDepth else yesDepth
+        val depth = depthRemaining(snap.fills, market.ticker, picked.side, rawDepth)
         val tags = AutopilotRegime.tags(market, picked.side, picked.ask, nowMs)
         val fill = paperBook.considerAutopilot(
             ticker = market.ticker,
@@ -431,6 +539,10 @@ object PaperAutopilot {
             maxStakeUsd = decision.maxStakeUsd,
             regime = tags
         )
+        if (fill != null) {
+            forgetHold(market.ticker, picked.side)
+            rememberSnap(market.ticker, picked.side, picked.ask, book)
+        }
         return Tick(decision, fill)
     }
 

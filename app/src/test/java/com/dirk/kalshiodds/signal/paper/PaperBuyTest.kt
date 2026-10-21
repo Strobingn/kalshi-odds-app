@@ -2,6 +2,7 @@ package com.dirk.kalshiodds.signal.paper
 
 import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TradeTicket
+import java.util.concurrent.atomic.AtomicInteger
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -9,6 +10,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PaperBuyTest {
+    private val bookIds = AtomicInteger()
 
     @Test
     fun manualBuyNoCredentials() {
@@ -93,13 +95,20 @@ class PaperBuyTest {
     }
 
     @Test
-    fun openDuplicateShowsReasonNotSilent() {
-        val book = PaperBook(com.dirk.kalshiodds.signal.paper.PaperBookState(startingUsd = 1_000.0, cashUsd = 1_000.0))
+    fun secondBuyOnAnOpenTickerIsItsOwnFill() {
+        val book = PaperBook(
+            com.dirk.kalshiodds.signal.paper.PaperBookState(startingUsd = 1_000.0, cashUsd = 1_000.0),
+            idFactory = { "b${bookIds.incrementAndGet()}" }
+        )
         val first = ticket(TicketKind.MANUAL, ticker = "KXBTC15M-D", contracts = 5, stake = 1.0, px = 0.20)
-        assertTrue(PaperBuy.execute(book, first).ok)
-        val again = PaperBuy.execute(book, first.copy(id = "other"))
-        assertFalse(again.ok)
-        assertTrue(again.message.contains("Already have an open paper fill"))
+        val a = PaperBuy.execute(book, first)
+        val b = PaperBuy.execute(book, first.copy(id = "other"))
+        assertTrue(a.message, a.ok)
+        assertTrue(b.message, b.ok)
+        val open = book.snapshot().fills.filter { !it.settled }
+        assertEquals(2, open.size)
+        assertEquals(2, open.map { it.id }.toSet().size)
+        assertTrue(open.all { it.side == "YES" && it.ticker == "KXBTC15M-D" })
     }
 
     @Test

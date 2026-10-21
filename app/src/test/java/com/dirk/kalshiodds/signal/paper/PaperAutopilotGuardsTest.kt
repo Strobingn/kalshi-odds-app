@@ -5,6 +5,7 @@ import com.dirk.kalshiodds.signal.config.SignalSettings
 import com.dirk.kalshiodds.ui.HomeFixtures
 import com.dirk.kalshiodds.ui.HomeScorecardSummary
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -76,14 +77,22 @@ class PaperAutopilotGuardsTest {
     }
 
     @Test
-    fun oppositeSideIsBlockedAfterAFill() {
-        val book = PaperBook(initial = com.dirk.kalshiodds.signal.paper.PaperBookState(startingUsd = 1_000.0, cashUsd = 1_000.0), idFactory = { "o1" }, nowMs = { nowMs })
-        val yes = enter(book, edge(yesAsk = 0.20, aiYes = 80.0), depth = 30) // ≥ \$5 floor (0.3.40)
+    fun oppositeSideFillsWhenItsOwnEdgeHolds() {
+        var n = 0
+        val book = PaperBook(initial = com.dirk.kalshiodds.signal.paper.PaperBookState(startingUsd = 1_000.0, cashUsd = 1_000.0), idFactory = { "o${n++}" }, nowMs = { nowMs })
+        val yes = enter(book, edge(yesAsk = 0.20, aiYes = 80.0), depth = 30) // ≥ $5 floor (0.3.40)
         assertEquals("YES", yes!!.side)
-        val no = edge(yesAsk = 0.75, aiYes = 30.0)
+        val no = edge(yesAsk = 0.75, aiYes = 30.0).copy(
+            spotUsd = 66_700.0,
+            floorStrike = 67_000.0,
+            spotVsTargetUsd = -300.0
+        )
         assertNull(PaperAutopilot.consider(book, no, settings, nowMs, yesDepth = 100_000, noDepth = 100_000))
-        assertTrue(book.snapshot().lastMessage!!.contains("opposite"))
-        assertEquals(1, book.snapshot().fills.size)
+        val down = PaperAutopilot.consider(book, no, settings, nowMs, yesDepth = 100_000, noDepth = 100_000)
+        assertNotNull(down)
+        assertEquals("NO", down!!.side)
+        assertEquals(setOf("YES", "NO"), book.snapshot().fills.map { it.side }.toSet())
+        assertFalse(book.snapshot().lastMessage!!.contains("opposite"))
     }
 
     @Test

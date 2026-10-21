@@ -326,13 +326,16 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             val book = hub.scoring.book.snapshotBook(sel)
             val orders = container.paperOrders.open().filter { it.ticker.equals(sel, true) && it.side.equals(side, true) }
                 .map { com.dirk.kalshiodds.decision.PriceLadder.Order(it.id, it.isBuy, it.limitPrice, it.remaining) }
-            val fill = runCatching { paperBook.snapshot().fills.firstOrNull { !it.settled && it.ticker.equals(sel, true) && it.side.equals(side, true) } }.getOrNull()
+            val opens = runCatching {
+                paperBook.snapshot().fills.filter { !it.settled && it.ticker.equals(sel, true) && it.side.equals(side, true) }
+            }.getOrDefault(emptyList())
+            val heldN = opens.sumOf { it.contracts }
             val close = markets.firstOrNull { it.ticker == sel }?.closeMs
             next = next.copy(
                 ladder = com.dirk.kalshiodds.decision.PriceLadder.rows(side, book?.yes.orEmpty(), book?.no.orEmpty(), orders),
                 openOrders = orders,
-                heldContracts = runCatching { paperBook.openContracts(sel, side) }.getOrDefault(0),
-                heldEntry = fill?.limitPrice,
+                heldContracts = runCatching { paperBook.openContracts(sel, side) }.getOrDefault(heldN),
+                heldEntry = if (heldN > 0) opens.sumOf { it.contracts * it.limitPrice } / heldN else null,
                 bookAgeMs = hub.scoring.book.bookAgeMs(sel, now),
                 secondsLeft = close?.let { ((it - now) / 1000L).coerceAtLeast(0L) }
             )
@@ -1216,10 +1219,10 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val livePos = s.positions.firstOrNull {
             it.ticker.equals(ticker, true) && it.side.equals(side, true)
         }
-        val paperFill = s.paper.fills.firstOrNull {
+        val paperHeld = s.paper.fills.filter {
             !it.settled && it.ticker.equals(ticker, true) && it.side.equals(side, true)
-        }
-        val held = livePos?.let { PositionParser.heldContracts(it) } ?: paperFill?.contracts ?: 0
+        }.sumOf { it.contracts }
+        val held = livePos?.let { PositionParser.heldContracts(it) } ?: paperHeld
         if (held <= 0) {
             ticketSession.failSoft("No open $side position on $ticker")
             return

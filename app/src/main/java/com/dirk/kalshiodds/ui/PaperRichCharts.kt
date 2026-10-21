@@ -71,7 +71,7 @@ fun PaperRichCharts(place: String) {
             fontWeight = FontWeight.Bold
         )
         Text(
-            "Paper only. The autopilot and manual paper ledger, not live orders. Times are US Eastern.",
+            "Paper only. The autopilot and manual paper ledger, not live orders. Several fills in one window add up. Times are US Eastern.",
             color = colors.textSecondary,
             style = MaterialTheme.typography.bodySmall
         )

@@ -176,6 +176,11 @@ fun RichReportCharts(
             }
         } else {
             FieldCard {
+                ChartBlock("P&L by window", note(n, "Every fill in the 15-minute window, US Eastern. UP and DOWN sum.")) {
+                    SideBars(report.byWindow, emptyText = emptyTrades(n), contentLabel = "P and L by window")
+                }
+            }
+            FieldCard {
                 ChartBlock("Daily P&L", note(n, "US Eastern close day. UP and DOWN together.")) {
                     SideBars(report.daily, emptyText = emptyTrades(n), contentLabel = "Daily P and L")
                 }

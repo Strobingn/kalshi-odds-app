@@ -38,7 +38,23 @@ object PaperTileBuy {
     }
 
     fun openFill(paper: PaperBookState, ticker: String): PaperFill? =
-        paper.fills.firstOrNull { !it.settled && it.ticker.equals(ticker, ignoreCase = true) }
+        openFills(paper, ticker).firstOrNull()
+
+    fun openFills(paper: PaperBookState, ticker: String): List<PaperFill> =
+        paper.fills.filter { !it.settled && it.contracts > 0 && it.ticker.equals(ticker, ignoreCase = true) }
+
+    fun positionLine(paper: PaperBookState, ticker: String): String? {
+        val opens = openFills(paper, ticker)
+        if (opens.isEmpty()) return null
+        if (opens.size == 1) return positionLine(opens.first())
+        val parts = opens.groupBy { sideKey(it.side) }.map { (side, rows) ->
+            val n = rows.sumOf { it.contracts }
+            val avg = rows.sumOf { it.contracts * it.limitPrice } / n
+            val cents = (avg * 100.0).roundToInt()
+            "${displaySide(side)} $n @ ${cents}c"
+        }
+        return "Paper: " + parts.joinToString(" · ")
+    }
 
     fun positionLine(fill: PaperFill?): String? {
         if (fill == null || fill.settled) return null

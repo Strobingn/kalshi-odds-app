@@ -56,7 +56,7 @@ fun PaperBookCard(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        "Start / reset $1,000 · half-Kelly on the paper bankroll · never hits Kalshi",
+                        "Start / reset $1,000 · half-Kelly · unlimited clips per window, UP and DOWN · never hits Kalshi",
                         style = MaterialTheme.typography.labelMedium,
                         color = colors.textSecondary
                     )
@@ -185,7 +185,7 @@ private fun PaperLedgerRow(
                 com.dirk.kalshiodds.ui.SignalCopy.callLabel(fill.side),
                 com.dirk.kalshiodds.ui.WindowLabel.of(fill.ticker),
                 fill.contracts,
-                com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(fill.limitPrice)
+                com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(fill.shownPrice())
             ),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface

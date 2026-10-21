@@ -231,6 +231,7 @@ class SupabaseSync(
             f.kellyF?.takeIf { it.isFinite() }?.let { payload.put("kellyF", it) }
             f.kellyFraction?.takeIf { it.isFinite() }?.let { payload.put("kellyFraction", it) }
             f.bankrollAfterUsd?.takeIf { it.isFinite() }?.let { payload.put("bankrollAfterUsd", it) }
+            f.exitPrice?.takeIf { it.isFinite() }?.let { payload.put("exitPrice", it) }
             out.add(rec("paper:${f.id}", "paper", f.syncAtMs(), payload))
         }
         bundle.settingsSnapshot?.takeIf { !SyncMerge.isForbiddenPayload(it) }?.let { snap ->
@@ -670,6 +671,7 @@ internal object SyncRows {
         },
         bankrollAfterUsd = o.optDouble("bankrollAfterUsd").takeIf {
             o.has("bankrollAfterUsd") && !o.isNull("bankrollAfterUsd")
-        }
+        },
+        exitPrice = o.optDouble("exitPrice").takeIf { o.has("exitPrice") && !o.isNull("exitPrice") }
     )
 }

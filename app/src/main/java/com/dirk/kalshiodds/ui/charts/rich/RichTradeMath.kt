@@ -56,7 +56,9 @@ object RichTradeMath {
         val won: Boolean,
         val stakeUsd: Double,
         val scalperId: String?,
-        val open: Boolean = false
+        val open: Boolean = false,
+        /** 15-minute market id. Empty on rows that are not a paper fill. */
+        val ticker: String = ""
     )
 
     data class Sample(val tMs: Long, val value: Double)
@@ -116,7 +118,9 @@ object RichTradeMath {
         val byConfidence: List<Split> = emptyList(),
         val exposure: List<Sample> = emptyList(),
         val sizeBins: List<Split> = emptyList(),
-        val openCount: Int = 0
+        val openCount: Int = 0,
+        /** One row per 15-minute ticker. UP and DOWN dollars both sit in the split, so the total is the window. */
+        val byWindow: List<Split> = emptyList()
     )
 
     fun countLabel(n: Int): String = if (n <= 0) "No trades yet" else "n=$n"
@@ -219,11 +223,12 @@ object RichTradeMath {
                 predicted = predicted,
                 confidence = confidence,
                 won = false,
-                stakeUsd = stake,
-                scalperId = null,
-                open = true
-            )
-        }
+            stakeUsd = stake,
+            scalperId = null,
+            open = true,
+            ticker = f.ticker
+        )
+    }
         val net = f.pnlUsd?.takeIf { it.isFinite() } ?: return null
         val closedAt = f.syncAtMs().coerceAtLeast(entryAt)
         return Trade(
@@ -243,7 +248,8 @@ object RichTradeMath {
             won = f.won ?: (net > 0.0),
             stakeUsd = stake,
             scalperId = null,
-            open = false
+            open = false,
+            ticker = f.ticker
         )
     }
 
@@ -305,8 +311,22 @@ object RichTradeMath {
             byConfidence = bandSplits(closed, CONF_ORDER) { confidenceBand(it.confidence) },
             exposure = exposure(unique, nowMs),
             sizeBins = countSplits(unique, SIZE_ORDER) { sizeBand(it.contracts) },
-            openCount = openCount
+            openCount = openCount,
+            byWindow = windowSplits(unique)
         )
+    }
+
+    /** Settled P&L of every fill in a 15-minute ticker. UP and DOWN both count. */
+    fun windowSplits(trades: List<Trade>): List<Split> {
+        val closed = dedupe(trades).filter { !it.open && it.ticker.isNotBlank() }
+        return closed.groupBy { it.ticker.uppercase(Locale.US) }
+            .map { (ticker, rows) ->
+                var up = 0.0
+                var down = 0.0
+                for (t in rows) if (t.sideUp) up += t.netUsd else down += t.netUsd
+                Split(com.dirk.kalshiodds.ui.WindowLabel.of(ticker), rows.size, up, down)
+            }
+            .sortedByDescending { kotlin.math.abs(it.total) }
     }
 
     /**

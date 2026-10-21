@@ -66,10 +66,19 @@ data class PaperFill(
     /** trend / chop / quiet / vol from the card regime tag. */
     val regimePath: String? = null,
     /** Distance-to-strike bucket. */
-    val regimeStrike: String? = null
+    val regimeStrike: String? = null,
+    /**
+     * Price a sale actually printed. Entry stays [limitPrice] so settlement,
+     * fees, and cost basis do not move. Null on buys and on pre-existing rows.
+     */
+    val exitPrice: Double? = null
 ) {
     fun syncAtMs(): Long = if (updatedAtMs > 0L) updatedAtMs else createdAtMs
     val displaySide: String get() = side.uppercase()
+
+    /** Ledger, history, and charts: a sale shows the sale price (6 of 10 at 55¢ shows 55¢). */
+    fun shownPrice(): Double =
+        if (outcome.equals("sell", ignoreCase = true)) (exitPrice ?: limitPrice) else limitPrice
 
     companion object {
         @JvmStatic
@@ -579,8 +588,8 @@ class PaperBook(
     }
 
     /**
-     * Explicit paper buy used by [PaperBuy]. Caps to cash, reuses a ticker
-     * after the prior fill settled, and always writes [lastMessage].
+     * Test and internal paper buy. Caps to cash. Another open fill on the
+     * same ticker is a new row. Always writes [lastMessage].
      */
     internal fun forceFill(
         ticker: String,
@@ -653,8 +662,8 @@ class PaperBook(
     }
 
     /**
-     * Explicit paper buy used by [PaperBuy]. Caps to cash, reuses a ticker
-     * after the prior fill settled, and always writes [lastMessage].
+     * Explicit paper buy used by [PaperBuy]. Caps to cash. Another open fill
+     * on the same ticker is a new row, not a block. Always writes [lastMessage].
      */
     fun explicitBuy(ticket: TradeTicket): PaperBuy.Outcome {
         val px = KalshiPrice.usable(ticket.estimatedAvgFill.takeIf { it > 0.0 } ?: ticket.limitPrice)
@@ -708,14 +717,6 @@ class PaperBook(
             val px = walked?.vwap ?: px0
             @Suppress("NAME_SHADOWING") val wantContracts = walked?.filled ?: wantContracts
             val cur = _state.value
-            val open = cur.fills.firstOrNull {
-                !it.settled && it.ticker.equals(ticker, ignoreCase = true)
-            }
-            if (open != null) {
-                val msg = "Already have an open paper fill on $ticker (${open.displaySide} ${open.contracts} ct)"
-                publish(cur.copy(lastMessage = msg))
-                return PaperBuy.Outcome(ok = false, message = msg)
-            }
             val (qty, capped) = PaperBuy.capContracts(wantContracts, cur.cashUsd, px)
             if (qty < 1) {
                 val msg = String.format(
@@ -806,14 +807,6 @@ class PaperBook(
         }
         synchronized(lock) {
             val cur = _state.value
-            val open = cur.fills.firstOrNull {
-                !it.settled && it.ticker.equals(ticker, ignoreCase = true)
-            }
-            if (open != null) {
-                val msg = "Already have an open paper fill on $ticker (${open.displaySide} ${open.contracts} ct)"
-                publish(cur.copy(lastMessage = msg))
-                return PaperBuy.Outcome(ok = false, message = msg)
-            }
             if (cur.cashUsd + 1e-9 < allInUsd) {
                 val msg = "Paper cash ${fmt(cur.cashUsd)} cannot cover ${fmt(allInUsd)}"
                 publish(cur.copy(lastMessage = msg))
@@ -859,8 +852,9 @@ class PaperBook(
      */
     /**
      * 0.3.43 paper LIMIT order buy fill (PaperOrderBook): [qty] contracts at exactly [price], [feeUsd] = taker fee for
-     * an immediate fill or the series maker fee for a resting fill. Adds to an open same-side fill on the ticker
-     * (volume-weighted price) or opens a new one. Cash-capped. Never calls Kalshi.
+     * an immediate fill or the series maker fee for a resting fill. Each clip is its own fill row
+     * (no average-in), so settlement, history, and a later partial sell keep the price of that clip.
+     * Cash-capped. Never calls Kalshi.
      */
     fun limitBuyFill(ticker: String, side: String, qty: Int, price: Double, feeUsd: Double, note: String): Int {
         if (qty <= 0) return 0
@@ -875,20 +869,16 @@ class PaperBook(
                 return 0
             }
             val fee = feeUsd * n / qty
-            val open = cur.fills.firstOrNull { !it.settled && it.ticker.equals(ticker, true) && it.side.equals(want, true) }
-            val row = if (open != null) {
-                val total = open.contracts + n
-                open.copy(
-                    contracts = total,
-                    stakeUsd = open.stakeUsd + n * px,
-                    limitPrice = (open.limitPrice * open.contracts + px * n) / total,
-                    updatedAtMs = nowMs(),
-                    note = open.note + String.format(java.util.Locale.US, " · +%d ct @ %s limit", n, com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(px))
-                )
-            } else {
-                newFill(ticker = ticker, side = want, stakeUsd = n * px, contracts = n, limitPrice = px, source = "paper-limit", note = note)
-            }
-            val rest = cur.fills.filterNot { it.id == row.id }
+            val row = newFill(
+                ticker = ticker,
+                side = want,
+                stakeUsd = n * px,
+                contracts = n,
+                limitPrice = px,
+                source = "paper-limit",
+                note = note
+            )
+            val rest = cur.fills
             val (fills, tail) = retainLedger(cur, listOf(row) + rest)
             publish(
                 cur.copy(
@@ -902,9 +892,94 @@ class PaperBook(
         }
     }
 
-    /** Contracts held in the open paper fill for [ticker]/[side] (0 when none). */
+    /** Contracts held across every open paper fill for [ticker]/[side] (0 when none). */
     fun openContracts(ticker: String, side: String): Int =
         _state.value.fills.filter { !it.settled && it.ticker.equals(ticker, true) && it.side.equals(side, true) }.sumOf { it.contracts }
+
+    /**
+     * Close [qtyWant] contracts of open [side] fills on [ticker], oldest first.
+     * A partial clip keeps the original id on what is still open and gives the
+     * sold piece a new id, with [exitPrice] stored so the sale shows that price.
+     */
+    private fun closeFifo(
+        cur: PaperBookState,
+        ticker: String,
+        side: String,
+        qtyWant: Int,
+        exitPrice: Double,
+        feeUsd: Double,
+        requested: Int,
+        noteFor: (soldQty: Int, fee: Double) -> String
+    ): CloseFifo? {
+        if (qtyWant <= 0) return null
+        val opens = cur.fills.mapIndexed { index, fill -> index to fill }
+            .filter { (_, fill) ->
+                !fill.settled && fill.contracts > 0 &&
+                    fill.ticker.equals(ticker, ignoreCase = true) &&
+                    fill.side.equals(side, ignoreCase = true)
+            }
+            .sortedWith(compareBy<Pair<Int, PaperFill>> { it.second.createdAtMs }.thenByDescending { it.first })
+            .map { it.second }
+        if (opens.isEmpty()) return null
+        var left = qtyWant
+        val sold = ArrayList<PaperFill>()
+        val replaced = HashMap<String, PaperFill?>()
+        var proceeds = 0.0
+        var pnl = 0.0
+        val at = nowMs()
+        val priceLabel = com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(exitPrice)
+        for (open in opens) {
+            if (left <= 0) break
+            val n = min(left, open.contracts)
+            if (n <= 0) continue
+            val sliceFee = if (requested <= 0) 0.0 else feeUsd * n / requested.toDouble()
+            val sliceProceeds = n * exitPrice - sliceFee
+            val slicePnl = sliceProceeds - n * open.limitPrice
+            val remaining = open.contracts - n
+            val row = open.copy(
+                id = if (remaining > 0) idFactory() else open.id,
+                settled = true,
+                contracts = n,
+                stakeUsd = if (remaining > 0) n * open.limitPrice else open.stakeUsd,
+                outcome = "sell",
+                won = slicePnl >= 0.0,
+                pnlUsd = slicePnl,
+                exitPrice = exitPrice,
+                updatedAtMs = at,
+                note = noteFor(n, sliceFee).replace("@ PX", "@ $priceLabel")
+            )
+            sold += row
+            replaced[open.id] = if (remaining > 0) {
+                open.copy(
+                    contracts = remaining,
+                    stakeUsd = remaining * open.limitPrice,
+                    updatedAtMs = at
+                )
+            } else {
+                null
+            }
+            proceeds += sliceProceeds
+            pnl += slicePnl
+            left -= n
+        }
+        if (sold.isEmpty()) return null
+        val next = buildList {
+            addAll(sold.asReversed())
+            cur.fills.forEach { row ->
+                if (row.id !in replaced) add(row)
+                else replaced[row.id]?.let { add(it) }
+            }
+        }
+        return CloseFifo(sold, proceeds, pnl, next, qtyWant - left)
+    }
+
+    private data class CloseFifo(
+        val sold: List<PaperFill>,
+        val proceeds: Double,
+        val pnl: Double,
+        val fills: List<PaperFill>,
+        val contracts: Int
+    )
 
     /** 0.3.43 paper LIMIT order sell fill: [qty] at exactly [price] minus [feeUsd]. Returns contracts sold. */
     fun limitSellFill(ticker: String, side: String, qty: Int, price: Double, feeUsd: Double): Int {
@@ -912,41 +987,47 @@ class PaperBook(
         val px = KalshiPrice.usable(price) ?: return 0
         synchronized(lock) {
             val cur = _state.value
-            val open = cur.fills.firstOrNull { !it.settled && it.ticker.equals(ticker, true) && it.side.equals(want, true) } ?: return 0
-            val n = minOf(qty, open.contracts)
+            val held = cur.fills.filter {
+                !it.settled && it.ticker.equals(ticker, true) && it.side.equals(want, true)
+            }.sumOf { it.contracts }
+            val n = minOf(qty, held)
             if (n <= 0) return 0
-            val fee = if (qty > 0) feeUsd * n / qty else 0.0
-            val proceeds = n * px - fee
-            val pnl = proceeds - n * open.limitPrice
-            val remaining = open.contracts - n
-            val sold = open.copy(
-                id = if (remaining > 0) idFactory() else open.id,
-                settled = true,
-                contracts = n,
-                stakeUsd = n * open.limitPrice,
-                outcome = "sell",
-                won = pnl >= 0.0,
-                pnlUsd = pnl,
-                updatedAtMs = nowMs(),
-                note = String.format(java.util.Locale.US, "Paper limit sell %d ct @ %s · fee $%.2f · never sent to Kalshi", n, com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(px), fee)
-            )
-            val leftover = if (remaining > 0) open.copy(contracts = remaining, stakeUsd = remaining * open.limitPrice) else null
-            val nextFills = buildList {
-                leftover?.let { add(it) }
-                add(sold)
-                cur.fills.filterNot { it.id == open.id }.forEach { add(it) }
-            }
-            val (kept, tail) = retainLedger(cur, nextFills)
+            val closed = closeFifo(
+                cur = cur,
+                ticker = ticker,
+                side = want,
+                qtyWant = n,
+                exitPrice = px,
+                feeUsd = feeUsd,
+                requested = qty,
+                noteFor = { soldQty, fee ->
+                    String.format(
+                        java.util.Locale.US,
+                        "Paper limit sell %d ct @ PX · fee $%.2f · never sent to Kalshi",
+                        soldQty,
+                        fee
+                    )
+                }
+            ) ?: return 0
+            val (kept, tail) = retainLedger(cur, closed.fills)
             publish(
                 cur.copy(
-                    cashUsd = cur.cashUsd + proceeds,
+                    cashUsd = cur.cashUsd + closed.proceeds,
                     fills = kept,
                     syncTail = tail,
-                    lifetimeRealizedPnlUsd = nextLifetime(cur, pnl),
-                    lastMessage = String.format(java.util.Locale.US, "PAPER LIMIT SELL %s %s · %d ct @ %s · %+.2f · never Kalshi", want, ticker, n, com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(px), pnl)
+                    lifetimeRealizedPnlUsd = nextLifetime(cur, closed.pnl),
+                    lastMessage = String.format(
+                        java.util.Locale.US,
+                        "PAPER LIMIT SELL %s %s · %d ct @ %s · %+.2f · never Kalshi",
+                        want,
+                        ticker,
+                        closed.contracts,
+                        com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(px),
+                        closed.pnl
+                    )
                 )
             )
-            return n
+            return closed.contracts
         }
     }
 
@@ -968,15 +1049,16 @@ class PaperBook(
         val px = KalshiPrice.usable(ticket.limitPrice) ?: return null
         synchronized(lock) {
             val cur = _state.value
-            val open = cur.fills.firstOrNull {
+            val held = cur.fills.filter {
                 !it.settled &&
                     it.ticker.equals(ticket.ticker, ignoreCase = true) &&
                     it.side.equals(want, ignoreCase = true)
-            } ?: run {
+            }.sumOf { it.contracts }
+            if (held <= 0) {
                 publish(cur.copy(lastMessage = "Paper sell skip ${ticket.ticker} — no open $want fill"))
                 return null
             }
-            val qty0 = min(ticket.contracts, open.contracts).coerceAtLeast(0)
+            val qty0 = min(ticket.contracts, held).coerceAtLeast(0)
             if (qty0 <= 0) return null
             // 0.3.46: walk the displayed bids (VWAP, capped at total bid depth).
             val walked = walkSell(ticket.ticker, want, qty0)
@@ -986,53 +1068,37 @@ class PaperBook(
             }
             val qty = walked?.filled ?: qty0
             val sellPx = walked?.vwap ?: px
-            val proceeds = qty * sellPx
-            val cost = qty * open.limitPrice
-            val pnl = proceeds - cost
-            val remaining = open.contracts - qty
-            val sold = open.copy(
-                settled = remaining <= 0,
-                contracts = if (remaining <= 0) open.contracts else qty,
-                outcome = "sell",
-                won = pnl >= 0.0,
-                pnlUsd = pnl,
-                updatedAtMs = nowMs(),
-                note = "Paper sell $qty ct @ ${String.format(java.util.Locale.US, "%.1f¢", sellPx * 100)} · never sent to Kalshi"
-            )
-            val leftover = if (remaining > 0) {
-                open.copy(
-                    contracts = remaining,
-                    stakeUsd = remaining * open.limitPrice,
-                    note = open.note
-                )
-            } else {
-                null
-            }
-            val nextFills = buildList {
-                leftover?.let { add(it) }
-                add(sold)
-                cur.fills.filterNot { it.id == open.id }.forEach { add(it) }
-            }
-            val (keptSells, tail) = retainLedger(cur, nextFills)
-            val lifetime = nextLifetime(cur, pnl)
+            val closed = closeFifo(
+                cur = cur,
+                ticker = ticket.ticker,
+                side = want,
+                qtyWant = qty,
+                exitPrice = sellPx,
+                feeUsd = 0.0,
+                requested = qty,
+                noteFor = { soldQty, _ ->
+                    "Paper sell $soldQty ct @ PX · never sent to Kalshi"
+                }
+            ) ?: return null
+            val (keptSells, tail) = retainLedger(cur, closed.fills)
             publish(
                 cur.copy(
-                    cashUsd = cur.cashUsd + proceeds,
+                    cashUsd = cur.cashUsd + closed.proceeds,
                     fills = keptSells,
                     syncTail = tail,
-                    lifetimeRealizedPnlUsd = lifetime,
+                    lifetimeRealizedPnlUsd = nextLifetime(cur, closed.pnl),
                     lastMessage = String.format(
                         java.util.Locale.US,
                         "PAPER SELL %s %s · %d ct @ %s · %+.2f · never Kalshi",
-                        sold.displaySide,
-                        sold.ticker,
-                        qty,
+                        closed.sold.first().displaySide,
+                        closed.sold.first().ticker,
+                        closed.contracts,
                         com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(sellPx),
-                        pnl
+                        closed.pnl
                     )
                 )
             )
-            return sold
+            return closed.sold.first()
         }
     }
 
@@ -1328,6 +1394,7 @@ class PaperBook(
             regimeSession = incoming.regimeSession ?: local.regimeSession,
             regimePath = incoming.regimePath ?: local.regimePath,
             regimeStrike = incoming.regimeStrike ?: local.regimeStrike,
+            exitPrice = incoming.exitPrice ?: local.exitPrice,
             updatedAtMs = incoming.syncAtMs()
         )
     }

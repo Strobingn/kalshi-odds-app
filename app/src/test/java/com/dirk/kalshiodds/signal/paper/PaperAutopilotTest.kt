@@ -80,7 +80,9 @@ class PaperAutopilotTest {
         assertEquals(1, book.snapshot().fills.size)
         clock.addAndGet(5_000)
         val moved = edgeMarket(yesAsk = 0.28, aiYes = 80.0)
-        val b = PaperAutopilot.consider(book, moved, settings, nowMs + 10_000, yesDepth = 80, noDepth = 80)
+        // Displayed depth still has to cover contracts our first fill already took.
+        val room = 80 + (a?.contracts ?: 0)
+        val b = PaperAutopilot.consider(book, moved, settings, nowMs + 10_000, yesDepth = room, noDepth = room)
         assertNotNull(b)
         assertEquals(2, book.snapshot().fills.size)
         assertEquals(2, book.snapshot().fills.count { !it.settled })
