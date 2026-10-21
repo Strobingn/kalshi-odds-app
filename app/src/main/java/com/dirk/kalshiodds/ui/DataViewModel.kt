@@ -65,7 +65,7 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         refreshStats()
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             runCatching { dataPrefs.hydrate() }.getOrNull()?.let { s ->
                 _state.update {
                     it.copy(

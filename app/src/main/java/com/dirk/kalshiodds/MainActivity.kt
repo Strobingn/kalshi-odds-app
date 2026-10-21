@@ -89,8 +89,15 @@ class MainActivity : ComponentActivity() {
                     var settingsFocusApiKey by rememberSaveable { mutableStateOf(false) }
                     var chartTicker by rememberSaveable { mutableStateOf<String?>(null) }
                     // 0.3.47: announce the previous crash once (marker consumed on read).
-                    var crashNote by rememberSaveable {
-                        mutableStateOf(runCatching { com.dirk.kalshiodds.crash.CrashLog.consumePending()?.let { com.dirk.kalshiodds.crash.CrashLog.headline(it) } }.getOrNull())
+                    var crashNote by rememberSaveable { mutableStateOf<String?>(null) }
+                    LaunchedEffect(Unit) {
+                        if (crashNote != null) return@LaunchedEffect
+                        val note = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            runCatching {
+                                com.dirk.kalshiodds.crash.CrashLog.consumePending()?.let { com.dirk.kalshiodds.crash.CrashLog.headline(it) }
+                            }.getOrNull()
+                        }
+                        if (note != null) crashNote = note
                     }
                     crashNote?.let { note ->
                         androidx.compose.material3.AlertDialog(
@@ -107,10 +114,12 @@ class MainActivity : ComponentActivity() {
                     }
                     val oddsState by oddsViewModel.state.collectAsStateWithLifecycle()
                     val scalpState by oddsViewModel.scalpTab.collectAsStateWithLifecycle()
+                    val historyChart by historyViewModel.chartMarket.collectAsStateWithLifecycle()
                     val knobTicks = com.dirk.kalshiodds.ui.rememberKnobTicks()
                     val sheetOpen = oddsState.tickets.phase is TicketPhase.AwaitingApprove
                     val chartMarket: MarketUiModel? = chartTicker?.let { t ->
                         oddsState.snapshot?.allMarkets?.firstOrNull { it.ticker == t }
+                            ?: historyChart?.takeIf { it.ticker.equals(t, true) }
                             ?: historyViewModel.marketModel(t)
                     }
                     DipApp(

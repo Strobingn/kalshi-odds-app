@@ -14,6 +14,14 @@ import android.database.sqlite.SQLiteOpenHelper
 class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodds.decision.LedgerSink, com.dirk.kalshiodds.decision.ScalpPersistence, com.dirk.kalshiodds.signal.paper.PaperOrderPersistence {
     private val db = Helper(context.applicationContext)
 
+    /** Single background writer for retention deletes. Never runs on a UI caller. */
+    private val backgroundWriter by lazy {
+        java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "results-db-writer").apply { isDaemon = true }
+        }
+    }
+    private val chartCapAtMs = java.util.concurrent.atomic.AtomicLong(0L)
+
     override fun insertSnapshots(rows: List<ScoredSnapshotRow>) {
         if (rows.isEmpty()) return
         val w = db.writableDatabase
@@ -64,6 +72,40 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
 
     override fun recentSnapshots(limit: Int): List<ScoredSnapshotRow> =
         query(TABLE_SNAP, limit) { cursorToSnap(it) }
+
+    /**
+     * Oldest row still inside the newest [lookback] snapshots, for a forward page scan.
+     * Null when the table is smaller than [lookback] (start at the beginning).
+     */
+    fun snapshotSyncFloor(lookback: Int): Pair<Long, Long>? {
+        val offset = lookback.coerceAtLeast(1) - 1
+        db.readableDatabase.rawQuery(
+            "SELECT created_at_ms, id FROM $TABLE_SNAP ORDER BY created_at_ms DESC, id DESC LIMIT 1 OFFSET $offset",
+            null
+        ).use { c ->
+            if (!c.moveToFirst()) return null
+            return c.getLong(0) to c.getLong(1)
+        }
+    }
+
+    /** Keyset page, oldest-first, strictly after ([afterCreatedAtMs], [afterId]). */
+    fun snapshotPageAfter(afterCreatedAtMs: Long, afterId: Long, limit: Int): List<ScoredSnapshotRow> {
+        val cap = limit.coerceIn(1, SNAPSHOT_PAGE)
+        val out = ArrayList<ScoredSnapshotRow>(cap)
+        db.readableDatabase.query(
+            TABLE_SNAP,
+            null,
+            "created_at_ms > ? OR (created_at_ms = ? AND id > ?)",
+            arrayOf(afterCreatedAtMs.toString(), afterCreatedAtMs.toString(), afterId.toString()),
+            null,
+            null,
+            "created_at_ms ASC, id ASC",
+            cap.toString()
+        ).use { c ->
+            while (c.moveToNext()) out.add(cursorToSnap(c))
+        }
+        return out
+    }
 
     override fun recentAlerts(limit: Int): List<AlertRow> =
         query(TABLE_ALERT, limit) { cursorToAlert(it) }
@@ -510,43 +552,70 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
                     SQLiteDatabase.CONFLICT_REPLACE
                 )
             }
-            w.execSQL(
-                "DELETE FROM $TABLE_CHART WHERE id NOT IN (SELECT id FROM $TABLE_CHART ORDER BY t_ms DESC LIMIT $MAX_CHART)"
-            )
             w.setTransactionSuccessful()
         } finally {
             w.endTransaction()
         }
+        scheduleChartCap()
     }
 
+    /** Retention delete is off the insert transaction so a chart read is not stuck behind it. */
+    private fun scheduleChartCap() {
+        val now = System.currentTimeMillis()
+        val prev = chartCapAtMs.get()
+        if (prev != 0L && now - prev < CHART_CAP_INTERVAL_MS) return
+        if (!chartCapAtMs.compareAndSet(prev, now)) return
+        backgroundWriter.execute {
+            runCatching {
+                val writer = db.writableDatabase
+                writer.beginTransaction()
+                try {
+                    writer.execSQL(
+                        "DELETE FROM $TABLE_CHART WHERE id NOT IN (SELECT id FROM $TABLE_CHART ORDER BY t_ms DESC LIMIT $MAX_CHART)"
+                    )
+                    writer.setTransactionSuccessful()
+                } finally {
+                    writer.endTransaction()
+                }
+            }
+        }
+    }
+
+    /**
+     * Newest [limit] prints in [startMs, endMs], oldest-first.
+     * `idx_chart_ticks_ticker (ticker, t_ms)` serves the inner DESC scan. Hard cap [CHART_QUERY_MAX].
+     */
     override fun chartTicks(
         ticker: String,
         startMs: Long,
         endMs: Long,
         limit: Int
     ): List<com.dirk.kalshiodds.data.local.archive.ChartTickRow> {
-        val out = ArrayList<com.dirk.kalshiodds.data.local.archive.ChartTickRow>(limit)
-        db.readableDatabase.query(
-            TABLE_CHART,
-            null,
-            "ticker = ? AND t_ms >= ? AND t_ms <= ?",
-            arrayOf(ticker, startMs.toString(), endMs.toString()),
-            null,
-            null,
-            "t_ms ASC",
-            limit.coerceIn(1, 2_000).toString()
+        val cap = limit.coerceIn(1, CHART_QUERY_MAX)
+        val out = ArrayList<com.dirk.kalshiodds.data.local.archive.ChartTickRow>(cap)
+        db.readableDatabase.rawQuery(
+            """
+            SELECT ticker, t_ms, yes_bid, no_bid, yes_ask, no_ask, spot_usd, source FROM (
+              SELECT ticker, t_ms, yes_bid, no_bid, yes_ask, no_ask, spot_usd, source
+              FROM $TABLE_CHART
+              WHERE ticker = ? AND t_ms >= ? AND t_ms <= ?
+              ORDER BY t_ms DESC
+              LIMIT $cap
+            ) ORDER BY t_ms ASC
+            """.trimIndent(),
+            arrayOf(ticker, startMs.toString(), endMs.toString())
         ).use { c ->
             while (c.moveToNext()) {
                 out.add(
                     com.dirk.kalshiodds.data.local.archive.ChartTickRow(
-                        ticker = c.str("ticker"),
-                        tMs = c.long("t_ms"),
-                        yesBid = c.dblOrNull("yes_bid"),
-                        noBid = c.dblOrNull("no_bid"),
-                        yesAsk = c.dblOrNull("yes_ask"),
-                        noAsk = c.dblOrNull("no_ask"),
-                        spotUsd = c.dblOrNull("spot_usd"),
-                        source = c.strOrNull("source") ?: com.dirk.kalshiodds.data.local.archive.ChartTickRow.SOURCE_LIVE
+                        ticker = c.getString(0),
+                        tMs = c.getLong(1),
+                        yesBid = c.dblAt(2),
+                        noBid = c.dblAt(3),
+                        yesAsk = c.dblAt(4),
+                        noAsk = c.dblAt(5),
+                        spotUsd = c.dblAt(6),
+                        source = c.getString(7) ?: com.dirk.kalshiodds.data.local.archive.ChartTickRow.SOURCE_LIVE
                     )
                 )
             }
@@ -769,6 +838,27 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
         return out
     }
 
+    override fun settledWindow(ticker: String): com.dirk.kalshiodds.data.local.archive.SettledWindowRow? {
+        db.readableDatabase.rawQuery(
+            "SELECT ticker, series, result, strike, open_ms, close_ms, imported_at_ms, source FROM $TABLE_SETTLED WHERE ticker = ? LIMIT 1",
+            arrayOf(ticker)
+        ).use { c ->
+            if (!c.moveToFirst()) return null
+            return settledRow(c)
+        }
+    }
+
+    private fun settledRow(c: Cursor) = com.dirk.kalshiodds.data.local.archive.SettledWindowRow(
+        ticker = c.getString(0),
+        series = c.getString(1) ?: "",
+        result = c.getString(2) ?: "",
+        strikeUsd = if (c.isNull(3)) null else c.getDouble(3),
+        openMs = if (c.isNull(4)) null else c.getLong(4),
+        closeMs = if (c.isNull(5)) null else c.getLong(5),
+        importedAtMs = if (c.isNull(6)) 0L else c.getLong(6),
+        source = c.getString(7) ?: "kalshi"
+    )
+
     override fun existingFillIds(): Set<String> {
         val out = HashSet<String>()
         db.readableDatabase.rawQuery("SELECT fill_id FROM $TABLE_FILL", null).use { c ->
@@ -968,7 +1058,37 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
         note = c.strOrNull("note")
     )
 
-    override fun insertLedger(row: com.dirk.kalshiodds.data.local.ledger.LedgerRow): Long {
+    override fun insertLedger(row: com.dirk.kalshiodds.data.local.ledger.LedgerRow): Long =
+        insertLedgerOn(db.writableDatabase, row)
+
+    /**
+     * One transaction for a forecast tick (up to one row per coin). Retention delete is
+     * scheduled on [backgroundWriter], not inside this transaction and not on the caller.
+     */
+    fun insertLedgerBatch(rows: List<com.dirk.kalshiodds.data.local.ledger.LedgerRow>): Int {
+        if (rows.isEmpty()) return 0
+        val writer = db.writableDatabase
+        var ok = true
+        writer.beginTransaction()
+        try {
+            for (row in rows) {
+                if (insertLedgerOn(writer, row) < 0L) {
+                    ok = false
+                    break
+                }
+            }
+            if (ok) writer.setTransactionSuccessful()
+        } finally {
+            writer.endTransaction()
+        }
+        if (!ok) return 0
+        rows.filter { it.modelVersion == com.dirk.kalshiodds.decision.ScalpForecastRecorder.MODEL }
+            .maxOfOrNull { it.timestampMs }
+            ?.let { scheduleForecastPrune(it) }
+        return rows.size
+    }
+
+    private fun insertLedgerOn(writer: SQLiteDatabase, row: com.dirk.kalshiodds.data.local.ledger.LedgerRow): Long {
         val values = ContentValues()
         for ((k, v) in com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.values(row)) {
             when (v) {
@@ -980,25 +1100,21 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
                 else -> values.put(k, v.toString())
             }
         }
-        val id = db.writableDatabase.insert(
+        return writer.insert(
             com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.TABLE,
             null,
             values
         )
-        if (row.modelVersion == com.dirk.kalshiodds.decision.ScalpForecastRecorder.MODEL) {
-            maybePruneWindowForecasts(row.timestampMs)
-        }
-        return id
     }
 
     private val forecastPruneAtMs = java.util.concurrent.atomic.AtomicLong(0L)
 
-    /** At most once an hour, on a window-forecast write. Other models are never deleted. */
-    private fun maybePruneWindowForecasts(nowMs: Long) {
+    /** At most once an hour, on the background writer. Other models are never deleted. */
+    private fun scheduleForecastPrune(nowMs: Long) {
         val prev = forecastPruneAtMs.get()
         if (prev != 0L && nowMs - prev < 3_600_000L) return
         if (!forecastPruneAtMs.compareAndSet(prev, nowMs)) return
-        runCatching { pruneWindowForecasts(nowMs) }
+        backgroundWriter.execute { runCatching { pruneWindowForecasts(nowMs) } }
     }
 
     /**
@@ -1176,9 +1292,17 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
     }
 
     override fun loadActiveScalps(): List<com.dirk.kalshiodds.decision.ScalpTrade> = runCatching {
-        // Open rows + rows closed in the last 20 min (per-window entry rules need them); index on state.
+        // Open rows stay in memory. Recently closed rows are a bounded page (entry rules), not the whole table.
         val since = System.currentTimeMillis() - 20 * 60_000L
-        scalpRows("SELECT * FROM ${ST.TABLE} WHERE state NOT IN ('CLOSED','NO_FILL') OR closed_at_ms >= ? ORDER BY signal_at_ms DESC LIMIT 5000", arrayOf(since.toString()))
+        val open = scalpRows(
+            "SELECT * FROM ${ST.TABLE} WHERE state NOT IN ('CLOSED','NO_FILL') ORDER BY signal_at_ms DESC LIMIT $ACTIVE_OPEN_CAP",
+            null
+        )
+        val recent = scalpRows(
+            "SELECT * FROM ${ST.TABLE} WHERE state IN ('CLOSED','NO_FILL') AND closed_at_ms >= ? ORDER BY closed_at_ms DESC LIMIT $ACTIVE_RECENT_CAP",
+            arrayOf(since.toString())
+        )
+        (open + recent).distinctBy { it.id }
     }.getOrDefault(emptyList())
 
     /** Keyset paging, newest first, index (scalper_id, closed_at_ms DESC). */
@@ -1507,6 +1631,15 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
     }
 
     private class Helper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, DB_VERSION) {
+        init {
+            setWriteAheadLoggingEnabled(true)
+        }
+
+        override fun onConfigure(db: SQLiteDatabase) {
+            super.onConfigure(db)
+            db.enableWriteAheadLogging()
+        }
+
         override fun onCreate(db: SQLiteDatabase) {
             db.execSQL(
                 """
@@ -1616,6 +1749,7 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
 
         override fun onOpen(db: SQLiteDatabase) {
             super.onOpen(db)
+            runCatching { db.execSQL(com.dirk.kalshiodds.data.local.chart.ChartTickSchema.INDEX) }
             applyPaperFillColumns(db)
             createPendingOrdersTable(db)
             createScalpTable(db)
@@ -1789,6 +1923,12 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
         const val CALIBRATION_LEAD_MS = 900_000L
         /** Window-forecast rows older than this are the only ledger rows prune deletes. */
         const val FORECAST_KEEP_MS = 45L * 86_400_000L
+        /** Indexed chartTicks hard cap. Callers asking for more still get the newest rows only. */
+        const val CHART_QUERY_MAX = 2_000
+        const val CHART_CAP_INTERVAL_MS = 60_000L
+        const val ACTIVE_OPEN_CAP = 400
+        const val ACTIVE_RECENT_CAP = 800
+        const val SNAPSHOT_PAGE = 200
         const val TABLE_SETTINGS = "settings_history"
         const val TABLE_SESSION = "sessions"
         const val MAX_SETTINGS = 400
@@ -1835,6 +1975,10 @@ private fun Cursor.dblOrNull(col: String): Double? {
     val i = getColumnIndex(col)
     if (i < 0 || isNull(i)) return null
     return getDouble(i)
+}
+private fun Cursor.dblAt(index: Int): Double? {
+    if (index < 0 || isNull(index)) return null
+    return getDouble(index)
 }
 private fun Cursor.intOrNull(col: String): Int? {
     val i = getColumnIndex(col)

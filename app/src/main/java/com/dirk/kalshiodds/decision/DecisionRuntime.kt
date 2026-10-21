@@ -137,7 +137,8 @@ class DecisionRuntime(
 
     companion object {
         /** Most recent settled rows used per fit (bounded for phone memory; nothing is deleted). */
-        const val MAX_FIT_ROWS = 25_000
+        /** Newest settled rows held for one fit. The ledger on disk is not trimmed. */
+        const val MAX_FIT_ROWS = 8_000
 
         /**
          * One calibration sample per (market, time bucket): the latest

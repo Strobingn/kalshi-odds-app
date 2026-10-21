@@ -15,7 +15,8 @@ import java.util.concurrent.ConcurrentHashMap
  * ([WindowCalibration.HORIZON]).
  */
 class ScalpForecastRecorder(
-    private val insert: (LedgerRow) -> Boolean
+    private val insert: (LedgerRow) -> Boolean,
+    private val insertBatch: ((List<LedgerRow>) -> Int)? = null
 ) {
     private val lastWriteMs = ConcurrentHashMap<String, Long>()
 
@@ -28,13 +29,29 @@ class ScalpForecastRecorder(
         pruneClosed(quotes.maxOf { it.nowMs })
         val open = quotes.filter { isFifteen(it.ticker) && it.closeMs > it.nowMs }
         if (open.isEmpty()) return
+        val pending = ArrayList<Triple<String, Long, LedgerRow>>()
         for ((coin, rows) in open.groupBy { ScalpParams.coinOf(it.ticker) }) {
             val quote = pick(rows) ?: continue
             val p = pYes(quote)?.takeIf { it.isFinite() && it in 0.0..1.0 } ?: continue
             val key = WindowCalibration.key(coin, quote.closeMs)
             if (!due(key, quote.nowMs, quote.tauS)) continue
-            val stored = runCatching { insert(row(quote, p)) }.getOrDefault(false)
-            if (stored) lastWriteMs[key] = quote.nowMs
+            pending += Triple(key, quote.nowMs, row(quote, p))
+        }
+        flush(pending)
+    }
+
+    /** One transaction for every coin that is due on this tick. A failed batch does not burn cadence. */
+    private fun flush(pending: List<Triple<String, Long, LedgerRow>>) {
+        if (pending.isEmpty()) return
+        val batch = insertBatch
+        if (batch != null) {
+            val stored = runCatching { batch(pending.map { it.third }) }.getOrDefault(0)
+            if (stored == pending.size) pending.forEach { lastWriteMs[it.first] = it.second }
+            return
+        }
+        for ((key, at, row) in pending) {
+            val stored = runCatching { insert(row) }.getOrDefault(false)
+            if (stored) lastWriteMs[key] = at
         }
     }
 

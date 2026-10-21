@@ -67,7 +67,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     init {
         refreshBatteryStatus()
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             runCatching { prefs.hydrate() }.getOrNull()?.let { s ->
                 _state.update {
                     it.copy(
@@ -125,11 +125,13 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun refreshBatteryStatus() {
+        viewModelScope.launch(Dispatchers.IO) {
         val persistReason = runCatching { container.oomFlag.reason() }.getOrNull()
         val persistOn = runCatching { container.oomFlag.isDisabled() }.getOrElse { false }
+        val unrestricted = BatteryExemption.isUnrestricted(getApplication())
         _state.update {
             it.copy(
-                batteryUnrestricted = BatteryExemption.isUnrestricted(getApplication()),
+                batteryUnrestricted = unrestricted,
                 mlGuardNote = when {
                     HeavyMlGuard.lastReason != null ->
                         "Heavy ML auto-disabled: ${HeavyMlGuard.lastReason}. Scoring is the 0.2.x blend. Re-enable only if you accept the heap risk."
@@ -138,6 +140,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     else -> null
                 }
             )
+        }
         }
     }
 
