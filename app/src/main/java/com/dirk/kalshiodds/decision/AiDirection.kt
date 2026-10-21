@@ -40,6 +40,20 @@ object AiDirection {
     }
 
     fun label(f: Forecast) = when (f.call) { Call.UP -> "AI says UP"; Call.DOWN -> "AI says DOWN"; Call.NONE -> "No clear call" }
+
+    /**
+     * Banner percent is the on-phone GBM's P(called side), max(p, 1−p).
+     * The checklist "Confidence" row is signal quality, and "Likely side" is the card model's P(settle).
+     */
+    fun confidenceLabel(f: Forecast): String? {
+        val c = f.confidence?.takeIf { it.isFinite() } ?: return null
+        val pct = Math.round(c * 100.0)
+        return when (f.call) {
+            Call.UP -> "$pct% GBM P(UP)"
+            Call.DOWN -> "$pct% GBM P(DOWN)"
+            Call.NONE -> "$pct% GBM"
+        }
+    }
     fun timeLeft(s: Long?) = s?.let { "%d:%02d left".format(it / 60, it % 60) } ?: "no live window"
 }
 

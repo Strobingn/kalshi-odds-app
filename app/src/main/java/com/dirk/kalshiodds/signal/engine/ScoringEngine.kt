@@ -9,6 +9,7 @@ import com.dirk.kalshiodds.signal.feedback.Allowlist
 import com.dirk.kalshiodds.signal.feedback.Calibrator
 import com.dirk.kalshiodds.signal.feedback.Guardrails
 import com.dirk.kalshiodds.signal.feedback.OnlineAdapter
+import com.dirk.kalshiodds.signal.checklist.ChecklistAdvisors
 import com.dirk.kalshiodds.signal.ml.ExtendedAiRuntime
 import com.dirk.kalshiodds.signal.ml.HeavyMlRuntime
 import com.dirk.kalshiodds.signal.ml.MicrostructureEncoder
@@ -109,6 +110,8 @@ class ScoringEngine(
         val gbmPp: Double? = null,
         val uncertainty: Double? = null,
         val uncertaintyPassed: Boolean = true,
+        /** "ensemble", "mc-dropout", "single-proxy", "cold", or "fail-soft". */
+        val uncertaintyMethod: String? = null,
         val timeToMoveSec: Double? = null,
         val midVolPp: Double? = null,
         val pFill: Double? = null,
@@ -690,6 +693,49 @@ class ScoringEngine(
         )
         tapeStreak[tick.ticker] = tape.disagreementStreak
         lastPrimarySide[tick.ticker] = tape.primarySide
+        // Edge model and the direction lock can change fair / side after the
+        // first EV pass. Recompute so Net EV and size match the side we show.
+        ev = NetExpectedValue.compute(
+            fairYes = fair / 100.0,
+            mid = mid01,
+            spreadDollars = spread,
+            feeRate = settings.feeRate,
+            preferSide = predictedSide,
+            stakeUsd = settings.ticketStakeUsd
+        )
+        size = PositionSizer.suggest(
+            fairSide = if (predictedSide == "YES") fair / 100.0 else 1.0 - fair / 100.0,
+            contractPrice = ev.contractPrice,
+            bankrollUsd = settings.bankrollUsd,
+            mode = PositionSizer.modeOf(settings.useKelly),
+            kellyFraction = settings.kellyFraction,
+            fixedFraction = settings.fixedFraction,
+            maxFraction = settings.maxBankrollFraction,
+            liquidity = liquidityObs,
+            depthNearMid = depthNear,
+            spreadDollars = spread,
+            maxSpreadCents = settings.maxSpreadCents,
+            netEvPositive = ev.netEv > 0.0
+        )
+        val advised = ChecklistAdvisors.fromLive(
+            uncertainty = heavyOut.uncertainty,
+            uncertaintyMethod = heavyOut.uncertaintyMethod,
+            mid = mid01,
+            fairYes = fair / 100.0,
+            tteFrac = tteFrac,
+            tteSeconds = tteSec,
+            momentum = momForMl,
+            imbalance = imb,
+            velocityPerSec = vel,
+            spot = spotRet,
+            vol = volForMl,
+            regime = regime,
+            edgePp = delta,
+            confidence = confidence,
+            conformal = extended.conformal,
+            rl = extended.rl,
+            stakeUsd = settings.ticketStakeUsd
+        )
         val reason = buildReason(
             aiPp = aiPp,
             flow = flow,
@@ -767,8 +813,9 @@ class ScoringEngine(
             cnnPp = heavyOut.cnnYes?.times(100.0),
             lstmPp = heavyOut.lstmYes?.times(100.0),
             gbmPp = heavyOut.gbmYes?.times(100.0),
-            uncertainty = if (settings.heavyMlEnabled) heavyOut.uncertainty else null,
+            uncertainty = advised.uncertainty,
             uncertaintyPassed = !uncBlocked,
+            uncertaintyMethod = advised.uncertaintyMethod,
             timeToMoveSec = heavyOut.timeToMoveSec,
             midVolPp = heavyOut.midVol?.times(100.0),
             pFill = heavyOut.pFill,
@@ -778,17 +825,17 @@ class ScoringEngine(
             newsShock = extOut?.regime?.newsShock == true,
             anomalyScore = extOut?.anomaly?.score,
             anomalyNote = extOut?.anomaly?.takeIf { it.anomalous }?.note,
-            survivalYesPp = extOut?.survival?.pYes?.times(100.0),
-            rlStakeUsd = extOut?.rl?.stakeUsd,
-            rlNote = extOut?.rl?.note,
+            survivalYesPp = advised.survivalYesPp,
+            rlStakeUsd = advised.rlStakeUsd,
+            rlNote = advised.rlNote,
             newsLabel = extOut?.newsLabel,
             flowNote = extOut?.flow?.note,
             mmShadowPp = extOut?.mm?.shadowYes?.times(100.0),
-            conformalSet = extOut?.conformal?.set?.sorted()?.joinToString(",", "{", "}"),
-            conformalAmbiguous = extOut?.conformal?.ambiguous == true,
+            conformalSet = advised.conformalSet,
+            conformalAmbiguous = advised.conformalAmbiguous,
             metaTake = extOut?.meta?.take,
             metaNote = extOut?.meta?.note,
-            pathSurvive = extOut?.path?.pSurvive,
+            pathSurvive = advised.pathSurvive,
             extendedNote = extOut?.note,
             directionalLock = dir.applied,
             spotVsTargetUsd = dir.spotVsTargetUsd,
