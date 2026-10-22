@@ -52,7 +52,7 @@ object ScalpRule {
     const val TAU_MAX_S = 900.0
     /** 0.3.40: hard exit at ≥ 60 s left — never hold into the final (settlement-averaging) minute. */
     const val TIME_STOP_S = 60.0
-    /** 0.3.40: re-entry cooldown after a scalp closes on the same market (per strategy variant). */
+    /** Kept for older notes. Paper entries do not wait on this. */
     const val REENTRY_COOLDOWN_MS = 15_000L
     /** 0.3.40 multi-strategy: look-back for dip / momentum triggers, and the minimum history needed. */
     const val LOOKBACK_MS = 60_000L
@@ -68,6 +68,7 @@ object ScalpRule {
     const val SLIPPAGE = 0.01
     const val LATENCY_MS = 3_000L
     const val FRESH_BOOK_MS = 10_000L
+    /** Kept for older notes. Paper entries are not capped per window. */
     const val MAX_ENTRIES_PER_MARKET = 12
     const val PROMOTION_ROUND_TRIPS = 300
     /** 0.3.43 CF-reprice. */
@@ -626,11 +627,7 @@ class ScalpBook(
                 val mine = mineAll.filter { it.variantId == p.id }.map { old -> changed.firstOrNull { it.id == old.id } ?: old }
                 if (q.nowMs >= q.closeMs) continue
                 val window = ScalpModels.windowKeyOf(q.ticker)
-                if (mine.any { it.state == ScalpState.PENDING_ENTRY }) {
-                    gates.block(modelCode, window, "fill in flight")
-                    continue
-                }
-                // Paper clips stack. An open position does not block the next signal. CF-reprice still picks one side per signal.
+                // A new clip on every trigger. An open or in-flight clip does not block the next one.
                 val free = listOf("YES", "NO")
                 val (sig, skip) = ScalpRule.strategySignal(q, tuned(p, ScalpModels.modelOf(p).code), free, recent)
                 if (sig == null) gates.block(modelCode, window, skip)
@@ -690,10 +687,6 @@ class ScalpBook(
         for (spec in ScalpVariants.ALL) {
             val p0 = spec.fair ?: continue
             if (spec.kind == ScalpVariants.Kind.FADE || spec.kind == ScalpVariants.Kind.SIMPLE || spec.kind == ScalpVariants.Kind.SHOCK || spec.kind == ScalpVariants.Kind.FAV) continue
-            if (_all.value.any { it.ticker.equals(q.ticker, true) && it.variantId == spec.id && it.state == ScalpState.PENDING_ENTRY }) {
-                gates.block(spec.id, window, "fill in flight")
-                continue
-            }
             val p = p0
             val (sig, skip) = if (p.strategy == ScalpStrategy.FAIR_GAP) ScalpRule.entrySignal(q, p) else ScalpRule.strategySignal(q, p, listOf("YES", "NO"), recent)
             if (sig == null) { gates.block(spec.id, window, skip); continue }
@@ -726,10 +719,6 @@ class ScalpBook(
         )
         for ((p, v2Id) in bases) {
             if (p == null) continue
-            if (_all.value.any { it.ticker.equals(q.ticker, true) && it.variantId == v2Id && it.state == ScalpState.PENDING_ENTRY }) {
-                gates.block(v2Id, ScalpModels.windowKeyOf(q.ticker), "fill in flight")
-                continue
-            }
             val sig = if (p.strategy == ScalpStrategy.FAIR_GAP) ScalpRule.entrySignal(q, p).first
                 else ScalpRule.strategySignal(q, p, listOf("YES", "NO"), recent).first
             if (sig == null) continue
@@ -796,7 +785,7 @@ class ScalpBook(
         val predFade = x54?.let { LeadForecaster.predict(coin, KeptScalpers.FADE_HORIZON_S, it) }
         val fadeWindow = ScalpModels.windowKeyOf(q.ticker)
         if (!q.fresh()) gates.noteOutage(fadeWindow, listOf(KeptScalpers.FADE_ID) + ScalpVariants.ALL.filter { it.kind == ScalpVariants.Kind.FADE }.map { it.id })
-        if (predFade != null && enabled && q.nowMs < q.closeMs && q.fresh() && openFc.none { it.variantId == KeptScalpers.FADE_ID && it.state == ScalpState.PENDING_ENTRY }) {
+        if (predFade != null && enabled && q.nowMs < q.closeMs && q.fresh()) {
             val f = -predFade
             val side = ForecastScalp.sideOf(f)
             val ask = side?.let { q.ask(it) }
@@ -820,9 +809,6 @@ class ScalpBook(
         }
         if (liveExtras && enabled && q.nowMs < q.closeMs && q.fresh()) for (spec in ScalpVariants.ALL) {
             if (spec.kind != ScalpVariants.Kind.FADE) continue
-            if (openFc.any { it.variantId == spec.id && it.state == ScalpState.PENDING_ENTRY }) {
-                gates.block(spec.id, fadeWindow, "fill in flight"); continue
-            }
             val predV = x54?.let { LeadForecaster.predict(coin, spec.fadeHorizonS, it) }
             if (predV == null) { gates.block(spec.id, fadeWindow, "no forecast lead"); continue }
             val fv = -predV
@@ -941,20 +927,19 @@ class ScalpBook(
             ask, ask - bid, g * ((ya + yb) / 2 - openMid), 900.0 - q.tauS)
     }
 
-    /** 0.3.65: Open 50 price-only entries (uptick / both / maker), one per variant per side per window ticker. */
+    /** Open 50 price entries. Removed cards do not open. A live card may open again on the next trigger. */
     private fun o50PriceEntries(q: ScalpRule.Quote, key: String, ya: Double, yb: Double): List<ScalpTrade> {
         if (!ShockFav.o50InEntryWindow(q.tauS)) return emptyList()
         val openMid = o50OpenMid[key] ?: return emptyList()
-        val mine = _trades.value.filter { it.ticker == key && ShockFav.isO50(it.variantId) }
         val out = ArrayList<ScalpTrade>()
         for (raw in ShockFav.VARIANTS) {
             val p = StrategyAlgo.overlayShock(raw, algoOf(raw.code))
             if (p.kind != ShockFav.Kind.OPEN50 || p.o50 == ShockFav.O50.AI) continue
+            if (ScalpModels.isRemoved(p.code)) continue
             val sides = ShockFav.o50Sides(p, openMid, (ya + yb) / 2)
-            if (p.o50 == ShockFav.O50.UPTICK && mine.any { it.variantId.take(4) == p.code }) continue
             for (sd in sides) {
                 val vid = ShockFav.o50VariantId(p, sd)
-                if (mine.any { it.variantId == vid } || out.any { it.variantId == vid }) continue
+                if (out.any { it.variantId == vid }) continue
                 val ask = q.ask(sd)?.takeIf { it in 0.05..0.95 } ?: continue
                 sfEnter(q, p, vid, sd, ask, 0.5, 0.0, Double.MAX_VALUE, "open 50")?.let {
                     out += if (p.o50 == ShockFav.O50.MAKER) it.copy(restingLimit = ShockFav.O50_MAKER_PX, restingSinceMs = q.nowMs) else it
@@ -1179,10 +1164,8 @@ class ScalpBook(
                         }.let { nets -> SidePick.onlyMaxBy(nets) { it.second }?.let { listOf(it.first) } ?: emptyList() }
                         null -> emptyList()
                     }
-                    if (p.o50 != ShockFav.O50.BOTH && p.o50 != ShockFav.O50.MAKER && mine.any { it.variantId.take(4) == p.code }) continue
                     for (sd in sides) {
                         val vid = if (sd == "NO" && (p.o50 == ShockFav.O50.BOTH || p.o50 == ShockFav.O50.MAKER)) p.code + "n" else p.shockId
-                        if (mine.any { it.variantId == vid }) continue
                         val ask = q.ask(sd)?.takeIf { it in 0.05..0.95 } ?: continue
                         val f = if (sd == "YES") fairYes else 1.0 - fairYes
                         val what = if (p.o50 == ShockFav.O50.AI) "open 50 · ${Open50Model.VERSION}" else "open 50"
@@ -1194,10 +1177,6 @@ class ScalpBook(
                     continue
                 }
                 if (p.kind != ShockFav.Kind.SHOCK_FAV) {
-                    if (mine.any { it.variantId == p.shockId && it.state == ScalpState.PENDING_ENTRY }) {
-                        gates.block(p.code, ScalpModels.windowKeyOf(q.ticker), "fill in flight")
-                        continue
-                    }
                     val side = when (p.kind) {
                         ShockFav.Kind.LAGGARD -> ShockFav.laggardSide(p, coin, sfSpot, sec, q.tauS)?.takeIf { sd -> q.ask(sd)?.let { it in 0.10..0.90 } == true }
                         ShockFav.Kind.IMBALANCE -> ShockFav.imbalanceSide(p, yb, ya, q.yesBidSize ?: 0.0, q.yesAskSize ?: 0.0, q.tauS)?.takeIf { sd -> q.ask(sd)?.let { it in 0.10..0.90 } == true }
@@ -1214,7 +1193,7 @@ class ScalpBook(
                     sfEnter(q, p, p.shockId, side, ask, f, openCost, bankroll, p.kind.name.lowercase().replace('_', ' '))?.let { changed += it; if (!shadowEntry(it)) openCost += it.entryCostUsd }
                     continue
                 }
-                if (p.shock && mine.none { it.variantId == p.shockId && it.state == ScalpState.PENDING_ENTRY }) {
+                if (p.shock) {
                     val side = ShockFav.shockSide(p, coin, ring, sec, q.tauS, sigma)
                     if (side != null) {
                         val sideFair = if (side == "YES") fairYes else 1.0 - fairYes
@@ -1227,7 +1206,7 @@ class ScalpBook(
                 val favCode = p.favId.take(4)
                 val favFg = FairGapTune.favUsesFairGapGate(favCode) // own-rule late favourites use favEntryOk, including sf31 off-US hours
                 val favTauMin = if (favFg) maxOf(p.favTmin, FairGapTune.SETTLE_MIN_S) else p.favTmin
-                if (p.fav && mine.none { it.variantId == p.favId && it.state == ScalpState.PENDING_ENTRY } && q.tauS <= (if (favFg) maxOf(p.favTmax, 300.0) else p.favTmax) && q.tauS >= favTauMin) {
+                if (p.fav && q.tauS <= (if (favFg) maxOf(p.favTmax, 300.0) else p.favTmax) && q.tauS >= favTauMin) {
                     val fy = if (p.brti && sigma != null) {
                         brtiFair ?: run {
                             val m = (60.0 - q.tauS).toInt().coerceIn(0, 60)
@@ -1261,7 +1240,6 @@ class ScalpBook(
                     val why = when {
                         q.tauS > p.favTmax -> "outside late-fav window"
                         q.tauS < favTauMin -> "outside late-fav window"
-                        mine.any { it.variantId == p.favId && it.state == ScalpState.PENDING_ENTRY } -> "fill in flight"
                         else -> "late-fav trigger not met"
                     }
                     gates.block(p.favId, ScalpModels.windowKeyOf(q.ticker), why)
@@ -1294,10 +1272,6 @@ class ScalpBook(
         for (spec in ScalpVariants.ALL) {
             val p = spec.shock ?: continue
             if (spec.kind != ScalpVariants.Kind.SIMPLE && spec.kind != ScalpVariants.Kind.SHOCK && spec.kind != ScalpVariants.Kind.FAV) continue
-            if (mine.any { it.variantId == spec.id && it.state == ScalpState.PENDING_ENTRY } || out.any { it.variantId == spec.id }) {
-                gates.block(spec.id, window, "fill in flight")
-                continue
-            }
             when (spec.kind) {
                 ScalpVariants.Kind.SIMPLE -> {
                     val side = simpleDipSide(key, p, q)
