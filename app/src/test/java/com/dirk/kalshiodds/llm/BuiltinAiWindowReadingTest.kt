@@ -17,6 +17,7 @@ import kotlinx.coroutines.test.runCurrent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -63,19 +64,37 @@ class BuiltinAiWindowReadingTest {
     }
 
     @Test
-    fun tickBookSpotReturnFeedsScoringEngineWhenExternalSpotCacheHasNoReturns() {
+    fun tickBookSpotReturnRequiresFullHorizonAndRetainsFiveMinutesAtOneHertz() {
         val book = TickBook()
         val t0 = 1_700_000_000_000L
-        book.noteSpot("KXBTC15M-A", 80_000.0, t0 - 300_000L)
-        book.noteSpot("KXBTC15M-A", 80_400.0, t0 - 60_000L)
-        book.noteSpot("KXBTC15M-A", 80_804.0, t0)
 
+        // Short history (10s) must not be mislabeled as a 1m or 5m return
+        book.noteSpot("KXBTC15M-SHORT", 80_000.0, t0 - 10_000L)
+        book.noteSpot("KXBTC15M-SHORT", 80_200.0, t0)
+        assertNull(book.spotReturn("KXBTC15M-SHORT", t0, 60_000L))
+        assertNull(book.spotReturn("KXBTC15M-SHORT", t0, 300_000L))
+
+        // 1m history covers 1m return but not 5m return
+        book.noteSpot("KXBTC15M-1M", 80_000.0, t0 - 65_000L)
+        book.noteSpot("KXBTC15M-1M", 80_400.0, t0)
+        assertNotNull(book.spotReturn("KXBTC15M-1M", t0, 60_000L))
+        assertNull(book.spotReturn("KXBTC15M-1M", t0, 300_000L))
+
+        // 1 Hz stream for 360 seconds retains full 5m (300s) and 1m (60s) horizons
+        for (sec in 0..360) {
+            val ts = t0 - (360 - sec) * 1_000L
+            val px = 80_000.0 + sec * 2.0
+            book.noteSpot("KXBTC15M-A", px, ts)
+        }
         val ret1m = book.spotReturn("KXBTC15M-A", t0, 60_000L)
         val ret5m = book.spotReturn("KXBTC15M-A", t0, 300_000L)
         assertNotNull(ret1m)
         assertNotNull(ret5m)
-        assertEquals((80_804.0 - 80_400.0) / 80_400.0, ret1m!!, 1e-6)
-        assertEquals((80_804.0 - 80_000.0) / 80_000.0, ret5m!!, 1e-6)
+        val curPx = 80_000.0 + 360 * 2.0
+        val px1mAgo = 80_000.0 + 300 * 2.0
+        val px5mAgo = 80_000.0 + 60 * 2.0
+        assertEquals((curPx - px1mAgo) / px1mAgo, ret1m!!, 1e-6)
+        assertEquals((curPx - px5mAgo) / px5mAgo, ret5m!!, 1e-6)
 
         val engine = ScoringEngine(book = book, idFactory = { "id" })
         val tick = MarketTick(
@@ -94,11 +113,11 @@ class BuiltinAiWindowReadingTest {
         assertNotNull(scored)
         assertNotNull(scored!!.spotPp)
         assertNotNull(scored.spotLabel)
-        assertEquals(80_804.0, scored.spotUsd!!, 1e-6)
+        assertEquals(curPx, scored.spotUsd!!, 1e-6)
     }
 
     @Test
-    fun liveWindowIncludesRichAtmTelemetryAndStrikeCrossEvents() {
+    fun liveWindowIncludesRichAtmTelemetryProvenanceAndSameStrikeCrossEvents() {
         val now = 1_700_000_300_000L
         val close = now + 300_000L
         val open = close - 900_000L
@@ -128,6 +147,12 @@ class BuiltinAiWindowReadingTest {
         assertTrue(telemetry.contains("CF $81,110.00 (85ms)"))
         assertFalse(telemetry.contains("snapshot", ignoreCase = true))
 
+        // When CF feed is absent/stale, exchange-spot fallback is NOT labeled as BRTI fair YES
+        val noCfQuote = atmQuote.copy(cfSpot = null, cfAgeMs = null)
+        val noCfTelemetry = ChatPrompt.atmTelemetry(noCfQuote)
+        assertFalse(noCfTelemetry.contains("BRTI fair YES"))
+        assertTrue(noCfTelemetry.contains("settle fair YES (spot)"))
+
         val liveText = ChatPrompt.liveWindow(
             ChatPrompt.LiveWindow(
                 nowMs = now,
@@ -138,6 +163,7 @@ class BuiltinAiWindowReadingTest {
         )
         assertTrue(liveText.contains(telemetry))
 
+        // True strike cross on the same strike logs "strike cross"
         val snap = AiLiveSnapshot(
             atMs = open + 25_000L,
             windowKey = "26OCT221200",
@@ -157,5 +183,15 @@ class BuiltinAiWindowReadingTest {
         )
         val history = ChatPrompt.tickHistory(snap)
         assertTrue(history.contains("strike cross"))
+
+        // ATM strike roll between two levels without BTC crossing either strike does NOT log a false "strike cross"
+        val rollSnap = snap.copy(
+            points = listOf(
+                AiLivePoint(open + 1_000L, 81_120.0, 81_000.0, 0.60, 0.38, 0.62, 0.40, 0.61),
+                AiLivePoint(open + 4_000L, 81_130.0, 81_250.0, 0.42, 0.56, 0.44, 0.58, 0.43)
+            )
+        )
+        val rollHistory = ChatPrompt.tickHistory(rollSnap)
+        assertFalse(rollHistory.contains("strike cross"))
     }
 }

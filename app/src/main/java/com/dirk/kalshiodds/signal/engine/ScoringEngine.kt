@@ -429,7 +429,7 @@ class ScoringEngine(
             liveSpotRet1m != null || liveSpotRet5m != null -> com.dirk.kalshiodds.signal.external.AssetSpotFeatures(
                 asset = tick.series,
                 spotReturn1m = liveSpotRet1m,
-                spotReturn5m = liveSpotRet5m ?: liveSpotRet1m,
+                spotReturn5m = liveSpotRet5m,
                 lastPrice = modelSpot,
                 source = "live-spot",
                 fetchedAtMs = nowMs,

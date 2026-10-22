@@ -297,15 +297,23 @@ object ChatPrompt {
     /** High-signal book + fair telemetry for the ATM contract. */
     fun atmTelemetry(q: ScalpRule.Quote): String {
         val parts = ArrayList<String>()
-        q.fair("YES")?.takeIf { it.isFinite() }?.let { parts += String.format(Locale.US, "spot fair YES %.2f", it) }
+        val spotFair = q.fair("YES")?.takeIf { it.isFinite() }
+        spotFair?.let { parts += String.format(Locale.US, "spot fair YES %.2f", it) }
         val rFair = com.dirk.kalshiodds.decision.Research.fair(q)
-        val brtiFair = q.cfFair("YES")?.takeIf { it.isFinite() } ?: rFair?.pYes?.takeIf { it.isFinite() }
-        brtiFair?.let { parts += String.format(Locale.US, "BRTI fair YES %.2f", it) }
-        if (brtiFair != null) {
+        val brtiFair = rFair?.takeIf { it.brti }?.pYes?.takeIf { it.isFinite() }
+        val cfDigitalFair = q.cfFair("YES")?.takeIf { it.isFinite() }
+        val spotSettleFair = rFair?.takeIf { !it.brti }?.pYes?.takeIf { it.isFinite() }
+        when {
+            brtiFair != null -> parts += String.format(Locale.US, "BRTI fair YES %.2f", brtiFair)
+            cfDigitalFair != null -> parts += String.format(Locale.US, "CF fair YES %.2f", cfDigitalFair)
+            spotSettleFair != null -> parts += String.format(Locale.US, "settle fair YES (spot) %.2f", spotSettleFair)
+        }
+        val edgeFair = brtiFair ?: cfDigitalFair ?: spotSettleFair ?: spotFair
+        if (edgeFair != null) {
             val ya = q.yesAsk
             val na = q.ask("NO")
-            val yesEdge = ya?.let { com.dirk.kalshiodds.decision.Research.edgeAfterCosts(brtiFair, it, 10, holdToSettle = true) }
-            val noEdge = na?.let { com.dirk.kalshiodds.decision.Research.edgeAfterCosts(1.0 - brtiFair, it, 10, holdToSettle = true) }
+            val yesEdge = ya?.let { com.dirk.kalshiodds.decision.Research.edgeAfterCosts(edgeFair, it, 10, holdToSettle = true) }
+            val noEdge = na?.let { com.dirk.kalshiodds.decision.Research.edgeAfterCosts(1.0 - edgeFair, it, 10, holdToSettle = true) }
             when {
                 yesEdge != null && (noEdge == null || yesEdge > noEdge) ->
                     parts += String.format(Locale.US, "net edge YES %+.1f¢", yesEdge * 100.0)
@@ -420,8 +428,11 @@ object ChatPrompt {
         for (i in 1 until pts.size) {
             val a = pts[i - 1]
             val b = pts[i]
-            val crossed = a.btc != null && a.strike != null && b.btc != null && b.strike != null &&
-                (a.btc - a.strike) * (b.btc - b.strike) < 0.0
+            val sameStrike = a.strike != null && b.strike != null &&
+                a.strike.isFinite() && b.strike.isFinite() &&
+                kotlin.math.abs(a.strike - b.strike) < 1e-6
+            val crossed = sameStrike && a.btc != null && b.btc != null &&
+                (a.btc - b.strike!!) * (b.btc - b.strike) < 0.0
             if (b.atMs - lastEvent < 8_000L && !crossed) continue
             val btcJump = a.btc != null && b.btc != null && kotlin.math.abs(b.btc - a.btc) >= 10.0
             val oddsJump = a.up != null && b.up != null && kotlin.math.abs(b.up - a.up) >= 0.10
