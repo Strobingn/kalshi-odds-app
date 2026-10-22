@@ -213,15 +213,15 @@ class SupabaseSync(
                 .put("id", f.id)
                 .put("ticker", f.ticker)
                 .put("side", f.side)
-                .put("stakeUsd", f.stakeUsd)
                 .put("contracts", f.contracts)
-                .put("limitPrice", f.limitPrice)
                 .put("createdAtMs", f.createdAtMs)
                 .put("updatedAtMs", f.syncAtMs())
                 .put("settled", f.settled)
-                .put("pnlUsd", f.pnlUsd)
                 .put("source", f.source)
-                .put("note", f.note)
+                .put("note", f.note.take(500))
+            payload.putFinite("stakeUsd", f.stakeUsd)
+            payload.putFinite("limitPrice", f.limitPrice)
+            payload.putFinite("pnlUsd", f.pnlUsd)
             f.outcome?.let { payload.put("outcome", it) }
             f.won?.let { payload.put("won", it) }
             f.aiPct?.takeIf { it.isFinite() }?.let { payload.put("aiPct", it) }

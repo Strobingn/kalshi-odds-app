@@ -120,7 +120,7 @@ class ScalpFreezeTest {
     }
 
     @Test fun autoFreezeAppliesThroughInsightsAndForceTradeWins() {
-        val controls = MemoryScalpControls()
+        val controls = MemoryScalpControls(com.dirk.kalshiodds.decision.ScalpControls(autoBench = true))
         val book = ScalpBook()
         val insights = ScalpInsights(book, controls, null) {}
         insights.start()

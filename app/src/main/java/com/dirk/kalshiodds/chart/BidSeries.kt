@@ -8,7 +8,9 @@ data class BidPoint(
     val tMs: Long,
     val upBidCents: Float?,
     val downBidCents: Float?,
-    val spotUsd: Double? = null
+    val spotUsd: Double? = null,
+    /** Live fair P(UP) in percent, stored on the same print as the bid. */
+    val aiYesPp: Float? = null
 )
 
 data class BidSeries(

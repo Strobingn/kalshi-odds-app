@@ -100,8 +100,8 @@ class ScalpInsights(
         }
         val realLists = synchronized(lock) { real.mapValues { it.value.toList() } }
         val shadowLists = synchronized(lock) { shadow.mapValues { it.value.toList() } }
-        // One freeze: default losers, the deep-loss rule, and the AI >$1 rule. Force trade / Force bench are left alone.
-        val next = ScalpFreeze.apply(benchNext, realLists, c.benchOverrides, shadowLists, decisions)
+        // Automatic freeze follows the auto-bench toggle. Off: only Force bench stops new trades.
+        val next = if (c.autoBench) ScalpFreeze.apply(benchNext, realLists, c.benchOverrides, shadowLists, decisions) else benchNext
         decisions = next
         book.benched = next.values.filter { !it.trading }.map { it.scalperId }.toSet()
         BenchRegistry.publish(next)

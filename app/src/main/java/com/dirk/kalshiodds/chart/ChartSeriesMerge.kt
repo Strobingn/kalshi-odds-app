@@ -36,7 +36,8 @@ object ChartSeriesMerge {
             tMs = newer.tMs,
             upBidCents = newer.upBidCents ?: older.upBidCents,
             downBidCents = newer.downBidCents ?: older.downBidCents,
-            spotUsd = newer.spotUsd ?: older.spotUsd
+            spotUsd = newer.spotUsd ?: older.spotUsd,
+            aiYesPp = newer.aiYesPp ?: older.aiYesPp
         )
     }
 
@@ -45,13 +46,15 @@ object ChartSeriesMerge {
         nowMs: Long,
         yesBid: Double?,
         noBid: Double?,
-        spotUsd: Double?
+        spotUsd: Double?,
+        aiYesPp: Double? = null
     ): List<BidPoint> {
         val up = dollarsToCents(yesBid)
         val down = dollarsToCents(noBid)
         val spot = spotUsd?.takeIf { it.isFinite() && it > 0.0 }
-        if (up == null && down == null && spot == null) return points
-        return merge(points, listOf(BidPoint(tMs = nowMs, upBidCents = up, downBidCents = down, spotUsd = spot)))
+        val fair = aiYesPp?.takeIf { it.isFinite() && it in 0.0..100.0 }?.toFloat()
+        if (up == null && down == null && spot == null && fair == null) return points
+        return merge(points, listOf(BidPoint(tMs = nowMs, upBidCents = up, downBidCents = down, spotUsd = spot, aiYesPp = fair)))
     }
 
     fun inWindow(points: List<BidPoint>, startMs: Long, endMs: Long): List<BidPoint> {

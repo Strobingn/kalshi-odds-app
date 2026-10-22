@@ -1,7 +1,6 @@
 package com.dirk.kalshiodds.decision
 
 import kotlinx.serialization.Serializable
-import kotlin.math.ceil
 import kotlin.math.exp
 import kotlin.math.sqrt
 
@@ -159,5 +158,5 @@ object Research {
     }
 
     /** Ceil helper used by tests. */
-    fun feeCents(n: Int, p: Double): Int = ceil(7.0 * n * p * (1.0 - p) - 1e-9).toInt()
+    fun feeCents(n: Int, p: Double): Int = kotlin.math.round(ScalpRule.orderFee(n, p) * 100.0).toInt()
 }

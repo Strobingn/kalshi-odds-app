@@ -547,6 +547,7 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
                         put("yes_ask", r.yesAsk)
                         put("no_ask", r.noAsk)
                         put("spot_usd", r.spotUsd)
+                        r.fairYesPp?.let { put("fair_yes_pp", it) }
                         put("source", r.source)
                     },
                     SQLiteDatabase.CONFLICT_REPLACE
@@ -595,8 +596,8 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
         val out = ArrayList<com.dirk.kalshiodds.data.local.archive.ChartTickRow>(cap)
         db.readableDatabase.rawQuery(
             """
-            SELECT ticker, t_ms, yes_bid, no_bid, yes_ask, no_ask, spot_usd, source FROM (
-              SELECT ticker, t_ms, yes_bid, no_bid, yes_ask, no_ask, spot_usd, source
+            SELECT ticker, t_ms, yes_bid, no_bid, yes_ask, no_ask, spot_usd, fair_yes_pp, source FROM (
+              SELECT ticker, t_ms, yes_bid, no_bid, yes_ask, no_ask, spot_usd, fair_yes_pp, source
               FROM $TABLE_CHART
               WHERE ticker = ? AND t_ms >= ? AND t_ms <= ?
               ORDER BY t_ms DESC
@@ -615,7 +616,8 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
                         yesAsk = c.dblAt(4),
                         noAsk = c.dblAt(5),
                         spotUsd = c.dblAt(6),
-                        source = c.getString(7) ?: com.dirk.kalshiodds.data.local.archive.ChartTickRow.SOURCE_LIVE
+                        fairYesPp = c.dblAt(7),
+                        source = c.getString(8) ?: com.dirk.kalshiodds.data.local.archive.ChartTickRow.SOURCE_LIVE
                     )
                 )
             }
@@ -1750,11 +1752,13 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
                         "${com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.TABLE}(close_time_ms)"
                 )
             }
+            if (oldVersion < 13) runCatching { db.execSQL(com.dirk.kalshiodds.data.local.chart.ChartTickSchema.ADD_FAIR) }
             applyPaperFillColumns(db)
         }
 
         override fun onOpen(db: SQLiteDatabase) {
             super.onOpen(db)
+            runCatching { db.execSQL(com.dirk.kalshiodds.data.local.chart.ChartTickSchema.ADD_FAIR) }
             runCatching { db.execSQL(com.dirk.kalshiodds.data.local.chart.ChartTickSchema.INDEX) }
             applyPaperFillColumns(db)
             createPendingOrdersTable(db)
@@ -1924,7 +1928,7 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
 
     companion object {
         const val DB_NAME = "diphunter_results.db"
-        const val DB_VERSION = 12
+        const val DB_VERSION = 13
         /** A 15-minute window. Calibration ignores ledger rows written earlier than this before the close range. */
         const val CALIBRATION_LEAD_MS = 900_000L
         /** Window-forecast rows older than this are the only ledger rows prune deletes. */

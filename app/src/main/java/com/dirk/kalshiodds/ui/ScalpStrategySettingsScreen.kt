@@ -18,11 +18,12 @@ import com.dirk.kalshiodds.decision.*
 import com.dirk.kalshiodds.ui.theme.DipTheme
 import kotlin.math.roundToInt
 
-/** Status under the Auto / Force trade / Force bench chips. */
-internal fun benchStatusLine(override: String?, autoBenched: Boolean, frozen: Boolean = false): String = when (override) {
+/** Status under the Auto / Force trade / Force bench chips. Auto-off does not say paused. */
+internal fun benchStatusLine(override: String?, autoBenched: Boolean, frozen: Boolean = false, autoBenchEnabled: Boolean = true): String = when (override) {
     "ACTIVE" -> "Bench · forced trading"
     "BENCHED" -> "Bench · forced benched"
-    else -> if (frozen) "Bench · auto · ${com.dirk.kalshiodds.decision.insights.ScalpFreeze.BADGE} (no new paper trades) · Force trade unfreezes"
+    else -> if (!autoBenchEnabled) "Bench · auto off"
+        else if (frozen) "Bench · auto · ${com.dirk.kalshiodds.decision.insights.ScalpFreeze.BADGE} (no new paper trades) · Force trade unfreezes"
         else if (autoBenched) "Bench · auto · BENCHED (shadow only)" else "Bench · auto"
 }
 
@@ -79,7 +80,7 @@ internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: Sc
             val benched by com.dirk.kalshiodds.decision.insights.BenchRegistry.benched.collectAsState()
             val benchedNow = model.code in benched
             val frozenNow = com.dirk.kalshiodds.decision.insights.ScalpFreeze.isFrozen(com.dirk.kalshiodds.decision.insights.BenchRegistry.decisions.collectAsState().value[model.code])
-            Text(benchStatusLine(ov, benchedNow, frozenNow), color = if (benchedNow || ov == "BENCHED") c.spot else c.textPrimary, fontWeight = FontWeight.SemiBold, modifier = Modifier.testTag("BENCH_STATUS"))
+            Text(benchStatusLine(ov, benchedNow, frozenNow, controls.autoBench), color = if (ov == "BENCHED" || (controls.autoBench && benchedNow)) c.spot else c.textPrimary, fontWeight = FontWeight.SemiBold, modifier = Modifier.testTag("BENCH_STATUS"))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(null to "Auto", "ACTIVE" to "Force trade", "BENCHED" to "Force bench").forEach { (v, label) ->
                     FilterChip(selected = ov == v, onClick = { onBenchOverride(v) }, label = { Text(label) },

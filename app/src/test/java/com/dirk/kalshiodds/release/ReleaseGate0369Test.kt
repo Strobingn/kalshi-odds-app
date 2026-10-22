@@ -32,7 +32,7 @@ class ReleaseGate0369Test {
         }
         val simple = closed.values.filter { it.variantId in setOf("sf41", "sf42", "sf43", "sf44") }
         assertTrue("simple-dip closes ${simple.size}", simple.isNotEmpty())
-        val generic = setOf("profit target hit", "take-profit: bid beats fair after fee", "turn-down: fair fell below entry")
+        val generic = setOf("profit target hit", "fair-value exit: bid crossed fair after the exit fee", "turn-down: fair fell below entry")
         simple.forEach { assertTrue("${it.variantId}: ${it.exitReason}", it.exitReason !in generic) }
         val sf = closed.values.filter { ShockFav.isShockFav(it.variantId) }
         sf.forEach { assertTrue("${it.variantId}: ${it.exitReason}", it.exitReason !in generic) }

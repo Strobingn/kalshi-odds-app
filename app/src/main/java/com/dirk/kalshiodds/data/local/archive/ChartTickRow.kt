@@ -15,13 +15,15 @@ data class ChartTickRow(
     val yesAsk: Double? = null,
     val noAsk: Double? = null,
     val spotUsd: Double? = null,
+    val fairYesPp: Double? = null,
     val source: String = SOURCE_LIVE
 ) {
     fun toBidPoint(): BidPoint = BidPoint(
         tMs = tMs,
         upBidCents = dollarsToCents(yesBid),
         downBidCents = dollarsToCents(noBid),
-        spotUsd = spotUsd
+        spotUsd = spotUsd,
+        aiYesPp = fairYesPp?.takeIf { it.isFinite() && it in 0.0..100.0 }?.toFloat()
     )
 
     companion object {

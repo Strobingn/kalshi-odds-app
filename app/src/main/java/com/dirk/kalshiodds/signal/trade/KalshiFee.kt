@@ -74,12 +74,33 @@ object KalshiFee {
 
     fun makerMultiplier(series: String): Double = if (series.uppercase() in MAKER_FEE_SERIES) 1.0 else 0.0
 
-    /** Maker fee for one fill: round_up_cent(M × 0.0175 × C × P × (1 − P)); $0 when M = 0. */
+    /** Maker fee for one fill. Same cent alignment as the taker fee, coefficient 0.0175 × M. $0 when M = 0. */
     fun makerFee(contracts: Int, price: Double, series: String): Double {
         val m = makerMultiplier(series)
         if (contracts <= 0 || m <= 0.0) return 0.0
-        val p = price.coerceIn(0.0, 1.0)
-        return ceilCent(m * MAKER_COEFFICIENT * contracts * p * (1.0 - p))
+        return total(contracts, price, m * MAKER_COEFFICIENT)
+    }
+
+    /**
+     * One order that prints at more than one price. Model fees are summed, then the
+     * order debit is ceiled once. Summing a per-piece cent-ceil overcharges by a cent
+     * whenever two fractional cents add to less than one cent.
+     */
+    fun sweepFee(lots: List<Pair<Int, Double>>, feeRate: Double = SignalConstants.DEFAULT_FEE_RATE): Double {
+        val clean = lots.filter { (n, px) -> n > 0 && px.isFinite() && px > 0.0 && px < 1.0 }
+        if (clean.isEmpty()) return 0.0
+        if (clean.size == 1) return total(clean[0].first, clean[0].second, feeRate)
+        val rate = bd(feeRate.coerceIn(0.0, 0.25))
+        var position = BigDecimal.ZERO
+        var trade = BigDecimal.ZERO
+        for ((n, px) in clean) {
+            val p = priceBd(px)
+            val c = BigDecimal.valueOf(n.toLong())
+            position = position.add(p.multiply(c))
+            val model = rate.multiply(c).multiply(p).multiply(BigDecimal.ONE.subtract(p)).max(BigDecimal.ZERO)
+            trade = trade.add(model.setScale(6, RoundingMode.CEILING))
+        }
+        return ceilGrid(position.add(trade), precisionScale()).subtract(position).max(BigDecimal.ZERO).toDouble()
     }
 
     /** Taker fee for one fill (dollars, rounded up to the cent). */
@@ -130,10 +151,10 @@ object KalshiFee {
         return bd(dollars).setScale(6, RoundingMode.CEILING).toDouble()
     }
 
-    /** Round up so the dollar amount sits on a $0.01 grid. */
+    /** Round up so the dollar amount sits on a $0.01 grid. Dust above an exact cent does not add a cent. */
     fun ceilCent(dollars: Double): Double {
         if (!dollars.isFinite() || dollars <= 0.0) return 0.0
-        return bd(dollars).setScale(2, RoundingMode.CEILING).toDouble()
+        return ceilGrid(bd(dollars), 2).toDouble()
     }
 
     /** @deprecated Use [ceilCent]; kept for existing call sites / tests. */
@@ -225,6 +246,20 @@ object KalshiFee {
 
     private fun debitBd(contracts: Int, price: Double, feeRate: Double): BigDecimal {
         val trade = modelFeeBd(contracts, price, feeRate).setScale(6, RoundingMode.CEILING)
-        return positionBd(contracts, price).add(trade).setScale(precisionScale(), RoundingMode.CEILING)
+        return ceilGrid(positionBd(contracts, price).add(trade), precisionScale())
+    }
+
+    /**
+     * Ceil onto a 10^-scale grid. A remainder smaller than 1/10000 of one grid step
+     * is binary dust (for cents, under $0.000001) and does not add a step.
+     */
+    private fun ceilGrid(amount: BigDecimal, scale: Int): BigDecimal {
+        if (amount.signum() <= 0) return BigDecimal.ZERO.setScale(scale)
+        val factor = BigDecimal.TEN.pow(scale)
+        val units = amount.multiply(factor)
+        val floor = units.setScale(0, RoundingMode.FLOOR)
+        val frac = units.subtract(floor)
+        val snapped = if (frac.compareTo(BigDecimal("0.0001")) < 0) floor else units
+        return snapped.setScale(0, RoundingMode.CEILING).divide(factor)
     }
 }

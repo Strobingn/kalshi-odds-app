@@ -176,9 +176,14 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         ensureScalpMigration() // 0.3.67: background, chunked; UI never waits on it
         hub.onMarketEvent = { t -> marketEvents.fire(t) }
         container.cfFeed.onTick = { indexId ->
+            val print = container.cfFeed.latest(indexId)
+            val at = print?.localReceivedAtMs?.takeIf { it > 0L } ?: System.currentTimeMillis()
             _state.value.snapshot?.allMarkets?.forEach { m ->
                 val series = com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(m.ticker)
-                if (com.dirk.kalshiodds.signal.ws.CfBenchmarks.indexForSeries(series) == indexId) marketEvents.fire(m.ticker)
+                if (com.dirk.kalshiodds.signal.ws.CfBenchmarks.indexForSeries(series) == indexId) {
+                    print?.value?.let { hub.scoring.book.noteSpot(m.ticker, it, at) }
+                    marketEvents.fire(m.ticker)
+                }
             }
         }
         vmScope.launch(paperLane) {
@@ -2261,7 +2266,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             now.coerceAtMost(end),
             m.yesBid,
             m.noBid,
-            m.spotUsd
+            m.spotUsd,
+            hub.scoring.book.lastFair(m.ticker)
         )
         return com.dirk.kalshiodds.chart.ChartDownsampler.downsample(
             com.dirk.kalshiodds.chart.ChartSeriesMerge.inWindow(headed, start, end),

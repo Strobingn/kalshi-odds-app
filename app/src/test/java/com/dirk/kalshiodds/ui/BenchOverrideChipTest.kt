@@ -34,7 +34,7 @@ class BenchOverrideChipTest {
 
     @Test fun tappingChipsSelectsThemAndUpdatesTheStatusLine() {
         BenchRegistry.publish(mapOf("fair" to BenchDecision("fair", BenchStatus.BENCHED, 30, -12.0, 0.0, "net negative")))
-        var controls by mutableStateOf(ScalpControls())
+        var controls by mutableStateOf(ScalpControls(autoBench = true))
         val taps = ArrayList<String?>()
         rule.setContent {
             KalshiOddsTheme {

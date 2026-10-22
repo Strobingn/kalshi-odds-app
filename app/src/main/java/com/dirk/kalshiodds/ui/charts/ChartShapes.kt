@@ -79,6 +79,21 @@ object ChartShapes {
         c?.takeIf { it.isFinite() && it in 0f..100f }?.let { Sample(p.tMs, it.toDouble()) }
     }
 
+    /** AI fair on the same timestamps as the market prints. Missing fair is skipped, not invented. */
+    fun aiSamples(points: List<BidPoint>): List<Sample> = points.mapNotNull { p ->
+        p.aiYesPp?.takeIf { it.isFinite() && it in 0f..100f }?.let { Sample(p.tMs, it.toDouble()) }
+    }
+
+    /**
+     * Lag of the AI print against the market print it sits on.
+     * Fair is stored on the bid row, so the lag is zero when both exist.
+     */
+    fun aiLagMs(points: List<BidPoint>): Long? {
+        val paired = points.filter { it.aiYesPp != null && (it.upBidCents != null || it.downBidCents != null) }
+        if (paired.isEmpty()) return null
+        return 0L
+    }
+
     fun latestBidCents(points: List<BidPoint>, up: Boolean): Double? = bidSamples(points, up).lastOrNull()?.value
 
     /**

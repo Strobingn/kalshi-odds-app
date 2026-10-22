@@ -2,6 +2,7 @@ package com.dirk.kalshiodds.decision.insights
 
 import com.dirk.kalshiodds.decision.MemoryScalpControls
 import com.dirk.kalshiodds.decision.ScalpBook
+import com.dirk.kalshiodds.decision.ScalpControls
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -12,8 +13,18 @@ import org.junit.Test
 class BenchOverrideTest {
     @After fun resetRegistry() { BenchRegistry.publish(emptyMap()) }
 
-    @Test fun forceTradeOverridesALosingBenchAndAutoReturns() {
+    @Test fun autoBenchOffLeavesALoserTrading() {
         val controls = MemoryScalpControls()
+        assertFalse(controls.state.value.autoBench)
+        val book = ScalpBook()
+        val insights = ScalpInsights(book, controls, null) {}
+        insights.start()
+        series("fair", List(30) { -1.0 }).forEach { insights.onSettled("fair", it) }
+        assertFalse(book.benched.contains("fair"))
+    }
+
+    @Test fun forceTradeOverridesALosingBenchAndAutoReturns() {
+        val controls = MemoryScalpControls(ScalpControls(autoBench = true))
         val book = ScalpBook()
         val insights = ScalpInsights(book, controls, null) {}
         insights.start()

@@ -146,7 +146,9 @@ class SyncWorker(
         }
         if (halted()) return@withContext Result.retry()
         runCatching {
-            val atMs = if (status.ok || status.advanced) status.atMs else hub.lastSyncAtMs
+            // A failed paper or scalp batch must not move the watermark, or those rows are never retried.
+            val kindsLanded = status.acknowledgePaper && status.scalpsOk
+            val atMs = if (kindsLanded && (status.ok || status.advanced)) status.atMs else hub.lastSyncAtMs
             container.dataPrefs.updateSyncStatus(status.message, atMs)
         }
         if (status.ok) Result.success() else Result.retry()

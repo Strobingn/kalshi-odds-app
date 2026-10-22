@@ -208,7 +208,8 @@ internal fun ArenaSummary(rows: List<ScalpModels.Row>, today: Collection<ScalpMo
 
 @Composable
 internal fun ArenaStrategyRow(row: ScalpModels.Row, st: ScalpTabState, onOpen: () -> Unit) {
-    val c = DipTheme.colors; val paused = ScalpModels.isV2(row.model) && !st.controls.permits(row.model.code)
+    val c = DipTheme.colors
+    val pause = st.controls.pausedReason(row.model.code, open = row.open)
     val points = remember(st.windows, row.model, st.updatedAtMs) { KashiArenaData.curve(st.windows, st.updatedAtMs, setOf(row.model)) }
     ArenaCard(modifier = Modifier.clickable(onClick = onOpen), accent = if (row.roundTrips > 0) pnlColor(row.netUsd) else c.border) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -229,10 +230,12 @@ internal fun ArenaStrategyRow(row: ScalpModels.Row, st: ScalpTabState, onOpen: (
                     Text("Reality check: after est. slippage ${ScalpTabCopy.money(r.netAfterSlippageUsd)} (−$${String.format(java.util.Locale.US, "%.2f", r.slippageUsd)} @ ${st.controls.slipCents}¢/ct/leg)", color = pnlColor(r.netAfterSlippageUsd), style = MaterialTheme.typography.labelSmall)
                 }
                 val bench = com.dirk.kalshiodds.decision.insights.BenchRegistry.decisions.collectAsState().value[row.model.code]
-                // One FROZEN badge. Plain auto-bench keeps its own line. Force trade shows the override instead.
-                if (com.dirk.kalshiodds.decision.insights.ScalpFreeze.isFrozen(bench)) Text(bench!!.reason.replaceFirst(com.dirk.kalshiodds.decision.insights.ScalpFreeze.BADGE, com.dirk.kalshiodds.decision.insights.ScalpFreeze.BADGE + " · no new paper trades"), color = c.down, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, maxLines = 2, modifier = Modifier.testTag("FROZEN_BADGE_" + row.model.code))
-                else if (bench != null && !bench.trading) Text("BENCHED · shadow only · " + bench.reason, color = c.down, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, maxLines = 2)
+                val manualBench = st.controls.benchOverrides[row.model.code] == "BENCHED"
+                if (manualBench) Text("Bench · forced benched", color = c.down, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, maxLines = 2)
+                else if (st.controls.autoBench && com.dirk.kalshiodds.decision.insights.ScalpFreeze.isFrozen(bench)) Text(bench!!.reason.replaceFirst(com.dirk.kalshiodds.decision.insights.ScalpFreeze.BADGE, com.dirk.kalshiodds.decision.insights.ScalpFreeze.BADGE + " · no new paper trades"), color = c.down, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, maxLines = 2, modifier = Modifier.testTag("FROZEN_BADGE_" + row.model.code))
+                else if (st.controls.autoBench && bench != null && !bench.trading) Text("BENCHED · shadow only · " + bench.reason, color = c.down, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, maxLines = 2)
                 else if (bench?.status == com.dirk.kalshiodds.decision.insights.BenchStatus.FORCED_ACTIVE) Text("Bench override · forced trading", color = c.spot, style = MaterialTheme.typography.labelSmall)
+                pause?.takeIf { it != "Bench · forced benched" }?.let { Text(it, color = c.down, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, maxLines = 2) }
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text(if (row.roundTrips > 0) ScalpTabCopy.money(row.netUsd) else "—", color = pnlColor(row.netUsd), style = ArenaUi.mono(MaterialTheme.typography.titleMedium), fontWeight = FontWeight.Bold)
@@ -252,7 +255,7 @@ internal fun ArenaStrategyRow(row: ScalpModels.Row, st: ScalpTabState, onOpen: (
             Text("LLM: $s", color = c.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 2)
         }
         if (ScalpModels.isV2(row.model)) Text(com.dirk.kalshiodds.decision.ScalperBrain.summary(row.model.code), color = c.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 2)
-        Text(if (paused) "Entries paused · view chart →" else "Live 15m chart & trades →", color = c.accentBlue, style = MaterialTheme.typography.labelSmall)
+        Text(if (pause != null) "Entries paused · view chart →" else "Live 15m chart & trades →", color = c.accentBlue, style = MaterialTheme.typography.labelSmall)
     }
 }
 

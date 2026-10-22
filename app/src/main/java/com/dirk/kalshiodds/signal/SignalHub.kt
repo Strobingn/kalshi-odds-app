@@ -337,6 +337,7 @@ class SignalHub(
                     yesAsk = tick.yesAsk,
                     noAsk = tick.noAsk,
                     spotUsd = scoring.book.lastSpot(tick.ticker),
+                    fairYesPp = scoring.book.lastFair(tick.ticker),
                     source = if (tick.source == TickSource.REST) ChartTickRow.SOURCE_REST else ChartTickRow.SOURCE_LIVE
                 )
             )

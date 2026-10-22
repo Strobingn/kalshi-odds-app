@@ -78,7 +78,8 @@ class ScalpControlsTest {
         val (n, usd, fees) = ScalpControls(maxStakeUsd = .32).walkBuy(listOf(.09 to 1.0, .095 to 1.0, .1 to 10.0), 10, .1)
         assertEquals(3, n)
         assertTrue(usd + fees <= .32 + 1e-9)
-        assertEquals(.03, fees, 1e-9)
+        assertEquals(ScalpRule.sweepFee(listOf(.09 to 1, .095 to 1, .1 to 1)), fees, 1e-9)
+        assertTrue(fees < .03)
         assertEquals(0.0, ScalpControls(maxStakeUsd = Double.NaN).normalized().maxStakeUsd, 0.0)
     }
 }

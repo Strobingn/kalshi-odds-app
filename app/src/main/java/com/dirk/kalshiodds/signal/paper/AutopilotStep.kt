@@ -56,13 +56,21 @@ object AutopilotStep {
         if (!tick.decision.ok || picked == null) return Outcome.Skip(tick.decision.reason)
         if (mode == AutopilotMode.PAPER) return Outcome.Paper(tick.fill)
         val depth = if (picked.side.equals("NO", true)) noDepth else yesDepth
+        val shadow = shadowBook.snapshot()
+        val shadowOpen = shadow.tickets.filter { it.booked && !it.settled }.sumOf { it.stakeUsd }
+        val room = minOf(
+            shadow.cashUsd.coerceAtLeast(0.0),
+            (shadow.bankrollUsd - shadowOpen).coerceAtLeast(0.0),
+            tick.decision.freeBankrollUsd.coerceAtLeast(0.0)
+        )
         val sized = PaperKellySizer.size(
             winProb = picked.winProb,
             ask = picked.ask,
-            bankrollUsd = tick.decision.freeBankrollUsd,
+            bankrollUsd = room,
             kellyFraction = PaperAutopilot.PAPER_AI_KELLY_FRACTION,
             feeRate = settings.feeRate,
             depthContracts = depth,
+            maxStakeUsd = room,
             capFullKelly = false
         )
         if (!sized.ok) return Outcome.Skip(sized.reason)
