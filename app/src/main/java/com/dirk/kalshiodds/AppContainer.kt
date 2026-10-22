@@ -389,7 +389,13 @@ class AppContainer(context: Context) {
             book?.yesAsk?.let { put("yesAskCents", cents(it)) }
             book?.noBid?.let { put("noBidCents", cents(it)) }
             book?.noAsk?.let { put("noAskCents", cents(it)) }
-            cfIndex.fresh(coin, now)?.value?.let { put("spot", it) }
+            val spot = cfIndex.fresh(coin, now)?.value
+            spot?.let { put("spot", it) }
+            val strike = scoring.book.strike(w.ticker) ?: com.dirk.kalshiodds.signal.engine.DirectionSanity.parseStrike(w.ticker)
+            strike?.let { put("strikePrice", it) }
+            if (spot != null && strike != null) put("spotMinusStrike", Math.round((spot - strike) * 100.0) / 100.0)
+            // The math's chance of YES (0-100): the same fair price the late favourites trade on.
+            runCatching { scalperFairYes(w.ticker, now) }.getOrNull()?.let { put("fairYesCents", Math.round(it * 1000.0) / 10.0) }
             put("openPaperPositions", w.open.size)
         }
     }

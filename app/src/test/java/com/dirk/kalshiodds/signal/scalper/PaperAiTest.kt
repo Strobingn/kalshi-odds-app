@@ -7,14 +7,15 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** The Paper AI: one bounded paper bet per window, settled when the window settles. */
+/** The Paper AI: bounded paper bets, a code risk check, settled when the window settles, then a lesson. */
 class PaperAiTest {
     private val ticker = "KXBTC15M-26OCT221200-00"
 
-    private fun feed(sec: Int = 60, yesAsk: Double = 55.0, noAsk: Double = 47.0): () -> JsonObject = {
+    private fun feed(sec: Int = 60, yesAsk: Double = 55.0, noAsk: Double = 47.0, fairYes: Double? = null): () -> JsonObject = {
         buildJsonObject {
             put("ticker", ticker); put("secondsIntoWindow", sec)
             put("yesAskCents", yesAsk); put("noAskCents", noAsk)
+            fairYes?.let { put("fairYesCents", it) }
         }
     }
 
@@ -23,7 +24,7 @@ class PaperAiTest {
 
     @Test
     fun betsAtTheAskWithTheFeeAndSettlesOnTheResult() {
-        val p = ai("""{"decision":"YES","contracts":30,"confidence":62,"reason":"momentum"}""")
+        val p = ai("""{"decision":"YES","contracts":30,"confidence":70,"reason":"momentum"}""")
         assertTrue(p.tick().startsWith("bet YES"))
         val b = p.openBets().single()
         assertEquals(0.55, b.price, 1e-9)
@@ -32,7 +33,7 @@ class PaperAiTest {
         p.onSettled(ticker, "yes")
         val s = p.settledBets().single()
         assertEquals(30 * 0.45 - b.feeUsd, s.pnlUsd!!, 1e-3)
-        val q = ai("""{"decision":"NO","contracts":1,"reason":"x"}""")
+        val q = ai("""{"decision":"NO","contracts":1,"confidence":60,"reason":"x"}""")
         q.tick(); q.onSettled(ticker, "yes")
         assertEquals(-(0.47) - q.settledBets().single().feeUsd, q.settledBets().single().pnlUsd!!, 1e-3)
     }
@@ -40,7 +41,7 @@ class PaperAiTest {
     @Test
     fun betsAgainEveryMinuteWithNoCapAndNeverTooEarlyOrLate() {
         val calls = IntArray(1)
-        val p = ai("""{"decision":"YES","contracts":2,"reason":"again"}""", calls = calls)
+        val p = ai("""{"decision":"YES","contracts":2,"confidence":70,"reason":"again"}""", calls = calls)
         repeat(5) { p.tick() }
         assertEquals(5, calls[0])
         assertEquals(5, p.openBets().size)
@@ -56,7 +57,7 @@ class PaperAiTest {
         val cheap = ai("""{"decision":"YES","reason":"long shot"}""", feed(yesAsk = 4.0))
         assertTrue(cheap.tick().startsWith("rejected"))
         assertTrue(cheap.openBets().isEmpty())
-        val big = ai("""{"decision":"YES","contracts":500,"reason":"all in"}""")
+        val big = ai("""{"decision":"YES","contracts":500,"confidence":70,"reason":"all in"}""")
         big.tick()
         assertEquals(PaperAi.MAX_CONTRACTS, big.openBets().single().contracts)
     }
@@ -66,5 +67,69 @@ class PaperAiTest {
         assertTrue(ai(null).tick().contains("no answer"))
         assertTrue(ai("not json").tick().contains("not JSON"))
         assertTrue(ai(null).openBets().isEmpty())
+    }
+
+    @Test
+    fun theRiskCheckBlocksABetWithNoEdgeAfterTheFee() {
+        // 56% claimed on a 55c ask: half the claimed edge counts at first, so well under 2c after the fee.
+        val thin = ai("""{"decision":"YES","contracts":10,"confidence":56,"reason":"maybe"}""")
+        assertTrue(thin.tick().startsWith("risk check blocked"))
+        assertTrue(thin.openBets().isEmpty())
+    }
+
+    @Test
+    fun theRiskCheckBlocksABetAgainstTheFairPrice() {
+        // The AI says 90% YES, but the math gives YES 40% against a 55c ask.
+        val p = ai("""{"decision":"YES","contracts":5,"confidence":90,"reason":"hunch"}""", feed(fairYes = 40.0))
+        assertTrue(p.tick().contains("fair price"))
+        assertTrue(p.openBets().isEmpty())
+        // With the math behind it, the same bet goes through and keeps the fair price and both cases.
+        val q = ai(
+            """{"decision":"YES","contracts":5,"confidence":70,"bull_case":"above strike","bear_case":"could fade","reason":"ok"}""",
+            feed(fairYes = 72.0)
+        )
+        assertTrue(q.tick().startsWith("bet YES"))
+        val b = q.openBets().single()
+        assertEquals(72.0, b.fairCents!!, 1e-9)
+        assertEquals("above strike", b.bullCase)
+        assertEquals("could fade", b.bearCase)
+    }
+
+    @Test
+    fun calibrationTrustsOnlyTheEdgeThatShowedUp() {
+        fun bet(won: Boolean, i: Int) = PaperBet(
+            id = i.toLong(), ticker = "T$i", side = "YES", price = 0.50, contracts = 1, feeUsd = 0.0,
+            openedMs = 0L, confidence = 70, reason = "", result = if (won) "YES" else "NO"
+        )
+        assertEquals(PaperAiCalibration.PRIOR_TRUST, PaperAiCalibration.read(emptyList()).trust, 1e-9)
+        // Claimed +20c a bet, won half at 50c: no realised edge, so trust falls under the prior.
+        val coinFlip = PaperAiCalibration.read((0 until 40).map { bet(it % 2 == 0, it) })
+        assertEquals(20.0, coinFlip.claimedEdgeCents, 1e-9)
+        assertEquals(0.0, coinFlip.realisedEdgeCents, 1e-9)
+        assertTrue(coinFlip.trust < PaperAiCalibration.PRIOR_TRUST)
+        // Won 7 of 10 at 50c claiming 70%: the edge showed up, trust rises above the prior.
+        val good = PaperAiCalibration.read((0 until 10).map { bet(it < 7, it) })
+        assertTrue(good.trust > PaperAiCalibration.PRIOR_TRUST)
+        assertEquals(62.5, PaperAiCalibration.adjust(70.0, 55.0, 0.5), 1e-9)
+    }
+
+    @Test
+    fun aLessonIsWrittenOnlyAfterTheWindowSettles() {
+        val prompts = ArrayList<String>()
+        val chat = LlmChat { system, _, _ ->
+            prompts += system
+            if (system == PaperAi.REFLECT_SYSTEM) """{"lesson":"late 55c YES above the strike paid"}"""
+            else """{"decision":"YES","contracts":2,"confidence":70,"reason":"up","lesson":"ignored"}"""
+        }
+        val p = PaperAi(chat = chat, feed = feed())
+        p.tick()
+        assertTrue(p.lessons().isEmpty())
+        p.onSettled(ticker, "yes")
+        p.tick()
+        assertEquals(listOf("late 55c YES above the strike paid"), p.lessons())
+        assertEquals(PaperAi.REFLECT_SYSTEM, prompts[1])
+        // Each settled window is looked back on once.
+        p.tick()
+        assertEquals(1, prompts.count { it == PaperAi.REFLECT_SYSTEM })
     }
 }
