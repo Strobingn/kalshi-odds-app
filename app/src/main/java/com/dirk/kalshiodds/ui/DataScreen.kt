@@ -141,7 +141,7 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
                 modifier = Modifier.fillMaxWidth().height(52.dp)
             ) { Text(if (state.learningMode) "Learning mode: ON · all but the big losers bet" else "Learning mode: OFF · money-makers only") }
             Text(
-                "Learning mode runs the small retired strategies on paper again (1 contract each) so the arena places as many bets as it can and the AI has data. The 17 big losers (each lost $1,000 to $48,000 in the replay) stay out. Paper only.",
+                "Learning mode runs the small retired strategies on paper again (50 contracts each) so the arena places as many bets as it can and the AI has data. The 17 big losers (each lost $1,000 to $48,000 in the replay) stay out. Paper only.",
                 style = MaterialTheme.typography.labelSmall,
                 color = colors.textSecondary
             )

@@ -169,7 +169,7 @@ class ScalpTuning(
     }
 
     companion object {
-        const val DEFAULT_CONTRACTS = 10
+        const val DEFAULT_CONTRACTS = 50
         const val MAX_CONTRACTS = 100
     }
 }
