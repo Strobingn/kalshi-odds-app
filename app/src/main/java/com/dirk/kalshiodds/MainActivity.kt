@@ -125,7 +125,7 @@ class MainActivity : ComponentActivity() {
                             val lab by oddsViewModel.paperScalpState.collectAsStateWithLifecycle()
                             com.dirk.kalshiodds.ui.PaperScalpScreen(lab,
                                 onBack = { navigator.back() }, onStart = oddsViewModel::startPaperScalps,
-                                onPause = oddsViewModel::pausePaperScalps, onExport = { paperReplayExport.launch("BitcoinEdge-paper-replay.zip") })
+                                onPause = oddsViewModel::pausePaperScalps, onQuantFilter = oddsViewModel::filterPaperScalps, onExport = { paperReplayExport.launch("BitcoinEdge-paper-replay.zip") })
                         },
                         settings = {
                             SettingsScreen(

@@ -29,6 +29,7 @@ class PaperScalpRuntime(context: Context, private val hub: SignalHub) {
     private val http = OkHttpClient.Builder().connectTimeout(3, TimeUnit.SECONDS).readTimeout(3, TimeUnit.SECONDS).callTimeout(4, TimeUnit.SECONDS).build()
     private var marketTicker: String? = null
     private var marketClose = 0L
+    private var marketStrike: Double? = null
     private var listAfter = 0L
     private var bookAfter = 0L
     private var retryAfter = 0L
@@ -46,7 +47,7 @@ class PaperScalpRuntime(context: Context, private val hub: SignalHub) {
         val previous = saved[key]
         fun material(s: PaperScalpState) = s.accounts.map { a -> a.copy(note = "", liquidity = emptyList(), peakEquity = 0.0, maxDrawdown = 0.0, positions = a.positions.map { p -> p.copy(lastBid = 0.0, markAtMs = 0, lowBid = 0.0) }) }
         val now = System.currentTimeMillis()
-        val important = previous == null || value.paused != previous.second.paused || material(value) != material(previous.second)
+        val important = previous == null || value.paused != previous.second.paused || value.quant != previous.second.quant || material(value) != material(previous.second)
         if (!important && now - previous!!.first < 2000) return
         check(prefs.edit().putString(key, json.encodeToString(value)).commit()) { "Paper checkpoint failed; entries paused until storage recovers" }
         saved[key] = now to value
@@ -54,6 +55,11 @@ class PaperScalpRuntime(context: Context, private val hub: SignalHub) {
     fun pause(paused: Boolean) {
         val key = source()
         try { engine(key).setPaused(paused); _state.value = engine(key).snapshot().copy(monitoring = _state.value.monitoring, recorderNote = recorder.note) }
+        catch (e: Exception) { _state.value = _state.value.copy(status = "Paper storage error: ${e.message}") }
+    }
+    fun quantFilter(enabled: Boolean) {
+        val key = source()
+        try { engine(key).setQuantFilter(enabled); _state.value = engine(key).snapshot().copy(monitoring = _state.value.monitoring, recorderNote = recorder.note) }
         catch (e: Exception) { _state.value = _state.value.copy(status = "Paper storage error: ${e.message}") }
     }
     fun export(uri: Uri): String = recorder.export(uri, engine(source()).snapshot())
@@ -69,7 +75,7 @@ class PaperScalpRuntime(context: Context, private val hub: SignalHub) {
         val key = source()
         try {
             if (environment != key) {
-                environment = key; lastWsRevision = null; marketTicker = null; marketClose = 0; listAfter = 0; bookAfter = 0; retryAfter = 0
+                environment = key; lastWsRevision = null; marketTicker = null; marketClose = 0; marketStrike = null; listAfter = 0; bookAfter = 0; retryAfter = 0
             }
             val lab = engine(key)
             val now = System.currentTimeMillis()
@@ -77,7 +83,7 @@ class PaperScalpRuntime(context: Context, private val hub: SignalHub) {
             if (now < retryAfter) { _state.value = lab.snapshot().copy(monitoring = true, recorderNote = recorder.note, status = "Market-data backoff; no simulated fills from stale quotes"); return }
             if (marketTicker == null || marketClose <= now) {
                 val candidate = hub.watchTickers.value.firstOrNull { it.startsWith("KXBTC15M-") && hub.bookEnvironment(it) == (key == "demo") && (hub.scoring.book.closeTime(it) ?: 0) > now }
-                if (candidate != null) { marketTicker = candidate; marketClose = hub.scoring.book.closeTime(candidate)!! }
+                if (candidate != null) { marketStrike = hub.scoring.book.strike(candidate); marketTicker = candidate; marketClose = hub.scoring.book.closeTime(candidate)!! }
                 else if (now >= listAfter) {
                     listAfter = now + 3000
                     discover(key, now)
@@ -106,7 +112,12 @@ class PaperScalpRuntime(context: Context, private val hub: SignalHub) {
                     levels(fp, "yes_dollars"), levels(fp, "no_dollars"))
             }
             if (key != source()) return
-            if (depth != null) lab.onBook(depth)
+            if (depth != null) {
+                val spot = hub.scoring.external.btc?.let { s -> PaperQuantSpot(s.fetchedAtMs, s.lastPrice,
+                    s.spotReturn1m, s.spotReturn5m, s.realizedVol15m,
+                    marketStrike ?: hub.scoring.book.strike(ticker), s.source) }
+                lab.onBook(depth.copy(spot = spot))
+            }
             _state.value = lab.snapshot().copy(monitoring = true, recorderNote = recorder.note, status = if (depth == null) "Waiting for the next fresh book; no stale fills" else
                 "${if (hub.hasFreshBook(ticker, now)) "WebSocket" else "REST 1s"} depth · 250ms minimum simulated order delay")
         } catch (e: Exception) {
@@ -124,7 +135,7 @@ class PaperScalpRuntime(context: Context, private val hub: SignalHub) {
             val m = markets.getJSONObject(i)
             val close = runCatching { Instant.parse(m.getString("close_time")).toEpochMilli() }.getOrNull() ?: continue
             val open = runCatching { Instant.parse(m.getString("open_time")).toEpochMilli() }.getOrDefault(close - 900000)
-            if (now in open until close) { marketTicker = m.getString("ticker"); marketClose = close; return }
+            if (now in open until close) { marketStrike = m.optDouble("floor_strike").takeIf { it.isFinite() && it > 0 }; marketTicker = m.getString("ticker"); marketClose = close; return }
         }
     }
     private fun get(url: String): String? = http.newCall(Request.Builder().url(url).header("User-Agent", "BitcoinEdge-PaperLab").build()).execute().use { response ->

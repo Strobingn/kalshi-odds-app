@@ -10,7 +10,7 @@ import kotlin.math.abs
 @Serializable data class PaperReplayEvent(val kind: String, val atMs: Long,
     val book: PaperDepth? = null, val ticker: String? = null, val yesWon: Boolean? = null, val paused: Boolean? = null,
     val checkpoint: PaperScalpState? = null, val history: List<PaperDepth> = emptyList(),
-    val totals: Map<String, PaperReplayTotals> = emptyMap(), val schema: Int = 1, val policy: Int = PaperScalpPolicy.VERSION)
+    val totals: Map<String, PaperReplayTotals> = emptyMap(), val quantDecisions: List<PaperQuantDecision> = emptyList(), val schema: Int = 1, val quantFilter: Boolean? = null, val policy: Int = PaperScalpPolicy.VERSION)
 data class PaperReplayFrame(val before: PaperScalpState, val history: List<PaperDepth>, val event: PaperReplayEvent)
 
 /** Reuses the production paper engine. Checkpoints include lookback books, pending orders and consumed depth. */
@@ -31,6 +31,7 @@ object PaperScalpReplay {
             when (event.kind) {
                 "book" -> lab.onBook(requireNotNull(event.book), event.atMs)
                 "settle" -> lab.settle(requireNotNull(event.ticker), requireNotNull(event.yesWon), event.atMs)
+                "quant" -> lab.setQuantFilter(requireNotNull(event.quantFilter))
                 "pause" -> lab.setPaused(requireNotNull(event.paused))
                 "expire" -> lab.expirePending(event.atMs)
                 else -> error("Unknown replay event ${event.kind}")

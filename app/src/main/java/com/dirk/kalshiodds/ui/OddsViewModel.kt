@@ -88,6 +88,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     private val paperBook = container.paper.book
     val paperScalpState = container.paperScalp.state
     suspend fun exportPaperScalps(uri: android.net.Uri): String = withContext(Dispatchers.IO) { container.paperScalp.export(uri) }
+    fun filterPaperScalps(enabled: Boolean) { viewModelScope.launch(Dispatchers.IO) { container.paperScalp.quantFilter(enabled) } }
     fun pausePaperScalps(paused: Boolean) { viewModelScope.launch(Dispatchers.IO) { container.paperScalp.pause(paused) } }
     fun startPaperScalps() { viewModelScope.launch {
         prefs.updateLiveSignals(true)

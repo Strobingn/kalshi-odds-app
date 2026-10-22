@@ -51,11 +51,11 @@ data class PaperScalpPosition(val id: String, val ticker: String, val side: Stri
     val lastBid: Double, val markAtMs: Long, val stop: Double,
     val exitReason: String? = null, val triggerMs: Long? = null, val triggerRevision: Long? = null,
     val netProceeds: Double = 0.0, val exitFees: Double = 0.0,
-    val policyVersion: Int = 1, val riskDistance: Double = .02, val trailDistance: Double = .02, val trailArmed: Boolean = false, val targetBid: Double = 0.0, val plannedRiskUsd: Double = 0.0)
+    val policyVersion: Int = 1, val riskDistance: Double = .02, val trailDistance: Double = .02, val trailArmed: Boolean = false, val targetBid: Double = 0.0, val plannedRiskUsd: Double = 0.0, val quantEntry: PaperQuantEntry? = null)
 @Serializable
 data class PaperScalpResult(val id: String, val ticker: String, val setup: String, val side: String,
     val count: Int, val entry: Double, val netUsd: Double, val feesUsd: Double, val maxFavorable: Double,
-    val maxAdverse: Double, val reason: String, val atMs: Long, val policyVersion: Int = 1)
+    val maxAdverse: Double, val reason: String, val atMs: Long, val policyVersion: Int = 1, val quantEntry: PaperQuantEntry? = null, val openedMs: Long = 0, val closeMs: Long = 0)
 @Serializable
 data class PaperLiquidity(val ticker: String, val side: String, val price: Double, val displayed: Double, val available: Double)
 @Serializable
@@ -76,7 +76,7 @@ data class PaperScalpAccount(val id: String, val cash: Double = PaperScalpPolicy
 }
 @Serializable
 data class PaperScalpState(val accounts: List<PaperScalpAccount> = PaperScalpCatalog.ALL.map { PaperScalpAccount(it.id) },
-    val paused: Boolean = false, val source: String = "production", val status: String = "Waiting for books", val lastQuoteMs: Long = 0, val monitoring: Boolean = false, val recorderNote: String = "")
+    val paused: Boolean = false, val source: String = "production", val status: String = "Waiting for books", val lastQuoteMs: Long = 0, val monitoring: Boolean = false, val recorderNote: String = "", val quant: PaperQuantState = PaperQuantState())
 
 data class PaperLesson(val n: Int, val meanNet: Double, val sizeScale: Double, val target: Double,
                        val windows: Int, val upperMean: Double, val lowerMean: Double = -.10) {
@@ -107,7 +107,7 @@ object PaperScalpLearning {
 @Serializable
 data class PaperDepth(val ticker: String, val atMs: Long, val revision: Long, val closeMs: Long,
                       val yes: List<Pair<Double, Double>>, val no: List<Pair<Double, Double>>,
-                      val fairYes: Double? = null) {
+                      val fairYes: Double? = null, val spot: PaperQuantSpot? = null) {
     fun bids(side: String) = (if (side == "YES") yes else no).sortedByDescending { it.first }
     fun asks(side: String) = (if (side == "YES") no else yes).map { (p, n) -> (1 - p) to n }.sortedBy { it.first }
     fun bid(side: String) = bids(side).firstOrNull()?.first ?: 0.0
@@ -186,6 +186,12 @@ class AdaptivePaperScalp(initial: PaperScalpState = PaperScalpState(),
         publish(before.copy(paused = paused))
         record(before, replayHistory(), PaperReplayEvent("pause", before.lastQuoteMs, paused = paused))
     }
+    @Synchronized fun setQuantFilter(enabled: Boolean) {
+        val before = _state.value
+        if (before.quant.filterRequested == enabled) return
+        publish(before.copy(quant = before.quant.copy(filterRequested = enabled)))
+        record(before, replayHistory(), PaperReplayEvent("quant", before.lastQuoteMs, quantFilter = enabled))
+    }
     @Synchronized fun status(message: String) { _state.value = _state.value.copy(status = message) }
     @Synchronized fun openTickers() = _state.value.accounts.flatMap { it.positions.map { p -> p.ticker } }.toSet()
     @Synchronized fun flush() = persist(_state.value)
@@ -206,8 +212,15 @@ class AdaptivePaperScalp(initial: PaperScalpState = PaperScalpState(),
             val next = step(a, PaperScalpCatalog.ALL.first { it.id == a.id }, q, recent)
             sample(next, nowMs, a.closed, force = next.positions.map { it.remaining } != a.positions.map { it.remaining })
         }
-        publish(_state.value.copy(accounts = accounts, status = "Receiving fresh book depth", lastQuoteMs = nowMs))
-        record(before, historyBefore, PaperReplayEvent("book", nowMs, book = q))
+        // Stops and all simulated fills run before fitting. New model is used on the next quote.
+        val quant = PaperQuant.update(_state.value.quant, accounts, nowMs)
+        publish(_state.value.copy(accounts = accounts, quant = quant, status = "Receiving fresh book depth", lastQuoteMs = nowMs))
+        val decisions = scan(q, recent).signals.mapNotNull { signal ->
+            PaperQuant.entry(q, recent, signal.side, signal.setup, before.quant.model)?.let { e ->
+                PaperQuantDecision(q.atMs, q.ticker, signal.setup, signal.side, e,
+                    PaperQuant.accepts(before.quant.model, e.x), before.quant.model.ready, before.quant.filterRequested) }
+        }
+        record(before, historyBefore, PaperReplayEvent("book", nowMs, book = q, quantDecisions = decisions))
     }
     private fun step(a: PaperScalpAccount, algo: PaperScalper, q: PaperDepth, history: List<PaperDepth>): PaperScalpAccount {
         var account = refreshLiquidity(a, q)
@@ -234,7 +247,8 @@ class AdaptivePaperScalp(initial: PaperScalpState = PaperScalpState(),
                 val position = PaperScalpPosition(idFactory(), q.ticker, pending.side, pending.setup,
                     fill.count, fill.count, avg, fill.value, fill.fees, q.atMs, q.closeMs,
                     bid, bid, bid, q.atMs, max(.001, avg - risk),
-                    policyVersion = PaperScalpPolicy.VERSION, riskDistance = risk, trailDistance = trail, targetBid = target, plannedRiskUsd = plannedRisk)
+                    policyVersion = PaperScalpPolicy.VERSION, riskDistance = risk, trailDistance = trail, targetBid = target, plannedRiskUsd = plannedRisk,
+                    quantEntry = PaperQuant.entry(q, history, pending.side, pending.setup, _state.value.quant.model))
                 account = account.copy(cash = (account.cash - fill.value - fill.fees).coerceAtLeast(0.0),
                     positions = account.positions + position, fees = account.fees + fill.fees,
                     note = "BUY ${pending.side} ${fill.count} ct @ ${fmt(avg * 100)}¢; initial protective stop active")
@@ -320,10 +334,17 @@ class AdaptivePaperScalp(initial: PaperScalpState = PaperScalpState(),
         liquidity = a.liquidity.map { l -> if (l.ticker != ticker || l.side != side) l else l.copy(available =
             (l.available - used.filter { kotlin.math.abs(it.first - l.price) < 1e-8 }.sumOf { it.second }).coerceAtLeast(0.0)) })
     private data class Candidate(val side: String, val setup: String, val ask: Double, val score: Double, val expectedBid: Double)
+    private fun quantBlocks(algo: PaperScalper, q: PaperDepth, history: List<PaperDepth>, side: String, setup: String): Boolean {
+        val quant = _state.value.quant
+        if (algo.fraction == .15 || !quant.filterRequested || !quant.model.ready) return false
+        val entry = PaperQuant.entry(q, history, side, setup, quant.model) ?: return false
+        return !PaperQuant.accepts(quant.model, entry.x)
+    }
     private fun choose(algo: PaperScalper, a: PaperScalpAccount, q: PaperDepth, history: List<PaperDepth>): Candidate? {
         if (cooldown(a, q) > 0) return null
         val setups = if (algo.family == "adaptive") listOf("cheap", "dip", "momentum", "forecast-fade") else listOf(algo.family)
         return scan(q, history).signals.filter { it.setup in setups }.mapNotNull { signal ->
+            if (quantBlocks(algo, q, history, signal.side, signal.setup)) return@mapNotNull null
             val lesson = PaperScalpLearning.lesson(a.results, signal.setup, signal.ask)
             if (lesson.n >= 8 && lesson.windows >= 3 && lesson.upperMean < 0) return@mapNotNull null
             Candidate(signal.side, signal.setup, signal.ask,
@@ -335,6 +356,8 @@ class AdaptivePaperScalp(initial: PaperScalpState = PaperScalpState(),
         if (remaining > 0) return "Loss cooldown · ${(remaining + 999) / 1000}s before another entry in this contract"
         val scan = scan(q, history)
         val matching = scan.signals.filter { algo.family == "adaptive" || it.setup == algo.family }
+        if (matching.isNotEmpty() && matching.all { quantBlocks(algo, q, history, it.side, it.setup) })
+            return "Fast model rejected entry after projected fees; protective exits stay active"
         if (matching.any { signal -> PaperScalpLearning.lesson(a.results, signal.setup, signal.ask).let { it.n >= 8 && it.windows >= 3 && it.upperMean < 0 } })
             return "Losing setup blocked by completed results across contract windows"
         return if (scan.signals.isNotEmpty()) "${algo.name.substringBefore(" ·")} waiting: no qualified signal for this family" else scan.note
@@ -349,7 +372,7 @@ class AdaptivePaperScalp(initial: PaperScalpState = PaperScalpState(),
     private fun completed(a: PaperScalpAccount, p: PaperScalpPosition, now: Long, reason: String): PaperScalpAccount {
         val net = p.netProceeds - p.entryValue - p.entryFee
         val result = PaperScalpResult(p.id, p.ticker, p.setup, p.side, p.count, p.entry, net, p.entryFee + p.exitFees,
-            (p.highBid - p.entry).coerceAtLeast(0.0), (p.entry - p.lowBid).coerceAtLeast(0.0), reason, now, p.policyVersion)
+            (p.highBid - p.entry).coerceAtLeast(0.0), (p.entry - p.lowBid).coerceAtLeast(0.0), reason, now, p.policyVersion, p.quantEntry, p.openedMs, p.closeMs)
         return a.copy(positions = a.positions.filterNot { it.id == p.id }, results = (a.results + result).takeLast(100),
             closed = a.closed + 1, wins = a.wins + if (net > 0) 1 else 0, realized = a.realized + net,
             note = "$reason · net $${fmt(net)}; feedback updated")
@@ -367,7 +390,7 @@ class AdaptivePaperScalp(initial: PaperScalpState = PaperScalpState(),
             }
             sample(a, atMs, account.closed, force = a.closed != account.closed)
         }
-        publish(_state.value.copy(accounts = accounts))
+        publish(_state.value.copy(accounts = accounts, quant = PaperQuant.observe(_state.value.quant, accounts)))
         if (_state.value != before) record(before, replayHistory(), PaperReplayEvent("settle", atMs, ticker = ticker, yesWon = yesWon))
     }
     private fun baseline(a: PaperScalpAccount, at: Long): PaperScalpAccount = if (a.policyStartedMs != 0L && a.policyVersion == PaperScalpPolicy.VERSION) a else a.copy(

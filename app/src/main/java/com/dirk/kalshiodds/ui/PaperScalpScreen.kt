@@ -58,7 +58,7 @@ private val labColors = darkColorScheme(primary = ink, onPrimary = Color.Black, 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun PaperScalpScreen(state: PaperScalpState, onBack: () -> Unit, onStart: () -> Unit, onPause: (Boolean) -> Unit,
-                     onExport: () -> Unit = {}, initialTab: Int = 0, clock: () -> Long = System::currentTimeMillis) {
+                     onExport: () -> Unit = {}, initialTab: Int = 0, onQuantFilter: (Boolean) -> Unit = {}, clock: () -> Long = System::currentTimeMillis) {
     var tab by rememberSaveable { mutableIntStateOf(initialTab) }
     var family by rememberSaveable { mutableStateOf("adaptive") }
     var allocation by rememberSaveable { mutableIntStateOf(35) }
@@ -198,6 +198,13 @@ fun PaperScalpScreen(state: PaperScalpState, onBack: () -> Unit, onStart: () -> 
                             val negatives = results.filter { it.netUsd < 0 }
                             val factor = if (negatives.isEmpty()) "—" else "%.2f".format(Locale.US, positives.sumOf { it.netUsd } / -negatives.sumOf { it.netUsd })
                             Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Text("Fast entry model", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                Text(state.quant.label, style = MaterialTheme.typography.bodyMedium)
+                                Text("${state.quant.observations.size} control examples · ${state.quant.model.windows} eligible windows · 20 entry-time features", style = MaterialTheme.typography.bodySmall, color = mutedInk)
+                                if (state.quant.model.testWindows > 0) QuantComparison(state.quant.model)
+                                else Text("Collecting at least 60 completed windows for three forward tests. No validated model filter yet.", style = MaterialTheme.typography.bodySmall, color = mutedInk)
+                                Text("15% books train the model. Higher allocations can use it after validation; they are different sizing experiments. Spot inputs use a timestamped exchange proxy when available.", style = MaterialTheme.typography.bodySmall, color = mutedInk)
+                                HorizontalDivider(color = rule)
                                 Text("Trade quality", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                     Stat("Profit factor", factor, Modifier.weight(1f))
@@ -250,12 +257,42 @@ fun PaperScalpScreen(state: PaperScalpState, onBack: () -> Unit, onStart: () -> 
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf(15, 35, 70, 100).forEach { n ->
                     FilterChip(allocation == n, onClick = { allocation = n }, label = { Text("$n%") })
                 } }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Use validated entry filter", Modifier.weight(1f))
+                    Switch(checked = state.quant.filterRequested, onCheckedChange = onQuantFilter)
+                }
+                Text(state.quant.label, style = MaterialTheme.typography.bodySmall)
+                Text("Default: observe and learn. The filter activates only after 30 training windows plus three 10-window forward tests, a 90s embargo and positive net/incremental uncertainty gates. 15% controls are never filtered. Stops and targets keep their existing rules.", style = MaterialTheme.typography.bodySmall)
                 Text("Rules 3 · range recovery, sweep reclaim, trend continuation, signed forecast follow and an adaptive mix. Every entry stays below 50¢ and must cover both fees plus at least 1.25× planned stop risk.", style = MaterialTheme.typography.bodySmall)
                 Text("Initial stop 4–8¢ from spread and 1s bid noise. Trail 2–4¢; arms after fees and at least 75% of planned risk are earned at its proposed stop. New setups explore with 5% of their allocation ceiling; size only grows with completed evidence across markets. Loss cooldowns remain active.", style = MaterialTheme.typography.bodySmall)
                 Text("Prior stops, cash and losses are retained. Updated-rule equity starts with the actual balance after upgrade; it includes any legacy positions still held. Charts retain 1,440 observations per book. No historic curve is invented.", style = MaterialTheme.typography.bodySmall)
                 Text("${state.status}\n${state.recorderNote}", style = MaterialTheme.typography.bodySmall)
             }
         }, confirmButton = { TextButton(onClick = { settings = false }) { Text("Done") } })
+    }
+}
+
+/** Equal-window, per-contract selection test. Zero for rejected opportunities; not a portfolio backtest. */
+@Composable internal fun QuantComparison(model: PaperQuantModel) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Forward selection test · ${model.testWindows} windows", style = MaterialTheme.typography.labelLarge)
+        val extent = maxOf(abs(model.baseline), abs(model.filtered), .001)
+        listOf("Existing entries" to model.baseline, "Model selection" to model.filtered).forEachIndexed { index, (label, value) ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(label, style = MaterialTheme.typography.bodySmall)
+                Text("%+.2f¢/ct".format(Locale.US, value * 100), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+            }
+            Canvas(Modifier.fillMaxWidth().height(16.dp).semantics { contentDescription = "$label: ${value * 100} cents per contract per window" }) {
+                val zero = size.width / 2
+                drawLine(rule, Offset(zero, 0f), Offset(zero, size.height), 2f)
+                val end = zero + (value / extent * (zero - 4)).toFloat()
+                drawLine(if (index == 0) mutedInk else ink, Offset(zero, size.height / 2), Offset(end, size.height / 2), 8f)
+            }
+        }
+        model.regimes.forEach { regime ->
+            Text("${regime.label} · ${regime.windows} windows · existing %+.2f / selected %+.2f¢".format(Locale.US, regime.baseline * 100, regime.filtered * 100), style = MaterialTheme.typography.labelSmall, color = mutedInk)
+        }
+        Text("${model.selectedWindows} windows selected · after paper fees. Rejected entries count as zero. Selection test on retained control trades; portfolio path and phone execution are unverified.", style = MaterialTheme.typography.labelSmall, color = mutedInk)
     }
 }
 

@@ -27,6 +27,17 @@ class PaperScalpScreenshotTest {
         val state = fixture().let { it.copy(accounts = it.accounts.map { a -> a.copy(curve = a.curve.filterIndexed { i, _ -> i !in 14..22 }) }) }
         paparazzi.snapshot(name = "performance_feed_gap") { PaperScalpScreen(state, {}, {}, {}, clock = { renderTime }) }
     }
+    @Test fun quantComparisonNarrow() {
+        paparazzi.unsafeUpdateConfig(deviceConfig = DeviceConfig.PIXEL_6.copy(softButtons = false, screenWidth = 945, screenHeight = 1800, fontScale = 1.3f))
+        paparazzi.snapshot(name = "quant_comparison") {
+            androidx.compose.material3.MaterialTheme(colorScheme = androidx.compose.material3.darkColorScheme()) {
+                androidx.compose.foundation.layout.Column {
+                    QuantComparison(PaperQuantModel(testWindows = 30, selectedWindows = 12, baseline = -.035, filtered = -.012,
+                        regimes = listOf(PaperQuantRegime("<5 min", 20, -.03, -.01))))
+                }
+            }
+        }
+    }
     private fun fixture(): PaperScalpState {
         val now = renderTime
         return PaperScalpState(lastQuoteMs = now, status = "Synthetic render fixture", monitoring = true,

@@ -1,3 +1,12 @@
+## Bitcoin Edge v1.5.0 — fast paper entry model
+
+Adds shadow-first local logistic learning from entry-time features and completed
+net paper outcomes, unfiltered control books, window-purged chronological selection
+tests, an optional validated filter and graphical selection comparisons. Existing
+stops/targets and balances persist. No trained edge is claimed. See
+[model protocol](docs/PAPER_FAST_QUANT.md) for feature schemas, causal cutoffs,
+validation limits and export instructions.
+
 ## Bitcoin Edge 1.4.0 — performance dashboard and paper rules 3
 
 Performance now leads with a large multi-strategy comparison chart, real axes, touch inspection and visible feed gaps. Positions and trades have separate tabs. Rule 3 corrects forecast direction, removes probability-as-sale-price entries, uses fixed-time momentum, checks projected gain against fees and stop risk, and starts new setups with smaller exploratory sizing. Local book/ledger recordings can be exported and replayed exactly. Prior losses and stops are preserved. Profitability remains unverified; see [the audit, rules and replay instructions](docs/PAPER_SCALP_POLICY_3.md).
