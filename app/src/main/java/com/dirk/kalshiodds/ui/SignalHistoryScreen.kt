@@ -21,7 +21,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.signal.model.SignalAlert
+import com.dirk.kalshiodds.ui.components.SignalEdgeDistributionCard
 import com.dirk.kalshiodds.ui.components.SignalSummaryCard
+import com.dirk.kalshiodds.ui.components.TelemetryChartMath
 import com.dirk.kalshiodds.ui.theme.DipTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -66,6 +68,11 @@ fun SignalHistoryScreen(
                     )
                 }
             } else {
+                item {
+                    SignalEdgeDistributionCard(
+                        TelemetryChartMath.signalCardDistribution(cards)
+                    )
+                }
                 items(cards, key = { "${it.title}-${it.call}-${it.modelLine}" }) { card ->
                     SignalSummaryCard(card)
                 }

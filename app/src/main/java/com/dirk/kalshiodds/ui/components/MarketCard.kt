@@ -475,6 +475,7 @@ private fun DetailsBlock(
             color = colors.accentBlue,
             fontWeight = FontWeight.Bold
         )
+        BookSpreadFairValueGauge(market = market)
         details.targetVsSpot?.let {
             Text(it, style = MaterialTheme.typography.labelMedium, color = labelColor)
         }
@@ -506,6 +507,7 @@ private fun DetailsBlock(
                 color = labelColor
             )
         }
+        FeatureDriversChart(market = market)
         Text(
             text = details.modelVsMarket,
             style = MaterialTheme.typography.bodyMedium,

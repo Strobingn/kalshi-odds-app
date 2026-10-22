@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.util.Locale
+import com.dirk.kalshiodds.ui.components.DataArchiveCompositionBars
 import com.dirk.kalshiodds.ui.theme.DipTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -305,6 +306,8 @@ private fun StatsCard(state: DataUiState) {
             color = colors.textSecondary,
             modifier = Modifier.padding(top = 4.dp)
         )
+        Spacer(Modifier.height(8.dp))
+        DataArchiveCompositionBars(stats = s)
     }
 }
 
