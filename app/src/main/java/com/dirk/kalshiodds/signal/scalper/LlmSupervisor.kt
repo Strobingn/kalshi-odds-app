@@ -53,7 +53,7 @@ object SupervisorBounds {
         "targetCents" to Range(1.0, 30.0, false),
         "stopCents" to Range(1.0, 30.0, false),
         "timeoutSeconds" to Range(10.0, 900.0, true),
-        "maxPerSide" to Range(1.0, 6.0, true),
+        "maxPerSide" to Range(1.0, 50.0, true),
         "entryMinCents" to band,
         "entryMaxCents" to band,
         "cadenceSeconds" to Range(1.0, 60.0, true),
@@ -61,7 +61,7 @@ object SupervisorBounds {
         "bidWaitSeconds" to Range(5.0, 120.0, true),
         "fromMinute" to Range(0.0, 14.0, true),
         "untilMinute" to Range(1.0, 15.0, true),
-        "maxOrdersPerWindow" to Range(1.0, 10.0, true),
+        "maxOrdersPerWindow" to Range(0.0, 1000.0, true),
         "cooldownSeconds" to Range(0.0, 300.0, true),
         "dailyLossUsd" to Range(1.0, 200.0, false),
         "secondsLeftMin" to Range(5.0, 899.0, true),
@@ -637,6 +637,7 @@ class LlmSupervisor(
             - Never open long shots: keep entryBandCents inside 10-98 and never go below 10.
             - Turn off (enabled=0) strategies that keep losing after fees; turn winners up (contracts, maxPerSide).
             - Tighten stops and shrink size near the window close.
+            - There is no limit on how many bets a strategy may place: raise maxPerSide (up to 50) and set maxOrdersPerWindow to 0 (no cap) on any strategy that is not clearly losing.
             - Be VERY aggressive: change many strategies every tick, in big steps (each change may move a knob up to 60% of its range). Test bold settings, judge them after only 4 trades, keep winners and undo losers fast. Doing nothing is rarely right.
             - Include a one-sentence lesson worth remembering.
             Answer only by calling apply_changes. An empty list is allowed.

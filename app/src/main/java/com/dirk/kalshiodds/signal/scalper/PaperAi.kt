@@ -42,11 +42,11 @@ data class PaperBet(
 data class PaperAiMemory(val bets: List<PaperBet> = emptyList(), val lessons: List<String> = emptyList())
 
 /**
- * The Paper AI: a chat LLM that decides paper BETS, one call per 15-minute window. It is a different thing from
+ * The Paper AI: a chat LLM that decides paper BETS, one call a minute. It is a different thing from
  * the scalping AI ([LlmSupervisor]), which only tunes the scalping algorithms. This one has its own prompt, its own
  * memory of its bets, its own journal and its own provider order.
  *
- * The model only answers `place_bet` (YES, NO or SKIP). Code enforces the rules: one bet per window, the first
+ * The model only answers `place_bet` (YES, NO or SKIP). Code enforces the rules: no cap on bets per window, any time in
  * [ENTRY_FROM_S]..[ENTRY_UNTIL_S] seconds, the side's ask between [MIN_ASK_CENTS] and [MAX_ASK_CENTS], at most
  * [MAX_CONTRACTS] contracts, taker fee charged. It never reaches a real order: it only writes paper bets here.
  */
@@ -63,8 +63,6 @@ class PaperAi(
     private var bets: List<PaperBet> = initialMemory.bets
     private var lessons: List<String> = initialMemory.lessons
     private var nextId: Long = (bets.maxOfOrNull { it.id } ?: 0L) + 1
-    /** The window already asked about, so the model is called once per window (a SKIP counts). */
-    private var askedTicker: String? = null
 
     private val _status = MutableStateFlow("Paper AI · not started")
     val status: StateFlow<String> = _status.asStateFlow()
@@ -110,16 +108,14 @@ class PaperAi(
         if (closed.isNotEmpty()) _record.value = synchronized(lock) { recordLine() }
     }
 
-    /** One pass. Calls the model at most once per window. Blocks on the network: run it off the main thread. */
+    /** One pass. Calls the model once per tick (a minute); any number of bets per window. Blocks on the network: run it off the main thread. */
     fun tick(): String {
         val f = feed()
         val ticker = (f["ticker"] as? JsonPrimitive)?.contentOrNull ?: return note("no live 15-minute market yet")
         val secIn = (f["secondsIntoWindow"] as? JsonPrimitive)?.doubleOrNull?.toInt() ?: return note("no window clock yet")
-        if (synchronized(lock) { askedTicker == ticker }) return note("already decided this window ($ticker)")
         if (secIn < ENTRY_FROM_S) return note("watching the first ${ENTRY_FROM_S}s of $ticker")
         if (secIn > ENTRY_UNTIL_S) return note("too late to enter $ticker; waiting for the next window")
         val ctx = synchronized(lock) { context(f) }
-        synchronized(lock) { askedTicker = ticker }
         val answer = chat.ask(SYSTEM, ctx.toString(), TOOLS)
             ?: return note("no answer from the LLM (check the keys); will retry next window")
         val obj = runCatching { Json.parseToJsonElement(answer).jsonObject }.getOrNull() ?: return note("answer was not JSON")
@@ -170,7 +166,7 @@ class PaperAi(
         put("feed", f)
         put("limits", buildJsonObject {
             put("askCentsRange", "$MIN_ASK_CENTS..$MAX_ASK_CENTS"); put("maxContracts", MAX_CONTRACTS)
-            put("oneBetPerWindow", true); put("entrySeconds", "$ENTRY_FROM_S..$ENTRY_UNTIL_S")
+            put("betsPerWindow", "unlimited, one per minute"); put("entrySeconds", "$ENTRY_FROM_S..$ENTRY_UNTIL_S")
         })
         put("yourRecord", recordLine())
         putJsonArray("yourLastBets") {
@@ -185,14 +181,14 @@ class PaperAi(
 
     companion object {
         const val ENTRY_FROM_S = 20
-        const val ENTRY_UNTIL_S = 420
+        const val ENTRY_UNTIL_S = 880
         const val MIN_ASK_CENTS = 10.0
         const val MAX_ASK_CENTS = 90.0
         const val MAX_CONTRACTS = 50
         const val KEEP_BETS = 300
         const val MAX_LESSONS = 30
 
-        val SYSTEM = """You are the PAPER BETTING AI for a Bitcoin-only Kalshi 15-minute UP/DOWN market. You are not the scalping AI: another AI tunes the scalping algorithms, you only decide whether to place one paper bet in this window.
+        val SYSTEM = """You are the PAPER BETTING AI for a Bitcoin-only Kalshi 15-minute UP/DOWN market. You are not the scalping AI: another AI tunes the scalping algorithms, you decide, every minute, whether to place another paper bet (there is no limit on how many bets you place in a window; you may bet again, the same side or the other, as the window moves). Bet often to learn, but only with an edge.
 Each call you get the live feed, the limits, your record, your last bets with results and your own notes. YES = Bitcoin finishes UP (at or above the strike), NO = DOWN.
 Goal: positive net profit after the taker fee (0.07 x price x (1 - price) per contract). Only bet when you see an edge: the side's ask should be below your real chance of winning. SKIP is a good answer when there is no edge. Learn from your last bets and notes; do not repeat what lost.
 Paper only. Answer only by calling place_bet."""
@@ -202,7 +198,7 @@ Paper only. Answer only by calling place_bet."""
                 put("type", "function")
                 putJsonObject("function") {
                     put("name", "place_bet")
-                    put("description", "Place one paper bet in this window, or SKIP.")
+                    put("description", "Place one paper bet now, or SKIP.")
                     putJsonObject("parameters") {
                         put("type", "object")
                         putJsonObject("properties") {

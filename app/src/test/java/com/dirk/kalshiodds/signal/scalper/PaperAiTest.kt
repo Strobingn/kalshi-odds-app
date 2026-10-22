@@ -38,14 +38,15 @@ class PaperAiTest {
     }
 
     @Test
-    fun oneCallPerWindowAndNeverTooEarlyOrLate() {
+    fun betsAgainEveryMinuteWithNoCapAndNeverTooEarlyOrLate() {
         val calls = IntArray(1)
-        val p = ai("""{"decision":"SKIP","reason":"no edge"}""", calls = calls)
-        p.tick(); p.tick(); p.tick()
-        assertEquals(1, calls[0])
+        val p = ai("""{"decision":"YES","contracts":2,"reason":"again"}""", calls = calls)
+        repeat(5) { p.tick() }
+        assertEquals(5, calls[0])
+        assertEquals(5, p.openBets().size)
         val early = ai("""{"decision":"YES","reason":"x"}""", feed(sec = 5), calls = IntArray(1))
         assertTrue(early.tick().contains("watching"))
-        val late = ai("""{"decision":"YES","reason":"x"}""", feed(sec = 800))
+        val late = ai("""{"decision":"YES","reason":"x"}""", feed(sec = 890))
         assertTrue(late.tick().contains("too late"))
         assertTrue(late.openBets().isEmpty())
     }
