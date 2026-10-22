@@ -188,7 +188,7 @@ class PaperAi(
         const val ENTRY_UNTIL_S = 420
         const val MIN_ASK_CENTS = 10.0
         const val MAX_ASK_CENTS = 90.0
-        const val MAX_CONTRACTS = 5
+        const val MAX_CONTRACTS = 50
         const val KEEP_BETS = 300
         const val MAX_LESSONS = 30
 

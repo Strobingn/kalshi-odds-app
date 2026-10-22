@@ -23,15 +23,15 @@ class PaperAiTest {
 
     @Test
     fun betsAtTheAskWithTheFeeAndSettlesOnTheResult() {
-        val p = ai("""{"decision":"YES","contracts":3,"confidence":62,"reason":"momentum"}""")
+        val p = ai("""{"decision":"YES","contracts":30,"confidence":62,"reason":"momentum"}""")
         assertTrue(p.tick().startsWith("bet YES"))
         val b = p.openBets().single()
         assertEquals(0.55, b.price, 1e-9)
-        assertEquals(3, b.contracts)
+        assertEquals(30, b.contracts)
         assertTrue(b.feeUsd > 0.0)
         p.onSettled(ticker, "yes")
         val s = p.settledBets().single()
-        assertEquals(3 * 0.45 - b.feeUsd, s.pnlUsd!!, 1e-3)
+        assertEquals(30 * 0.45 - b.feeUsd, s.pnlUsd!!, 1e-3)
         val q = ai("""{"decision":"NO","contracts":1,"reason":"x"}""")
         q.tick(); q.onSettled(ticker, "yes")
         assertEquals(-(0.47) - q.settledBets().single().feeUsd, q.settledBets().single().pnlUsd!!, 1e-3)
