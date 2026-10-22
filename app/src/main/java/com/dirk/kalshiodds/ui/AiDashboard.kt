@@ -202,7 +202,7 @@ object AiDashboard {
 fun AiDashboardContent(s: AiDashboardState, onOpenKeys: () -> Unit = {}) {
     val c = DipTheme.colors
     val scalpColor = c.accentBlue
-    val paperColor = Color(0xFFB083F0)
+    val paperColor = c.accentPurple
     val chatColor = c.accentOrange
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         // Keys and switches at a glance

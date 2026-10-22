@@ -144,7 +144,7 @@ fun AiChatContent(
     val list = rememberLazyListState()
     LaunchedEffect(msgs.size, which) { if (msgs.isNotEmpty()) list.animateScrollToItem(msgs.lastIndex) }
     val scalpColor = c.accentBlue
-    val paperColor = Color(0xFFB083F0)
+    val paperColor = c.accentPurple
     val accent = if (which == AiChat.SCALPING) scalpColor else paperColor
 
     Column(Modifier.fillMaxSize().imePadding().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {

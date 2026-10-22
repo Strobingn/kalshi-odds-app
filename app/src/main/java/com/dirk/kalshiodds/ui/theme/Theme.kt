@@ -27,7 +27,9 @@ data class DipPalette(
     val onUp: Color,
     val onDown: Color,
     val onAccentOrange: Color,
-    val onAccentRed: Color
+    val onAccentRed: Color,
+    /** The Paper AI's color on the AI tab (the Scalping AI is accentBlue). */
+    val accentPurple: Color = AccentPurple
 )
 
 val DarkPalette = DipPalette(
@@ -69,7 +71,8 @@ val LightPalette = DipPalette(
     onUp = OnAccentLight,
     onDown = OnAccentLight,
     onAccentOrange = OnAccentLight,
-    onAccentRed = OnAccentLight
+    onAccentRed = OnAccentLight,
+    accentPurple = LightAccentPurple
 )
 
 val LocalDipPalette = staticCompositionLocalOf { DarkPalette }

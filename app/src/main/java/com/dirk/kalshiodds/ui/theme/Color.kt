@@ -42,4 +42,6 @@ val LightDownColor = Color(0xFF730812)
 val LightDownContainer = Color(0xFFE9A5AD)
 val LightAccentOrange = Color(0xFF7D4E00)
 val LightAccentRed = LightDownColor
+val AccentPurple = Color(0xFFB083F0)
+val LightAccentPurple = Color(0xFF6E40C9)
 val OnAccentLight = Color(0xFFFFFFFF)

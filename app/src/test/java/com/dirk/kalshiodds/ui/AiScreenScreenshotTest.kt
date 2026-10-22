@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import app.cash.paparazzi.DeviceConfig
@@ -26,21 +27,26 @@ class AiScreenScreenshotTest {
     @get:Rule
     val paparazzi = Paparazzi(
         deviceConfig = DeviceConfig.PIXEL_6.copy(
-            softButtons = false, screenWidth = 411, screenHeight = 3900, xdpi = 160, ydpi = 160,
+            softButtons = false, screenWidth = 411, screenHeight = 900, xdpi = 160, ydpi = 160,
             density = com.android.resources.Density.MEDIUM
         ),
         theme = "android:Theme.Material3.DayNight.NoActionBar",
         maxPercentDifference = 1.0
     )
 
+    /** The dashboard as a phone shows it, one screen at a time (scrolled 0, 1, 2, 3 and 4 screens down). */
     @Test
     fun dashboard() {
         val s = AiScreenFixtures.dashboard()
-        paparazzi.snapshot(name = "ai_dashboard") {
-            KalshiOddsTheme(darkTheme = true) {
-                Column(Modifier.background(DipTheme.colors.bg)) {
-                    AiSectionTabs(0) {}
-                    Column(Modifier.padding(16.dp)) { AiDashboardContent(s) }
+        for (part in 0..4) {
+            paparazzi.snapshot(name = "ai_dashboard_$part") {
+                KalshiOddsTheme(darkTheme = true) {
+                    Column(Modifier.background(DipTheme.colors.bg).fillMaxSize()) {
+                        if (part == 0) AiSectionTabs(0) {}
+                        Column(
+                            Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState(part * 840)).padding(16.dp)
+                        ) { AiDashboardContent(s) }
+                    }
                 }
             }
         }
