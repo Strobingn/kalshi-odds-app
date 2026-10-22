@@ -142,7 +142,7 @@ class ScalpTuning(
     fun tuned(st: ScalpStrategy): Tuned = Tuned(st, knobs(st), contractsFor(st))
 
     /** Order size when nobody set one: the arena's, except a retired strategy that learning mode has put back bets small. */
-    private fun contractsFor(st: ScalpStrategy): Int =
+    fun contractsFor(st: ScalpStrategy): Int =
         if (ScalpStrategy.learningMode && ScalpStrategy.isRetiredBase(st)) {
             minOf(defaultContracts, ScalpStrategy.LEARNING_CONTRACTS)
         } else {

@@ -152,8 +152,8 @@ internal fun StrategySettingsCard(st: ScalpStrategy, tuning: ScalpTuning, modelT
         k = n
         tuning.set(st, n)
     }
-    val t = Tuned(st, k, tuning.defaultContracts)
-    val d = Tuned(st, ScalpKnobs(), tuning.defaultContracts)
+    val t = Tuned(st, k, tuning.contractsFor(st))
+    val d = Tuned(st, ScalpKnobs(), tuning.contractsFor(st))
     ArenaCard(Modifier.testTag("STRATEGY_SETTINGS")) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -404,7 +404,7 @@ internal fun ArenaSettingsPage(
                 ) {
                     Column(Modifier.weight(1f)) {
                         Text(st.label, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, color = colors.textPrimary, maxLines = 1)
-                        val t = Tuned(st, k, tuning.defaultContracts)
+                        val t = Tuned(st, k, tuning.contractsFor(st))
                         val exits = if (st.hold) {
                             if (t.stopDollars > 0) "hold · stop ${cents(t.stopDollars * 100)}" else "hold to the close"
                         } else if (t.trail) {
