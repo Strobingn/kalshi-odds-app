@@ -31,6 +31,8 @@ object ScalpParamSanity {
         var min = s.minEntryCents.coerceAtLeast(floor).coerceAtMost(98)
         var max = s.maxEntryCents
         if (ScalpFloors.isFavorite(code) && (max == null || max < floor)) max = ceilCap
+        // A ceiling under 30¢ on a v2 dip / fair-gap copy is the signal price, not a band.
+        if (max != null && ScalpFloors.repairsTightAsk(code) && max < ScalpFloors.minCeilingCents(code)) max = ceilCap
         if (max != null && max <= min) max = (min + 1).coerceAtMost(99)
         if (max != null && max > 99) max = 99
         if (min >= (max ?: 99)) min = ((max ?: 99) - 1).coerceAtLeast(floor)
@@ -64,17 +66,49 @@ object ScalpParamSanity {
     fun pricesComplement(yes: Double, no: Double): Boolean =
         yes.isFinite() && no.isFinite() && abs((yes + no) - 1.0) <= 0.02
 
+    /** Built-in clip for this scalper. A saved contracts value, when present, replaces it. */
+    fun builtinClip(code: String): Int {
+        ScalpVariants.clipOf(code)?.let { return it }
+        if (code.startsWith("v2-")) return ScalpV2.spec(code).clip.coerceAtLeast(1)
+        if (ShockFav.byVariantId(code) != null) return ShockFav.CLIP
+        return ScalpRule.CONTRACTS
+    }
+
+    /** The size this scalper may fill. [explicit] is a manual or tuner clip and wins. Green size does not. */
+    fun ownClip(code: String, explicit: Int? = null): Int =
+        (explicit ?: builtinClip(code)).coerceIn(1, 500)
+
+    /**
+     * Ask band written into v2 notes and read back at fill time.
+     * v2min cannot sit under the strategy floor. A ceiling inside the longshot
+     * band is replaced with the parent ceiling (55¢ for dip and fair-gap).
+     */
+    fun v2Band(code: String, savedMin: Double, savedMax: Double): Pair<Double, Double> {
+        val floor = ScalpFloors.cents(code) / 100.0
+        val ceil = ScalpFloors.ceilingCents(code) / 100.0
+        val minPx = (if (savedMin.isFinite()) savedMin else floor).coerceAtLeast(floor).coerceIn(floor, 0.98)
+        var maxPx = if (savedMax.isFinite() && savedMax > 0.0) savedMax else ceil
+        if (ScalpFloors.repairsTightAsk(code) && maxPx + 1e-9 < ScalpFloors.minCeilingCents(code) / 100.0) maxPx = ceil
+        if (maxPx <= minPx + 1e-9) maxPx = ceil
+        maxPx = maxPx.coerceAtMost(ceil).coerceAtLeast(minPx + 0.01)
+        return minPx to maxPx
+    }
+
     /**
      * Why a new paper entry must be skipped, or null. Does not throw.
      * [contracts] of 0 is an unfilled pending clip, not a bad size.
+     * [clip] is this scalper's own clip. A size above it cannot fill.
      */
-    fun entryBlock(side: String, price: Double, contracts: Int, floor: Double, cash: Double): String? {
+    fun entryBlock(side: String, price: Double, contracts: Int, floor: Double, cash: Double, clip: Int = Int.MAX_VALUE): String? {
         if (side(side) == null) return "sanity: side $side is not YES/NO (UP/DOWN)"
         if (!price.isFinite() || price <= 0.0 || price >= 1.0) return "sanity: price is not a contract price"
         if (price + 1e-9 < floor) {
             return String.format(Locale.US, "sanity: %.0f¢ is below the %.0f¢ floor", price * 100.0, floor * 100.0)
         }
         if (contracts < 0 || contracts > 1_000) return "sanity: clip $contracts"
+        if (contracts > clip) {
+            return String.format(Locale.US, "sanity: size %d is above the clip %d", contracts, clip)
+        }
         if (contracts > 0 && cash.isFinite() && contracts * price > cash + 1.0) return "sanity: clip costs more than free cash"
         return null
     }

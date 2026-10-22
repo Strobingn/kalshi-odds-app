@@ -505,8 +505,8 @@ class ScalpBook(
     @Volatile private var v2Evidence = if (liveExtras) store.loadWindows(48) else emptyList()
     val stats: StateFlow<List<ScalpStat>> = _stats.asStateFlow()
 
-    // 0.3.69 "green size": a scalper that is net positive after fees (≥ GREEN_MIN_TRADES closes) buys greenClip
-    // contracts per trade instead of its normal clip, filled by walking real book depth. Losers unchanged.
+    // 0.3.69 "green size": a scalper that is net positive after fees (≥ GREEN_MIN_TRADES closes) may walk the
+    // book, but never above its own clip. greenContracts is not a second clip.
     private var greenSrc: List<ScalpStat>? = null
     private var greenIds: Set<String> = emptySet()
     fun isGreen(scalperId: String?): Boolean {
@@ -714,8 +714,11 @@ class ScalpBook(
             if (!triggerIsNew(spec.id, q.ticker, sig.side)) { gates.block(spec.id, window, "same trigger still on"); continue }
             armTrigger(spec.id, q.ticker, sig.side)
             val v2 = spec.kind == ScalpVariants.Kind.V2_FAIR || spec.kind == ScalpVariants.Kind.V2_DIP
-            val note = if (v2) String.format(Locale.US, "v2 variant of %s · v2ask=%.4f · v2trail=%.4f · v2clip=%d · v2peakrule=1 · v2stopPct=20 · v2min=0.01 · v2until=14 · v2sidecap=20 · v2cadence=0", spec.parentId, px, ScalpV2.TRAIL, n)
-                else String.format(Locale.US, "%s · variant %s", p.strategy.label, spec.id)
+            val note = if (v2) {
+                val saved = controls.state.value.settings(spec.id)
+                val (minPx, maxPx) = ScalpParamSanity.v2Band(spec.id, saved.minEntryCents / 100.0, (saved.maxEntryCents ?: ScalpFloors.ceilingCents(spec.id)) / 100.0)
+                String.format(Locale.US, "v2 variant of %s · v2ask=%.4f · v2trail=%.4f · v2clip=%d · v2peakrule=1 · v2stopPct=20 · v2min=%.4f · v2until=14 · v2sidecap=20 · v2cadence=0", spec.parentId, maxPx, ScalpV2.TRAIL, n, minPx)
+            } else String.format(Locale.US, "%s · variant %s", p.strategy.label, spec.id)
             out += ScalpTrade(
                 id = idFactory(), ticker = q.ticker.uppercase(), side = sig.side, state = ScalpState.PENDING_ENTRY,
                 signalAtMs = q.nowMs, signalAsk = px, fairAtSignal = sig.fair, contracts = n,
@@ -1077,17 +1080,28 @@ class ScalpBook(
                 continue
             }
             val ask = q.ask(t.side) ?: continue
-            if (ask <= 0.99 && greenOf(t)) {
-                val (gn, usd, fee) = walkBuy(q, t.side, greenClip, 0.99)
-                if (gn <= 0) continue
+            val code = ScalpModels.modelOf(t)?.code ?: t.variantId
+            if (!FairGapTune.askAllowed(pk?.code, ask, ShockFav.isFavLeg(t.variantId))) { changed += cappedEntry(t, q.nowMs); continue }
+            if (greenOf(t)) {
+                val admitted = admitSize(t, ask, greenClip) ?: continue
+                val maxPx = if (ScalpFloors.isFavorite(code)) 0.99 else ScalpRule.ENTRY_HI
+                val (gn, usd, fee) = walkBuy(q, t.side, admitted.n, maxPx)
+                if (gn <= 0 || gn > admitted.clip) {
+                    if (gn > admitted.clip) gates.block(code, ScalpModels.windowKeyOf(q.ticker),
+                        String.format(Locale.US, "sanity: size %d is above the clip %d", gn, admitted.clip))
+                    continue
+                }
+                gates.entered(code, ScalpModels.windowKeyOf(q.ticker))
+                val cap = if (admitted.capped) String.format(Locale.US, " (green %d capped at clip %d)", greenClip, admitted.clip) else ""
                 changed += t.copy(state = ScalpState.OPEN, contracts = gn, entryPrice = usd / gn, entryFeeUsd = fee, entryAtMs = q.nowMs,
-                    note = String.format(Locale.US, "%s; green size: walked book %d/%d avg %.2f¢", t.note, gn, greenClip, usd / gn * 100))
+                    note = String.format(Locale.US, "%s; green size: walked book %d/%d avg %.2f¢%s", t.note, gn, admitted.clip, usd / gn * 100, cap))
                 continue
             }
             val want = if (t.contracts > 0) t.contracts else StrategyAlgo.clip(controls.state.value, t.variantId, ScalpVariants.clipOf(t.variantId) ?: ShockFav.CLIP)
-            val n = minOf(want, kotlin.math.floor((q.askSize(t.side) ?: 0.0) + 1e-9).toInt())
+            val admitted = admitSize(t, ask, want) ?: continue
+            val n = minOf(admitted.n, kotlin.math.floor((q.askSize(t.side) ?: 0.0) + 1e-9).toInt())
             if (n <= 0) continue
-            if (!FairGapTune.askAllowed(pk?.code, ask, ShockFav.isFavLeg(t.variantId))) { changed += cappedEntry(t, q.nowMs); continue }
+            if (admitted.capped) gates.entered(code, ScalpModels.windowKeyOf(q.ticker))
             changed += t.copy(state = ScalpState.OPEN, contracts = n, entryPrice = ask, entryFeeUsd = ScalpRule.orderFee(n, ask), entryAtMs = q.nowMs,
                 note = String.format(Locale.US, "%s; filled %d @ %.0f¢ after %.1fs", t.note, n, ask * 100, age / 1000.0))
         }
@@ -1523,7 +1537,8 @@ class ScalpBook(
         val (filled, next) = makerQueueStep(t, q, limit, buy = true)
         if (!filled) return next.takeIf { it != t }
         val want = if (t.contracts > 0) t.contracts else ScalpVariants.clipOf(t.variantId) ?: ScalpRule.CONTRACTS
-        val n = minOf(want, kotlin.math.floor((q.askSize(t.side) ?: 0.0) + 1e-9).toInt())
+        val admitted = admitSize(t, limit, want) ?: return next.takeIf { it != t }
+        val n = minOf(admitted.n, kotlin.math.floor((q.askSize(t.side) ?: 0.0) + 1e-9).toInt())
         if (n <= 0) return next.takeIf { it != t }
         val fee = com.dirk.kalshiodds.signal.trade.KalshiFee.makerFee(n, limit, com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(t.ticker))
         return next.copy(
@@ -1664,7 +1679,8 @@ class ScalpBook(
         val size = q.askSize(t.side) ?: 0.0
         val clipCode = ScalpModels.modelOf(t)?.code ?: t.variantId
         val want = if (t.contracts > 0) t.contracts else StrategyAlgo.clip(controls.state.value, clipCode, ScalpVariants.clipOf(clipCode) ?: ScalpRule.CONTRACTS)
-        val n = minOf(want, kotlin.math.floor(size + 1e-9).toInt())
+        val admitted = admitSize(t, ask, want) ?: return miss("sanity")
+        val n = minOf(admitted.n, kotlin.math.floor(size + 1e-9).toInt())
         if (n <= 0) return miss("no displayed depth")
         return t.copy(
             state = ScalpState.OPEN,
@@ -1822,15 +1838,44 @@ class ScalpBook(
         return StrategyAlgo.view(raw, code)
     }
 
+    private class Admitted(val n: Int, val clip: Int, val capped: Boolean)
+
+    /**
+     * Size that may open. Caps [want] at the scalper's own clip and logs when the
+     * request was larger. The strategy floor stays on the entry gate; this is the
+     * size and cash check, so a tenth-cent book can still lift a displayed ask.
+     */
+    private fun admitSize(t: ScalpTrade, price: Double, want: Int): Admitted? {
+        val code = ScalpModels.modelOf(t)?.code ?: t.variantId
+        val clip = ScalpParamSanity.ownClip(code, controls.state.value.settings(code).contracts)
+        val window = ScalpModels.windowKeyOf(t.ticker)
+        val n = minOf(want.coerceAtLeast(0), clip)
+        if (want > clip) {
+            gates.block(code, window, String.format(Locale.US, "sanity: size %d is above the clip %d", want, clip))
+        }
+        if (n <= 0) return null
+        if (price.isFinite() && price > 0.0 && n * price > bankrollUsd() + 1.0) {
+            gates.block(code, window, "sanity: clip costs more than free cash")
+            return null
+        }
+        return Admitted(n, clip, want > clip)
+    }
+
     /** Skip a new paper clip at a nonsense price or size. Logs the reason and does not throw. */
     private fun guardNewEntry(t: ScalpTrade): ScalpTrade {
         if (t.state != ScalpState.PENDING_ENTRY) return t
         val code = ScalpModels.modelOf(t)?.code ?: t.variantId
         val floor = ScalpFloors.cents(code) / 100.0
         val px = t.restingLimit ?: t.signalAsk
-        val why = ScalpParamSanity.entryBlock(t.side, px, t.contracts, floor, bankrollUsd()) ?: return t
-        gates.block(code, ScalpModels.windowKeyOf(t.ticker), why)
-        return t.copy(state = ScalpState.NO_FILL, closedAtMs = t.signalAtMs, note = "${t.note}; $why")
+        val clip = ScalpParamSanity.ownClip(code, controls.state.value.settings(code).contracts)
+        val window = ScalpModels.windowKeyOf(t.ticker)
+        val sized = if (t.contracts > clip) {
+            ScalpParamSanity.entryBlock(t.side, px, t.contracts, floor, bankrollUsd(), clip)?.let { gates.block(code, window, it) }
+            t.copy(contracts = clip, note = "${t.note}; sanity: size ${t.contracts} capped at clip $clip")
+        } else t
+        val why = ScalpParamSanity.entryBlock(sized.side, px, sized.contracts, floor, bankrollUsd(), clip) ?: return sized
+        gates.block(code, window, why)
+        return sized.copy(state = ScalpState.NO_FILL, closedAtMs = sized.signalAtMs, note = "${sized.note}; $why")
     }
 
     /** Log a closed trade whose exit or P&L does not reconcile. The row is kept. */
@@ -2013,7 +2058,9 @@ class ScalpBook(
             if (strategyEntryChecks.size > 2000) strategyEntryChecks.keys.filter { (ScalpTicker.closeMs(it.substringBefore('|')) ?: 0) < t.signalAtMs }.forEach { strategyEntryChecks.remove(it) }
             val plan = cfg.plan(informed, model.code)
             // Hard rule: every Kalshi Scalper strategy trails 3¢ below the peak bid, active from entry.
-            val sp = plan.spec.copy(trail = ScalpV2.TRAIL)
+            val seeded = plan.spec.copy(trail = ScalpV2.TRAIL)
+            val (minPx, maxPx) = ScalpParamSanity.v2Band(model.code, knobs.minEntryCents / 100.0, seeded.maxAsk)
+            val sp = seeded.copy(maxAsk = maxPx, clip = minOf(seeded.clip, ScalpParamSanity.ownClip(model.code, knobs.contracts)))
             if (_all.value.any { isActive(it) && it.variantId == sp.id && it.ticker.equals(t.ticker, true) }) continue
             val stopPct = knobs.stopLossPercent ?: cfg.stopLossPercent
             val stop = plan.stop
@@ -2025,7 +2072,7 @@ class ScalpBook(
                     String.format(Locale.US, " · v2ask=%.4f · v2trail=%.4f · v2arm=%.4f · %s", sp.maxAsk, sp.trail, plan.arm, plan.note + "; learned ${feedback.trades} closed; recent net/ct ${feedback.recentNetPerContract}") +
                     String.format(Locale.US, " · v2tp=%.4f · v2hold=%d · v2clip=%d", (knobs.takeProfitCents ?: if (cfg.manual) cfg.takeProfitCents else 0) / 100.0, knobs.maxHoldSeconds ?: cfg.maxHoldSeconds, sp.clip) +
                     (if (true) " · v2peakrule=1 · v2stopPct=$stopPct · exit policy: $stopPct% below fill / ${Math.round(sp.trail * 100)}¢ below bid peak, active from entry" else "") +
-                    String.format(Locale.US, " · %s · conf=%.3f", ScalperBrain.tag(bx), conf) + " · v2min=${knobs.minEntryCents / 100.0} · v2until=${knobs.untilMinute} · v2sidecap=${knobs.maxOpenPerSide} · v2cadence=${knobs.cadenceSeconds}",
+                    String.format(Locale.US, " · %s · conf=%.3f · v2min=%.4f · v2until=%d · v2sidecap=%d · v2cadence=%d", ScalperBrain.tag(bx), conf, minPx, knobs.untilMinute, knobs.maxOpenPerSide, knobs.cadenceSeconds),
                 ruleVersion = "${ScalpRule.VERSION}|${sp.id}|P"))
         }
     }
@@ -2274,12 +2321,24 @@ class ScalpBook(
                         val activeIds = _all.value.filter { it.state == ScalpState.PENDING_ENTRY }.map { it.id }.toSet()
                         pendingEntryChecks.keys.retainAll(activeIds)
                     }
-                    val seed = ScalpV2.spec(t.variantId).let { if (greenOf(t)) it.copy(clip = maxOf(it.clip, greenClip), walk = true) else it }
-                    val sp = seed.copy(maxAsk = minOf(ScalpRule.ENTRY_HI, ScalpV2.savedNumber(t.note, "v2ask", seed.maxAsk)),
-                        clip = ScalpV2.savedNumber(t.note, "v2clip", seed.clip.toDouble()).toInt().coerceIn(1, 1000))
+                    val seed = ScalpV2.spec(t.variantId)
+                    val (minAsk, maxAsk) = ScalpParamSanity.v2Band(
+                        code,
+                        ScalpV2.savedNumber(t.note, "v2min", ScalpFloors.cents(code) / 100.0),
+                        ScalpV2.savedNumber(t.note, "v2ask", seed.maxAsk)
+                    )
+                    val noteClip = ScalpV2.savedNumber(t.note, "v2clip", seed.clip.toDouble()).toInt().coerceAtLeast(1)
+                    val own = ScalpParamSanity.ownClip(code, cfg.settings(code).contracts)
+                    val sp = seed.copy(maxAsk = minOf(ScalpRule.ENTRY_HI, maxAsk), clip = minOf(noteClip, own))
                     val ask = q.ask(t.side) ?: continue
-                    val minAsk = ScalpV2.savedNumber(t.note, "v2min", .01).coerceIn(.01, .50)
-                    if (ask < minAsk - 1e-9 || !ScalpV2.entryOk(ask, sp.maxAsk)) continue
+                    if (ask < minAsk - 1e-9 || !ScalpV2.entryOk(ask, sp.maxAsk)) {
+                        if (ask < minAsk - 1e-9) {
+                            ScalpParamSanity.entryBlock(t.side, ask, sp.clip, minAsk, bankrollUsd(), sp.clip)?.let {
+                                gates.block(code, ScalpModels.windowKeyOf(key), it)
+                            }
+                        }
+                        continue
+                    }
                     if (FairGapTune.entryGated(code) && FairGapTune.entryBlock(q, t.side, ask, sp.clip, entryView(code) ?: explicit(code), false, q.nowMs) != null) continue
                     if (cfg.dipCents > 0) {
                         val historyPrices = history[key].orEmpty().filter { it.atMs in (q.nowMs - cfg.windowSeconds * 1000L)..q.nowMs }
@@ -2290,16 +2349,22 @@ class ScalpBook(
                     if (sp.walk) {
                         // 0.3.68: lift real ask levels up to max ask; partial fill allowed, avg price gets worse with depth.
                         val (n, usd, fee) = cfg.walkBuy(q.askLadder(t.side).filter { it.first >= minAsk - 1e-9 }, sp.clip, sp.maxAsk)
-                        if (n <= 0) continue
+                        if (n <= 0 || n > sp.clip) {
+                            if (n > sp.clip) gates.block(code, ScalpModels.windowKeyOf(key),
+                                String.format(Locale.US, "sanity: size %d is above the clip %d", n, sp.clip))
+                            continue
+                        }
                         val avg = usd / n
                         controls.recordEntry(q.nowMs); openCount++; openByModelSide[sideKey] = (openByModelSide[sideKey] ?: 0) + 1
+                        gates.entered(code, ScalpModels.windowKeyOf(key))
                         out += t.copy(state = ScalpState.OPEN, contracts = n, entryPrice = avg, entryFeeUsd = fee, entryAtMs = q.nowMs,
                             note = ScalpV2.entryRiskNote(String.format(Locale.US, "%s; walked book: filled %d/%d avg %.2f¢ (top %.0f¢) after %.1fs", t.note, n, sp.clip, avg * 100, ask * 100, age / 1000.0), q.bid(t.side)))
                         continue
                     }
                     val n = minOf(cfg.affordableContracts(ask, sp.clip), kotlin.math.floor((q.askSize(t.side) ?: 0.0) + 1e-9).toInt())
-                    if (n <= 0) continue
+                    if (n <= 0 || n > sp.clip) continue
                     controls.recordEntry(q.nowMs); openCount++; openByModelSide[sideKey] = (openByModelSide[sideKey] ?: 0) + 1
+                    gates.entered(code, ScalpModels.windowKeyOf(key))
                     out += t.copy(state = ScalpState.OPEN, contracts = n, entryPrice = ask, entryFeeUsd = ScalpRule.orderFee(n, ask), entryAtMs = q.nowMs,
                         note = ScalpV2.entryRiskNote(String.format(Locale.US, "%s; filled %d @ %.0f¢ after %.1fs", t.note, n, ask * 100, age / 1000.0), q.bid(t.side)))
                 }
@@ -2333,7 +2398,7 @@ class ScalpBook(
                     val target = ScalpV2.savedNumber(t.note, "v2tp", 0.0)
                     val timeExit = if (holdExpired) (if (fgT) "fair-gap rule: ${maxHold.toInt()}s hold done" else "V2 user max hold reached") else null
                     val priceExit = if (fgT) null else bid?.let {
-                        (if (ScalpV2.peakRule(t)) ScalpV2.peakExit(entry, ScalpV2.stopPercent(t), pk, it, trail)
+                        (if (ScalpV2.peakRule(t)) ScalpV2.peakExit(entry, ScalpV2.stopPercent(t), pk, it, trail, t.contracts)
                         else ScalpV2.exit(entry, stop, pk, it, armed, t.contracts, trail, armThreshold = arm, netGain = ScalpV2.netPerContract(t, it)))
                             ?: if (target > 0 && ScalpV2.netPerContract(t, it) >= target - 1e-9) "V2 user net take-profit" else null
                     }

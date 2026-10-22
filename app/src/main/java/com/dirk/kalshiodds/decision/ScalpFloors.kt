@@ -70,6 +70,30 @@ object ScalpFloors {
         return 55.coerceAtLeast(floor + 1)
     }
 
+    /**
+     * v2 dip and v2 fair-gap copies. Their notes stamped v2ask to the signal
+     * price, so a 12¢ print became the whole ceiling.
+     */
+    fun repairsTightAsk(code: String): Boolean {
+        if (code == KeptScalpers.V2_DIP_ID || code == KeptScalpers.V2_FAIR_ID) return true
+        if (code.startsWith("v2-dip-") || code.startsWith("v2-g10-")) return true
+        val kind = ScalpVariants.of(code)?.kind
+        return kind == ScalpVariants.Kind.V2_DIP || kind == ScalpVariants.Kind.V2_FAIR
+    }
+
+    /**
+     * Lowest ceiling that is still a band, in cents.
+     * On the v2 dip / fair-gap family a ceiling under 30¢ is the collapsed
+     * signal-price cap (the 10–14¢ band). It is put back on the parent 55¢
+     * ceiling. Every other scalper may tighten to one cent above its floor.
+     */
+    fun minCeilingCents(code: String): Int {
+        val floor = cents(code)
+        val ceil = ceilingCents(code)
+        if (!repairsTightAsk(code)) return (floor + 1).coerceAtMost(ceil)
+        return 30.coerceIn(floor + 1, ceil)
+    }
+
     /** Fair threshold in cents for a favourite, or null. */
     fun fairMinCents(code: String): Int? {
         if (Research.isLate(code)) return null

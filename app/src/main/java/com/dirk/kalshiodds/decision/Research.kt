@@ -145,7 +145,14 @@ object Research {
         val floor = ScalpFloors.cents(code)
         val ceil = ScalpFloors.ceilingCents(code)
         val step = PaperSettingTuner.stepCents(net)
-        val winner = net > 0.0
+        val trackedN = s.aiN + 1
+        val trackedNet = (if (s.aiNet.isFinite()) s.aiNet else 0.0) + net
+        // One winning fill is not a sample. Loosen only after enough closes and a positive net.
+        val winner = net > 0.0 && trackedN >= PaperSettingTuner.LOOSEN_MIN && trackedNet > 0.0
+        if (net > 0.0 && !winner) {
+            val held = String.format(java.util.Locale.US, "AI held settings (%d closes, net %+.2f; loosen after %d and a positive net)", trackedN, trackedNet, PaperSettingTuner.LOOSEN_MIN)
+            return ScalpParamSanity.settings(code, s.copy(aiN = trackedN, aiNet = trackedNet, aiNote = held))
+        }
         val notes = ArrayList<String>()
         val min0 = s.minEntryCents.coerceAtLeast(floor)
         var min = min0
@@ -164,11 +171,11 @@ object Research {
         } else {
             val cur = max ?: defaultMaxCents
             val base = s.aiBaseCents ?: cur
-            val nx = if (winner) minOf(cur + step, base + 12, ceil) else maxOf(cur - step, base - 20, floor + 1)
+            val nx = if (winner) minOf(cur + step, base + 12, ceil) else maxOf(cur - step, base - 20, ScalpFloors.minCeilingCents(code))
             if (nx != cur) notes += "highest buy ${cur}¢ → ${nx}¢"
             max = nx
         }
-        val clip0 = contracts ?: 10
+        val clip0 = contracts ?: ScalpParamSanity.builtinClip(code)
         val clip1 = if (winner) (clip0 + step).coerceAtMost(100) else (clip0 - step).coerceAtLeast(1)
         if (clip1 != clip0) {
             contracts = clip1
@@ -196,8 +203,8 @@ object Research {
             untilMinute = until,
             stopLossPercent = stopPct,
             aiBaseCents = anchor,
-            aiN = s.aiN + 1,
-            aiNet = 0.0,
+            aiN = trackedN,
+            aiNet = trackedNet,
             aiNote = note
         ))
     }

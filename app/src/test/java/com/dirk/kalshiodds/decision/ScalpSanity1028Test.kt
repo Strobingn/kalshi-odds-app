@@ -42,7 +42,8 @@ class ScalpSanity1028Test {
     @Test fun livePostNamesTunerChangesInsteadOfNoSettingChanges() {
         val code = KeptScalpers.V2_DIP_ID
         val controls = ScalpControls()
-        val tape = PaperTape(code, 6, 5, 3.0, 5.0 / 6.0, listOf(0.4, 0.5, 0.6, 0.2, 0.8, 0.5), emptyList())
+        val recent = List(12) { 0.4 }
+        val tape = PaperTape(code, 12, 12, recent.sum(), 1.0, recent, emptyList())
         val changes = PaperSettingTuner.propose(controls, listOf(tape))
         assertTrue(changes.isNotEmpty())
         assertTrue(changes.none { it.setting.contains("bench") })

@@ -126,11 +126,18 @@ object StrategyAlgo {
         return raw.roundToInt().coerceIn(knob.min.toInt(), knob.max.toInt())
     }
 
-    /** Paper clip: AI size when set, otherwise [fallback], never above the paper cap. */
+    /**
+     * Paper clip. A saved per-scalper contracts value is the clip (manual or tuner).
+     * An algorithm override cannot grow past the built-in clip, and green size is not a clip.
+     */
     fun clip(c: ScalpControls, code: String?, fallback: Int): Int {
         val cap = contractCap(c)
         if (code.isNullOrBlank()) return fallback.coerceIn(1, cap)
-        return storedInt(c, code, "contracts", fallback).coerceIn(1, cap)
+        val explicit = c.strategySettings[code]?.contracts
+        if (explicit != null) return explicit.coerceIn(1, 500)
+        val own = ScalpParamSanity.ownClip(code, null)
+        val algo = c.algo[code]?.get("contracts")?.takeIf { it.isFinite() }?.roundToInt()
+        return minOf((algo ?: fallback).coerceIn(1, cap), own).coerceAtLeast(1)
     }
 
     /** Numeric overlay for an original strategy. Does not change the params id the book uses to match open trades. */

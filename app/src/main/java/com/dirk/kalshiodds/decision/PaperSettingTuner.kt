@@ -6,11 +6,14 @@ import kotlin.math.roundToInt
 
 /**
  * On-device paper tuner. It runs after a fill and after a window, without an LLM call.
- * Winners get a looser trigger and a bigger clip. Losers get tighter and smaller.
- * It never benches, never pauses, and never moves a setting the owner just edited.
- * Steps scale with recent P&L. The strategy floor is a hard stop.
+ * It loosens and enlarges only a scalper that is net-positive after fees over at least
+ * [LOOSEN_MIN] recent closes. A loser gets tighter and a smaller clip.
+ * It never loosens a loser, never benches, never pauses, and never moves a setting the owner just edited.
+ * Steps scale with recent P&L. The strategy floor and the sane ask ceiling are hard stops.
  */
 object PaperSettingTuner {
+    /** Recent closes required before a positive net may loosen or enlarge a clip. */
+    const val LOOSEN_MIN = 10
     data class Change(
         val scalper: String,
         val setting: String,
@@ -34,15 +37,16 @@ object PaperSettingTuner {
             if (ScalpModels.modelByCode(tape.code) == null || tape.code == "v2-llm") continue
             val fields = fieldsFor(tape.code)
             if (fields.isEmpty()) continue
-            val recent = tape.recentReal.filter { it.isFinite() }.takeLast(8)
-            val sample = if (recent.isNotEmpty()) recent else if (tape.trades > 0 && tape.netUsd.isFinite()) listOf(tape.netUsd) else continue
+            val sample = tape.recentReal.filter { it.isFinite() }.takeLast(20)
+            if (sample.isEmpty()) continue
             val net = sample.sum()
             if (!net.isFinite() || net == 0.0) continue
             val wins = sample.count { it > 0.0 }
             val wr = wins.toDouble() / sample.size
             val avg = net / sample.size
             val step = stepCents(avg)
-            val winner = net > 0.0 && wr >= 0.5
+            // A short hot streak is not a winner. Net has to be positive after fees, not just the win rate.
+            val winner = sample.size >= LOOSEN_MIN && net > 0.0
             val loser = net < 0.0
             if (!winner && !loser) continue
             val view = controls.settings(tape.code)
@@ -61,7 +65,7 @@ object PaperSettingTuner {
                 val hi: Int
                 when (field) {
                     "minEntryCents" -> { lo = floor; hi = (ceil - 1).coerceAtLeast(floor) }
-                    "maxEntryCents" -> { lo = floor + 1; hi = ceil }
+                    "maxEntryCents" -> { lo = ScalpFloors.minCeilingCents(tape.code); hi = ceil }
                     "contracts" -> { lo = 1; hi = 100 }
                     "untilMinute" -> { lo = 1; hi = 14 }
                     "stopCents", "stopLossPercent" -> { lo = 1; hi = 48 }
@@ -77,17 +81,18 @@ object PaperSettingTuner {
             }
             val max0 = view.maxEntryCents ?: ceil
             val min0 = view.minEntryCents
+            val clip0 = view.contracts ?: ScalpParamSanity.builtinClip(tape.code)
             if (winner) {
                 put("maxEntryCents", view.maxEntryCents, max0 + step)
                 put("minEntryCents", min0, min0 - step)
-                put("contracts", view.contracts, (view.contracts ?: 10) + step)
+                put("contracts", view.contracts, clip0 + step)
                 put("untilMinute", view.untilMinute, view.untilMinute + 1)
                 put("takeProfitCents", view.takeProfitCents, (view.takeProfitCents ?: 0) + step)
                 if ("edgeCents" in fields) put("edgeCents", view.edgeCents, (view.edgeCents ?: Research.defaultEdge(tape.code)) - step)
             } else {
                 put("maxEntryCents", view.maxEntryCents ?: max0, max0 - step)
                 put("minEntryCents", min0, min0 + 1)
-                put("contracts", view.contracts, (view.contracts ?: 10) - step)
+                put("contracts", view.contracts, clip0 - step)
                 put("untilMinute", view.untilMinute, view.untilMinute - 1)
                 if (view.stopCents != null || "stopCents" in fields) put("stopCents", view.stopCents ?: 8, (view.stopCents ?: 8) - 1)
                 if ("stopLossPercent" in fields && view.stopCents == null) put("stopLossPercent", view.stopLossPercent ?: 20, (view.stopLossPercent ?: 20) - 1)
@@ -107,7 +112,7 @@ object PaperSettingTuner {
                 "enabled", "aiLearns", "contracts", "minEntryCents", "maxEntryCents", "stopCents", "stopLossPercent",
                 "takeProfitCents", "maxHoldSeconds", "untilMinute", "cadenceSeconds", "maxOpenPerSide"
             )
-            else -> setOf("aiLearns", "minEntryCents", "maxEntryCents", "untilMinute", "stopLossPercent", "takeProfitCents", "maxHoldSeconds")
+            else -> setOf("aiLearns", "contracts", "minEntryCents", "maxEntryCents", "untilMinute", "stopLossPercent", "takeProfitCents", "maxHoldSeconds")
         }
     }
 }
