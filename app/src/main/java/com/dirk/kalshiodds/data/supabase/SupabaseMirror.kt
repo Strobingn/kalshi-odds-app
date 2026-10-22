@@ -46,6 +46,27 @@ class SupabaseMirror(
         val shadow: List<com.dirk.kalshiodds.signal.paper.ShadowTicket> = emptyList()
     )
 
+    /** Closed paper scalps only. One-time card restore; does not touch other kinds. */
+    fun pullScalps(settings: DataHubSettings): List<com.dirk.kalshiodds.decision.ScalpTrade> {
+        if (!settings.supabaseConfigured) return emptyList()
+        val out = ArrayList<com.dirk.kalshiodds.decision.ScalpTrade>()
+        var after: String? = null
+        var pages = 0
+        while (pages < MAX_PAGES_PER_KIND) {
+            val page = fetchPage(settings, "scalp", after)
+            val last = page.lastOrNull()?.key ?: break
+            if (after != null && last <= after) break
+            page.forEach { rec ->
+                val o = runCatching { JSONObject(rec.payload) }.getOrNull() ?: return@forEach
+                SyncRows.scalp(o)?.let { out += it }
+            }
+            pages++
+            if (page.size < pageSize) break
+            after = last
+        }
+        return out
+    }
+
     fun restore(settings: DataHubSettings, seen: SeenKeys): Restore {
         if (!settings.supabaseConfigured) {
             return Restore(ImportBatch(), emptyList(), "Supabase is not configured")

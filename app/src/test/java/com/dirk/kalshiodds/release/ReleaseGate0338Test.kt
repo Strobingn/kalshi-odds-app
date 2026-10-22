@@ -119,6 +119,8 @@ class ReleaseGate0338Test {
 
     // 1.0.14: the fair-t1/t2 tweak cards are extra Fair-gap primaries; these 0.3.38 gates keep checking the seed row only.
     private fun ScalpBook.legacy() = snapshot().filter { it.variantId !in TWEAK_IDS }
+    /** The clip signaled at [at]. Later quotes may open another clip of the same rule. */
+    private fun ScalpBook.at(at: Long) = legacy().filter { it.signalAtMs == at }
     private val TWEAK_IDS = com.dirk.kalshiodds.decision.ScalpParams.FAIR_TWEAKS.map { it.id }.toSet()
 
     @Test
@@ -143,13 +145,13 @@ class ReleaseGate0338Test {
         val b = book()
         val t0 = close - 600_000L
         b.onQuote(q(t0, 0.34, 0.35), enabled = true)
-        assertEquals(ScalpState.PENDING_ENTRY, b.legacy().single().state)
+        assertEquals(ScalpState.PENDING_ENTRY, b.at(t0).single().state)
         // Same book (no newer book) a second later: no fill yet — latency ≥ 1 tick.
         b.onQuote(q(t0 + 1_000L, 0.34, 0.35, bookAtMs = t0), enabled = true)
-        assertEquals(ScalpState.PENDING_ENTRY, b.legacy().single().state)
+        assertEquals(ScalpState.PENDING_ENTRY, b.at(t0).single().state)
         // Newer book 3 s later at 36¢ (within 1¢ slippage): fills at 36¢, the later book's price.
         b.onQuote(q(t0 + 3_000L, 0.35, 0.36), enabled = true)
-        val t = b.legacy().single()
+        val t = b.at(t0).single()
         assertEquals(ScalpState.OPEN, t.state)
         assertEquals(0.36, t.entryPrice!!, 1e-12)
         assertEquals(ScalpRule.orderFee(10, 0.36), t.entryFeeUsd, 1e-12)
@@ -161,11 +163,13 @@ class ReleaseGate0338Test {
         val t0 = close - 600_000L
         b.onQuote(q(t0, 0.34, 0.35), enabled = true)
         b.onQuote(q(t0 + 3_000L, 0.38, 0.39), enabled = true)
-        assertEquals(ScalpState.NO_FILL, b.legacy().single().state)
+        assertEquals(ScalpState.NO_FILL, b.at(t0).single().state)
         val b2 = book()
         b2.onQuote(q(t0, 0.34, 0.35), enabled = true)
         b2.onQuote(q(t0 + 3_000L, 0.34, 0.35, askSize = 4.0), enabled = true)
-        assertEquals(ScalpState.NO_FILL, b2.legacy().single().state)
+        val partial = b2.at(t0).single()
+        assertEquals(ScalpState.OPEN, partial.state)
+        assertEquals(4, partial.contracts)
     }
 
     @Test
@@ -176,10 +180,10 @@ class ReleaseGate0338Test {
         b.onQuote(q(t0 + 3_000L, 0.34, 0.35), enabled = true) // fill at 35¢
         // Market rallies to 52¢ bid with fair 50¢: selling beats holding → exit decided.
         b.onQuote(q(t0 + 6_000L, 0.52, 0.53), enabled = true)
-        assertEquals(ScalpState.PENDING_EXIT, b.legacy().single().state)
+        assertEquals(ScalpState.PENDING_EXIT, b.at(t0).single().state)
         // Next fresh book ≥ 3 s later: sells 10 at that book's bid (51¢).
         b.onQuote(q(t0 + 9_000L, 0.51, 0.52), enabled = true)
-        val t = b.legacy().single()
+        val t = b.at(t0).single()
         assertEquals(ScalpState.CLOSED, t.state)
         val expected = 10 * 0.51 - ScalpRule.orderFee(10, 0.51) - (10 * 0.35 + ScalpRule.orderFee(10, 0.35))
         assertEquals(expected, t.netUsd!!, 1e-9)
@@ -197,11 +201,11 @@ class ReleaseGate0338Test {
         b.onQuote(q(t0 + 3_000L, 0.34, 0.35), enabled = true)
         b.onQuote(q(t0 + 6_000L, 0.52, 0.53), enabled = true)
         b.onQuote(q(t0 + 9_000L, 0.51, 0.52, bidSize = 4.0), enabled = true)
-        val partial = b.legacy().single()
+        val partial = b.at(t0).single()
         assertEquals(ScalpState.PENDING_EXIT, partial.state)
         assertEquals(4, partial.soldContracts)
         b.onQuote(q(t0 + 12_000L, 0.50, 0.51, bidSize = 100.0), enabled = true)
-        val done = b.legacy().single()
+        val done = b.at(t0).single()
         assertEquals(ScalpState.CLOSED, done.state)
         val expectedProceeds = 4 * 0.51 + 6 * 0.50
         assertEquals(expectedProceeds, done.proceedsUsd, 1e-9)
@@ -217,14 +221,14 @@ class ReleaseGate0338Test {
         val c = book()
         a.onQuote(q(t0, 0.34, 0.35), enabled = true)
         c.onQuote(q(t0, 0.34, 0.35), enabled = true)
-        assertEquals(a.legacy().single().copy(id = "x"), c.legacy().single().copy(id = "x"))
+        assertEquals(a.at(t0).single().copy(id = "x"), c.at(t0).single().copy(id = "x"))
         // Diverging futures only affect fills after the latency.
         a.onQuote(q(t0 + 3_000L, 0.34, 0.35), enabled = true)
         c.onQuote(q(t0 + 3_000L, 0.60, 0.61), enabled = true)
-        assertEquals(0.35, a.legacy().single().signalAsk, 1e-12)
-        assertEquals(0.35, c.legacy().single().signalAsk, 1e-12)
-        assertEquals(ScalpState.OPEN, a.legacy().single().state)
-        assertEquals(ScalpState.NO_FILL, c.legacy().single().state)
+        assertEquals(0.35, a.at(t0).single().signalAsk, 1e-12)
+        assertEquals(0.35, c.at(t0).single().signalAsk, 1e-12)
+        assertEquals(ScalpState.OPEN, a.at(t0).single().state)
+        assertEquals(ScalpState.NO_FILL, c.at(t0).single().state)
         // Entry signal is a pure function of the one quote it sees.
         val one = q(t0, 0.34, 0.35)
         assertEquals(ScalpRule.entrySignal(one), ScalpRule.entrySignal(one.copy()))
@@ -238,9 +242,9 @@ class ReleaseGate0338Test {
         b.onQuote(q(t0 + 3_000L, 0.34, 0.35), enabled = true)
         // 20 s left → time stop decided; market then closes with no exit fill → settles.
         b.onQuote(q(close - 15_000L, 0.40, 0.41, bidSize = 0.0), enabled = true)
-        assertEquals(ScalpState.PENDING_EXIT, b.legacy().single().state)
+        assertEquals(ScalpState.PENDING_EXIT, b.at(t0).single().state)
         b.settle("KXBTC15M-26OCT091015-15", "yes", close + 10_000L)
-        val t = b.legacy().single()
+        val t = b.at(t0).single()
         assertEquals(ScalpState.CLOSED, t.state)
         assertEquals(10 * 1.0 - (10 * 0.35 + ScalpRule.orderFee(10, 0.35)), t.netUsd!!, 1e-9)
     }

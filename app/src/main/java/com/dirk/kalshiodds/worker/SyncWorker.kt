@@ -84,6 +84,13 @@ class SyncWorker(
                 ackPrefs.edit().putBoolean(KEY_LEDGER_ACK_APPLIED, true).apply()
             }
             yield()
+            if (!ackPrefs.getBoolean(KEY_SCALP_HISTORY, false)) {
+                runCatching {
+                    val prior = com.dirk.kalshiodds.data.supabase.SupabaseMirror(http).pullScalps(hub)
+                    if (prior.isNotEmpty()) container.scalp.importRestored(prior)
+                }
+                ackPrefs.edit().putBoolean(KEY_SCALP_HISTORY, true).apply()
+            }
             val newest = container.scalp.unsyncedClosed(SCALP_NEWEST)
             if (halted()) return@withContext Result.retry()
             val result = sync.roundTrip(
@@ -97,6 +104,7 @@ class SyncWorker(
                     paperFills = paper.fillsForSync(),
                     settingsSnapshot = SettingsRestore.snapshot(settings),
                     scalps = newest,
+                    scalpGates = container.scalp.gateSnapshot(),
                     shadow = container.shadow.book.snapshot().tickets.filter { it.createdAtMs >= startedMs - 6 * 3_600_000L }
                 ),
                 store = store,
@@ -186,6 +194,7 @@ class SyncWorker(
         const val KEY_SCALP_ACK = "ack_closed_ms"
         const val KEY_SCALP_UNSYNCED = "unsynced"
         const val KEY_LEDGER_ACK_APPLIED = "ledger_ack_applied_0367"
+        const val KEY_SCALP_HISTORY = "scalp_history_imported"
         const val SCALP_BATCH = 500
         const val SCALP_CHUNKS = 12
         const val SCALP_NEWEST = 300

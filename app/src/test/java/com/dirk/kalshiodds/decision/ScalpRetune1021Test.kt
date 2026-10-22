@@ -24,7 +24,9 @@ class ScalpRetune1021Test {
             assertNull(it, ScalpRetune.cardNote(it))
         }
         assertTrue(FairGapTune.cardNoteMissing("sf41"))
-        assertTrue(FairGapTune.favUsesFairGapGate("sf41"))
+        assertFalse(FairGapTune.favUsesFairGapGate("sf41"))
+        assertFalse(FairGapTune.entryGated("sf41"))
+        assertFalse(FairGapTune.entryGated("sf42"))
         assertTrue(FairGapTune.entryGated("sf01"))
         assertFalse(FairGapTune.entryGated("fcfade"))
         assertFalse(FairGapTune.entryGated("r-late"))

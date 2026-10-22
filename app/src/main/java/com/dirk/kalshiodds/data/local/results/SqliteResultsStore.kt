@@ -1136,6 +1136,16 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
 
     /** 0.3.38 paper scalps: insert or replace one row by id. Never deletes. */
     override fun upsertScalp(trade: com.dirk.kalshiodds.decision.ScalpTrade) {
+        var synced = 0
+        db.readableDatabase.rawQuery("SELECT state, synced FROM ${com.dirk.kalshiodds.data.local.paper.ScalpSchema.TABLE} WHERE id = ?", arrayOf(trade.id)).use { c ->
+            if (c.moveToFirst()) {
+                val prevState = c.getString(0)
+                val prevSynced = c.getInt(1)
+                val opened = trade.state == com.dirk.kalshiodds.decision.ScalpState.OPEN && prevState != "OPEN"
+                val closed = trade.state == com.dirk.kalshiodds.decision.ScalpState.CLOSED && prevState != "CLOSED"
+                synced = if (opened || closed) 0 else prevSynced
+            }
+        }
         val v = ContentValues().apply {
             put("id", trade.id)
             put("ticker", trade.ticker)
@@ -1158,7 +1168,7 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
             put("note", trade.note)
             put("rule_version", trade.ruleVersion)
             put("scalper_id", com.dirk.kalshiodds.decision.ScalpModels.scalperIdOf(trade) ?: "")
-            put("synced", 0)
+            put("synced", synced)
         }
         db.writableDatabase.insertWithOnConflict(
             com.dirk.kalshiodds.data.local.paper.ScalpSchema.TABLE, null, v, SQLiteDatabase.CONFLICT_REPLACE
@@ -1329,7 +1339,7 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
 
     /** Uploader: unsynced closed primaries by index (synced, closed_at_ms), oldest first. */
     override fun unsyncedClosed(limit: Int): List<com.dirk.kalshiodds.decision.ScalpTrade> = runCatching {
-        scalpRows("SELECT * FROM ${ST.TABLE} WHERE synced = 0 AND state = 'CLOSED' AND scalper_id IS NOT NULL AND scalper_id != '' ORDER BY closed_at_ms ASC LIMIT $limit", null)
+        scalpRows("SELECT * FROM ${ST.TABLE} WHERE synced = 0 AND state IN ('OPEN','CLOSED') AND scalper_id IS NOT NULL AND scalper_id != '' ORDER BY COALESCE(entry_at_ms, closed_at_ms, signal_at_ms) ASC LIMIT $limit", null)
     }.getOrDefault(emptyList())
 
     override fun markSynced(ids: List<String>) {

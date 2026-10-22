@@ -52,7 +52,7 @@ object ScalpRule {
     const val TAU_MAX_S = 900.0
     /** 0.3.40: hard exit at ≥ 60 s left — never hold into the final (settlement-averaging) minute. */
     const val TIME_STOP_S = 60.0
-    /** 0.3.40: re-entry cooldown after a scalp closes on the same market (per strategy variant). */
+    /** Kept for older notes. Paper entries do not wait on this. */
     const val REENTRY_COOLDOWN_MS = 15_000L
     /** 0.3.40 multi-strategy: look-back for dip / momentum triggers, and the minimum history needed. */
     const val LOOKBACK_MS = 60_000L
@@ -68,6 +68,7 @@ object ScalpRule {
     const val SLIPPAGE = 0.01
     const val LATENCY_MS = 3_000L
     const val FRESH_BOOK_MS = 10_000L
+    /** Kept for older notes. Paper entries are not capped per window. */
     const val MAX_ENTRIES_PER_MARKET = 12
     const val PROMOTION_ROUND_TRIPS = 300
     /** 0.3.43 CF-reprice. */
@@ -483,6 +484,20 @@ class ScalpBook(
     private val idFactory: () -> String = { UUID.randomUUID().toString() }
 ) {
     private val lock = Any()
+    private val gates = ScalpGateLog()
+    /** Close time last seen on a quote. Wins over the ticker stamp when a test pins closeMs. */
+    private val closeSeen = HashMap<String, Long>()
+
+    /** Last blocking gate for one scalper, for the Scalp tab. Null when the latest tick entered. */
+    fun gateLine(code: String, windowKey: String? = null): String? = gates.line(code, windowKey)
+
+    fun gateSnapshot(): List<ScalpGateLog.SyncRow> = gates.snapshot(KeptScalpers.IDS + ScalpVariants.IDS)
+
+    /** Book or spot is missing. Every live scalper shows the same outage reason until a fresh tick. */
+    fun noteOutage(tickerOrWindow: String) {
+        val key = if (tickerOrWindow.contains('-')) ScalpModels.windowKeyOf(tickerOrWindow) else tickerOrWindow
+        gates.noteOutage(key.ifBlank { "outage" }, KeptScalpers.IDS + ScalpVariants.IDS)
+    }
     // 0.3.67: only open/pending rows live in RAM; closed history stays in SQLite + scalp_stats.
     private val _all = MutableStateFlow(store.loadActiveScalps().sortedByDescending { it.signalAtMs })
     private val _trades = MutableStateFlow(_all.value.filter { it.isPrimary })
@@ -560,6 +575,8 @@ class ScalpBook(
     private fun isActive(t: ScalpTrade) = t.state != ScalpState.CLOSED && t.state != ScalpState.NO_FILL
 
     fun onQuote(q: ScalpRule.Quote, enabled: Boolean): List<ScalpTrade> = synchronized(lock) {
+        closeSeen[q.ticker.uppercase()] = q.closeMs
+        expireOrphansLocked(q.nowMs)
         if (q.nowMs / 15_000L != (_lastPruneBucket)) { _lastPruneBucket = q.nowMs / 15_000L; pruneClosed(q.nowMs) }
         _marks.value = (_marks.value + (q.ticker.uppercase() to q)).let { m ->
             if (m.size <= ScalpMemory.MAX_TICKERS) m else m.filterValues { it.closeMs > q.nowMs - 60_000L || it.ticker.equals(q.ticker, true) }
@@ -594,7 +611,9 @@ class ScalpBook(
             val p = tuned(baseP, ScalpModels.modelOf(t)?.code)
             step(t, q, p)?.let { changed += it }
         }
-        if (enabled) {
+        if (!q.fresh() || q.bookGap || q.yesBid == null || q.yesAsk == null) {
+            gates.noteOutage(ScalpModels.windowKeyOf(q.ticker).ifBlank { "outage" }, KeptScalpers.IDS + ScalpVariants.IDS)
+        } else if (enabled) {
             val run = (primaries + variants).distinctBy { it.id }
             // 0.3.50: per-model slice usage computed once per quote from active rows (was a full-ledger scan per candidate).
             val sliceUsed = HashMap<ScalpModels.Model, Double>()
@@ -606,21 +625,20 @@ class ScalpBook(
                 val modelCode = ScalpModels.modelOf(p).code
                 if (com.dirk.kalshiodds.decision.insights.ScalpFreeze.blocksRestored(modelCode, controls.state.value.benchOverrides[modelCode])) continue
                 val mine = mineAll.filter { it.variantId == p.id }.map { old -> changed.firstOrNull { it.id == old.id } ?: old }
-                if (!liveExtras && mine.count { it.state != ScalpState.NO_FILL } >= ScalpRule.MAX_ENTRIES_PER_MARKET) continue
                 if (q.nowMs >= q.closeMs) continue
-                val lastClose = mine.mapNotNull { it.closedAtMs }.maxOrNull()
-                if (lastClose != null && q.nowMs - lastClose < ScalpRule.REENTRY_COOLDOWN_MS) continue
-                val openSides = mine.filter { isActive(it) }.map { it.side }.toSet()
-                // 0.3.43 CF-reprice: one direction per market (no YES and NO at once).
-                val free = if (p.strategy == ScalpStrategy.CF_REPRICE && openSides.isNotEmpty()) emptyList()
-                    else listOf("YES", "NO").filter { it !in openSides }
-                if (free.isEmpty()) continue
-                val (sig, _) = ScalpRule.strategySignal(q, tuned(p, ScalpModels.modelOf(p).code), free, recent)
+                val window = ScalpModels.windowKeyOf(q.ticker)
+                // A new clip on every trigger. An open or in-flight clip does not block the next one.
+                val free = listOf("YES", "NO")
+                val (sig, skip) = ScalpRule.strategySignal(q, tuned(p, ScalpModels.modelOf(p).code), free, recent)
+                if (sig == null) gates.block(modelCode, window, skip)
                 if (sig != null && ScalpRule.buyPriceOk(if (p.maker) q.bid(sig.side) else sig.ask)) {
                     val role = if (p.id in primaryIds) "P" else "S"
                     if (role == "P" && !shadowCode(ScalpModels.modelOf(p).code)) { // 1.0.14: frozen/benched entries reserve nothing
                         val cost = sig.ask * ScalpRule.CONTRACTS + ScalpRule.orderFee(ScalpRule.CONTRACTS, sig.ask)
-                        if (openCost + cost > bankrollUsd() + 1e-9) continue // paper bankroll fully committed
+                        if (openCost + cost > bankrollUsd() + 1e-9) {
+                            gates.block(modelCode, window, "paper cash spent")
+                            continue
+                        }
                         // 0.3.50: each of the six models has its own bankroll slice (independent ledger).
                         val model = ScalpModels.modelOf(p)
                         // 0.3.54: no per-model cap — all scalpers share the one free paper bankroll.
@@ -645,13 +663,52 @@ class ScalpBook(
                             (if (p.maker) String.format(Locale.US, " · maker post @ %s, queue ahead %.0f", com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(makerBid!!), q.bidSize(sig.side) ?: 0.0) else ""),
                         ruleVersion = "${ScalpRule.VERSION}|${p.id}|$role"
                     )
-                }
+                    gates.entered(modelCode, window)
+                } else if (sig != null) gates.block(modelCode, window, "ask above 55¢ ceiling")
+            }
+            if (liveExtras && coin == ShockFav.TRADE_COIN) {
+                val variantFair = enterFairVariants(q, recent, openCost)
+                changed += variantFair.first
+                openCost = variantFair.second
             }
             if (liveExtras && coin == ShockFav.TRADE_COIN) enterKeptV2(q, recent)
         }
         changed.forEach { save(it) }
         if (changed.any { it.state == ScalpState.CLOSED }) maybeTune(q.nowMs)
         changed.filter { it.isPrimary }
+    }
+
+    /** Fair-gap, dip, and v2 nudges. Same fee-rounded fills as the parent. Open clips do not block the next signal. */
+    private fun enterFairVariants(q: ScalpRule.Quote, recent: List<ScalpRule.Snap>, openCostIn: Double): Pair<List<ScalpTrade>, Double> {
+        var openCost = openCostIn
+        val out = ArrayList<ScalpTrade>()
+        val window = ScalpModels.windowKeyOf(q.ticker)
+        val bankroll = bankrollUsd()
+        for (spec in ScalpVariants.ALL) {
+            val p0 = spec.fair ?: continue
+            if (spec.kind == ScalpVariants.Kind.FADE || spec.kind == ScalpVariants.Kind.SIMPLE || spec.kind == ScalpVariants.Kind.SHOCK || spec.kind == ScalpVariants.Kind.FAV) continue
+            val p = p0
+            val (sig, skip) = if (p.strategy == ScalpStrategy.FAIR_GAP) ScalpRule.entrySignal(q, p) else ScalpRule.strategySignal(q, p, listOf("YES", "NO"), recent)
+            if (sig == null) { gates.block(spec.id, window, skip); continue }
+            val px = if (p.maker) q.bid(sig.side) else sig.ask
+            if (px == null) { gates.block(spec.id, window, "no bid"); continue }
+            if (!ScalpRule.buyPriceOk(px)) { gates.block(spec.id, window, "ask above 55¢ ceiling"); continue }
+            val n = spec.clip
+            val cost = px * n + ScalpRule.orderFee(n, px)
+            if (openCost + cost > bankroll + 1e-9) { gates.block(spec.id, window, "paper cash spent"); continue }
+            val v2 = spec.kind == ScalpVariants.Kind.V2_FAIR || spec.kind == ScalpVariants.Kind.V2_DIP
+            val note = if (v2) String.format(Locale.US, "v2 variant of %s · v2ask=%.4f · v2trail=%.4f · v2clip=%d · v2peakrule=1 · v2stopPct=20 · v2min=0.01 · v2until=14 · v2sidecap=20 · v2cadence=0", spec.parentId, px, ScalpV2.TRAIL, n)
+                else String.format(Locale.US, "%s · variant %s", p.strategy.label, spec.id)
+            out += ScalpTrade(
+                id = idFactory(), ticker = q.ticker.uppercase(), side = sig.side, state = ScalpState.PENDING_ENTRY,
+                signalAtMs = q.nowMs, signalAsk = px, fairAtSignal = sig.fair,
+                restingLimit = if (p.maker) px else null, restingSinceMs = if (p.maker) q.nowMs else null,
+                note = note, ruleVersion = "${ScalpRule.VERSION}|${spec.id}|P"
+            )
+            openCost += cost
+            gates.entered(spec.id, window)
+        }
+        return out to openCost
     }
 
     /** Open the two kept v2 configs from their base signal. The losing original is not saved. */
@@ -662,7 +719,6 @@ class ScalpBook(
         )
         for ((p, v2Id) in bases) {
             if (p == null) continue
-            if (_all.value.any { it.ticker.equals(q.ticker, true) && it.variantId == v2Id && isActive(it) }) continue
             val sig = if (p.strategy == ScalpStrategy.FAIR_GAP) ScalpRule.entrySignal(q, p).first
                 else ScalpRule.strategySignal(q, p, listOf("YES", "NO"), recent).first
             if (sig == null) continue
@@ -726,9 +782,10 @@ class ScalpBook(
             fcStep(active, q, f, h54)?.let { changed += it }
         }
         // Kept fade is horizon 600 only. Forecast ride does not open.
-        val fadeOpen = openFc.any { it.variantId.startsWith(ForecastScalp.FADE_PREFIX) }
         val predFade = x54?.let { LeadForecaster.predict(coin, KeptScalpers.FADE_HORIZON_S, it) }
-        if (predFade != null && enabled && q.nowMs < q.closeMs && q.fresh() && !fadeOpen) {
+        val fadeWindow = ScalpModels.windowKeyOf(q.ticker)
+        if (!q.fresh()) gates.noteOutage(fadeWindow, listOf(KeptScalpers.FADE_ID) + ScalpVariants.ALL.filter { it.kind == ScalpVariants.Kind.FADE }.map { it.id })
+        if (predFade != null && enabled && q.nowMs < q.closeMs && q.fresh()) {
             val f = -predFade
             val side = ForecastScalp.sideOf(f)
             val ask = side?.let { q.ask(it) }
@@ -745,7 +802,30 @@ class ScalpBook(
                         ruleVersion = "${ScalpRule.VERSION}|$vid|P"
                     )
                 }
-            }
+            } else if (side == null || ask == null) gates.block(KeptScalpers.FADE_ID, fadeWindow, "fade trigger not met")
+            else gates.block(KeptScalpers.FADE_ID, fadeWindow, "fade trigger not met")
+        } else if (predFade == null && q.fresh() && enabled) {
+            gates.block(KeptScalpers.FADE_ID, fadeWindow, "no forecast lead")
+        }
+        if (liveExtras && enabled && q.nowMs < q.closeMs && q.fresh()) for (spec in ScalpVariants.ALL) {
+            if (spec.kind != ScalpVariants.Kind.FADE) continue
+            val predV = x54?.let { LeadForecaster.predict(coin, spec.fadeHorizonS, it) }
+            if (predV == null) { gates.block(spec.id, fadeWindow, "no forecast lead"); continue }
+            val fv = -predV
+            val sideV = ForecastScalp.sideOf(fv)
+            val askV = sideV?.let { q.ask(it) }
+            if (sideV != null && askV != null && ForecastScalp.wantsEntry(mid, ya - yb, askV, kotlin.math.abs(fv), q.tauS, cfg.marginUsd, spec.fadeLo, spec.fadeHi)) {
+                val costV = askV * spec.clip + ScalpRule.orderFee(spec.clip, askV)
+                if (openCostUsd() + costV <= bankrollUsd() + 1e-9) {
+                    changed += ScalpTrade(
+                        id = idFactory(), ticker = key, side = sideV, state = ScalpState.PENDING_ENTRY, signalAtMs = q.nowMs,
+                        signalAsk = askV, fairAtSignal = mid + fv, restingLimit = askV, restingSinceMs = q.nowMs,
+                        note = String.format(Locale.US, "Forecast fade variant %s · clip %d", spec.id, spec.clip),
+                        ruleVersion = "${ScalpRule.VERSION}|${spec.id}|P"
+                    )
+                    gates.entered(spec.id, fadeWindow)
+                } else gates.block(spec.id, fadeWindow, "paper cash spent")
+            } else gates.block(spec.id, fadeWindow, "fade trigger not met")
         }
         changed.forEach { save(it) }
         changed
@@ -760,7 +840,7 @@ class ScalpBook(
                 if (q.nowMs - t.signalAtMs > ForecastScalp.ENTRY_LIMIT_TTL_MS || q.nowMs >= q.closeMs)
                     return t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; limit cancelled unfilled")
                 val n = com.dirk.kalshiodds.signal.paper.PaperLimitFill.touchFillQty(limit, q.ask(t.side), q.askSize(t.side),
-                    StrategyAlgo.clip(controls.state.value, codeOf(t), ScalpRule.CONTRACTS), buy = true)
+                    StrategyAlgo.clip(controls.state.value, codeOf(t), ScalpVariants.clipOf(codeOf(t)) ?: ScalpRule.CONTRACTS), buy = true)
                 if (n <= 0) null else t.copy(state = ScalpState.OPEN, contracts = n, entryPrice = limit, entryFeeUsd = ScalpRule.orderFee(n, limit),
                     entryAtMs = q.nowMs, restingLimit = null, note = "${t.note}; filled $n @ ${com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(limit)}")
             }
@@ -847,20 +927,19 @@ class ScalpBook(
             ask, ask - bid, g * ((ya + yb) / 2 - openMid), 900.0 - q.tauS)
     }
 
-    /** 0.3.65: Open 50 price-only entries (uptick / both / maker), one per variant per side per window ticker. */
+    /** Open 50 price entries. Removed cards do not open. A live card may open again on the next trigger. */
     private fun o50PriceEntries(q: ScalpRule.Quote, key: String, ya: Double, yb: Double): List<ScalpTrade> {
         if (!ShockFav.o50InEntryWindow(q.tauS)) return emptyList()
         val openMid = o50OpenMid[key] ?: return emptyList()
-        val mine = _trades.value.filter { it.ticker == key && ShockFav.isO50(it.variantId) }
         val out = ArrayList<ScalpTrade>()
         for (raw in ShockFav.VARIANTS) {
             val p = StrategyAlgo.overlayShock(raw, algoOf(raw.code))
             if (p.kind != ShockFav.Kind.OPEN50 || p.o50 == ShockFav.O50.AI) continue
+            if (ScalpModels.isRemoved(p.code)) continue
             val sides = ShockFav.o50Sides(p, openMid, (ya + yb) / 2)
-            if (p.o50 == ShockFav.O50.UPTICK && mine.any { it.variantId.take(4) == p.code }) continue
             for (sd in sides) {
                 val vid = ShockFav.o50VariantId(p, sd)
-                if (mine.any { it.variantId == vid } || out.any { it.variantId == vid }) continue
+                if (out.any { it.variantId == vid }) continue
                 val ask = q.ask(sd)?.takeIf { it in 0.05..0.95 } ?: continue
                 sfEnter(q, p, vid, sd, ask, 0.5, 0.0, Double.MAX_VALUE, "open 50")?.let {
                     out += if (p.o50 == ShockFav.O50.MAKER) it.copy(restingLimit = ShockFav.O50_MAKER_PX, restingSinceMs = q.nowMs) else it
@@ -882,9 +961,13 @@ class ScalpBook(
     }
 
     fun onShockFavQuote(q: ScalpRule.Quote, enabled: Boolean): List<ScalpTrade> = synchronized(lock) {
-        val yb = q.yesBid ?: return@synchronized emptyList()
+        closeSeen[q.ticker.uppercase()] = q.closeMs
+        expireOrphansLocked(q.nowMs)
+        val yb = q.yesBid ?: return@synchronized staleReturn(q, emptyList())
         val ya = q.yesAsk ?: return@synchronized emptyList()
-        if (ya <= yb) return@synchronized emptyList()
+        // A locked book (ask == bid) is the print that fills a maker at that price.
+        // Only a crossed book (ask below bid) is unusable.
+        if (ya < yb - 1e-9) return@synchronized emptyList()
         val key = q.ticker.uppercase()
         val coin = ScalpParams.coinOf(q.ticker)
         val sec = q.nowMs / 1000L
@@ -903,9 +986,11 @@ class ScalpBook(
         val ring = sfSpot.getOrPut(coin) { ShockFav.SpotRing() }
         q.spot?.takeIf { it > 0.0 && it.isFinite() }?.let { ring.put(sec, it) }
         // 0.3.58 fair, 1.0.16 basis: index gap applied to spot only. This contract's strike stays in fairYes.
-        val strike = q.strike?.takeIf { it > 0.0 && it.isFinite() } ?: return@synchronized emptyList()
-        val sNow = ring.at(sec) ?: return@synchronized emptyList()
-        val sig = ring.sigma900(sec) ?: return@synchronized emptyList()
+        val strike = q.strike?.takeIf { it > 0.0 && it.isFinite() } ?: return@synchronized staleReturn(q, o50Early)
+        val sNow = ring.at(sec) ?: return@synchronized staleReturn(q, o50Early)
+        // A cold ring after an outage used to return here for the whole window. Median σ lets the
+        // strategy price fair on the first fresh tick; the live σ replaces it once 120 seconds exist.
+        val sig = ring.sigma900(sec) ?: ShockFav.MEDIAN_SIGMA[coin] ?: ScalpRule.defaultSigmaPerSec(q.ticker)
         val basisKey = "$coin|${q.closeMs}"
         val basis = sfBasis[basisKey] ?: run {
             val osec = (q.closeMs - 900_000L) / 1000L
@@ -943,7 +1028,7 @@ class ScalpBook(
                     changed += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, restingLimit = null, note = "${t.note}; 49¢ bid unfilled")
                 } else {
                     val a = q.ask(t.side)
-                    if (a != null && a <= ShockFav.O50_MAKER_PX - 0.01 + 1e-9) {
+                    if (a != null && a <= ShockFav.O50_MAKER_PX + 1e-9) {
                         val clipN = StrategyAlgo.clip(controls.state.value, pk?.code, ShockFav.CLIP)
                         changed += t.copy(state = ScalpState.OPEN, contracts = clipN, entryPrice = ShockFav.O50_MAKER_PX, entryFeeUsd = 0.0, entryAtMs = q.nowMs,
                             note = String.format(Locale.US, "%s; maker filled %d @ 49¢ (ask traded through)", t.note, clipN))
@@ -956,14 +1041,17 @@ class ScalpBook(
                 val px = t.restingLimit
                 if (px != null && !ScalpRule.buyPriceOk(px)) { changed += cappedEntry(t, q.nowMs); continue }
                 if (px == null) {
-                    val b = q.bid(t.side)?.takeIf { it in 0.05..0.95 && ScalpRule.buyPriceOk(Math.round(it * 100) / 100.0) }
-                    changed += if (b == null) t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; no bid to join")
-                        else t.copy(restingLimit = Math.round(b * 100) / 100.0, restingSinceMs = q.nowMs, note = String.format(Locale.US, "%s; resting bid %.0f¢", t.note, b * 100))
+                    // Keep the tenth-cent touch. Rounding to a whole cent (2.9¢ → 3¢, 96.8¢ → 97¢)
+                    // posts off the level, and the old 5–95¢ band rejected both sides of a 97/3 book.
+                    val b = q.bid(t.side)?.takeIf { it in 0.001..0.999 && ScalpRule.buyPriceOk(it) }
+                    val posted = b?.let { kotlin.math.round(it * 1000.0) / 1000.0 }
+                    changed += if (posted == null) t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; no bid to join")
+                        else t.copy(restingLimit = posted, restingSinceMs = q.nowMs, note = String.format(Locale.US, "%s; resting bid %.1f¢", t.note, posted * 100))
                 } else if (q.nowMs - (t.restingSinceMs ?: q.nowMs) > pk.ttlS * 1000L || q.tauS <= 60.0) {
                     changed += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, restingLimit = null, note = "${t.note}; maker bid unfilled")
                 } else {
                     val a = q.ask(t.side)
-                    if (a != null && a <= px - 0.01 + 1e-9) {
+                    if (a != null && a <= px + 1e-9) {
                         val clipN = StrategyAlgo.clip(controls.state.value, pk.code, ShockFav.CLIP)
                         changed += t.copy(state = ScalpState.OPEN, contracts = clipN, entryPrice = px, entryFeeUsd = 0.0, entryAtMs = q.nowMs,
                             note = String.format(Locale.US, "%s; maker filled %d @ %.0f¢ (ask traded through)", t.note, clipN, px * 100))
@@ -1048,8 +1136,10 @@ class ScalpBook(
             val next = ScalpFills.sell(base, q.nowMs, n, n * bid, ScalpRule.orderFee(n, bid))
             changed += if (next.remaining <= 0) close(next, q.nowMs, reason) else next
         }
+        if (!q.fresh() || q.bookGap) gates.noteOutage(ScalpModels.windowKeyOf(q.ticker).ifBlank { "outage" }, KeptScalpers.IDS + ScalpVariants.IDS)
         // 0.3.59: Scalp tab is Bitcoin only — sf entries on BTC markets only (other coins' spot is signal input).
-        if (enabled && live && coin == ShockFav.TRADE_COIN) {
+        // A seq gap is the same outage as a stale book: no new clip until the next intact tick.
+        if (enabled && live && !q.bookGap && coin == ShockFav.TRADE_COIN) {
             val sigma: Double? = sig
             var openCost = openCostUsd()
             val bankroll = bankrollUsd()
@@ -1074,10 +1164,8 @@ class ScalpBook(
                         }.let { nets -> SidePick.onlyMaxBy(nets) { it.second }?.let { listOf(it.first) } ?: emptyList() }
                         null -> emptyList()
                     }
-                    if (p.o50 != ShockFav.O50.BOTH && p.o50 != ShockFav.O50.MAKER && mine.any { it.variantId.take(4) == p.code }) continue
                     for (sd in sides) {
                         val vid = if (sd == "NO" && (p.o50 == ShockFav.O50.BOTH || p.o50 == ShockFav.O50.MAKER)) p.code + "n" else p.shockId
-                        if (mine.any { it.variantId == vid }) continue
                         val ask = q.ask(sd)?.takeIf { it in 0.05..0.95 } ?: continue
                         val f = if (sd == "YES") fairYes else 1.0 - fairYes
                         val what = if (p.o50 == ShockFav.O50.AI) "open 50 · ${Open50Model.VERSION}" else "open 50"
@@ -1089,32 +1177,36 @@ class ScalpBook(
                     continue
                 }
                 if (p.kind != ShockFav.Kind.SHOCK_FAV) {
-                    if (mine.any { it.variantId == p.shockId && isActive(it) }) continue
                     val side = when (p.kind) {
                         ShockFav.Kind.LAGGARD -> ShockFav.laggardSide(p, coin, sfSpot, sec, q.tauS)?.takeIf { sd -> q.ask(sd)?.let { it in 0.10..0.90 } == true }
                         ShockFav.Kind.IMBALANCE -> ShockFav.imbalanceSide(p, yb, ya, q.yesBidSize ?: 0.0, q.yesAskSize ?: 0.0, q.tauS)?.takeIf { sd -> q.ask(sd)?.let { it in 0.10..0.90 } == true }
                         ShockFav.Kind.SIMPLE_DIP -> simpleDipSide(key, p, q)
                         ShockFav.Kind.FADE_MAKER -> if (q.tauS in 120.0..870.0) ShockFav.moveBp(ring, sec, 5)?.takeIf { kotlin.math.abs(it) >= p.xBp }?.let { if (it > 0) "NO" else "YES" } else null
                         else -> null
-                    } ?: continue
+                    }
+                    if (side == null) {
+                        gates.block(p.code, ScalpModels.windowKeyOf(q.ticker), if (p.kind == ShockFav.Kind.SIMPLE_DIP) "dip trigger not met" else "trigger not met")
+                        continue
+                    }
                     val ask = q.ask(side) ?: continue
                     val f = if (side == "YES") fairYes else 1.0 - fairYes
                     sfEnter(q, p, p.shockId, side, ask, f, openCost, bankroll, p.kind.name.lowercase().replace('_', ' '))?.let { changed += it; if (!shadowEntry(it)) openCost += it.entryCostUsd }
                     continue
                 }
-                if (p.shock && mine.none { it.variantId == p.shockId && isActive(it) }) {
+                if (p.shock) {
                     val side = ShockFav.shockSide(p, coin, ring, sec, q.tauS, sigma)
                     if (side != null) {
                         val sideFair = if (side == "YES") fairYes else 1.0 - fairYes
                         val ask = q.ask(side)
                         if (ask != null && ShockFav.shockEntryOk(p, sideFair, ask))
                             sfEnter(q, p, p.shockId, side, ask, sideFair, openCost, bankroll, "shock")?.let { changed += it; if (!shadowEntry(it)) openCost += it.entryCostUsd }
-                    }
+                        else gates.block(p.code, ScalpModels.windowKeyOf(q.ticker), "shock lag or ask band not met")
+                    } else gates.block(p.code, ScalpModels.windowKeyOf(q.ticker), "shock trigger not met")
                 }
                 val favCode = p.favId.take(4)
                 val favFg = FairGapTune.favUsesFairGapGate(favCode) // own-rule late favourites use favEntryOk, including sf31 off-US hours
                 val favTauMin = if (favFg) maxOf(p.favTmin, FairGapTune.SETTLE_MIN_S) else p.favTmin
-                if (p.fav && mine.none { it.variantId == p.favId } && q.tauS <= (if (favFg) maxOf(p.favTmax, 300.0) else p.favTmax) && q.tauS >= favTauMin) {
+                if (p.fav && q.tauS <= (if (favFg) maxOf(p.favTmax, 300.0) else p.favTmax) && q.tauS >= favTauMin) {
                     val fy = if (p.brti && sigma != null) {
                         brtiFair ?: run {
                             val m = (60.0 - q.tauS).toInt().coerceIn(0, 60)
@@ -1143,12 +1235,87 @@ class ScalpBook(
                         if (ask != null) sfEnter(q, p, p.favId, won.first, ask, won.third, openCost, bankroll, "late fav")?.let {
                             changed += it; if (!shadowEntry(it)) openCost += it.entryCostUsd
                         }
+                    } else gates.block(p.favId, ScalpModels.windowKeyOf(q.ticker), "late-fav trigger not met")
+                } else if (p.fav) {
+                    val why = when {
+                        q.tauS > p.favTmax -> "outside late-fav window"
+                        q.tauS < favTauMin -> "outside late-fav window"
+                        else -> "late-fav trigger not met"
                     }
+                    gates.block(p.favId, ScalpModels.windowKeyOf(q.ticker), why)
                 }
+            }
+            if (liveExtras) {
+                val variantPass = enterShockVariants(q, key, fairYes, ring, sec, sigma, openCost, bankroll, mine)
+                changed += variantPass.first
+                openCost = variantPass.second
             }
         }
         changed.forEach { save(it) }
         changed
+    }
+
+    /** Missing spot or strike. Median σ is used instead of bailing when only the vol ring is cold. */
+    private fun staleReturn(q: ScalpRule.Quote, already: List<ScalpTrade>): List<ScalpTrade> {
+        gates.noteOutage(ScalpModels.windowKeyOf(q.ticker), KeptScalpers.IDS + ScalpVariants.IDS)
+        return already
+    }
+
+    /** Paper nudges of the shock, simple-dip, and late-fav winners. One in-flight clip at a time; open clips do not block the next. */
+    private fun enterShockVariants(
+        q: ScalpRule.Quote, key: String, fairYes: Double, ring: ShockFav.SpotRing, sec: Long, sigma: Double?,
+        openCostIn: Double, bankroll: Double, mine: List<ScalpTrade>
+    ): Pair<List<ScalpTrade>, Double> {
+        var openCost = openCostIn
+        val out = ArrayList<ScalpTrade>()
+        val window = ScalpModels.windowKeyOf(q.ticker)
+        for (spec in ScalpVariants.ALL) {
+            val p = spec.shock ?: continue
+            if (spec.kind != ScalpVariants.Kind.SIMPLE && spec.kind != ScalpVariants.Kind.SHOCK && spec.kind != ScalpVariants.Kind.FAV) continue
+            when (spec.kind) {
+                ScalpVariants.Kind.SIMPLE -> {
+                    val side = simpleDipSide(key, p, q)
+                    if (side == null) { gates.block(spec.id, window, "dip trigger not met"); continue }
+                    val ask = q.ask(side)
+                    if (ask == null) { gates.block(spec.id, window, "no ask"); continue }
+                    val f = if (side == "YES") fairYes else 1.0 - fairYes
+                    sfEnter(q, p, spec.id, side, ask, f, openCost, bankroll, "simple dip")?.let {
+                        out += it; if (!shadowEntry(it)) openCost += it.entryCostUsd
+                    }
+                }
+                ScalpVariants.Kind.SHOCK -> {
+                    val side = ShockFav.shockSide(p, ShockFav.TRADE_COIN, ring, sec, q.tauS, sigma)
+                    if (side == null) { gates.block(spec.id, window, "shock trigger not met"); continue }
+                    val sideFair = if (side == "YES") fairYes else 1.0 - fairYes
+                    val ask = q.ask(side)
+                    if (ask == null || !ShockFav.shockEntryOk(p, sideFair, ask)) {
+                        gates.block(spec.id, window, "shock lag or ask band not met"); continue
+                    }
+                    sfEnter(q, p, spec.id, side, ask, sideFair, openCost, bankroll, "shock")?.let {
+                        out += it; if (!shadowEntry(it)) openCost += it.entryCostUsd
+                    }
+                }
+                ScalpVariants.Kind.FAV -> {
+                    if (q.tauS < p.favTmin || q.tauS > p.favTmax) {
+                        gates.block(spec.id, window, "outside late-fav window"); continue
+                    }
+                    var placed = false
+                    for (side in listOf("YES", "NO")) {
+                        val f = if (side == "YES") fairYes else 1.0 - fairYes
+                        val ask = q.ask(side) ?: continue
+                        if (!ShockFav.favEntryOk(p, f, ask, q.tauS, ShockFav.TRADE_COIN, q.closeMs)) continue
+                        sfEnter(q, p, spec.id, side, ask, f, openCost, bankroll, "late fav")?.let {
+                            out += it; if (!shadowEntry(it)) openCost += it.entryCostUsd
+                            placed = true
+                        }
+                        break
+                    }
+                    if (!placed) gates.block(spec.id, window, "late-fav trigger not met")
+                }
+                else -> Unit
+            }
+        }
+        return out to openCost
     }
 
     /** Per-strategy window-start entry limit for original sf strategies: 2–5 minutes after the open (distinct by code). */
@@ -1193,16 +1360,25 @@ class ScalpBook(
     /** Taker paper entry at the displayed ask, capped at displayed size; skipped when shared free cash can't cover it. */
     private fun sfEnter(q: ScalpRule.Quote, p: ShockFav.Params, vid: String, side: String, ask: Double, fair: Double,
                         openCost: Double, bankroll: Double, what: String): ScalpTrade? {
+        val window = ScalpModels.windowKeyOf(q.ticker)
         // Fade makers choose their purchase bid after the delay; the post/fill paths enforce the ceiling.
-        if (p.kind != ShockFav.Kind.FADE_MAKER && !FairGapTune.askAllowed(p.code, if (p.o50 == ShockFav.O50.MAKER) ShockFav.O50_MAKER_PX else ask, ShockFav.isFavLeg(vid))) return null
-        // Kept shock variants use their own tau window (sf15 is mid-window). Simple-dip still waits for its 4-min history.
-        val keptOwnWindow = vid in KeptScalpers.IDS && p.kind == ShockFav.Kind.SHOCK_FAV && p.shock
-        if (!ShockFav.isFavLeg(vid) && !keptOwnWindow && 15.0 - q.tauS / 60.0 > ShockFav.entryOpenMin(p, sfOpenMin(p.code))) return null
-        val want = StrategyAlgo.clip(controls.state.value, p.code, ShockFav.CLIP)
+        if (p.kind != ShockFav.Kind.FADE_MAKER && !FairGapTune.askAllowed(p.code, if (p.o50 == ShockFav.O50.MAKER) ShockFav.O50_MAKER_PX else ask, ShockFav.isFavLeg(vid))) {
+            gates.block(vid, window, "ask above this scalper's price band")
+            return null
+        }
+        // Simple-dip still waits for its own 4-minute average. There is no extra 2–5 minute cutoff.
+        val want = StrategyAlgo.clip(controls.state.value, vid, ScalpVariants.clipOf(vid) ?: ShockFav.CLIP)
         val n = if (p.kind == ShockFav.Kind.FADE_MAKER) want else minOf(want, kotlin.math.floor((q.askSize(side) ?: 0.0) + 1e-9).toInt())
-        if (n <= 0) return null
+        if (n <= 0) {
+            gates.block(vid, window, "no displayed depth")
+            return null
+        }
         val cost = ask * n + ScalpRule.orderFee(n, ask)
-        if (p.kind != ShockFav.Kind.OPEN50 && !shadowCode(p.code) && openCost + cost > bankroll + 1e-9) return null // 0.3.65: Open 50 unlimited paper
+        if (p.kind != ShockFav.Kind.OPEN50 && !shadowCode(p.code) && openCost + cost > bankroll + 1e-9) {
+            gates.block(vid, window, "paper cash spent")
+            return null
+        }
+        gates.entered(vid, window)
         return ScalpTrade(
             id = idFactory(), ticker = q.ticker.uppercase(), side = side, state = ScalpState.PENDING_ENTRY, signalAtMs = q.nowMs,
             signalAsk = ask, fairAtSignal = fair,
@@ -1256,7 +1432,8 @@ class ScalpBook(
     private fun makerQueueStep(t: ScalpTrade, q: ScalpRule.Quote, limit: Double, buy: Boolean): Pair<Boolean, ScalpTrade> {
         val ourBest = if (buy) q.bid(t.side) else q.ask(t.side)
         val opp = if (buy) q.ask(t.side) else q.bid(t.side)
-        val oppCrossed = opp != null && (if (buy) opp < limit - 1e-9 else opp > limit + 1e-9)
+        // At the price or through it. A tenth-cent book never trades a full cent through a 0.3¢ spread.
+        val oppCrossed = opp != null && (if (buy) opp <= limit + 1e-9 else opp >= limit - 1e-9)
         val levelWiped = ourBest != null && (if (buy) ourBest < limit - 1e-9 else ourBest > limit + 1e-9)
         if (oppCrossed || levelWiped) return true to t
         if (ourBest == null || kotlin.math.abs(ourBest - limit) > 1e-9) return false to t
@@ -1276,9 +1453,11 @@ class ScalpBook(
         }
         val (filled, next) = makerQueueStep(t, q, limit, buy = true)
         if (!filled) return next.takeIf { it != t }
-        val fee = com.dirk.kalshiodds.signal.trade.KalshiFee.makerFee(ScalpRule.CONTRACTS, limit, com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(t.ticker))
+        val n = minOf(ScalpRule.CONTRACTS, kotlin.math.floor((q.askSize(t.side) ?: 0.0) + 1e-9).toInt())
+        if (n <= 0) return next.takeIf { it != t }
+        val fee = com.dirk.kalshiodds.signal.trade.KalshiFee.makerFee(n, limit, com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(t.ticker))
         return next.copy(
-            state = ScalpState.OPEN, contracts = ScalpRule.CONTRACTS, entryPrice = limit, entryFeeUsd = fee, entryAtMs = q.nowMs,
+            state = ScalpState.OPEN, contracts = n, entryPrice = limit, entryFeeUsd = fee, entryAtMs = q.nowMs,
             restingLimit = null, note = "${t.note}; maker fill @ ${com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(limit)} (queue model)"
         )
     }
@@ -1409,14 +1588,17 @@ class ScalpBook(
         if (!ScalpRule.buyPriceOk(ask)) return cappedEntry(t, q.nowMs)
         if (ask > t.signalAsk + ScalpRule.SLIPPAGE + 1e-9) return miss(String.format(Locale.US, "ask moved to %s", com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(ask)))
         val size = q.askSize(t.side) ?: 0.0
-        val want = StrategyAlgo.clip(controls.state.value, ScalpModels.modelOf(t)?.code, ScalpRule.CONTRACTS)
-        if (size + 1e-9 < want) return miss("displayed size ${size.toInt()} < $want")
+        val clipCode = ScalpModels.modelOf(t)?.code
+        val want = StrategyAlgo.clip(controls.state.value, clipCode, ScalpVariants.clipOf(clipCode ?: "") ?: ScalpRule.CONTRACTS)
+        val n = minOf(want, kotlin.math.floor(size + 1e-9).toInt())
+        if (n <= 0) return miss("no displayed depth")
         return t.copy(
             state = ScalpState.OPEN,
-            contracts = want,
+            contracts = n,
             entryPrice = ask,
-            entryFeeUsd = ScalpRule.orderFee(want, ask),
-            entryAtMs = q.nowMs
+            entryFeeUsd = ScalpRule.orderFee(n, ask),
+            entryAtMs = q.nowMs,
+            note = String.format(Locale.US, "%s; filled %d @ %.1f¢", t.note, n, ask * 100)
         )
     }
 
@@ -1467,6 +1649,36 @@ class ScalpBook(
     }
 
     /** Settlement: anything still held pays $1 / $0, no fee; pending entries become no-fills. */
+    /**
+     * Paper positions whose 15-minute window has already closed. Pending clips become no-fills.
+     * Open clips are voided at the entry price (no invented settlement) so they cannot pin the book
+     * after a Kalshi outage. Safe to call every tick.
+     */
+    fun expireOrphans(nowMs: Long): List<ScalpTrade> = synchronized(lock) { expireOrphansLocked(nowMs) }
+
+    private fun expireOrphansLocked(nowMs: Long): List<ScalpTrade> {
+        val out = ArrayList<ScalpTrade>()
+        for (t in _all.value) {
+            if (!isActive(t)) continue
+            val closeAt = closeSeen[t.ticker.uppercase()] ?: ScalpTicker.closeMs(t.ticker) ?: continue
+            if (nowMs < closeAt) continue
+            val next = if (t.state == ScalpState.PENDING_ENTRY || t.remaining <= 0) {
+                t.copy(state = ScalpState.NO_FILL, closedAtMs = nowMs, restingLimit = null, note = "${t.note}; no fill: window closed")
+            } else {
+                val px = t.entryPrice ?: 0.0
+                val n = t.remaining
+                close(
+                    ScalpFills.sell(t, nowMs, n, n * px, 0.0, settlement = true),
+                    nowMs,
+                    "orphaned paper position: window closed"
+                )
+            }
+            out += next
+        }
+        out.forEach { save(it) }
+        return out
+    }
+
     fun settle(ticker: String, result: String, atMs: Long = System.currentTimeMillis()): List<ScalpTrade> = synchronized(lock) {
         val r = result.lowercase()
         val out = _all.value.filter {
@@ -1685,21 +1897,13 @@ class ScalpBook(
                 learned.copy(arm = (learned.arm + feedback.recentNetPerContract * .1).coerceIn(.01, learned.arm)) else learned
             val knobs = StrategyAlgo.view(cfg, model.code)
             val close = ScalpTicker.closeMs(t.ticker)
-            if (close != null && !knobs.timeOk(t.signalAtMs, close)) continue
-            // Kalshi Scalper rules: entries only in the first minutes of each 15-minute window, and only when this
-            // strategy's self-learned confidence clears its own learned threshold.
-            val minuteIn = close?.let { 15.0 - (it - t.signalAtMs) / 60_000.0 } ?: 99.0
-            if (minuteIn < 0.0 || (!ShockFav.isFavLeg(seed.base) && minuteIn > ScalpV2.entryOpenMin(seed))) continue // 1.0.14: Simple-dip copies count after the 4-min history
-            // Direction: the on-device GBM must favour this side (fair value used when the model is missing).
+            // Missing or untrained AI does not block a paper entry. The base signal is the strategy.
+            val minuteIn = close?.let { 15.0 - (it - t.signalAtMs) / 60_000.0 } ?: 0.0
             val gq = _marks.value[t.ticker.uppercase()]
             val gp = gq?.let { GbmModel.pSide(it, t.side, dm60(t.ticker.uppercase(), it.nowMs)) }
-            if (gp != null && gp < 0.5) continue
-            val bx = ScalperBrain.features(t.signalAsk, gp ?: t.fairAtSignal.takeIf { it.isFinite() }, minuteIn)
-            val conf = ScalperBrain.p(model.code, bx)
-            if (conf < ScalperBrain.minConf(model.code)) continue
+            val bx = ScalperBrain.features(t.signalAsk, gp ?: t.fairAtSignal.takeIf { it.isFinite() }, minuteIn.coerceIn(0.0, 15.0))
+            val conf = if (ScalperBrain.trained(model.code)) ScalperBrain.p(model.code, bx) else Double.NaN
             val checkKey = "${t.ticker}|${model.code}|${t.side}"
-            val lastCheck = strategyEntryChecks[checkKey]
-            if (lastCheck != null && t.signalAtMs - lastCheck < knobs.cadenceSeconds * 1000L) continue
             strategyEntryChecks[checkKey] = t.signalAtMs
             if (strategyEntryChecks.size > 2000) strategyEntryChecks.keys.filter { (ScalpTicker.closeMs(it.substringBefore('|')) ?: 0) < t.signalAtMs }.forEach { strategyEntryChecks.remove(it) }
             val plan = cfg.plan(informed, model.code)
@@ -1765,10 +1969,8 @@ class ScalpBook(
         val s = entryView(code) ?: explicit(code)
         val hasDefault = FairGapTune.defaultMaxCents(code) != null || code == "fairh60"
         if (s == null && !hasDefault) return t
-        val close = ScalpTicker.closeMs(t.ticker)
         val px = t.signalAsk
-        val bad = FairGapTune.priceBlocked(code, px, s) ||
-            (s != null && close != null && !s.timeOk(t.signalAtMs, close))
+        val bad = FairGapTune.priceBlocked(code, px, s)
         return if (!bad) t else t.copy(state = ScalpState.NO_FILL, closedAtMs = t.signalAtMs, note = "${t.note}; skipped by your strategy sliders (price range / until minute)")
     }
 
@@ -1827,7 +2029,7 @@ class ScalpBook(
                     val lim = t.restingLimit
                     if (q.tauS <= 60 || ps - lim < rp.makerEdgeCents / 200.0) { out += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; maker bid cancelled (fair moved or final minute)"); continue }
                     val ask = q.ask(t.side) ?: continue
-                    if (ask <= lim - 0.01 + 1e-9) { // trade-through: the offer moved below our resting bid
+                    if (ask <= lim + 1e-9) { // at the bid or through it
                         val n = ScalpV2.savedNumber(t.note, "rn", rp.clip.toDouble()).toInt().coerceAtLeast(1)
                         out += t.copy(state = ScalpState.OPEN, contracts = n, entryPrice = lim, entryFeeUsd = 0.0, entryAtMs = q.nowMs,
                             note = researchNote("${t.note}; maker fill @ ${Math.round(lim * 100)}¢ (fee 0)", "fillmid", midOf(t.side) ?: lim))
@@ -1959,17 +2161,8 @@ class ScalpBook(
                     val blocked = cfg.entryBlock(code, openCount, controls.entries(q.nowMs), controlDailyNet + unflushedNet)
                     if (blocked != null) { out += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; $blocked"); continue }
                     if (q.tauS <= ScalpV2.EXIT_BY_S || age > ScalpV2.GIVE_UP_MS) { out += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; no fill: final minute, expired signal, or no executable entry"); continue }
-                    val until = ScalpV2.savedNumber(t.note, "v2until", 14.0).toInt().coerceIn(1, 14)
-                    if (q.nowMs >= q.closeMs - 900_000 + until * 60_000L) {
-                        out += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; entry minute limit reached"); continue
-                    }
-                    val sideCap = ScalpV2.savedNumber(t.note, "v2sidecap", 1.0).toInt().coerceIn(1, 20)
                     val sideKey = "$code|${t.side}"
-                    if ((openByModelSide[sideKey] ?: 0) >= sideCap) continue
                     if (age < ScalpV2.ENTRY_DELAY_MS || !ScalpV2.fresh(q) || q.bookAtMs <= t.signalAtMs) continue
-                    val cadenceMs = ScalpV2.savedNumber(t.note, "v2cadence", 0.0).coerceIn(0.0, 30.0).toLong() * 1000
-                    val lastCheck = pendingEntryChecks[t.id]
-                    if (lastCheck != null && q.nowMs - lastCheck < cadenceMs) continue
                     pendingEntryChecks[t.id] = q.nowMs
                     if (pendingEntryChecks.size > 2000) {
                         val activeIds = _all.value.filter { it.state == ScalpState.PENDING_ENTRY }.map { it.id }.toSet()
@@ -1981,7 +2174,7 @@ class ScalpBook(
                     val ask = q.ask(t.side) ?: continue
                     val minAsk = ScalpV2.savedNumber(t.note, "v2min", .01).coerceIn(.01, .50)
                     if (ask < minAsk - 1e-9 || !ScalpV2.entryOk(ask, sp.maxAsk)) continue
-                    if (FairGapTune.isTweaked(code) && FairGapTune.entryBlock(q, t.side, ask, sp.clip, entryView(code) ?: explicit(code), false, q.nowMs) != null) continue // 1.0.3 fair-gap gate at fill
+                    if (FairGapTune.entryGated(code) && FairGapTune.entryBlock(q, t.side, ask, sp.clip, entryView(code) ?: explicit(code), false, q.nowMs) != null) continue
                     if (cfg.dipCents > 0) {
                         val historyPrices = history[key].orEmpty().filter { it.atMs in (q.nowMs - cfg.windowSeconds * 1000L)..q.nowMs }
                             .groupBy { it.atMs / 1000L }.values.map { it.maxBy { p -> p.atMs } }.sortedBy { it.atMs }

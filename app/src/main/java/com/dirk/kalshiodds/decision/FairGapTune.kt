@@ -50,9 +50,14 @@ object FairGapTune {
     const val FAIRH60_MIN_CENTS = 40
 
     fun isTweaked(code: String?): Boolean = code != null && code !in KEEP
-    fun ownsRules(code: String?): Boolean = code != null && code in OWN_RULES
-    /** 24–42¢ entry gate. Keep and own-rule scalpers are exempt. Exits still use [isTweaked]. */
-    fun entryGated(code: String?): Boolean = isTweaked(code) && !ownsRules(code)
+    fun ownsRules(code: String?): Boolean = code != null && (code in OWN_RULES || code.removeSuffix("f") in OWN_RULES)
+    /**
+     * 24–42¢ entry gate. Kept winners, their paper variants, and own-rule scalpers are exempt.
+     * The gate was cancelling sf16f / sf41 / sf04 at save time because the card id is not the
+     * bare family code in [OWN_RULES]. Exits still use [isTweaked].
+     */
+    fun entryGated(code: String?): Boolean = isTweaked(code) && !ownsRules(code) &&
+        code !in KeptScalpers.IDS && !ScalpVariants.isLive(code)
     /** Late-favourite leg uses the fair-gap ask gate only when this is true. */
     fun favUsesFairGapGate(code: String?): Boolean = entryGated(code)
 
@@ -104,8 +109,8 @@ object FairGapTune {
      * Entry gate. Returns null when the entry may proceed, else the skip reason. [otherSideTaken] = this strategy already
      * bought the opposite side in this window.
      */
+    @Suppress("UNUSED_PARAMETER")
     fun entryBlock(q: ScalpRule.Quote?, side: String, ask: Double, n: Int, s: ScalpStrategySettings?, otherSideTaken: Boolean, nowMs: Long): String? {
-        if (otherSideTaken) return "fair-gap rule: never both sides in one window"
         if (q == null || nowMs - q.nowMs > QUOTE_MAX_AGE_MS) return "fair-gap rule: no fresh quote"
         if (ScalpParams.coinOf(q.ticker) != ShockFav.TRADE_COIN) return "fair-gap rule: BTC only"
         val b = band(s)

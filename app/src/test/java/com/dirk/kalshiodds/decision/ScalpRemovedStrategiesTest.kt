@@ -32,8 +32,9 @@ class ScalpRemovedStrategiesTest {
     )
 
     @Test fun registryIsExactlyTheTwelveKeptIds() {
-        assertEquals(kept, ScalpModels.ALL.map { it.code })
+        assertEquals(kept, ScalpModels.WINNERS.map { it.code })
         assertEquals(kept, KeptScalpers.ALL.map { it.id })
+        assertEquals(kept, ScalpModels.ALL.take(kept.size).map { it.code })
         assertTrue(ScalpModels.ALL.size <= KeptScalpers.MAX_SLOTS)
         assertTrue(ScalpModels.REMOVED_CODES.containsAll(listOf(
             "sf32", "sf30", "r-kelly", "r-late", "r-late-t1", "r-late-t2", "r-hold", "r-maker",
@@ -54,12 +55,13 @@ class ScalpRemovedStrategiesTest {
             ScalpStat("sf32", n = 544, wins = 100, netUsd = -209.15),
             ScalpStat("dip", n = 10, netUsd = -3.0)
         )).map { it.model.code }
-        assertEquals(kept.toSet(), settings.toSet())
-        assertEquals(kept.toSet(), arena.toSet())
-        assertEquals(kept, board)
+        assertEquals(ScalpModels.ALL.map { it.code }.toSet(), settings.toSet())
+        assertEquals(ScalpModels.ALL.map { it.code }.toSet(), arena.toSet())
+        assertEquals(ScalpModels.ALL.map { it.code }.toSet(), board.toSet())
+        assertEquals("sf42", board.first())
         assertFalse(board.contains("sf32"))
         assertFalse(board.contains("dip"))
-        assertEquals(12, board.size)
+        assertEquals(ScalpModels.ALL.size, board.size)
     }
 
     @Test fun eachKeptScalperStillFiresItsEntryOnAFixture() {

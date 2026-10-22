@@ -38,7 +38,8 @@ class ScreenRegressionSmokeTest {
     @get:Rule val compose = createComposeRule()
 
     @Test fun liveBoardIsTheTwelveKeptScalpers() {
-        assertEquals(KeptScalpers.ALL.map { it.id }, ScalpModels.ALL.map { it.code })
+        assertEquals(KeptScalpers.ALL.map { it.id }, ScalpModels.WINNERS.map { it.code })
+        assertEquals(KeptScalpers.ALL.map { it.id }, ScalpModels.ALL.take(KeptScalpers.ALL.size).map { it.code })
         assertTrue(ScalpModels.ALL.size <= KeptScalpers.MAX_SLOTS)
         assertTrue(ScalpModels.REMOVED_CODES.containsAll(HIDDEN_SINCE_1010))
         assertTrue(ScalpModels.ALL.all { it.label.isNotBlank() })

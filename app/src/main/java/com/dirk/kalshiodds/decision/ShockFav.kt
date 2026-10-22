@@ -221,8 +221,11 @@ object ShockFav {
         "sf09" to "duplicate: identical trades to sf01 on the BTC-only tab",
         "sf10" to "zero trades: ETH+SOL only, tab is BTC-only",
         "sf11" to "zero trades: calm-regime filter never fired on BTC in backtest")
-    fun byVariantId(variantId: String): Params? = if (isShockFav(variantId)) BY_CODE[variantId.take(4)] else null
-    fun isFavLeg(variantId: String): Boolean = isShockFav(variantId) && variantId.endsWith("f")
+    fun byVariantId(variantId: String): Params? {
+        ScalpVariants.shockParams(variantId)?.let { return it }
+        return if (isShockFav(variantId)) BY_CODE[variantId.take(4)] else null
+    }
+    fun isFavLeg(variantId: String): Boolean = ScalpVariants.isFav(variantId) || (isShockFav(variantId) && variantId.endsWith("f"))
 
     /** Per-coin 1 s spot ring (last 128 s). Single writer under ScalpBook's lock. */
     class SpotRing {

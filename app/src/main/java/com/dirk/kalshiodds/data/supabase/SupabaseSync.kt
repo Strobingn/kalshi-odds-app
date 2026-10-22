@@ -65,7 +65,9 @@ class SupabaseSync(
         /** 0.3.55: the 8 paper scalpers' closed round trips (never synced before). */
         val scalps: List<com.dirk.kalshiodds.decision.ScalpTrade> = emptyList(),
         /** 0.3.55: Autopilot SHADOW tickets (Autopilot has been in SHADOW since Oct 10 01:27 ET; never synced before). */
-        val shadow: List<com.dirk.kalshiodds.signal.paper.ShadowTicket> = emptyList()
+        val shadow: List<com.dirk.kalshiodds.signal.paper.ShadowTicket> = emptyList(),
+        /** Per-scalper block counts for the current windows. Uploaded every sync. */
+        val scalpGates: List<com.dirk.kalshiodds.decision.ScalpGateLog.SyncRow> = emptyList()
     )
 
     fun pull(settings: DataHubSettings): List<SyncMerge.Record> {
@@ -145,15 +147,16 @@ class SupabaseSync(
             out.add(rec("snapshot:${s.ticker}:${s.createdAtMs}:${s.side}", "snapshot", s.createdAtMs, payload))
         }
         bundle.scalps.forEach { t ->
-            if (t.state != com.dirk.kalshiodds.decision.ScalpState.CLOSED) return@forEach
-            val at = t.closedAtMs ?: return@forEach
+            val open = t.state == com.dirk.kalshiodds.decision.ScalpState.OPEN
+            if (t.state != com.dirk.kalshiodds.decision.ScalpState.CLOSED && !open) return@forEach
+            val at = (if (open) t.entryAtMs ?: t.signalAtMs else t.closedAtMs) ?: return@forEach
             val payload = JSONObject()
                 .put("id", t.id).put("ticker", t.ticker).put("side", t.side)
                 .put("algo", t.algoLabel).put("variant", t.variantId).put("primary", t.isPrimary)
                 .put("contracts", t.contracts).putFinite("entryPrice", t.entryPrice)
                 .putFinite("exitAvg", if (t.contracts > 0) t.proceedsUsd / t.contracts else null)
                 .putFinite("feesUsd", t.entryFeeUsd + t.exitFeeUsd).putFinite("netUsd", t.netUsd)
-                .put("entryAtMs", t.entryAtMs ?: JSONObject.NULL).put("closedAtMs", at)
+                .put("entryAtMs", t.entryAtMs ?: JSONObject.NULL).put("closedAtMs", if (open) JSONObject.NULL else at)
                 .put("exitReason", t.exitReason ?: "")
                 // 0.3.65 full detail: signal, fees per leg, exit decision time, adverse marks, note (entry/exit book, spot, fair, model, peak bid, stop).
                 .put("signalAtMs", t.signalAtMs).putFinite("signalAsk", t.signalAsk).putFinite("fairAtSignal", t.fairAtSignal)
@@ -161,9 +164,16 @@ class SupabaseSync(
                 .put("exitDecidedAtMs", t.exitDecidedAtMs ?: JSONObject.NULL).putFinite("adverse30", t.adverse30).putFinite("adverse60", t.adverse60)
                 .put("stopLevel", com.dirk.kalshiodds.decision.ScalpModels.modelOf(t)?.let { com.dirk.kalshiodds.decision.ScalpModels.stopLabel(it) } ?: "")
                 .put("group", if (com.dirk.kalshiodds.decision.ScalpV2.isV2(t.variantId)) "v2" else (com.dirk.kalshiodds.decision.ShockFav.byVariantId(t.variantId)?.group ?: ""))
+                .put("state", t.state.name)
                 .put("note", t.note.take(2_000))
                 .put("executionNotes", com.dirk.kalshiodds.decision.ScalpFills.executionNotes(t.note))
             out.add(rec("scalp:${t.id}", "scalp", at, payload))
+        }
+        val gateAt = System.currentTimeMillis()
+        bundle.scalpGates.forEach { g ->
+            val payload = JSONObject()
+                .put("windowKey", g.windowKey).put("code", g.code).put("reason", g.reason).put("count", g.count)
+            out.add(rec("scalp_gate:${g.windowKey}:${g.code}:${g.reason.hashCode()}", "scalp_gate", gateAt, payload))
         }
         bundle.shadow.forEach { s ->
             val payload = JSONObject()
