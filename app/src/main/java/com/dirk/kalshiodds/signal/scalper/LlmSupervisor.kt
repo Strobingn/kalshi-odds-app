@@ -567,6 +567,12 @@ class LlmSupervisor(
             trigger and size matter most. The arena is in learning mode: all of them bet on paper as often as
             they can so you have data on every one. Tune them hard; do not just switch things off after a few
             losses, and re-enable a strategy you disabled if the market has changed.
+            The strategies the arena had retired (dip-hunter, momentum-sniper, extreme reversion, resting and
+            buy-now forms, flow, bounce, panic fade and the rest) lost money on every one of 11 recorded days,
+            about 2 to 4 cents a contract after fees, because a 1-2 cent target cannot pay a 1.8 cent entry fee and
+            a stop that costs 6 cents. They start at 1 contract for that reason. Raise one only after its own
+            results here are clearly positive over many trades; the late buy-and-hold strategies are the proven
+            ones (late comeback, late edge, the Kashi favourites).
             Rules:
             - Learn from every trade: what won, what lost, and which settings were in force.
             - There is no cooldown. You may change anything on any tick, but a single trade is weak evidence;

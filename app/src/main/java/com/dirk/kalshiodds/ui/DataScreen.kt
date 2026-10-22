@@ -130,7 +130,7 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
                 modifier = Modifier.fillMaxWidth().height(52.dp)
             ) { Text(if (state.learningMode) "Learning mode: ON · every strategy bets" else "Learning mode: OFF · money-makers only") }
             Text(
-                "Learning mode runs every strategy on paper, retired ones too, so the arena places as many paper bets as it can and the AI has data on all of them. Paper only.",
+                "Learning mode runs every strategy on paper, retired ones too, so the arena places as many paper bets as it can and the AI has data on all of them. The retired ones lost on every recorded day, so they bet 1 contract until they earn more. Paper only.",
                 style = MaterialTheme.typography.labelSmall,
                 color = colors.textSecondary
             )

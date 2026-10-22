@@ -11,6 +11,8 @@ are stored encrypted; Groq is tried first, Mistral is the fallback).
   supervisor, on by default) that is all of them, including the dip-hunter, momentum-sniper and extreme-reversion
   scalpers the arena had retired, so the paper arena bets as often as it can and the AI has data on everything.
   With learning mode off only the 7 late buy-and-hold strategies run.
+  The retired ones lost on all 11 recorded days (−2 to −4¢ a contract; the replay in `ArenaReplayTest`), so in
+  learning mode they bet 1 contract and the AI is told why; a size you or the AI set always wins.
 - **On by default:** it starts as soon as a Groq or Mistral key is saved (Data screen shows why if it is idle).
 - **Live chart:** shows the UP price (blue) and the DOWN price (orange); each paper mark sits on its own side's line. The engine already reads these on every decision, so a change takes effect at once.
 - **Hard bounds:** every value is clamped to a fixed range and to 25 % of that range per change. The entry

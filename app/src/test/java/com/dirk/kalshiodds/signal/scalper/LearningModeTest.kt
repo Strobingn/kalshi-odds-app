@@ -52,6 +52,23 @@ class LearningModeTest {
     }
 
     @Test
+    fun retiredStrategiesBetSmallInLearningModeAndTheMoneyMakersKeepTheirSize() {
+        val t = ScalpTuning()
+        val loser = ScalpStrategy.DIP_HUNTER
+        val winner = ScalpStrategy.LATE_COMEBACK
+        // Off: everything that runs bets the arena's size.
+        assertEquals(t.defaultContracts, t.tuned(winner).contracts)
+        assertEquals(t.defaultContracts, t.tuned(loser).contracts)
+        learning {
+            assertEquals(ScalpStrategy.LEARNING_CONTRACTS, t.tuned(loser).contracts)
+            assertEquals(t.defaultContracts, t.tuned(winner).contracts)
+            // A size you (or the AI) set always wins.
+            t.set(loser, ScalpKnobs(contracts = 7))
+            assertEquals(7, t.tuned(loser).contracts)
+        }
+    }
+
+    @Test
     fun theSupervisorCanTuneARetiredStrategyOnlyInLearningMode() {
         val st = ScalpStrategy.DIP_HUNTER
         assertTrue(SupervisorBounds.apply(ScalpTuning(), st.name, "targetCents", 12.0) is SupervisorBounds.Change.Rejected)

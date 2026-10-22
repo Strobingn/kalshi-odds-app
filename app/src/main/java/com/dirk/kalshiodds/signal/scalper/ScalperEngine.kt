@@ -343,6 +343,16 @@ enum class ScalpStrategy(
         /** The strategies the arena runs and shows: the replay's money makers, or all of them in [learningMode]. */
         val ACTIVE: List<ScalpStrategy> get() = if (learningMode) ALL_STRATEGIES else ACTIVE_BASE
 
+        /**
+         * Contracts per order a retired strategy bets while [learningMode] is on. They lost on every one of the 11
+         * recorded days (about −2 to −4¢ a contract, ArenaReplayTest), so they bet small for the data and the AI
+         * supervisor (or you) may raise it if one turns out to pay. The money-makers keep the arena's size.
+         */
+        const val LEARNING_CONTRACTS = 1
+
+        /** True for a strategy taken out of the arena on 2026-10-20, whether or not learning mode has put it back. */
+        fun isRetiredBase(st: ScalpStrategy): Boolean = st in RETIRED_BASE
+
         /** A trade-file or ledger name of a retired strategy. */
         fun isRetired(name: String): Boolean = !learningMode && name in RETIRED_NAMES
 

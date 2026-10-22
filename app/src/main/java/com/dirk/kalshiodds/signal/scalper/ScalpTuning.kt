@@ -139,7 +139,15 @@ class ScalpTuning(
 
     fun knobs(st: ScalpStrategy): ScalpKnobs = map[st.name] ?: ScalpKnobs()
 
-    fun tuned(st: ScalpStrategy): Tuned = Tuned(st, knobs(st), defaultContracts)
+    fun tuned(st: ScalpStrategy): Tuned = Tuned(st, knobs(st), contractsFor(st))
+
+    /** Order size when nobody set one: the arena's, except a retired strategy that learning mode has put back bets small. */
+    private fun contractsFor(st: ScalpStrategy): Int =
+        if (ScalpStrategy.learningMode && ScalpStrategy.isRetiredBase(st)) {
+            minOf(defaultContracts, ScalpStrategy.LEARNING_CONTRACTS)
+        } else {
+            defaultContracts
+        }
 
     fun all(): Map<String, ScalpKnobs> = map
 
