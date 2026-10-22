@@ -38,7 +38,7 @@ data class PaperBet(
     val pnlUsd: Double? = null,
     /** The math's chance for this side when the bet was placed (fair price, 0–100), if the feed had one. */
     val fairCents: Double? = null,
-    /** The chance the risk check used: the AI's confidence cut to its proven skill, averaged with [fairCents]. */
+    /** The AI's confidence cut to its proven skill, averaged with [fairCents]: for the review, never a block. */
     val chanceCents: Double? = null,
     /** The AI's best case for UP and for DOWN, written before it picked a side. */
     val bullCase: String? = null,
@@ -187,30 +187,12 @@ class PaperAi(
         val bull = (obj["bull_case"] as? JsonPrimitive)?.contentOrNull?.take(300)?.takeIf { it.isNotBlank() }
         val bear = (obj["bear_case"] as? JsonPrimitive)?.contentOrNull?.take(300)?.takeIf { it.isNotBlank() }
 
-        // The risk manager: code, not the model, has the last word.
+        // Recorded for the review afterwards, never used to block: a bet inside the limits is always placed.
         val fairYes = (f["fairYesCents"] as? JsonPrimitive)?.doubleOrNull?.takeIf { it in 0.0..100.0 }
         val fairSide = fairYes?.let { if (decision == "YES") it else 100.0 - it }
-        val feeCents = KalshiFee.total(contracts, price) / contracts * 100.0
         val trust = synchronized(lock) { PaperAiCalibration.read(bets.filter { it.result != null }).trust }
         val adjusted = PaperAiCalibration.adjust(conf.toDouble(), askCents, trust)
         val chance = if (fairSide != null) (adjusted + fairSide) / 2.0 else adjusted
-        val edge = chance - askCents - feeCents
-        val blocked = when {
-            fairSide != null && fairSide < askCents ->
-                "the fair price gives $decision ${"%.1f".format(fairSide)}%, under its ${askCents}c ask"
-            edge < MIN_EDGE_CENTS ->
-                "edge ${"%.1f".format(edge)}c after the fee (chance ${"%.1f".format(chance)}%, ask ${askCents}c, fee ${"%.1f".format(feeCents)}c) is under ${MIN_EDGE_CENTS}c"
-            else -> null
-        }
-        if (blocked != null) {
-            journal("risk_rejected", buildJsonObject {
-                put("ticker", ticker); put("side", decision); put("why", blocked); put("reason", reason)
-                put("confidence", conf); put("trust", trust)
-                fairSide?.let { put("fairCents", it) }
-                bull?.let { put("bullCase", it) }; bear?.let { put("bearCase", it) }
-            })
-            return note("risk check blocked $decision on $ticker: $blocked")
-        }
 
         val bet = synchronized(lock) {
             PaperBet(
@@ -295,7 +277,6 @@ class PaperAi(
         put("limits", buildJsonObject {
             put("askCentsRange", "$MIN_ASK_CENTS..$MAX_ASK_CENTS"); put("maxContracts", MAX_CONTRACTS)
             put("betsPerWindow", "unlimited, one per minute"); put("entrySeconds", "$ENTRY_FROM_S..$ENTRY_UNTIL_S")
-            put("riskCheck", "code blocks a bet when the fair price gives your side less than its ask, or when (your confidence cut to trustInYourConfidence, averaged with the fair price) minus the ask and fee is under ${MIN_EDGE_CENTS}c")
         })
         put("yourRecord", recordLine())
         put("yourCalibration", calibrationJson())
@@ -319,14 +300,12 @@ class PaperAi(
         const val KEEP_BETS = 300
         const val MAX_LESSONS = 30
         const val MAX_REFLECT_QUEUE = 5
-        /** Cents a contract a bet must clear after the fee, on the risk check's chance. */
-        const val MIN_EDGE_CENTS = 2.0
 
         val SYSTEM = """You are the PAPER BETTING AI for a Bitcoin-only Kalshi 15-minute UP/DOWN market. You are not the scalping AI: another AI tunes the scalping algorithms, you decide, every minute, whether to place another paper bet (there is no limit on how many bets you place in a window; you may bet again, the same side or the other, as the window moves).
 Each call you get the live feed, the limits, your record, your calibration, your last bets with results and lessons you wrote after earlier windows settled. YES = Bitcoin finishes UP (at or above strikePrice), NO = DOWN.
 The feed's fairYesCents is the math's chance of YES (0-100) from the settlement index, the strike, its volatility and the time left. spotMinusStrike says how far Bitcoin is from the strike now.
 Before you choose, write bull_case (the best reason UP wins) and bear_case (the best reason DOWN wins), then pick the side whose case is stronger at its price, or SKIP.
-Goal: positive net profit after the taker fee (0.07 x price x (1 - price) per contract). A code risk check blocks any bet where the fair price gives your side less than its ask, and any bet whose edge after the fee is under 2c, counting only trustInYourConfidence of the edge you claim. Give your real chance as confidence; inflating it does not help. SKIP is a good answer when there is no edge.
+Goal: positive net profit after the taker fee (0.07 x price x (1 - price) per contract). Every bet you place inside the limits is placed: bet often to learn, but only with an edge (the side's ask below your real chance of winning). Give your real chance as confidence; trustInYourConfidence shows how much of the edge you claimed has shown up. SKIP is a good answer when there is no edge.
 Paper only. Answer only by calling place_bet."""
 
         val REFLECT_SYSTEM = """You are the PAPER BETTING AI looking back on one settled Bitcoin 15-minute window you bet on. You get how it finished, your bets (side, price, confidence, the fair price at entry, your reason, your bull and bear cases) and your calibration.

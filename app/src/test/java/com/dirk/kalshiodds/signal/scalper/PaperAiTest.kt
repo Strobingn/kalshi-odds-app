@@ -7,7 +7,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** The Paper AI: bounded paper bets, a code risk check, settled when the window settles, then a lesson. */
+/** The Paper AI: every bet inside the limits is placed, settled when the window settles, then a lesson. */
 class PaperAiTest {
     private val ticker = "KXBTC15M-26OCT221200-00"
 
@@ -70,27 +70,17 @@ class PaperAiTest {
     }
 
     @Test
-    fun theRiskCheckBlocksABetWithNoEdgeAfterTheFee() {
-        // 56% claimed on a 55c ask: half the claimed edge counts at first, so well under 2c after the fee.
+    fun everyBetInsideTheLimitsIsPlacedAndKeepsTheFairPriceAndBothCases() {
+        // A thin edge and a bet against the math still go through: only the limits decide.
         val thin = ai("""{"decision":"YES","contracts":10,"confidence":56,"reason":"maybe"}""")
-        assertTrue(thin.tick().startsWith("risk check blocked"))
-        assertTrue(thin.openBets().isEmpty())
-    }
-
-    @Test
-    fun theRiskCheckBlocksABetAgainstTheFairPrice() {
-        // The AI says 90% YES, but the math gives YES 40% against a 55c ask.
-        val p = ai("""{"decision":"YES","contracts":5,"confidence":90,"reason":"hunch"}""", feed(fairYes = 40.0))
-        assertTrue(p.tick().contains("fair price"))
-        assertTrue(p.openBets().isEmpty())
-        // With the math behind it, the same bet goes through and keeps the fair price and both cases.
-        val q = ai(
-            """{"decision":"YES","contracts":5,"confidence":70,"bull_case":"above strike","bear_case":"could fade","reason":"ok"}""",
-            feed(fairYes = 72.0)
+        assertTrue(thin.tick().startsWith("bet YES"))
+        val against = ai(
+            """{"decision":"YES","contracts":5,"confidence":90,"bull_case":"above strike","bear_case":"could fade","reason":"hunch"}""",
+            feed(fairYes = 40.0)
         )
-        assertTrue(q.tick().startsWith("bet YES"))
-        val b = q.openBets().single()
-        assertEquals(72.0, b.fairCents!!, 1e-9)
+        assertTrue(against.tick().startsWith("bet YES"))
+        val b = against.openBets().single()
+        assertEquals(40.0, b.fairCents!!, 1e-9)
         assertEquals("above strike", b.bullCase)
         assertEquals("could fade", b.bearCase)
     }

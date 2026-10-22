@@ -19,7 +19,7 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
-## 1.16.1 (Claude branch): the Paper AI borrows four ideas from TradingAgents
+## 1.16.1 (Claude branch): the Paper AI borrows ideas from TradingAgents
 
 From [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) (a multi-agent LLM
 stock-trading framework). Its full analyst team is too slow for 15-minute windows, so only the parts that fit
@@ -30,10 +30,10 @@ one call a minute are taken. Paper only.
   saw the spot price but never the strike, so it could not tell which side Bitcoin was on.
 - **Bull vs bear.** Each bet must state the best case for UP and for DOWN before picking a side, in the same
   call (no extra cost). Both are saved on the bet.
-- **A risk manager in code.** A bet is blocked (`risk_rejected` in the journal) when the fair price gives the
-  side less than its ask, or when the edge after the taker fee is under 2¢. The edge counts the AI's confidence
-  only as far as its record has earned (`PaperAiCalibration`: realised ÷ claimed edge over settled bets,
-  starting at half and pulled toward that by 20 pretend bets), averaged with the fair price.
+- **Unlimited paper bets.** Any bet inside the limits (20–880 s into the window, ask 10–90¢, up to 50
+  contracts) is placed, with no cap per window. Each bet also saves the fair price for its side and a
+  `chanceCents` (`PaperAiCalibration`: its confidence cut to the share of claimed edge that has shown up,
+  averaged with the fair price), for the review only; neither ever blocks a bet.
 - **Lessons after the result.** The AI no longer writes a "lesson" while betting. After a window it bet on
   settles, it gets one call to look back (its bets, its cases, the fair price, how it finished) and writes one
   lesson; those feed the next bets as `lessonsFromResults`.
