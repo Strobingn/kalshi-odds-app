@@ -75,18 +75,20 @@ class ScalpRetune1021Test {
         assertFalse(FairGapTune.priceBlocked("fair-t2", 0.33, ScalpStrategySettings(maxEntryCents = 33)))
         assertTrue(FairGapTune.priceBlocked("fairh60", 0.39, null))
         assertFalse(FairGapTune.priceBlocked("fairh60", 0.40, null))
-        assertFalse(FairGapTune.priceBlocked("fairh60", 0.25, ScalpStrategySettings(minEntryCents = 25)))
-        assertTrue(FairGapTune.priceBlocked("fairh60", 0.24, ScalpStrategySettings(minEntryCents = 25)))
+        assertTrue(FairGapTune.priceBlocked("fairh60", 0.25, ScalpStrategySettings(minEntryCents = 25)))
+        assertFalse(FairGapTune.priceBlocked("fairh60", 0.40, ScalpStrategySettings(minEntryCents = 25)))
         assertFalse(FairGapTune.priceBlocked("sf41", 0.50, null))
         var learned = ScalpStrategySettings(aiLearns = true)
         repeat(15) { learned = Research.learn("fair", learned.copy(aiN = 2), -1.0, FairGapTune.FAIR_MAX_CENTS) }
-        assertTrue(learned.maxEntryCents!! >= FairGapTune.FAIR_MAX_CENTS - 10)
-        assertTrue(learned.maxEntryCents!! <= FairGapTune.FAIR_MAX_CENTS)
+        assertTrue(learned.maxEntryCents!! >= FairGapTune.FAIR_MAX_CENTS - 20)
+        assertTrue(learned.maxEntryCents!! < FairGapTune.FAIR_MAX_CENTS)
         val manual = Research.learn("fair", ScalpStrategySettings(maxEntryCents = 52, aiLearns = true, aiN = 2), -1.0, FairGapTune.FAIR_MAX_CENTS)
-        assertEquals(51, manual.maxEntryCents)
+        assertEquals(48, manual.maxEntryCents)
+        assertTrue(manual.minEntryCents >= ScalpFloors.cents("fair"))
         val edge = Research.learn("r-late", ScalpStrategySettings(aiLearns = true, aiN = 2), -1.0, 99)
-        assertEquals(11, edge.edgeCents)
-        assertTrue(edge.edgeCents!! <= Research.defaultEdge("r-late") + 4)
+        assertEquals(14, edge.edgeCents)
+        assertTrue(edge.edgeCents!! <= Research.defaultEdge("r-late") + 12)
+        assertTrue(edge.minEntryCents >= ScalpFloors.cents("r-late"))
     }
 
     @Test fun fadeBandIs40To49AndASliderReplacesIt() {

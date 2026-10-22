@@ -112,7 +112,7 @@ class LlmUsageTest {
             java.io.File("app/src/main/java/com/dirk/kalshiodds/llm/LlmPaperStrategy.kt"),
             java.io.File("src/main/java/com/dirk/kalshiodds/llm/LlmPaperStrategy.kt")
         ).first { it.isFile }.readText()
-        assertTrue(paper.contains("delay(15_000)"))
+        assertTrue(paper.contains("CYCLE_MS"))
         assertFalse(paper.contains("MIN_SPACING_MS"))
     }
 

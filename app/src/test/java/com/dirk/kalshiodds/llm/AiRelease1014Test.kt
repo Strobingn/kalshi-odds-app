@@ -77,10 +77,10 @@ class AiRelease1014Test {
         val code = ScalpModels.ALL.first { it.code.startsWith("v2-") && it.code != "v2-llm" }.code
         assertTrue(ScalpModels.ALL.any { it.code == code })
         val losing = List(30) { -1.0 }
-        assertTrue(AiBench.decide(false, losing, emptyList(), 30).bench)
-        assertFalse(AiBench.decide(false, List(30) { -0.01 }, emptyList(), 30).bench)
+        assertFalse(AiBench.decide(false, losing, emptyList(), 30).bench)
+        assertFalse(AiBench.decide(false, List(40) { -5.0 }, emptyList(), 30).bench)
         assertFalse(AiBench.decide(false, List(29) { -5.0 }, emptyList(), 30).bench)
-        assertTrue(AiBench.decide(true, losing, List(30) { 0.2 }, 30).unbench)
+        assertFalse(AiBench.decide(true, losing, List(30) { 0.2 }, 30).bench)
 
         val forced = MemoryScalpControls(ScalpControls(benchOverrides = mapOf(code to "ACTIVE")))
         val store = AiWatchStore()

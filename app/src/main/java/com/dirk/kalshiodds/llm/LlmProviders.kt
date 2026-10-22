@@ -41,7 +41,8 @@ object LlmProviders {
     /** Last free-plan model. 750 requests/min. Used only after the first two are not on the plan. */
     const val MISTRAL_3B = "ministral-3b-latest"
     val MISTRAL_CHAIN = listOf(MISTRAL_DEFAULT, MISTRAL_NEMO, MISTRAL_3B)
-    const val MISTRAL_PACE_MS = 30_000L
+    /** One call per free-plan minute slot (188/min). The day cap is a hard stop, not a 30s idle gap. */
+    const val MISTRAL_PACE_MS = 320L
     const val FREE_KEY_HINT = "Get a free key at console.mistral.ai, console.groq.com, or aistudio.google.com."
 
     data class Spec(
@@ -108,22 +109,23 @@ object LlmProviders {
     /**
      * Provider ceilings before the optional daily budget.
      * Mistral free plan: 188/min and 625K tokens/min on ministral-8b and open-mistral-nemo
-     * (ministral-3b is 750/min). Automatic calls stay at one every 30s, under all three.
-     * Groq: 30/min, 1,000/day, 8K tokens/min, 200K tokens/day, per model.
-     * Gemini's daily figure is the safety budget (500), because a key may be free or billed.
-     * OpenRouter `:free`: 20/min, 50/day.
+     * (ministral-3b is 750/min). The pace is that minute slot, about 320ms, so a Kalshi
+     * cycle is not left waiting while quota remains. The day cap is a hard stop.
+     * Groq: 30/min, 1,000/day, 8K tokens/min, 200K tokens/day, per model. Pace is 2s.
+     * Gemini's daily figure is the safety budget (500). Pace is 6s (10/min).
+     * OpenRouter `:free`: 20/min, 50/day. Pace is 3s.
      */
     fun baseQuota(id: String, model: String = ""): FreeQuota? {
         if (!freeFamily(id, model)) return null
         return when (id) {
             MISTRAL -> FreeQuota(188, 2_880, 625_000, 900_000_000, MISTRAL_PACE_MS)
-            GROQ -> FreeQuota(30, 1_000, 8_000, 200_000, 90_000L)
-            GEMINI -> FreeQuota(10, 500, 250_000, 50_000_000, spreadPaceMs(500))
-            else -> FreeQuota(20, 50, 250_000, 50_000_000, spreadPaceMs(50))
+            GROQ -> FreeQuota(30, 1_000, 8_000, 200_000, 2_000L)
+            GEMINI -> FreeQuota(10, 500, 250_000, 50_000_000, 6_000L)
+            else -> FreeQuota(20, 50, 250_000, 50_000_000, 3_000L)
         }
     }
 
-    /** Optional daily auto-call budget. Groq is per model. 0 means no extra cap. Mistral's 2,880 matches one call every 30s. */
+    /** Optional daily auto-call budget. Groq is per model. 0 means no extra cap. Mistral's 2,880 is the hard day stop. */
     fun defaultDailyCap(id: String, model: String = ""): Int = when {
         id == GROQ -> 1_000
         id == GEMINI -> 500
@@ -136,11 +138,9 @@ object LlmProviders {
     fun effectiveQuota(id: String, model: String, dailyCap: Int): FreeQuota? {
         val base = baseQuota(id, model) ?: return null
         val cap = if (dailyCap > 0) minOf(base.requestsPerDay, dailyCap) else base.requestsPerDay
-        val spread = spreadPaceMs(cap)
-        // A 2,880/day cap spreads to ~30.01s. Keep the 30s Mistral pace unless the cap is actually tighter.
-        val pace = if (id == MISTRAL && spread <= base.perModelPaceMs + 1_500L) base.perModelPaceMs
-        else maxOf(base.perModelPaceMs, spread)
-        return base.copy(requestsPerDay = cap, perModelPaceMs = pace)
+        // Day and minute ceilings are hard stops inside the pacer. Do not stretch the gap
+        // across 24h: that left the paper strategy idle while quota was still left.
+        return base.copy(requestsPerDay = cap)
     }
 
     /** Spread [perDay] calls across 24h with one slot of margin so a simulated day stays under the cap. */

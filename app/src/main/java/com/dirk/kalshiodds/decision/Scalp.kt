@@ -1801,13 +1801,13 @@ class ScalpBook(
     /** 1.0.9: called (cheaply, under the book lock) when a primary or bench-shadow trade settles. Arg = scalper code. */
     @Volatile var onSettled: ((String, ScalpTrade) -> Unit)? = null
 
-    /** Force trade wins over the AI bench and over the 1.0.9 auto-bench. Force bench wins over both. */
+    /** Force trade wins. Force bench is the only automatic-looking stop, and it is manual. */
     private fun shouldBench(code: String): Boolean {
         when (controls.state.value.benchOverrides[code]) {
             "ACTIVE" -> return false
             "BENCHED" -> return true
         }
-        return code in controls.state.value.aiBench || code in benched
+        return code in benched
     }
 
     private fun algoOf(code: String?): Map<String, Double> =
@@ -1822,6 +1822,34 @@ class ScalpBook(
         return StrategyAlgo.view(raw, code)
     }
 
+    /** Skip a new paper clip at a nonsense price or size. Logs the reason and does not throw. */
+    private fun guardNewEntry(t: ScalpTrade): ScalpTrade {
+        if (t.state != ScalpState.PENDING_ENTRY) return t
+        val code = ScalpModels.modelOf(t)?.code ?: t.variantId
+        val floor = ScalpFloors.cents(code) / 100.0
+        val px = t.restingLimit ?: t.signalAsk
+        val why = ScalpParamSanity.entryBlock(t.side, px, t.contracts, floor, bankrollUsd()) ?: return t
+        gates.block(code, ScalpModels.windowKeyOf(t.ticker), why)
+        return t.copy(state = ScalpState.NO_FILL, closedAtMs = t.signalAtMs, note = "${t.note}; $why")
+    }
+
+    /** Log a closed trade whose exit or P&L does not reconcile. The row is kept. */
+    private fun noteSanity(t: ScalpTrade) {
+        val code = ScalpModels.modelOf(t)?.code ?: t.variantId
+        val window = ScalpModels.windowKeyOf(t.ticker)
+        val q = _marks.value[t.ticker.uppercase()]
+        val exitPx = if (t.soldContracts > 0) t.proceedsUsd / t.soldContracts else null
+        val bid = q?.bid(t.side)
+        val depth = q?.bidSize(t.side)
+        ScalpParamSanity.exitBlock(exitPx, bid, t.soldContracts, depth)?.let { gates.block(code, window, it) }
+        val entry = t.entryPrice
+        val net = t.netUsd
+        if (entry != null && exitPx != null && net != null) {
+            val gap = ScalpParamSanity.pnlGap(entry, exitPx, t.soldContracts.coerceAtLeast(t.contracts), t.entryFeeUsd, t.exitFeeUsd, net)
+            if (gap != null && kotlin.math.abs(gap) > 0.05) gates.block(code, window, "sanity: P&L does not reconcile")
+        }
+    }
+
     private fun benchShadow(t: ScalpTrade): ScalpTrade {
         if (!t.isPrimary) return t
         val code = ScalpModels.modelOf(t)?.code ?: return t
@@ -1831,12 +1859,15 @@ class ScalpBook(
 
     private fun save(tIn: ScalpTrade) {
         val prev = _all.value.firstOrNull { it.id == tIn.id }
-        val tf = if (prev == null) fairGapEntryFilter(settingsEntryFilter(tIn)) else tIn
+        val incoming = if (prev == null) guardNewEntry(tIn) else tIn
+        val tf = if (prev == null && incoming.state == ScalpState.PENDING_ENTRY) fairGapEntryFilter(settingsEntryFilter(incoming)) else incoming
         // Bench after the live entry gates, so the shadow book only holds entries the scalper would really have taken.
         val t0 = if (prev == null && tf.ruleVersion.endsWith("|P")) benchShadow(tf) else tf
         val t = if (liveExtras) withDetail(t0, prev) else t0
-        if (t.state == ScalpState.CLOSED && prev != null && prev.state != ScalpState.CLOSED && (t.isPrimary || BENCH_SHADOW in t.note))
+        if (t.state == ScalpState.CLOSED && prev != null && prev.state != ScalpState.CLOSED && (t.isPrimary || BENCH_SHADOW in t.note)) {
+            noteSanity(t)
             onSettled?.let { cb -> ScalpModels.modelOf(if (t.isPrimary) t else t.copy(ruleVersion = t.ruleVersion.removeSuffix("|S") + "|P"))?.code?.let { runCatching { cb(it, t) } } }
+        }
         // 0.3.67: enqueue DB+stats off the quote lock; flushBatches drains on a worker.
         writeQ.merge(t.id, t to prev) { old, neu -> neu.first to (old.second ?: neu.second) }
         if (writeQ.size >= 80) flushWrites() // 0.3.67: never let the queue grow unboundedly (soak / burst quotes)
@@ -1983,6 +2014,7 @@ class ScalpBook(
             val plan = cfg.plan(informed, model.code)
             // Hard rule: every Kalshi Scalper strategy trails 3¢ below the peak bid, active from entry.
             val sp = plan.spec.copy(trail = ScalpV2.TRAIL)
+            if (_all.value.any { isActive(it) && it.variantId == sp.id && it.ticker.equals(t.ticker, true) }) continue
             val stopPct = knobs.stopLossPercent ?: cfg.stopLossPercent
             val stop = plan.stop
             save(ScalpTrade(id = idFactory(), ticker = t.ticker.uppercase(), side = t.side, state = ScalpState.PENDING_ENTRY,

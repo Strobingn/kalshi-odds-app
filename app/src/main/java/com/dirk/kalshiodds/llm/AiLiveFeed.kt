@@ -17,6 +17,9 @@ data class AiLivePoint(
 
 data class AiLivePosition(val label: String, val side: String, val contracts: Int, val pnlUsd: Double)
 
+/** One line on the live card. A zero clip is flat, not a position. */
+data class AiLiveRow(val id: String, val text: String, val pnlUsd: Double, val flat: Boolean)
+
 /**
  * Latest KXBTC15M picture. Replaced on every Kalshi odds/book tick and every BTC price tick.
  * [atMs] is the tick time, not a 1-second timer.
@@ -135,6 +138,40 @@ object AiLiveFeed {
 
     fun cardOddsLine(s: AiLiveSnapshot): String =
         "UP ${centsLabel(s.yesBid)}/${centsLabel(s.yesAsk)} · DOWN ${centsLabel(s.noBid)}/${centsLabel(s.noAsk)} · AI UP ${upChanceLabel(s.modelUp)}"
+
+    /**
+     * One row per full variant id. `-v1` / `-v2` / `-v3` stay on the id.
+     * Two pending clips of the same id (the parent opened twice, both at 0 contracts)
+     * collapse to a single flat line. A real clip keeps its side, size, and P&L.
+     */
+    fun positionRows(rows: List<AiLivePosition>): List<AiLiveRow> {
+        val grouped = LinkedHashMap<String, AiLivePosition>()
+        for (p in rows) {
+            val id = p.label.trim()
+            if (id.isEmpty()) continue
+            val side = p.side.trim().uppercase(Locale.US)
+            val prev = grouped["$id|$side"]
+            grouped["$id|$side"] = if (prev == null) p.copy(label = id, side = side)
+            else prev.copy(contracts = prev.contracts + p.contracts, pnlUsd = prev.pnlUsd + p.pnlUsd)
+        }
+        val out = ArrayList<AiLiveRow>()
+        for ((id, list) in grouped.values.groupBy { it.label }) {
+            val open = list.filter { it.contracts > 0 }
+            if (open.isEmpty()) {
+                out += AiLiveRow(id, "$id flat", list.sumOf { it.pnlUsd }, true)
+            } else {
+                for (p in open) {
+                    out += AiLiveRow(
+                        id,
+                        "$id ${p.side} ${p.contracts} · ${String.format(Locale.US, "%+.2f", p.pnlUsd)}",
+                        p.pnlUsd,
+                        false
+                    )
+                }
+            }
+        }
+        return out
+    }
 
     fun post(live: AiLiveSnapshot?, trigger: LiveTrigger, tweaks: List<AiAdjustment>): String {
         val s = live

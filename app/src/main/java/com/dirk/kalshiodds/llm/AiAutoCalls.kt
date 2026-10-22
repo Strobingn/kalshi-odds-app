@@ -24,9 +24,9 @@ object AiAutoCalls {
         if (quota == null) return "Auto pace: at most every 60s"
         val models = LlmProviders.paceModels(ep)
         val ms = if (models.size >= 2) quota.perModelPaceMs / 2 else quota.perModelPaceMs
-        val sec = (ms / 1000L).coerceAtLeast(1L)
-        return if (models.size >= 2) "Auto pace: every ${sec}s, rotating ${models.joinToString(" and ")}"
-        else "Auto pace: every ${sec}s"
+        val label = if (ms < 1_000L) String.format(java.util.Locale.US, "%.1fs", ms / 1000.0) else "${(ms / 1000L).coerceAtLeast(1L)}s"
+        return if (models.size >= 2) "Auto pace: every $label, rotating ${models.joinToString(" and ")}"
+        else "Auto pace: every $label"
     }
 
     /**
@@ -74,11 +74,47 @@ object AiAutoCalls {
             } catch (e: LlmBillingRequired) {
                 onBilling(e.provider.ifBlank { use.provider }, e.message ?: "billing")
             } catch (e: Exception) {
-                pacer.note429(use.provider, model, quota.perModelPaceMs, nowMs)
-                return null
+                pacer.note429(use.provider, model, quota.perModelPaceMs.coerceAtLeast(1_000L), nowMs)
             }
         }
         return null
+    }
+
+    data class Wait(val reason: String, val resumeAtMs: Long)
+
+    /**
+     * Why every free provider is quiet, and the soonest ET-ready instant.
+     * Null when one of them can be called now. Paid providers are not in [endpoints].
+     */
+    fun explainWait(
+        endpoints: List<LlmEndpoint>,
+        pacer: FreeCallPacer,
+        nowMs: Long,
+        tokens: Int,
+        quotaOf: (LlmEndpoint) -> FreeQuota?,
+        allowed: (LlmEndpoint) -> Boolean
+    ): Wait? {
+        var soonest: Wait? = null
+        var sawFree = false
+        for (ep in endpoints) {
+            if (!ep.usable || !allowed(ep) || !LlmProviders.freeFamily(ep.provider, ep.model)) continue
+            sawFree = true
+            val quota = quotaOf(ep) ?: continue
+            val hold = pacer.hold(ep.provider, LlmProviders.paceModels(ep), quota, nowMs, tokens) ?: return null
+            val wait = Wait("${LlmProviders.shortLabel(ep.provider)} ${hold.reason}", hold.resumeAtMs)
+            if (soonest == null || wait.resumeAtMs < soonest.resumeAtMs) soonest = wait
+        }
+        if (!sawFree) return Wait("no free provider with a key", nowMs)
+        return soonest
+    }
+
+    /** Shown only when the wait is a real cap or backoff, not the steady inter-call gap. */
+    fun paceStatus(wait: Wait?, nowMs: Long): String {
+        if (wait == null) return ""
+        val gap = wait.resumeAtMs - nowMs
+        if (wait.reason.endsWith("pace") && gap <= 2_500L) return ""
+        val whenEt = com.dirk.kalshiodds.domain.EtTime.clock(wait.resumeAtMs)
+        return "waiting for the free-tier pace · ${wait.reason} · resumes $whenEt"
     }
 }
 
@@ -118,6 +154,33 @@ class FreeCallPacer {
 
     fun ready(provider: String, models: List<String>, quota: FreeQuota, now: Long, tokens: Int): Boolean =
         pick(provider, models, quota, now, tokens, advance = false) != null
+
+    data class Hold(val reason: String, val resumeAtMs: Long)
+
+    /** Null when [ready] is true. Otherwise the soonest this provider can be called, and why. */
+    fun hold(provider: String, models: List<String>, quota: FreeQuota, now: Long, tokens: Int): Hold? {
+        if (ready(provider, models, quota, now, tokens)) return null
+        if (models.isEmpty() || tokens <= 0 || quota.requestsPerMinute <= 0 || quota.requestsPerDay <= 0) {
+            return Hold("quota", now + 60_000L)
+        }
+        prune(now)
+        val globalPace = if (models.size >= 2) quota.perModelPaceMs / 2 else quota.perModelPaceMs
+        val lastAny = hits.lastOrNull { it.provider == provider }?.at
+        val globalAt = if (lastAny != null && globalPace > 0L && now - lastAny < globalPace) lastAny + globalPace else now
+        var modelAt = Long.MAX_VALUE
+        var why = "pace"
+        for (model in models) {
+            val block = modelHold(provider, model, quota, now, tokens)
+            if (block.resumeAtMs < modelAt) {
+                modelAt = block.resumeAtMs
+                why = block.reason
+            }
+        }
+        var at = maxOf(globalAt, modelAt)
+        if (globalAt > modelAt) why = "pace"
+        if (at == Long.MAX_VALUE || at <= now) at = now + quota.perModelPaceMs.coerceAtLeast(1_000L)
+        return Hold(why, at)
+    }
 
     fun record(provider: String, model: String, now: Long, tokens: Int) {
         hits.addLast(Hit(now, provider, model, tokens.coerceAtLeast(0)))
@@ -194,6 +257,48 @@ class FreeCallPacer {
             return model
         }
         return null
+    }
+
+    private fun modelHold(provider: String, model: String, quota: FreeQuota, now: Long, tokens: Int): Hold {
+        val key = "$provider|$model"
+        var at = now
+        var why = "pace"
+        fun later(t: Long, reason: String) {
+            if (t > at) { at = t; why = reason }
+        }
+        later(backoffUntil[key] ?: Long.MIN_VALUE, "backoff")
+        later(adaptiveUntil[key] ?: Long.MIN_VALUE, "backoff")
+        var minuteCalls = 0
+        var dayCalls = 0
+        var minuteTokens = 0L
+        var dayTokens = 0L
+        var last = Long.MIN_VALUE
+        var oldestMinute = Long.MAX_VALUE
+        var oldestDay = Long.MAX_VALUE
+        for (hit in hits) {
+            if (hit.provider != provider || hit.model != model) continue
+            val age = now - hit.at
+            if (age in 0 until DAY_MS) {
+                dayCalls++
+                dayTokens += hit.tokens
+                if (hit.at < oldestDay) oldestDay = hit.at
+                if (age < MINUTE_MS) {
+                    minuteCalls++
+                    minuteTokens += hit.tokens
+                    if (hit.at < oldestMinute) oldestMinute = hit.at
+                }
+            }
+            if (hit.at > last) last = hit.at
+        }
+        if (last != Long.MIN_VALUE && quota.perModelPaceMs > 0L && now - last < quota.perModelPaceMs) {
+            later(last + quota.perModelPaceMs, "pace")
+        }
+        if (minuteCalls >= quota.requestsPerMinute && oldestMinute != Long.MAX_VALUE) later(oldestMinute + MINUTE_MS, "minute cap")
+        if (dayCalls >= quota.requestsPerDay && oldestDay != Long.MAX_VALUE) later(oldestDay + DAY_MS, "day cap")
+        if (minuteTokens + tokens > quota.tokensPerMinute && oldestMinute != Long.MAX_VALUE) later(oldestMinute + MINUTE_MS, "token cap")
+        if (dayTokens + tokens > quota.tokensPerDay && oldestDay != Long.MAX_VALUE) later(oldestDay + DAY_MS, "token cap")
+        if (at <= now) at = now + quota.perModelPaceMs.coerceAtLeast(1_000L)
+        return Hold(why, at)
     }
 
     private fun within(provider: String, model: String, quota: FreeQuota, now: Long, tokens: Int): Boolean {

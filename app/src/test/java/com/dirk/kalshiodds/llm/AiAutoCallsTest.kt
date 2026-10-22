@@ -136,7 +136,7 @@ class AiAutoCallsTest {
         val one = simulate(LlmProviders.GROQ, listOf(LlmProviders.GROQ_120), groq, tokens)
         assertWithin(LlmProviders.GROQ, one, groq, tokens)
         assertTrue(one.size in 900..1_000)
-        assertTrue(one.zipWithNext { a, b -> b.first - a.first }.all { it >= 90_000L })
+        assertTrue(one.zipWithNext { a, b -> b.first - a.first }.all { it >= 2_000L })
 
         val rotated = simulate(LlmProviders.GROQ, listOf(LlmProviders.GROQ_120, LlmProviders.GROQ_20), groq, tokens)
         assertWithin(LlmProviders.GROQ, rotated, groq, tokens)
@@ -144,9 +144,9 @@ class AiAutoCallsTest {
         assertEquals(setOf(LlmProviders.GROQ_120, LlmProviders.GROQ_20), byModel.keys)
         byModel.values.forEach { rows ->
             assertTrue(rows.size in 900..1_000)
-            assertTrue(rows.zipWithNext { a, b -> b.first - a.first }.all { it >= 90_000L })
+            assertTrue(rows.zipWithNext { a, b -> b.first - a.first }.all { it >= 2_000L })
         }
-        assertTrue(rotated.zipWithNext { a, b -> b.first - a.first }.all { it >= 45_000L })
+        assertTrue(rotated.zipWithNext { a, b -> b.first - a.first }.all { it >= 1_000L })
 
         val gemini = LlmProviders.effectiveQuota(LlmProviders.GEMINI, LlmProviders.GEMINI_DEFAULT, 500)!!
         val geminiHits = simulate(LlmProviders.GEMINI, listOf(LlmProviders.GEMINI_DEFAULT), gemini, tokens)
@@ -156,7 +156,7 @@ class AiAutoCallsTest {
         val router = LlmProviders.effectiveQuota(LlmProviders.OPENROUTER_FREE, LlmProviders.OPENROUTER_FREE_MODEL, 50)!!
         val routerHits = simulate(LlmProviders.OPENROUTER_FREE, listOf(LlmProviders.OPENROUTER_FREE_MODEL), router, tokens)
         assertWithin(LlmProviders.OPENROUTER_FREE, routerHits, router, tokens)
-        assertTrue(routerHits.size < 50)
+        assertTrue(routerHits.size in 1..50)
 
         val burst = FreeQuota(2, 1_000, 100, 100_000, 0L)
         val burstHits = simulate("burst", listOf("m"), burst, 40, stepMs = 1_000L, horizonMs = 180_000L)

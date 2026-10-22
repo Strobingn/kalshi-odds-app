@@ -232,8 +232,6 @@ internal fun ArenaStrategyRow(row: ScalpModels.Row, st: ScalpTabState, onOpen: (
                 val bench = com.dirk.kalshiodds.decision.insights.BenchRegistry.decisions.collectAsState().value[row.model.code]
                 val manualBench = st.controls.benchOverrides[row.model.code] == "BENCHED"
                 if (manualBench) Text("Bench · forced benched", color = c.down, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, maxLines = 2)
-                else if (st.controls.autoBench && com.dirk.kalshiodds.decision.insights.ScalpFreeze.isFrozen(bench)) Text(bench!!.reason.replaceFirst(com.dirk.kalshiodds.decision.insights.ScalpFreeze.BADGE, com.dirk.kalshiodds.decision.insights.ScalpFreeze.BADGE + " · no new paper trades"), color = c.down, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, maxLines = 2, modifier = Modifier.testTag("FROZEN_BADGE_" + row.model.code))
-                else if (st.controls.autoBench && bench != null && !bench.trading) Text("BENCHED · shadow only · " + bench.reason, color = c.down, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, maxLines = 2)
                 else if (bench?.status == com.dirk.kalshiodds.decision.insights.BenchStatus.FORCED_ACTIVE) Text("Bench override · forced trading", color = c.spot, style = MaterialTheme.typography.labelSmall)
                 pause?.takeIf { it != "Bench · forced benched" }?.let { Text(it, color = c.down, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, maxLines = 2) }
                 st.entryGates[row.model.code]?.let {

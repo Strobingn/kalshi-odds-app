@@ -131,10 +131,8 @@ fun SwarmScalpSettingsContent(initial: ScalpControls, onBack: () -> Unit = {}, o
                 SwarmNumber("Daily net loss limit ($; 0 = off)", draft.maxDailyLossUsd, 0.0..100000.0, true, ::number) { draft = draft.copy(maxDailyLossUsd = it) }
                 Text("Daily loss uses realized V2 results after fees and resets at midnight Eastern. Counts and limits survive restarts.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
             } }
-            item { SwarmCard("Auto-bench, reality check & alerts") {
-                SwarmToggle("Auto-bench losing scalpers", draft.autoBench) { draft = draft.copy(autoBench = it) }
-                SwarmNumber("Bench after settled trades (N)", draft.benchWindow.toDouble(), 5.0..500.0, draft.autoBench, ::number) { draft = draft.copy(benchWindow = it.toInt()) }
-                Text("After N settled trades a scalper net negative after fees is benched: no new paper trades, but its signals keep shadow-tracking. It returns when its last N shadow results would be net positive. Per-scalper override is in each strategy's settings.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+            item { SwarmCard("Reality check & alerts") {
+                Text("Auto-bench is off. A losing scalper keeps trading. Only Force bench, on that scalper's settings, stops new paper trades.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
                 SwarmNumber("Estimated slippage ($ cents/contract/leg)", draft.slipCents, 0.0..10.0, true, ::number) { draft = draft.copy(slipCents = it) }
                 SwarmToggle("Alert: hot streak (5 wins in a row)", draft.alertHotStreak) { draft = draft.copy(alertHotStreak = it) }
                 SwarmToggle("Alert: big single-trade loss", draft.alertBigLoss) { draft = draft.copy(alertBigLoss = it) }

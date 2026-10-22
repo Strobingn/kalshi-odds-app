@@ -30,8 +30,8 @@ data class AiWatchProposal(val scalper: String, val setting: String, val value: 
 
 object AiWatchBounds {
     const val MAX_PER_SCALPER = 3
-    private const val ABOVE = 4
-    private const val BELOW = 10
+    private const val ABOVE = 8
+    private const val BELOW = 16
 
     fun capture(c: ScalpControls): Map<String, Int> {
         val out = HashMap<String, Int>()
@@ -91,6 +91,7 @@ object AiWatchBounds {
         var hi = spec.max.toInt()
         lo = maxOf(lo, base - BELOW)
         hi = minOf(hi, base + ABOVE)
+        if (field == "minEntryCents") lo = maxOf(lo, com.dirk.kalshiodds.decision.ScalpFloors.cents(code))
         val s = c.settings(code)
         if (Research.isResearch(code) && field == "edgeCents") {
             lo = maxOf(lo, base)
@@ -231,8 +232,8 @@ Rules:
 - Numeric changes are clamped to the AI-learns band: research edgeCents stays at or above the user's baseline and at most 4 cents above it; other strategies' maxEntryCents stays at or below the user's baseline and at most 10 cents below it; every other number stays within 10 below and 4 above its current value, and inside the setting's allowed range.
 - Only change fields that scalper already uses.
 - Each scalper also lists its own algorithm knobs as algo key=current[min..max step N]. Those keys are separate from the settings above. Move an algorithm knob by at most one step, and stay inside its min and max. Do not jump.
-- The context includes each scalper's paper net $, win rate, trade count, and last 20 trade P&L (oldest to newest). Spend changes on scalpers that are making money, and tighten the ones that are losing: higher edge or gap, lower entry ceiling, smaller size, tighter stop. One step at a time.
-- Bench is decided in code from paper results. Do not emit an order, a live arm, or a force-bench. A scalper whose last 30 or more paper trades are clearly negative is benched automatically; shadow paper can bring it back. Force trade and Force bench, when Dirk set them, always win.
+- The context includes each scalper's paper net $, win rate, trade count, and last 20 trade P&L (oldest to newest). Loosen winners so they trade more (lower floor down to the strategy floor, higher ceiling, bigger clip, wider entry window). Tighten losers (higher floor, lower ceiling, smaller clip, tighter stop). Steps can be several cents, scaled to recent P&L. Do not leave a winner untouched when it is clearly making money.
+- Never bench, freeze, pause, or auto-pause a scalper. Do not emit an order, a live arm, or a force-bench. Only Dirk's Force bench stops one. Force trade and Force bench, when Dirk set them, always win. A setting Dirk changed by hand wins over you.
 """.trimIndent()
 }
 
@@ -398,7 +399,7 @@ class AiWindowWatcher(
         lastFingerprint = snap.fingerprint
         store.record(LlmSources.WATCHER, ep.provider, reply.model.ifBlank { ep.model }, reply.promptTokens, reply.completionTokens, now())
         val tweaks = apply(reply.text)
-        if (store.config.value.liveFeed) runCatching { onLivePost(AiLiveFeed.post(liveSnap, LiveTrigger.NONE, tweaks)) }
+        if (tweaks.isNotEmpty() && store.config.value.liveFeed) runCatching { onLivePost(AiLiveFeed.post(liveSnap, LiveTrigger.NONE, tweaks)) }
         val capAfter = store.config.value.budgetOrNull()
         if (capAfter != null && store.budgetPaused(now())) store.setNotice(LlmUsageText.budgetNotice(store.todaySpend(now()), capAfter))
         else store.setNotice("")
@@ -411,6 +412,10 @@ class AiWindowWatcher(
         liveSnap = next
         store.publishLive(next)
         val t = AiLiveFeed.trigger(prev, next)
+        if (t == LiveTrigger.FILL || t == LiveTrigger.WINDOW) {
+            val tweaks = runCatching { localTune() }.getOrDefault(emptyList())
+            if (store.config.value.liveFeed) runCatching { onLivePost(AiLiveFeed.post(next, t, tweaks)) }
+        }
         if (t != LiveTrigger.NONE) pending = AiLiveFeed.prefer(pending, t)
         val cfg = store.config.value
         val ep = runCatching { endpoint() }.getOrNull()
@@ -471,7 +476,9 @@ class AiWindowWatcher(
         pending = LiveTrigger.NONE
         store.record(AiLiveFeed.source(trigger), used.provider, reply.model.ifBlank { used.model }, reply.promptTokens, reply.completionTokens, now())
         val tweaks = apply(reply.text)
-        if (store.config.value.liveFeed) runCatching { onLivePost(AiLiveFeed.post(liveSnap, trigger, tweaks)) }
+        if (tweaks.isNotEmpty() && store.config.value.liveFeed && trigger != LiveTrigger.FILL && trigger != LiveTrigger.WINDOW) {
+            runCatching { onLivePost(AiLiveFeed.post(liveSnap, trigger, tweaks)) }
+        }
         val capAfter = store.config.value.budgetOrNull()
         if (capAfter != null && store.budgetPaused(now())) store.setNotice(LlmUsageText.budgetNotice(store.todaySpend(now()), capAfter))
         else store.setNotice("")
@@ -499,7 +506,9 @@ class AiWindowWatcher(
         val src = AiLiveFeed.source(trigger)
         store.record(src, ep.provider, reply.model.ifBlank { ep.model }, reply.promptTokens, reply.completionTokens, now())
         val tweaks = apply(reply.text)
-        runCatching { onLivePost(AiLiveFeed.post(liveSnap, trigger, tweaks)) }
+        if (tweaks.isNotEmpty() || (trigger != LiveTrigger.FILL && trigger != LiveTrigger.WINDOW)) {
+            runCatching { onLivePost(AiLiveFeed.post(liveSnap, trigger, tweaks)) }
+        }
     }
 
     private fun apply(text: String): List<AiAdjustment> {
@@ -540,12 +549,33 @@ class AiWindowWatcher(
         return logged
     }
 
-    /**
-     * The watcher tunes knobs only. It does not bench.
-     * Force trade / Force bench stay on [com.dirk.kalshiodds.decision.ScalpControls.benchOverrides].
-     * Automatic bench is the settings toggle, off unless the owner turns it on.
-     */
+    /** Automatic bench and freeze are off. Force bench is the only stop, and it is not set here. */
     private fun autoBench() = Unit
+
+    /** On-device tuner. No network. Never benches. Owner edits that are still locked are skipped. */
+    private fun localTune(): List<AiAdjustment> {
+        val tapes = runCatching { paper() }.getOrDefault(emptyList())
+        val at = now()
+        val proposals = com.dirk.kalshiodds.decision.PaperSettingTuner.propose(controls.state.value, tapes) { key ->
+            store.manualBlocks(key, at)
+        }
+        if (proposals.isEmpty()) return emptyList()
+        val logged = ArrayList<AiAdjustment>()
+        controls.update { start ->
+            var cur = start
+            for (p in proposals) {
+                val key = "strategy.${p.scalper}.${p.setting}"
+                if (SettingTools.isRealMoneyKey(key) || store.manualBlocks(key, at)) continue
+                val proposed = SettingTools.propose(cur, key, p.newValue)
+                if (proposed !is SettingTools.Result.Proposal) continue
+                cur = SettingTools.applyAutomatic(cur, proposed)
+                logged += AiAdjustment(at, p.scalper, p.setting, proposed.oldValue, proposed.newValue, p.reason)
+            }
+            cur
+        }
+        logged.forEach { store.addAdjustment(it) }
+        return logged
+    }
 
     companion object {
         /** On-device bench/freeze cadence. The chat LLM cap is [AiLiveFeed.MIN_SPACING_MS], not this poll. */

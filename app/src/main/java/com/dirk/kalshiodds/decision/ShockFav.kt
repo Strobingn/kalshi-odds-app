@@ -319,7 +319,7 @@ object ShockFav {
         return if (m > 0) "YES" else "NO"
     }
 
-    fun shockEntryOk(p: Params, sideFair: Double, ask: Double): Boolean = sideFair - ask >= p.lag - 1e-9 && ask in 0.05..0.95
+    fun shockEntryOk(p: Params, sideFair: Double, ask: Double): Boolean = sideFair - ask >= p.lag - 1e-9 && ask in 0.10..0.95
 
     fun usHours(closeMs: Long): Boolean = java.time.Instant.ofEpochMilli(closeMs - 900_000L).atZone(java.time.ZoneOffset.UTC).hour in 13..20
 

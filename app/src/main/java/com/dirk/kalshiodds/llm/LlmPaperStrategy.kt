@@ -43,26 +43,32 @@ class LlmPaperStrategy(
         place = { q, side, conf -> book.llmEntry(q, side, conf) },
         onUsage = onUsage,
         onCall = { id, dir, conf -> onCall?.invoke(id, dir, conf) },
-        freeProvider = { LlmProviders.freeFamily(endpoint().provider, endpoint().model) }
+        freeProvider = { LlmProviders.freeFamily(endpoint().provider, endpoint().model) },
+        onPaceMiss = { paceStatus }
     )
+    @Volatile private var sleepMs: Long = CYCLE_MS
+    @Volatile private var paceStatus: String = "waiting for the free-tier pace"
 
     fun start(scope: CoroutineScope) = scope.launch {
         while (isActive) {
             runCatching { loop.tick()?.let { _status.value = it } }
                 .onFailure { _status.value = "error (${settings.model}, no fallback model): ${it.message?.take(120)}" }
-            // Built-in paper strategy. Not the chat LLM's 60s cap. Decisions repeat through the window.
-            delay(15_000)
+            // Kalshi conflator cycle. The pacer, not this delay, keeps the call inside the free quota.
+            delay(sleepMs.coerceIn(CYCLE_MS, 60_000L))
         }
     }
 
     private fun perform(messages: List<Pair<String, String>>): Pair<LlmEndpoint, LlmClient.Reply>? {
         val ep = endpoint()
         if (!LlmProviders.freeFamily(ep.provider, ep.model)) return null
-        return AiAutoCalls.callFree(
+        val nowMs = System.currentTimeMillis()
+        val messagesTokens = AiCompact.tokens(messages, 20)
+        val slots = listOf(ep) + alternates()
+        val hit = AiAutoCalls.callFree(
             selected = ep,
             slots = alternates(),
             pacer = pacer,
-            nowMs = System.currentTimeMillis(),
+            nowMs = nowMs,
             messages = messages,
             reserveCompletion = 20,
             quotaOf = { ep ->
@@ -73,6 +79,25 @@ class LlmPaperStrategy(
             ask = { use, msgs -> client.chatReply(msgs, 20, use, automatic = true) },
             onBilling = onBilling
         )
+        if (hit != null) {
+            sleepMs = CYCLE_MS
+            paceStatus = ""
+            return hit
+        }
+        val wait = AiAutoCalls.explainWait(
+            endpoints = slots,
+            pacer = pacer,
+            nowMs = nowMs,
+            tokens = messagesTokens,
+            quotaOf = { qep ->
+                if (!MonthlyTokenCaps.room(qep.provider, LlmPrices.monthKey(nowMs))) null
+                else quotaOf(qep)
+            },
+            allowed = { autoCalls() && LlmProviders.freeFamily(it.provider, it.model) }
+        )
+        sleepMs = ((wait?.resumeAtMs ?: nowMs) - nowMs).coerceIn(CYCLE_MS, 60_000L)
+        paceStatus = AiAutoCalls.paceStatus(wait, nowMs).ifBlank { "" }
+        return null
     }
 
     companion object {
@@ -80,6 +105,8 @@ class LlmPaperStrategy(
         /** Last minute of the window: no new paper decision. The live feed on the card is still running. */
         const val PAST_OPEN_STATUS = "watching this window; paper decisions pause in the last 60 seconds. Live feed still running."
         const val FREE_ONLY_STATUS = "automatic calls stay on free providers only (Mistral, Groq, Gemini)"
+        /** Same gap as the Kalshi quote conflator. The free pacer decides whether a call actually goes out. */
+        const val CYCLE_MS = 150L
         const val STRATEGY_PROMPT = "Kalshi BTC 15-minute market %s. Strike %.2f, BTC spot %.2f, minutes left %.1f. YES bid/ask %s/%s. Model fair YES %s. " +
             "Paper trade only. Rules: buy at most 55c, 3c trailing stop. Reply ONE line: 'YES <conf 0-1>' or 'NO <conf 0-1>' or 'SKIP'."
         fun parse(reply: String): Pair<String, Double>? {
@@ -102,7 +129,8 @@ internal class LlmPaperLoop(
     private val place: (ScalpRule.Quote, String, Double) -> String?,
     private val onUsage: (LlmEndpoint, LlmClient.Reply) -> Unit,
     private val onCall: (String, String, Double) -> Unit,
-    private val freeProvider: () -> Boolean = { true }
+    private val freeProvider: () -> Boolean = { true },
+    private val onPaceMiss: () -> String = { "waiting for the free-tier pace" }
 ) {
     var lastWindow: String? = null
 
@@ -121,7 +149,7 @@ internal class LlmPaperLoop(
             call(messages)
         } catch (e: LlmSkipped) {
             return null
-        } ?: return "waiting for the free-tier pace"
+        } ?: return onPaceMiss().ifBlank { null }
         val (used, reply) = hit
         lastWindow = q.ticker
         runCatching { onUsage(used, reply) }

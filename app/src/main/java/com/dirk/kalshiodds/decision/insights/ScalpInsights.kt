@@ -88,20 +88,12 @@ class ScalpInsights(
         val benchNext = synchronized(lock) {
             (real.keys + shadow.keys + c.benchOverrides.keys).associateWith { code ->
                 val ov = when (c.benchOverrides[code]) { "ACTIVE" -> BenchOverride.FORCE_ACTIVE; "BENCHED" -> BenchOverride.FORCE_BENCHED; else -> BenchOverride.AUTO }
-                val was = decisions[code]?.status == BenchStatus.BENCHED
-                if (!c.autoBench && ov == BenchOverride.AUTO) BenchDecision(code, BenchStatus.ACTIVE, real[code]?.size ?: 0, 0.0, 0.0, "auto-bench off")
-                else {
-                    // Real + bench-shadow outcomes together, so a freshly unbenched scalper is judged on its recent
-                    // (shadow) record rather than the frozen losing streak that benched it.
-                    val merged = (real[code].orEmpty() + shadow[code].orEmpty()).sortedBy { it.closedAtMs ?: 0L }
-                    ScalpBench.decide(code, was, merged, emptyList(), c.benchWindow, ov)
-                }
+                // Losses never freeze or bench. Force bench is the only non-trading state.
+                val merged = (real[code].orEmpty() + shadow[code].orEmpty()).sortedBy { it.closedAtMs ?: 0L }
+                ScalpBench.decide(code, false, merged, emptyList(), c.benchWindow, ov)
             }
         }
-        val realLists = synchronized(lock) { real.mapValues { it.value.toList() } }
-        val shadowLists = synchronized(lock) { shadow.mapValues { it.value.toList() } }
-        // Automatic freeze follows the auto-bench toggle. Off: only Force bench stops new trades.
-        val next = if (c.autoBench) ScalpFreeze.apply(benchNext, realLists, c.benchOverrides, shadowLists, decisions) else benchNext
+        val next = benchNext
         decisions = next
         book.benched = next.values.filter { !it.trading }.map { it.scalperId }.toSet()
         BenchRegistry.publish(next)

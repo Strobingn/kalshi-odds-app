@@ -45,11 +45,11 @@ class AiWindowWatchTest {
             ]}""")
         }
         // Direct band, same numbers either way around — no side input exists.
-        assertEquals("40", AiWatchBounds.clamp(c.state.value, code, "maxEntryCents", "1", 50))
+        assertEquals("34", AiWatchBounds.clamp(c.state.value, code, "maxEntryCents", "1", 50))
         assertEquals("50", AiWatchBounds.clamp(c.state.value, code, "maxEntryCents", "90", 50))
-        assertEquals("30", AiWatchBounds.clamp(c.state.value, research, "maxEntryCents", "20", 40))
+        assertEquals("24", AiWatchBounds.clamp(c.state.value, research, "maxEntryCents", "20", 40))
         assertEquals("40", AiWatchBounds.clamp(c.state.value, research, "maxEntryCents", "90", 40))
-        assertEquals("10", AiWatchBounds.clamp(c.state.value, code, "stopCents", "99", 6))
+        assertEquals("14", AiWatchBounds.clamp(c.state.value, code, "stopCents", "99", 6))
         assertEquals(
             AiWatchBounds.clamp(c.state.value, code, "maxEntryCents", "30", 50),
             AiWatchBounds.clamp(c.state.value, code, "maxEntryCents", "30", 50)
@@ -57,13 +57,13 @@ class AiWindowWatchTest {
         w.tick()
         val v2 = c.state.value.settings(code)
         val edge = c.state.value.settings(research)
-        assertEquals(50, v2.maxEntryCents) // 30 clamps to base-10=40, then 90 clamps to the user baseline 50
+        assertEquals(50, v2.maxEntryCents) // 30 clamps into the band, then 90 clamps to the user baseline 50
         assertEquals(50, v2.aiBaseCents)
         assertEquals(2, v2.aiN)
         assertEquals("learning", v2.aiNote)
         assertEquals(40, edge.maxEntryCents)
         assertEquals(40, edge.aiBaseCents)
-        assertEquals(10, v2.stopCents) // other knobs stay inside −10..+4
+        assertEquals(14, v2.stopCents) // other knobs stay inside −16..+8
         assertFalse(v2.aiNote.contains("set by you"))
     }
 
@@ -196,11 +196,11 @@ class AiWindowWatchTest {
         val w = watcher(MemoryScalpControls()) { _, _ -> calls++; reply("""{"adjustments":[]}""") }
         w.tick()
         assertEquals(1, calls)
-        nowMs += 5_000
-        snap = snap.copy(fingerprint = "inside-30s")
+        nowMs += 100
+        snap = snap.copy(fingerprint = "inside-pace")
         w.tick()
         assertEquals(1, calls)
-        nowMs += 30_000
+        nowMs += 5_000
         snap = snap.copy(fingerprint = "pace-open")
         w.tick()
         assertEquals(2, calls)

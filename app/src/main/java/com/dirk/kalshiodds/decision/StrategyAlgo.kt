@@ -31,8 +31,8 @@ object StrategyAlgo {
 
     private fun size(cap: Int) = AlgoKnob("contracts", "size", 1.0, cap.toDouble().coerceIn(1.0, 500.0), 1.0)
     private fun hold(maxS: Double = 900.0, step: Double = 30.0) = AlgoKnob("maxHoldSeconds", "max hold", 0.0, maxS, step)
-    private val stop = cents("stopCents", "stop distance", 1.0, 40.0)
-    private val tp = cents("takeProfitCents", "take profit", 0.0, 40.0)
+    private val stop = cents("stopCents", "stop distance", 1.0, 48.0)
+    private val tp = cents("takeProfitCents", "take profit", 0.0, 48.0)
 
     /** Largest paper clip the AI may set: the wider of the two paper size caps, never a live size. */
     fun contractCap(c: ScalpControls): Int = maxOf(c.contracts, c.greenContracts).coerceIn(1, 500)
@@ -47,7 +47,7 @@ object StrategyAlgo {
             )
             Research.isResearch(code) -> listOf(
                 cents("edgeCents", "edge minimum", 0.0, 20.0),
-                cents("minEntryCents", "entry floor", 1.0, 99.0),
+                cents("minEntryCents", "entry floor", 10.0, 99.0),
                 cents("maxEntryCents", "entry ceiling", 1.0, 99.0),
                 size(cap)
             )
@@ -279,20 +279,11 @@ object AiBench {
 
     data class Decision(val bench: Boolean, val unbench: Boolean, val netUsd: Double, val reason: String)
 
+    @Suppress("UNUSED_PARAMETER")
     fun decide(wasBenched: Boolean, recentReal: List<Double>, shadow: List<Double>, window: Int = MIN_TRADES): Decision {
-        val w = window.coerceAtLeast(MIN_TRADES)
-        if (!wasBenched) {
-            if (recentReal.size < w) return Decision(false, false, recentReal.sum(), "warming up ${recentReal.size}/$w")
-            val net = recentReal.takeLast(w).sum()
-            return if (net < -CLEAR_LOSS_USD)
-                Decision(true, false, net, "paper net ${money(net)} over last $w trades")
-            else Decision(false, false, net, "paper net ${money(net)} is not clearly negative")
-        }
-        if (shadow.size < w) return Decision(false, false, shadow.sum(), "stay benched: ${shadow.size}/$w shadow trades")
-        val net = shadow.takeLast(w).sum()
-        return if (net > 0.0)
-            Decision(false, true, net, "unbench: shadow net ${money(net)} over last $w trades")
-        else Decision(false, false, net, "stay benched: shadow net ${money(net)}")
+        val net = recentReal.filter { it.isFinite() }.takeLast(window.coerceAtLeast(1)).sum()
+        // No automatic bench. A losing book keeps trading. Force bench is a settings override, not this call.
+        return Decision(false, false, net, "trading · no auto-bench")
     }
 
     private fun money(v: Double) = String.format(Locale.US, "%+.2f", v)

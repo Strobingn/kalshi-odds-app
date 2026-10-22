@@ -153,7 +153,7 @@ fun AiUsageSettingsCard(store: AiWatchStore, settings: LlmSettings) {
     FieldCard {
         Text("AI usage", color = colors.onSurface, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Text(
-            "Chat and the window watcher share this provider. A message you send is answered right away, including one retry if the reply talks like a one-shot snapshot. Automatic calls stay off for a paid provider until you turn on \"${AiAutoCalls.SWITCH}\". Mistral, Groq, Gemini, and OpenRouter free models pace themselves inside the free quota and the daily auto-call budget. Mistral is free-plan (ministral-8b, then open-mistral-nemo, then ministral-3b), every 30s, and costs \$0. The on-device paper scalpers, forecast, auto-freeze, and tuner keep their own pace. Nothing here places orders or changes real money.",
+            "Chat and the window watcher share this provider. A message you send is answered right away, including one retry if the reply talks like a one-shot snapshot. Automatic calls stay off for a paid provider until you turn on \"${AiAutoCalls.SWITCH}\". Mistral (ministral-8b, then open-mistral-nemo, then ministral-3b) is the main free pace, inside its free minute quota, and costs \$0. Groq and Gemini take the call when Mistral is at a cap or returns an error. The on-device paper scalpers, forecast, and tuner keep their own pace. Nothing here places orders or changes real money.",
             color = colors.onSurfaceVariant,
             style = MaterialTheme.typography.bodySmall
         )

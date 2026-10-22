@@ -166,9 +166,15 @@ private fun AiLiveFeedCard(live: com.dirk.kalshiodds.llm.AiLiveSnapshot, on: Boo
         val dist = live.distanceUsd?.let { String.format(Locale.US, "%+,.2f", it) } ?: "—"
         Text("Strike ${fmtPx(live.strike)} · BTC ${fmtPx(live.btc)} · ${dist}", color = c.textPrimary, style = MaterialTheme.typography.bodySmall)
         Text(com.dirk.kalshiodds.llm.AiLiveFeed.cardOddsLine(live), color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
-        if (live.positions.isEmpty()) Text("No open paper scalps", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
-        else live.positions.take(6).forEach { p ->
-            Text("${p.label} ${p.side} ${p.contracts} · ${String.format(Locale.US, "%+.2f", p.pnlUsd)}", color = if (p.pnlUsd >= 0) c.up else c.down, style = MaterialTheme.typography.labelSmall)
+        val rows = com.dirk.kalshiodds.llm.AiLiveFeed.positionRows(live.positions)
+        if (rows.isEmpty()) Text("No open paper scalps", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
+        else rows.take(6).forEach { p ->
+            val color = when {
+                p.flat -> c.textSecondary
+                p.pnlUsd >= 0 -> c.up
+                else -> c.down
+            }
+            Text(p.text, color = color, style = MaterialTheme.typography.labelSmall)
         }
         LiveMiniChart(live)
     }

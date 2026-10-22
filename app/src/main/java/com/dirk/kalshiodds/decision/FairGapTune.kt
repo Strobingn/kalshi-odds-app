@@ -77,8 +77,9 @@ object FairGapTune {
      * Passing a null settings object is the untouched slider.
      */
     fun effectiveMinCents(code: String?, s: ScalpStrategySettings?): Int {
-        val min = s?.minEntryCents ?: 1
-        return if (code == "fairh60" && min <= 1) FAIRH60_MIN_CENTS else min
+        val floor = code?.let { ScalpFloors.cents(it) } ?: ScalpFloors.GENERAL
+        val min = s?.minEntryCents ?: floor
+        return maxOf(floor, min)
     }
 
     /** True when [ask] is outside the effective band. Does not apply time or fair-gap gates. */
