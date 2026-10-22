@@ -92,6 +92,7 @@ class SyncWorker(
                 ackPrefs.edit().putBoolean(KEY_SCALP_HISTORY, true).apply()
             }
             val newest = container.scalp.unsyncedClosed(SCALP_NEWEST)
+            val resets = container.scalp.unsyncedScalpResets()
             if (halted()) return@withContext Result.retry()
             val result = sync.roundTrip(
                 settings = hub,
@@ -104,6 +105,7 @@ class SyncWorker(
                     paperFills = paper.fillsForSync(),
                     settingsSnapshot = SettingsRestore.snapshot(settings),
                     scalps = newest,
+                    scalpResets = resets,
                     scalpGates = container.scalp.gateSnapshot(),
                     shadow = container.shadow.book.snapshot().tickets.filter { it.createdAtMs >= startedMs - 6 * 3_600_000L }
                 ),
@@ -123,6 +125,7 @@ class SyncWorker(
                 }
             }
             if (result.scalpsOk && newest.isNotEmpty() && !halted()) container.scalp.markSynced(newest.map { it.id })
+            if (result.scalpResetsOk && resets.isNotEmpty() && !halted()) container.scalp.markScalpResetsSynced(resets.map { it.atMs })
             // 0.3.67: push remaining unsynced pages from SQLite; markSynced advances the index (never deletes rows).
             var chunks = 0
             var left = 0

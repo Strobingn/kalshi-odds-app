@@ -62,6 +62,12 @@ object ScalperBrain {
         return minOf(f, pm)
     }
 
+    /** Drop learned weights so the next close does not tune off trades from before a bankroll reset. */
+    fun resetRecent() = synchronized(lock) {
+        states.clear()
+        persist()
+    }
+
     fun learn(code: String, x: DoubleArray, won: Boolean) = synchronized(lock) {
         val s = st(code)
         val err = (if (won) 1.0 else 0.0) - sig(dot(s.w, x))

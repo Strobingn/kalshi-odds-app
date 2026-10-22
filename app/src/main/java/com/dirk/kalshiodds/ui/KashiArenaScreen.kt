@@ -34,7 +34,8 @@ internal enum class KashiArenaTab(val label: String) { OVERVIEW("Overview"), STR
 @Composable
 internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) -> Unit = {}, onSettings: () -> Unit = {},
     onHistory: () -> Unit = {}, onLadder: () -> Unit = {}, initialTab: KashiArenaTab = KashiArenaTab.OVERVIEW,
-    aiPanel: AiWatchPanelModel? = null, onAiFollows: (Boolean) -> Unit = {}, extras: LiveWindowExtras = LiveWindowExtras()) {
+    aiPanel: AiWatchPanelModel? = null, onAiFollows: (Boolean) -> Unit = {}, extras: LiveWindowExtras = LiveWindowExtras(),
+    onResetBankroll: () -> Unit = {}) {
     val c = DipTheme.colors
     val openAi = LocalOpenAiTab.current
     var tabName by rememberSaveable { mutableStateOf(initialTab.name) }
@@ -65,6 +66,22 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
                 }
                 IconButton(onClick = onSettings) { Icon(Icons.Outlined.Tune, "Scalping settings", tint = c.accentBlue) }
             }
+        }
+        item(key = "reset-bankroll") {
+            var confirmReset by rememberSaveable { mutableStateOf(false) }
+            val resetLine = com.dirk.kalshiodds.decision.ScalpBankrollReset.note.collectAsState().value ?: st.resetNote
+            OutlinedButton(
+                onClick = {
+                    if (confirmReset) {
+                        onResetBankroll()
+                        confirmReset = false
+                    } else confirmReset = true
+                },
+                modifier = Modifier.fillMaxWidth().height(44.dp).testTag("RESET_SCALP_BANKROLL"),
+                border = androidx.compose.foundation.BorderStroke(1.dp, c.spot),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = c.spot)
+            ) { Text(if (confirmReset) ScalpBankrollResetCopy.CONFIRM else ScalpBankrollResetCopy.BUTTON) }
+            if (!resetLine.isNullOrBlank()) Text(resetLine, color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
         }
         item(key = "arena-tabs") { PillTabs(KashiArenaTab.values().toList(), tab, { it.label }, { "ARENA_TAB_${it.name}" }) { if (it == KashiArenaTab.CHAT) openAi() else tabName = it.name } }
         item(key = "arena-group") {

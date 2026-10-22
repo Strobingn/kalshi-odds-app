@@ -45,7 +45,9 @@ class SupabaseSync(
         /** 0.3.56: the snapshot batch landed (or there was none) — safe to commit SnapshotUploadFilter. */
         val snapshotsOk: Boolean = false,
         /** 0.3.65: the scalp batch landed (or there was none) — safe to advance the scalp ack watermark. */
-        val scalpsOk: Boolean = false
+        val scalpsOk: Boolean = false,
+        /** The scalp_reset marker batch landed (or there was none). False when sync did not run. */
+        val scalpResetsOk: Boolean = false
     )
 
     data class PushOutcome(
@@ -67,7 +69,9 @@ class SupabaseSync(
         /** 0.3.55: Autopilot SHADOW tickets (Autopilot has been in SHADOW since Oct 10 01:27 ET; never synced before). */
         val shadow: List<com.dirk.kalshiodds.signal.paper.ShadowTicket> = emptyList(),
         /** Per-scalper block counts for the current windows. Uploaded every sync. */
-        val scalpGates: List<com.dirk.kalshiodds.decision.ScalpGateLog.SyncRow> = emptyList()
+        val scalpGates: List<com.dirk.kalshiodds.decision.ScalpGateLog.SyncRow> = emptyList(),
+        /** Push-only split points. Never a delete of scalp rows. */
+        val scalpResets: List<com.dirk.kalshiodds.decision.ScalpResetMarker> = emptyList()
     )
 
     fun pull(settings: DataHubSettings): List<SyncMerge.Record> {
@@ -171,6 +175,15 @@ class SupabaseSync(
                 .put("note", t.note.take(2_000))
                 .put("executionNotes", com.dirk.kalshiodds.decision.ScalpFills.executionNotes(t.note))
             out.add(rec("scalp:${t.id}", "scalp", at, payload))
+        }
+        bundle.scalpResets.forEach { r ->
+            val payload = JSONObject()
+                .put("atMs", r.atMs)
+                .put("note", r.note)
+                .put("archivedN", r.archivedN)
+                .put("cashUsd", r.cashUsd)
+                .put("marker", "reset")
+            out.add(rec("reset:${r.atMs}", "scalp_reset", r.atMs, payload))
         }
         val gateAt = System.currentTimeMillis()
         bundle.scalpGates.forEach { g ->
@@ -313,7 +326,8 @@ class SupabaseSync(
                 advanced = pushed.errors.isEmpty() || pushed.pushed > 0,
                 acknowledgePaper = pushed.paperOk,
                 snapshotsOk = "snapshot" !in pushed.failedKinds,
-                scalpsOk = "scalp" !in pushed.failedKinds
+                scalpsOk = "scalp" !in pushed.failedKinds,
+                scalpResetsOk = "scalp_reset" !in pushed.failedKinds
             )
         } catch (t: Throwable) {
             Status(ok = false, message = t.message?.takeIf { it.isNotBlank() } ?: "Sync failed")
@@ -403,7 +417,7 @@ class SupabaseSync(
     companion object {
         const val FREE_CAP_MB = 500
         const val TABLE = "diphunter_sync"
-        /** 0.3.60: kinds merged back on pull (everything except snapshot / scalp / shadow, which are push-only). */
+        /** 0.3.60: kinds merged back on pull (everything except snapshot / scalp / shadow / scalp_reset, which are push-only). */
         val PULL_KINDS = listOf("alert", "paper", "ticket", "settings", "settings_snapshot")
         const val PULL_LIMIT_PER_KIND = 1000
         /** One POST body. Larger kinds are split so a sync cannot allocate one giant JSON array. */

@@ -99,6 +99,16 @@ class ScalpInsights(
         BenchRegistry.publish(next)
     }
 
+    /** Drop the recent-performance window so the tuner does not learn from trades before a bankroll reset. */
+    fun clearRecent() {
+        synchronized(lock) {
+            real.clear()
+            shadow.clear()
+        }
+        seededWindow = controls.state.value.benchWindow
+        recompute()
+    }
+
     /** Recent settled nets for the AI watcher. Real history is the seeded window; shadow history is in memory. */
     fun tapes(stats: List<com.dirk.kalshiodds.decision.ScalpStat>): List<PaperTape> = synchronized(lock) {
         val byId = stats.associateBy { it.scalperId }

@@ -144,6 +144,8 @@ interface ScalpControlsRepository {
     fun recordEntry(at: Long)
     fun feedback(code: String): ScalpTradeFeedback
     fun recordOutcome(code: String, trade: ScalpTrade)
+    /** Forget the recent-trade sample (EWMA). Manual sliders are not touched. */
+    fun clearRecentPerformance() {}
 }
 class MemoryScalpControls(initial: ScalpControls = ScalpControls()) : ScalpControlsRepository {
     override val state = MutableStateFlow(initial.normalized())
@@ -154,6 +156,10 @@ class MemoryScalpControls(initial: ScalpControls = ScalpControls()) : ScalpContr
     override fun recordOutcome(code: String, trade: ScalpTrade) = synchronized(lessons) {
         if (learned.add(trade.id)) lessons[code] = feedback(code).observe(trade)
         if (learned.size > 20000) learned.remove(learned.first())
+    }
+    override fun clearRecentPerformance() = synchronized(lessons) {
+        lessons.clear()
+        learned.clear()
     }
     override fun save(value: ScalpControls) = synchronized(this) { state.value = value.normalized() }
     override fun entries(now: Long): Int = synchronized(times) { times.filterKeys { it in (now / 1000 - 3600)..(now / 1000) }.values.sum() }
@@ -218,6 +224,7 @@ class SavedScalpControls(context: Context, private val flushDelayMs: Long = 1_00
     private val lessons = mutableMapOf<String, ScalpTradeFeedback>()
     private val learned = mutableMapOf<String, LinkedHashSet<String>>()
     private val dirty = mutableSetOf<String>()
+    private var wipeFeedback = false
     private var entriesDirty = false
     private var countAtSec = Long.MIN_VALUE
     private var cachedCount = 0
@@ -261,6 +268,14 @@ class SavedScalpControls(context: Context, private val flushDelayMs: Long = 1_00
         dirty.add(code)
         scheduleLocked()
     }
+    override fun clearRecentPerformance() = synchronized(lock) {
+        if (closed) return@synchronized
+        lessons.clear()
+        learned.clear()
+        dirty.clear()
+        wipeFeedback = true
+        scheduleLocked()
+    }
     /** Called only under lock; there is at most one scheduled/running writer. */
     private fun scheduleLocked() {
         if (scheduled != null || closed) return
@@ -268,13 +283,18 @@ class SavedScalpControls(context: Context, private val flushDelayMs: Long = 1_00
             try { flushPending() }
             finally { synchronized(lock) {
                 scheduled = null
-                if (entriesDirty || dirty.isNotEmpty()) scheduleLocked()
+                if (entriesDirty || dirty.isNotEmpty() || wipeFeedback) scheduleLocked()
             } }
         }, flushDelayMs.coerceAtLeast(1), java.util.concurrent.TimeUnit.MILLISECONDS)
     }
     /** IO only. Synchronous for shutdown/tests; normal callers only update cached values. */
     internal fun flushPending(): Boolean = synchronized(writerLock) {
         val pending = synchronized(lock) {
+            val removals = ArrayList<String>()
+            if (wipeFeedback) {
+                wipeFeedback = false
+                removals += prefs.all.keys.filter { it.startsWith("feedback:") || it.startsWith("learned:") }
+            }
             val values = linkedMapOf<String, String>()
             if (entriesDirty) values["entry-buckets"] = times.entries.joinToString(",") { "${it.key}:${it.value}" }
             dirty.forEach { code ->
@@ -283,17 +303,19 @@ class SavedScalpControls(context: Context, private val flushDelayMs: Long = 1_00
             }
             entriesDirty = false
             dirty.clear()
-            values
+            values to removals
         }
-        if (pending.isEmpty()) return@synchronized true
+        if (pending.first.isEmpty() && pending.second.isEmpty()) return@synchronized true
         val ok = runCatching {
             val edit = prefs.edit()
-            pending.forEach { (key, value) -> edit.putString(key, value) }
+            pending.second.forEach { edit.remove(it) }
+            pending.first.forEach { (key, value) -> edit.putString(key, value) }
             edit.commit() // worker thread: does not enqueue lifecycle-blocking apply() work
         }.getOrDefault(false)
         if (!ok) synchronized(lock) {
-            if ("entry-buckets" in pending) entriesDirty = true
-            pending.keys.filter { it.startsWith("feedback:") }.forEach { dirty.add(it.removePrefix("feedback:")) }
+            if ("entry-buckets" in pending.first) entriesDirty = true
+            pending.first.keys.filter { it.startsWith("feedback:") }.forEach { dirty.add(it.removePrefix("feedback:")) }
+            if (pending.second.isNotEmpty()) wipeFeedback = true
         }
         ok
     }

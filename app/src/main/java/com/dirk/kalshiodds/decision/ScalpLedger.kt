@@ -77,6 +77,15 @@ data class ScalpCloseDelta(
  * 0.3.67 persistence: trades live in SQLite; the book keeps only open rows in RAM.
  * All methods are safe to call from a background thread (caller batches off Main).
  */
+/** One scalping-bankroll reset. Local and remote history stay; this row is the split point. */
+data class ScalpResetMarker(
+    val atMs: Long,
+    val note: String,
+    val archivedN: Int,
+    val cashUsd: Double,
+    val synced: Boolean = false
+)
+
 interface ScalpPersistence {
     fun loadScalps(): List<ScalpTrade>
     fun upsertScalp(trade: ScalpTrade)
@@ -97,6 +106,14 @@ interface ScalpPersistence {
     fun migrateStatsChunk(limit: Int): Int = 0
     fun tradeCount(): Int = 0
     fun statsMigrated(): Boolean = true
+    /**
+     * Hide the current displayed run. [flattened] closes are written first (still synced = 0 so the
+     * close can upload), then every visible row is marked archived. Trade rows are not deleted.
+     * Aggregate tables are cleared so cards, curves and charts start at zero. Returns rows archived.
+     */
+    fun archiveDisplayedRun(flattened: List<ScalpTrade>, atMs: Long, note: String, cashUsd: Double): Int = 0
+    fun unsyncedScalpResets(): List<ScalpResetMarker> = emptyList()
+    fun markScalpResetsSynced(atMs: List<Long>) {}
 }
 
 class InMemoryScalpPersistence : ScalpPersistence {
@@ -105,11 +122,15 @@ class InMemoryScalpPersistence : ScalpPersistence {
     private val daily = ConcurrentHashMap<String, ScalpDaily>()
     private val exits = ConcurrentHashMap<String, ScalpExitAgg>()
     private val windows = ConcurrentHashMap<String, ScalpWindowAgg>()
+    private val archivedIds = HashSet<String>()
+    private val resets = ArrayList<ScalpResetMarker>()
 
-    override fun loadScalps(): List<ScalpTrade> = synchronized(rows) { rows.values.toList() }
+    private fun visible(t: ScalpTrade) = t.id !in archivedIds
+
+    override fun loadScalps(): List<ScalpTrade> = synchronized(rows) { rows.values.filter(::visible) }
     override fun upsertScalp(trade: ScalpTrade) { synchronized(rows) { rows[trade.id] = trade } }
     override fun loadActiveScalps(): List<ScalpTrade> = synchronized(rows) {
-        rows.values.filter { it.state != ScalpState.CLOSED && it.state != ScalpState.NO_FILL }
+        rows.values.filter { visible(it) && it.state != ScalpState.CLOSED && it.state != ScalpState.NO_FILL }
     }
     override fun upsertScalpAndStats(trade: ScalpTrade, prev: ScalpTrade?) {
         val before = synchronized(rows) { val p = rows[trade.id]; rows[trade.id] = trade; p } ?: prev
@@ -144,22 +165,36 @@ class InMemoryScalpPersistence : ScalpPersistence {
     override fun pageTrades(scalperId: String, afterClosedAtMs: Long?, afterId: String?, limit: Int): List<ScalpTrade> =
         synchronized(rows) {
             rows.values.asSequence()
-                .filter { ScalpModels.scalperIdOf(it) == scalperId && it.state == ScalpState.CLOSED }
+                .filter { visible(it) && ScalpModels.scalperIdOf(it) == scalperId && it.state == ScalpState.CLOSED }
                 .sortedWith(compareByDescending<ScalpTrade> { it.closedAtMs ?: 0L }.thenByDescending { it.id })
                 .filter { afterClosedAtMs == null || (it.closedAtMs ?: 0L) < afterClosedAtMs || ((it.closedAtMs ?: 0L) == afterClosedAtMs && it.id < (afterId ?: "")) }
                 .take(limit).toList()
         }
     override fun windowPrimaryTrades(ticker: String, limit: Int): List<ScalpTrade> = synchronized(rows) {
-        rows.values.filter { it.ticker.equals(ticker, true) && it.isPrimary }.sortedByDescending { it.signalAtMs }.take(limit.coerceIn(1, 600)).sortedBy { it.signalAtMs }
+        rows.values.filter { visible(it) && it.ticker.equals(ticker, true) && it.isPrimary }.sortedByDescending { it.signalAtMs }.take(limit.coerceIn(1, 600)).sortedBy { it.signalAtMs }
     }
     override fun windowTrades(scalperId: String, ticker: String): List<ScalpTrade> = synchronized(rows) {
-        rows.values.filter { it.ticker.equals(ticker, true) && ScalpModels.scalperIdOf(it) == scalperId }.sortedBy { it.signalAtMs }
+        rows.values.filter { visible(it) && it.ticker.equals(ticker, true) && ScalpModels.scalperIdOf(it) == scalperId }.sortedBy { it.signalAtMs }
     }
     override fun unsyncedClosed(limit: Int): List<ScalpTrade> = synchronized(rows) {
         rows.values.filter { it.isPrimary && (it.state == ScalpState.CLOSED || it.state == ScalpState.OPEN) }
             .sortedBy { it.entryAtMs ?: it.closedAtMs ?: it.signalAtMs }.take(limit)
     }
     override fun tradeCount(): Int = synchronized(rows) { rows.size }
+    override fun archiveDisplayedRun(flattened: List<ScalpTrade>, atMs: Long, note: String, cashUsd: Double): Int = synchronized(rows) {
+        flattened.forEach { rows[it.id] = it }
+        val fresh = rows.keys.filter { it !in archivedIds }
+        archivedIds.addAll(fresh)
+        stats.clear(); daily.clear(); exits.clear(); windows.clear()
+        resets += ScalpResetMarker(atMs, note, fresh.size, cashUsd, synced = false)
+        fresh.size
+    }
+    override fun unsyncedScalpResets(): List<ScalpResetMarker> = synchronized(rows) { resets.filter { !it.synced } }
+    override fun markScalpResetsSynced(atMs: List<Long>) = synchronized(rows) {
+        if (atMs.isEmpty()) return@synchronized
+        val hit = atMs.toSet()
+        for (i in resets.indices) if (resets[i].atMs in hit) resets[i] = resets[i].copy(synced = true)
+    }
     /** Test helper: bulk insert rows and build totals. */
     fun seed(list: List<ScalpTrade>) { list.forEach { upsertScalpAndStats(it, null) } }
 }

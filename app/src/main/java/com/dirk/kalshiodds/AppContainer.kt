@@ -456,6 +456,21 @@ class AppContainer(context: Context) {
         )
     }
 
+    /** Paper scalping bankroll back to $20,000. Archives scalp history and the paper ledger. No Kalshi order. */
+    suspend fun resetScalpingBankroll(nowMs: Long = clock.nowMs()): String {
+        val v = com.dirk.kalshiodds.signal.config.SignalConstants.PAPER_START_USD
+        runCatching { preferences.updatePaperBankrollStartUsd(v) }
+        return com.dirk.kalshiodds.decision.ScalpBankrollReset.apply(
+            book = scalp,
+            controls = scalpControls,
+            insights = runCatching { scalpInsights }.getOrNull(),
+            nowMs = nowMs
+        ) {
+            paper.book.configure(startUsd = v)
+            paper.resetTo20k()
+        }
+    }
+
     fun endSession() {
         val paperSnap = runCatching { paper.book.snapshot() }.getOrNull()
         runCatching {
