@@ -177,13 +177,6 @@ internal fun LiveWindowChart(window: LiveWindow?, markers: List<ArenaStats.Marke
 }
 
 @Composable
-internal fun LineKey(color: Color) {
-    Canvas(Modifier.width(14.dp).height(10.dp)) {
-        drawLine(color, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
-    }
-}
-
-@Composable
 internal fun RingKey(color: Color) {
     Canvas(Modifier.width(10.dp).height(10.dp)) {
         drawCircle(color, radius = size.minDimension / 2 - 1.dp.toPx(), style = Stroke(width = 2.dp.toPx()))
