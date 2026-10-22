@@ -549,6 +549,6 @@ class AiWindowWatcher(
 
     companion object {
         /** On-device bench/freeze cadence. The chat LLM cap is [AiLiveFeed.MIN_SPACING_MS], not this poll. */
-        const val POLL_MS = 5_000L
+        const val POLL_MS = 2_000L
     }
 }

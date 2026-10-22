@@ -37,7 +37,12 @@ class LlmPaperStrategy(
         autoCalls = autoCalls,
         hasKey = { endpoint().usable },
         quote = {
-            book.marks.value.values.filter { it.ticker.uppercase().contains("BTC") && it.closeMs > it.nowMs }.minByOrNull { it.closeMs }
+            val marks = book.marks.value
+            val now = marks.values.maxOfOrNull { it.nowMs } ?: System.currentTimeMillis()
+            val close = marks.values.filter { it.ticker.uppercase().contains("BTC") && it.closeMs > now }.minOfOrNull { it.closeMs }
+            val openPx = close?.let { book.spotAt("BTC", it - 900_000L) }
+            com.dirk.kalshiodds.decision.AiDirection.current(marks, now, openPx)
+                ?: marks.values.filter { it.ticker.uppercase().contains("BTC") && it.closeMs > it.nowMs }.minByOrNull { it.closeMs }
         },
         call = { messages -> perform(messages) },
         place = { q, side, conf -> book.llmEntry(q, side, conf) },
@@ -113,9 +118,10 @@ internal class LlmPaperLoop(
         if (!freeProvider()) return LlmPaperStrategy.FREE_ONLY_STATUS
         val q = quote() ?: return "idle: no BTC quote"
         if (q.tauS <= 60.0) return LlmPaperStrategy.PAST_OPEN_STATUS
+        val fairYes = q.cfFair("YES") ?: com.dirk.kalshiodds.decision.GbmModel.pSide(q, "YES") ?: q.fair("YES")
         val prompt = String.format(Locale.US, LlmPaperStrategy.STRATEGY_PROMPT,
             q.ticker, q.strike ?: 0.0, q.spot ?: 0.0, q.tauS / 60, q.yesBid?.let { "%.2f".format(Locale.US, it) } ?: "-", q.yesAsk?.let { "%.2f".format(Locale.US, it) } ?: "-",
-            q.fair("YES")?.let { "%.2f".format(Locale.US, it) } ?: "-")
+            fairYes?.let { "%.2f".format(Locale.US, it) } ?: "-")
         val messages = listOf("system" to "You are a cautious BTC scalping assistant.", "user" to prompt)
         val hit = try {
             call(messages)

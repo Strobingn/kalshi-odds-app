@@ -247,6 +247,24 @@ class TickBook(private val maxPoints: Int = 80) {
         while (q.size > maxSpotPoints) q.removeFirst()
     }
 
+    /**
+     * Live spot log return over the last [windowMs] from the in-memory
+     * 1 Hz CF / Coinbase spot ring. Used when the 25s REST spot cache has
+     * no fresher return.
+     */
+    @Synchronized
+    fun spotReturn(ticker: String, nowMs: Long, windowMs: Long = 60_000L): Double? {
+        val q = spotsByTicker[ticker] ?: return null
+        if (q.size < 2) return null
+        val cur = q.last()
+        if (nowMs - cur.tMs > 15_000L || cur.spotUsd <= 0.0) return null
+        val target = cur.tMs - windowMs
+        val ref = q.lastOrNull { it.tMs <= target } ?: q.first()
+        if (cur.tMs - ref.tMs < 2_000L || ref.spotUsd <= 0.0) return null
+        val ret = (cur.spotUsd - ref.spotUsd) / ref.spotUsd
+        return ret.takeIf { it.isFinite() }
+    }
+
     @Synchronized
     fun lastSpot(ticker: String): Double? = lastSpotByTicker[ticker]
 
