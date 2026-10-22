@@ -165,6 +165,7 @@ class AdaptivePaperScalp(initial: PaperScalpState = PaperScalpState(),
     val state = _state.asStateFlow()
     private val histories = mutableMapOf<String, ArrayDeque<PaperDepth>>()
     private val lastRevision = mutableMapOf<String, Long>()
+    private val quantEntries = mutableMapOf<String, PaperQuantEntry?>()
     private var scannedRevision = Long.MIN_VALUE
     private var scannedTicker = ""
     private var scanned = PaperScalpSignals.Scan(emptyList(), "Waiting for history")
@@ -199,6 +200,7 @@ class AdaptivePaperScalp(initial: PaperScalpState = PaperScalpState(),
         if (!q.ticker.startsWith("KXBTC15M-") || !q.valid() || q.atMs > nowMs || nowMs - q.atMs > 3000 || q.atMs >= q.closeMs) return
         if (lastRevision[q.ticker]?.let { q.revision <= it } == true) return
         val before = _state.value
+        quantEntries.clear()
         val historyBefore = replayHistory()
         lastRevision[q.ticker] = q.revision
         val hist = histories.getOrPut(q.ticker) { ArrayDeque() }
@@ -216,7 +218,7 @@ class AdaptivePaperScalp(initial: PaperScalpState = PaperScalpState(),
         val quant = PaperQuant.update(_state.value.quant, accounts, nowMs)
         publish(_state.value.copy(accounts = accounts, quant = quant, status = "Receiving fresh book depth", lastQuoteMs = nowMs))
         val decisions = scan(q, recent).signals.mapNotNull { signal ->
-            PaperQuant.entry(q, recent, signal.side, signal.setup, before.quant.model)?.let { e ->
+            quantEntry(q, recent, signal.side, signal.setup, before.quant.model)?.let { e ->
                 PaperQuantDecision(q.atMs, q.ticker, signal.setup, signal.side, e,
                     PaperQuant.accepts(before.quant.model, e.x), before.quant.model.ready, before.quant.filterRequested) }
         }
@@ -248,7 +250,7 @@ class AdaptivePaperScalp(initial: PaperScalpState = PaperScalpState(),
                     fill.count, fill.count, avg, fill.value, fill.fees, q.atMs, q.closeMs,
                     bid, bid, bid, q.atMs, max(.001, avg - risk),
                     policyVersion = PaperScalpPolicy.VERSION, riskDistance = risk, trailDistance = trail, targetBid = target, plannedRiskUsd = plannedRisk,
-                    quantEntry = PaperQuant.entry(q, history, pending.side, pending.setup, _state.value.quant.model))
+                    quantEntry = quantEntry(q, history, pending.side, pending.setup, _state.value.quant.model))
                 account = account.copy(cash = (account.cash - fill.value - fill.fees).coerceAtLeast(0.0),
                     positions = account.positions + position, fees = account.fees + fill.fees,
                     note = "BUY ${pending.side} ${fill.count} ct @ ${fmt(avg * 100)}¢; initial protective stop active")
@@ -334,10 +336,15 @@ class AdaptivePaperScalp(initial: PaperScalpState = PaperScalpState(),
         liquidity = a.liquidity.map { l -> if (l.ticker != ticker || l.side != side) l else l.copy(available =
             (l.available - used.filter { kotlin.math.abs(it.first - l.price) < 1e-8 }.sumOf { it.second }).coerceAtLeast(0.0)) })
     private data class Candidate(val side: String, val setup: String, val ask: Double, val score: Double, val expectedBid: Double)
+    private fun quantEntry(q: PaperDepth, history: List<PaperDepth>, side: String, setup: String, model: PaperQuantModel): PaperQuantEntry? {
+        val key = "$side/$setup/${model.trainedAtMs}"
+        if (!quantEntries.containsKey(key)) quantEntries[key] = PaperQuant.entry(q, history, side, setup, model)
+        return quantEntries[key]
+    }
     private fun quantBlocks(algo: PaperScalper, q: PaperDepth, history: List<PaperDepth>, side: String, setup: String): Boolean {
         val quant = _state.value.quant
         if (algo.fraction == .15 || !quant.filterRequested || !quant.model.ready) return false
-        val entry = PaperQuant.entry(q, history, side, setup, quant.model) ?: return false
+        val entry = quantEntry(q, history, side, setup, quant.model) ?: return false
         return !PaperQuant.accepts(quant.model, entry.x)
     }
     private fun choose(algo: PaperScalper, a: PaperScalpAccount, q: PaperDepth, history: List<PaperDepth>): Candidate? {

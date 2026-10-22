@@ -98,10 +98,11 @@ object PaperQuant {
         if (additions.isEmpty()) return state
         return state.copy(observations = (state.observations + additions).sortedBy { it.closeMs }.takeLast(600))
     }
-    fun eligible(rows: List<PaperQuantObservation>, beforeMs: Long) = rows.filter {
-        validX(it.x) && it.netPerContract.isFinite() && it.openedMs < it.closeMs &&
-            maxOf(it.closeMs, it.outcomeMs) + EMBARGO_MS < beforeMs
-    }
+    fun eligible(rows: List<PaperQuantObservation>, beforeMs: Long) = rows.groupBy { it.ticker }.values.filter { window ->
+        // Purge the entire window if any of its labels is unavailable or overlaps the cutoff.
+        window.all { validX(it.x) && it.netPerContract.isFinite() && it.openedMs < it.closeMs &&
+            maxOf(it.closeMs, it.outcomeMs) + EMBARGO_MS < beforeMs }
+    }.flatten()
     /** Window weights prevent a busy market from dominating. Fixed transforms need no future statistics. */
     fun fit(rows: List<PaperQuantObservation>, atMs: Long): PaperQuantModel {
         if (rows.isEmpty()) return PaperQuantModel(trainedAtMs = atMs)

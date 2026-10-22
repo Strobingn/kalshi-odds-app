@@ -1,5 +1,7 @@
 package com.dirk.kalshiodds.ui
 
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
 import app.cash.paparazzi.DeviceConfig
 import app.cash.paparazzi.Paparazzi
 import com.dirk.kalshiodds.signal.scalp.*
@@ -31,9 +33,12 @@ class PaperScalpScreenshotTest {
         paparazzi.unsafeUpdateConfig(deviceConfig = DeviceConfig.PIXEL_6.copy(softButtons = false, screenWidth = 945, screenHeight = 1800, fontScale = 1.3f))
         paparazzi.snapshot(name = "quant_comparison") {
             androidx.compose.material3.MaterialTheme(colorScheme = androidx.compose.material3.darkColorScheme()) {
-                androidx.compose.foundation.layout.Column {
-                    QuantComparison(PaperQuantModel(testWindows = 30, selectedWindows = 12, baseline = -.035, filtered = -.012,
-                        regimes = listOf(PaperQuantRegime("<5 min", 20, -.03, -.01))))
+                androidx.compose.material3.Surface(color = androidx.compose.ui.graphics.Color(0xFF101010), contentColor = androidx.compose.ui.graphics.Color.White) {
+                    androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.padding(20.dp)) {
+                        androidx.compose.material3.Text("Synthetic render fixture", color = androidx.compose.ui.graphics.Color.LightGray)
+                        QuantComparison(PaperQuantModel(testWindows = 30, selectedWindows = 12, baseline = -.035, filtered = -.012,
+                            regimes = listOf(PaperQuantRegime("<5 min", 20, -.03, -.01))))
+                    }
                 }
             }
         }

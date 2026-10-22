@@ -48,6 +48,7 @@ class PaperQuantTest {
         val r = row(0).copy(outcomeMs = 1_000_000)
         assertTrue(PaperQuant.eligible(listOf(r), 1_090_000).isEmpty())
         assertEquals(listOf(r), PaperQuant.eligible(listOf(r), 1_090_001))
+        assertTrue(PaperQuant.eligible(listOf(r, r.copy(setup = "dip", outcomeMs = 1_100_000)), 1_090_001).isEmpty())
         assertTrue(PaperQuant.eligible(listOf(r.copy(x = listOf(Double.NaN))), 9_000_000).isEmpty())
     }
     @Test fun forwardFoldsNeverShareWindowsOrOverlappingOutcomeLabels() {
