@@ -6,7 +6,7 @@ import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * Shared by every AI: all calls go to one provider until it has answered [every] calls, then the next provider with a
- * key takes over (Groq → Gemini → Mistral → Groq …). Spreads the load over the free tiers (Groq allows 1,000 requests a
+ * key takes over (Groq → Mistral → Groq …). Spreads the load over the free tiers (Groq allows 1,000 requests a
  * day). A provider that fails still falls through to the next one for that call; only answered calls count.
  */
 class LlmRotation(

@@ -40,7 +40,6 @@ data class DataUiState(
     val githubTokenDraft: String = "",
     val groqKeyDraft: String = "",
     val mistralKeyDraft: String = "",
-    val geminiKeyDraft: String = "",
     val paperAiOn: Boolean = true,
     val supervisorOn: Boolean = false,
     val learningMode: Boolean = true,
@@ -70,7 +69,6 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
     val paperAiLog: StateFlow<List<String>> = container.paperAi.log
     val paperAiRecord: StateFlow<String> = container.paperAi.record
 
-    fun setGeminiKeyDraft(v: String) = _state.update { it.copy(geminiKeyDraft = v) }
 
     fun setPaperAiOn(on: Boolean) {
         container.extraSecrets.paperAiEnabled = on
@@ -86,14 +84,11 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
         val m = _state.value.mistralKeyDraft.trim()
         if (g.isNotEmpty()) container.extraSecrets.groqApiKey = g
         if (m.isNotEmpty()) container.extraSecrets.mistralApiKey = m
-        val gem = _state.value.geminiKeyDraft.trim()
-        if (gem.isNotEmpty()) container.extraSecrets.geminiApiKey = gem
         _state.update {
             it.copy(
                 groqKeyDraft = "",
                 mistralKeyDraft = "",
-                geminiKeyDraft = "",
-                message = if (g.isEmpty() && m.isEmpty() && gem.isEmpty()) "Nothing to save" else "AI keys stored (encrypted)"
+                message = if (g.isEmpty() && m.isEmpty()) "Nothing to save" else "AI keys stored (encrypted)"
             )
         }
     }

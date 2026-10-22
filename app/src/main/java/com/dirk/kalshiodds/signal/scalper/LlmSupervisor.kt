@@ -239,7 +239,7 @@ fun interface LlmChat {
 }
 
 /**
- * An OpenAI-compatible provider. Groq, Mistral and Gemini all speak this. [models] are tried in order: providers retire
+ * An OpenAI-compatible provider. Groq and Mistral both speak this. [models] are tried in order: providers retire
  * models (Groq dropped llama-3.3-70b-versatile for some keys), so a "model not found" moves on to the next one and the
  * one that answered is remembered.
  */
@@ -247,7 +247,7 @@ class LlmProvider(
     val name: String,
     val baseUrl: String,
     val models: List<String>,
-    /** "required" forces the tool call; Gemini's compatibility layer is only documented with "auto". */
+    /** "required" forces the tool call. */
     val toolChoice: String = "required",
     val key: () -> String
 ) {
@@ -259,12 +259,11 @@ class LlmProvider(
     companion object {
         const val GROQ_URL = "https://api.groq.com/openai/v1"
         const val MISTRAL_URL = "https://api.mistral.ai/v1"
-        const val GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
 
         /** Checked 2026-10-22 against a free Groq key: all three make the tool call; llama-3.3-70b-versatile was gone. */
         val GROQ_MODELS = listOf("openai/gpt-oss-120b", "qwen/qwen3.8-27b", "openai/gpt-oss-20b", "llama-3.3-70b-versatile")
-        val MISTRAL_MODELS = listOf("mistral-large-latest", "mistral-medium-latest", "mistral-small-latest")
-        val GEMINI_MODELS = listOf("gemini-2.5-flash", "gemini-flash-latest", "gemini-2.0-flash", "gemini-2.5-flash-lite")
+        /** Free ("Experiment") Mistral keys get "not available in your subscription tier" for mistral-large: small first. */
+        val MISTRAL_MODELS = listOf("mistral-small-latest", "open-mistral-nemo", "ministral-8b-latest", "mistral-medium-latest", "mistral-large-latest")
     }
 }
 
@@ -278,7 +277,9 @@ class HttpLlmChat(
     private val onCall: (LlmAttempt) -> Unit = {},
     private val http: OkHttpClient = OkHttpClient.Builder().callTimeout(40, TimeUnit.SECONDS).build(),
     /** Shared provider rotation (switch every 500 answered calls); null = always in [providers] order. */
-    private val rotation: LlmRotation? = null
+    private val rotation: LlmRotation? = null,
+    /** Answer budget. gpt-oss counts its reasoning in it, so 1,024 cut tool calls short on a full prompt. */
+    private val maxTokens: Int = 2048
 ) : LlmChat {
 
     /** The last failure in words ("groq openai/gpt-oss-120b: HTTP 429 Rate limit reached …"), or "" after a success. */
@@ -296,7 +297,8 @@ class HttpLlmChat(
             val body = buildJsonObject {
                 put("model", model)
                 put("temperature", 0.5)
-                put("max_tokens", 1024)
+                put("max_tokens", maxTokens)
+                reasoningLow(model)
                 put("tool_choice", p.toolChoice)
                 put("tools", tools)
                 putJsonArray("messages") {
@@ -304,8 +306,52 @@ class HttpLlmChat(
                     add(buildJsonObject { put("role", "user"); put("content", user) })
                 }
             }
-            post(p, body) { parseArguments(it) ?: throw Failure("answered without the tool call") }
+            try {
+                post(p, body) { parseArguments(it)?.takeIf(::isJsonObject) ?: throw Failure("tool call missing or not valid JSON", toolProblem = true) }
+            } catch (e: Failure) {
+                if (!e.toolProblem) throw e
+                // Some models (gpt-oss on Groq) break the forced tool call on a long prompt: ask for the same JSON as plain text.
+                try {
+                    jsonMode(p, model, system, user, tools)
+                } catch (j: Failure) {
+                    // A rate limit or bad key is the provider's problem; anything else means this model can't do it: next model.
+                    val m = j.message.orEmpty()
+                    if ((m.startsWith("HTTP 429") && !m.contains("quota", true)) || m.startsWith("HTTP 401")) throw j
+                    throw Failure(m, wrongModel = true)
+                }
+            }
         }
+
+    /** The tool's arguments as a plain JSON answer (response_format json_object), for models whose tool calls fail. */
+    private fun jsonMode(p: LlmProvider, model: String, system: String, user: String, tools: JsonArray): String {
+        val schema = runCatching { tools[0].jsonObject["function"]!!.jsonObject["parameters"].toString() }.getOrDefault("{}")
+        val body = buildJsonObject {
+            put("model", model)
+            put("temperature", 0.5)
+            put("max_tokens", maxTokens)
+            reasoningLow(model)
+            putJsonObject("response_format") { put("type", "json_object") }
+            putJsonArray("messages") {
+                add(buildJsonObject {
+                    put("role", "system")
+                    put("content", system + "\n\nReply with ONLY one JSON object (no other text) matching this JSON schema: " + schema)
+                })
+                add(buildJsonObject { put("role", "user"); put("content", user) })
+            }
+        }
+        return post(p, body) { text ->
+            val c = parseContent(text).orEmpty()
+            val obj = c.substring(c.indexOf('{').coerceAtLeast(0), (c.lastIndexOf('}') + 1).coerceAtLeast(0))
+            obj.takeIf(::isJsonObject) ?: throw Failure("JSON answer not valid", wrongModel = true)
+        }
+    }
+
+    /** gpt-oss spends its answer budget on reasoning; "low" leaves room for the tool call. Groq only. */
+    private fun kotlinx.serialization.json.JsonObjectBuilder.reasoningLow(model: String) {
+        if (model.startsWith("openai/gpt-oss")) put("reasoning_effort", "low")
+    }
+
+    private fun isJsonObject(s: String): Boolean = runCatching { Json.parseToJsonElement(s) is JsonObject }.getOrDefault(false)
 
     /**
      * A plain chat turn for the chat screen: [messages] are (role, text) pairs, system first. Returns
@@ -350,7 +396,7 @@ class HttpLlmChat(
         else "${p.name}: FAILED · ${one.lastError}"
     }
 
-    private class Failure(msg: String, val wrongModel: Boolean = false) : Exception(msg)
+    private class Failure(msg: String, val wrongModel: Boolean = false, val toolProblem: Boolean = false) : Exception(msg)
 
     /** Tries each provider with a key, and each of its models from the one that last worked, until [call] returns. */
     private fun <T> each(call: (LlmProvider, String) -> T): T? {
@@ -397,9 +443,13 @@ class HttpLlmChat(
             val text = r.body?.string().orEmpty()
             if (!r.isSuccessful) {
                 val msg = errorMessage(text)
-                val wrongModel = r.code == 404 || msg.contains("model", true) &&
-                    (msg.contains("not found", true) || msg.contains("does not exist", true) || msg.contains("decommission", true) || msg.contains("not supported", true))
-                throw Failure("HTTP ${r.code} ${msg.take(160)}".trim(), wrongModel)
+                val m = msg.lowercase()
+                val toolProblem = r.code == 400 && (m.contains("tool") || m.contains("function"))
+                // This model is gone, not in the plan, or out of its own quota (Google counts per model): try the next model.
+                val wrongModel = r.code == 404 || r.code == 403 || m.contains("not available") || m.contains("tier") ||
+                    m.contains("quota") || m.contains("not found") || m.contains("does not exist") ||
+                    m.contains("decommission") || m.contains("not supported")
+                throw Failure("HTTP ${r.code} ${msg.take(160)}".trim(), wrongModel, toolProblem)
             }
             read(text)
         }
@@ -698,8 +748,8 @@ class LlmSupervisor(
         const val EVAL_TRADES = 4
         private const val KEEP_TRADES = 400
         private const val CONTEXT_TRADES = 15
-        /** About 4,500 tokens: room for the system prompt, tools and a 1,024-token answer under Groq's 8,000 a minute. */
-        const val MAX_CONTEXT_CHARS = 16_000
+        /** About 3,000 tokens: with the system prompt, tools and a 2,048-token answer it stays well under Groq's 8,000 a minute. */
+        const val MAX_CONTEXT_CHARS = 11_000
         private const val CONTEXT_SCORED = 12
         private const val CONTEXT_LESSONS = 10
         private const val KEEP_SCORED = 40

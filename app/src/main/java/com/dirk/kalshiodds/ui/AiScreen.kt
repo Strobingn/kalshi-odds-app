@@ -59,7 +59,7 @@ import com.dirk.kalshiodds.ui.theme.DipTheme
 
 /**
  * The AI tab: Dashboard (charts of every AI call, the scalping winners and losers, the Paper AI's bets), Chat (one thread
- * per AI) and Keys (Groq / Mistral / Gemini keys, a real Test button, the on/off switches). Paper only throughout.
+ * per AI) and Keys (Groq / Mistral keys, a real Test button, the on/off switches). Paper only throughout.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -248,7 +248,7 @@ fun AiKeysContent(
     val c = DipTheme.colors
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         AiCard("API keys", "Free keys work. Stored encrypted on this phone, never uploaded anywhere else.") {
-            for ((name, draft) in listOf("Groq" to s.groqDraft, "Mistral" to s.mistralDraft, "Gemini" to s.geminiDraft)) {
+            for ((name, draft) in listOf("Groq" to s.groqDraft, "Mistral" to s.mistralDraft)) {
                 val saved = s.saved.firstOrNull { it.first == name }?.second == true
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
@@ -279,7 +279,7 @@ fun AiKeysContent(
             SwitchRow("Learning mode", "Small retired strategies bet on paper too; the 17 big losers stay out", s.learningOn, onLearning)
         }
         AiCard("Provider rotation", "All AIs share one provider for 500 answered calls, then switch to the next one with a key") {
-            Text("Groq → Gemini → Mistral → Groq …", fontSize = 12.sp, color = c.textPrimary)
+            Text("Groq → Mistral → Groq …", fontSize = 12.sp, color = c.textPrimary)
             if (s.rotation.isNotBlank()) Text(s.rotation, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.accentBlue)
             Text("If the current one fails or hits its free limit, that call goes to the next provider at once. Groq models are tried in order: gpt-oss-120b, qwen3.8-27b, gpt-oss-20b; a retired model is skipped.", fontSize = 11.sp, color = c.textSecondary)
         }

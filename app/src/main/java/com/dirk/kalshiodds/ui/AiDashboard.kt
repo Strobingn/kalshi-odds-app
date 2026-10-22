@@ -38,7 +38,7 @@ data class AiDashboardState(
     val version: String = "",
     /** "Now using Groq · 312 of 500 calls, …" */
     val rotation: String = "",
-    val keys: List<Pair<String, Boolean>> = listOf("Groq" to false, "Mistral" to false, "Gemini" to false),
+    val keys: List<Pair<String, Boolean>> = listOf("Groq" to false, "Mistral" to false),
     val scalpingOn: Boolean = true,
     val paperOn: Boolean = true,
     val learningOn: Boolean = true,
@@ -214,7 +214,7 @@ fun AiDashboardContent(s: AiDashboardState, onOpenKeys: () -> Unit = {}) {
             Text(s.version, fontSize = 10.sp, color = c.textSecondary)
         }
         if (s.keys.none { it.second }) {
-            Banner("No API key saved yet. Add your Groq, Mistral or Gemini key to start both AIs.", c.accentOrange, "Add keys", onOpenKeys)
+            Banner("No API key saved yet. Add your Groq or Mistral key to start both AIs.", c.accentOrange, "Add keys", onOpenKeys)
         } else if (s.lastError.isNotBlank()) {
             Banner("Last AI call failed: ${s.lastError}", c.down, "Test keys", onOpenKeys)
         }
@@ -233,7 +233,7 @@ fun AiDashboardContent(s: AiDashboardState, onOpenKeys: () -> Unit = {}) {
             StatTile("Paper AI net", fmtSignedUsd(s.paperNet), if (s.paperNet >= 0) c.up else c.down, "${s.paperWins}W · ${s.paperLosses}L · ${s.paperOpen} open")
         }
 
-        AiCard("AI calls per hour", "Last 24 hours, every request to Groq, Mistral and Gemini") {
+        AiCard("AI calls per hour", "Last 24 hours, every request to Groq and Mistral") {
             StackedBars(s.callsByHour, listOf(scalpColor, paperColor, chatColor, c.down), s.hourLabels)
             Legend(listOf("Scalping AI" to scalpColor, "Paper AI" to paperColor, "Chat" to chatColor, "Failed" to c.down))
         }

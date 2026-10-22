@@ -20,7 +20,6 @@ import kotlinx.coroutines.launch
 data class AiKeysState(
     val groqDraft: String = "",
     val mistralDraft: String = "",
-    val geminiDraft: String = "",
     val saved: List<Pair<String, Boolean>> = emptyList(),
     val scalpingOn: Boolean = true,
     val paperOn: Boolean = true,
@@ -57,8 +56,7 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun savedKeys() = listOf(
         "Groq" to secrets.groqApiKey.isNotBlank(),
-        "Mistral" to secrets.mistralApiKey.isNotBlank(),
-        "Gemini" to secrets.geminiApiKey.isNotBlank()
+        "Mistral" to secrets.mistralApiKey.isNotBlank()
     )
 
     private fun rotationLine(): String {
@@ -97,8 +95,7 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
     fun setDraft(provider: String, v: String) = _keys.update {
         when (provider) {
             "Groq" -> it.copy(groqDraft = v)
-            "Mistral" -> it.copy(mistralDraft = v)
-            else -> it.copy(geminiDraft = v)
+            else -> it.copy(mistralDraft = v)
         }
     }
 
@@ -107,8 +104,7 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
         val k = _keys.value
         if (k.groqDraft.isNotBlank()) secrets.groqApiKey = k.groqDraft.trim()
         if (k.mistralDraft.isNotBlank()) secrets.mistralApiKey = k.mistralDraft.trim()
-        if (k.geminiDraft.isNotBlank()) secrets.geminiApiKey = k.geminiDraft.trim()
-        val any = k.groqDraft.isNotBlank() || k.mistralDraft.isNotBlank() || k.geminiDraft.isNotBlank()
+        val any = k.groqDraft.isNotBlank() || k.mistralDraft.isNotBlank()
         _keys.value = keysNow().copy(message = if (any) "Saved (encrypted on this phone). Testing…" else "Type a key first", testLines = k.testLines)
         if (any) { testKeys(); container.kickAi() }
     }
@@ -116,8 +112,7 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
     fun clearKey(provider: String) {
         when (provider) {
             "Groq" -> secrets.groqApiKey = ""
-            "Mistral" -> secrets.mistralApiKey = ""
-            else -> secrets.geminiApiKey = ""
+            else -> secrets.mistralApiKey = ""
         }
         _keys.value = keysNow().copy(message = "$provider key removed")
     }

@@ -84,11 +84,10 @@ class AiScreenScreenshotTest {
     @Test
     fun keys() {
         val k = AiKeysState(
-            groqDraft = "", saved = listOf("Groq" to true, "Mistral" to false, "Gemini" to true),
+            groqDraft = "", saved = listOf("Groq" to true, "Mistral" to true),
             testLines = listOf(
                 "groq: OK · openai/gpt-oss-120b · 1612 ms (tool call works)",
-                "mistral: no key saved",
-                "gemini: FAILED · gemini gemini-2.5-flash: HTTP 429 Resource has been exhausted"
+                "mistral: OK · mistral-small-latest · 840 ms (tool call works)"
             )
         )
         paparazzi.snapshot(name = "ai_keys") {
@@ -113,12 +112,12 @@ object AiScreenFixtures {
             val t = NOW - 24 * H + m * 60_000L
             val fail = rnd.nextInt(14) == 0
             ev += AiEvent(t, AiEvent.SCALPING, AiEvent.CALL, if (fail) "groq" else "groq", !fail, 900L + rnd.nextInt(900), if (fail) "openai/gpt-oss-120b | HTTP 429 Rate limit reached" else "openai/gpt-oss-120b | ")
-            if (m % 6 == 0) ev += AiEvent(t + 5_000, AiEvent.PAPER, AiEvent.CALL, "gemini", true, 1400L + rnd.nextInt(600), "gemini-2.5-flash | ")
+            if (m % 6 == 0) ev += AiEvent(t + 5_000, AiEvent.PAPER, AiEvent.CALL, "mistral", true, 1400L + rnd.nextInt(600), "mistral-small-latest | ")
             if (rnd.nextInt(3) == 0) ev += AiEvent(t + 9_000, AiEvent.SCALPING, AiEvent.APPLIED, detail = listOf("LATE_EDGE edgeCents 3 → 5", "IMPROVE_1C targetCents 2 → 6", "KASHI_FAV_BASE secondsLeftMax 240 → 300", "LATE_COMEBACK contracts 50 → 70")[rnd.nextInt(4)])
             if (rnd.nextInt(9) == 0) ev += AiEvent(t + 9_500, AiEvent.SCALPING, AiEvent.REJECTED, detail = "LONG_SHOT entryMinCents: below 10")
             if (rnd.nextInt(5) == 0) ev += AiEvent(t + 10_000, AiEvent.SCALPING, if (rnd.nextInt(3) == 0) AiEvent.SCORED_WORSE else AiEvent.SCORED_BETTER, detail = "LATE_EDGE edgeCents → 5")
         }
-        for (i in 0 until 6) ev += AiEvent(NOW - 2 * H + i * 60_000L, AiEvent.CHAT, AiEvent.CALL, "mistral", i != 2, 2100, "mistral-large-latest | ${if (i == 2) "HTTP 401 Unauthorized" else ""}")
+        for (i in 0 until 6) ev += AiEvent(NOW - 2 * H + i * 60_000L, AiEvent.CHAT, AiEvent.CALL, "mistral", i != 2, 2100, "mistral-small-latest | ${if (i == 2) "HTTP 429 Rate limit exceeded" else ""}")
         val strategies = listOf(
             StrategyResult("LATE_EDGE", 140, 98, 212.4), StrategyResult("KASHI_FAV_BASE", 88, 79, 148.0),
             StrategyResult("LATE_COMEBACK", 61, 33, 96.2), StrategyResult("KASHI_FAV_97", 40, 38, 31.5),
@@ -138,7 +137,7 @@ object AiScreenFixtures {
         }
         val base = AiDashboardState(
             version = "Claude Bitcoin v1.16.0 (69)",
-            keys = listOf("Groq" to true, "Mistral" to true, "Gemini" to true),
+            keys = listOf("Groq" to true, "Mistral" to true),
             scalpingStatus = "Scalping AI · tick 412: 3 changes applied",
             paperStatus = "Paper AI · bet YES x30 on KXBTC15M-26OCT221245-45 at 54c (68%): spot pulling away above strike"
         )
