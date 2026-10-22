@@ -37,6 +37,8 @@ data class ScalpTabState(
     val updatedAtMs: Long = 0L,
     /** 0.3.67: background history index progress (null when idle). */
     val migrateNote: String? = null,
+    /** Eastern-time confirmation after 'Reset scalping bankroll'. */
+    val resetNote: String? = null,
     /** 0.3.67 debug: last stats read. */
     val debugTiming: String = "",
     /** Last blocking gate per scalper for the visible window. */

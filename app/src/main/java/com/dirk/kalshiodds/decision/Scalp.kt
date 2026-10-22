@@ -1982,6 +1982,26 @@ class ScalpBook(
     }
 
     fun reloadStats() { _stats.value = store.loadStats() }
+
+    /**
+     * Archive the displayed scalping run and drop open clips from RAM. No Kalshi order.
+     * Holds the quote lock and the write lock so a flush cannot put a pre-reset row back.
+     */
+    fun resetDisplayedRun(atMs: Long, note: String, cashUsd: Double): Int = synchronized(lock) {
+        synchronized(flushLock) {
+            writeQ.clear()
+            val flattened = _all.value.filter { isActive(it) }.map { ScalpBankrollReset.flatten(it, atMs) }
+            val n = store.archiveDisplayedRun(flattened, atMs, note, cashUsd)
+            _all.value = emptyList()
+            _trades.value = emptyList()
+            _stats.value = store.loadStats()
+            v2Evidence = emptyList()
+            peakBid.clear()
+            v2Armed.clear()
+            controlDaily.set(ScalpModels.dayEt(atMs) to 0.0)
+            n
+        }
+    }
     /** 0.3.68 aggregate reads (≈ hundreds of rows, indexed). Call off Main. */
     fun loadExits() = store.loadExits()
     fun loadWindows(limitWindows: Int = 48) = store.loadWindows(limitWindows)
@@ -1993,6 +2013,8 @@ class ScalpBook(
     fun windowPrimaryTrades(ticker: String) = store.windowPrimaryTrades(ticker)
     fun unsyncedClosed(limit: Int) = store.unsyncedClosed(limit)
     fun markSynced(ids: List<String>) = store.markSynced(ids)
+    fun unsyncedScalpResets() = store.unsyncedScalpResets()
+    fun markScalpResetsSynced(atMs: List<Long>) = store.markScalpResetsSynced(atMs)
     fun migrateStatsChunk(limit: Int = 500): Int = store.migrateStatsChunk(limit).also { if (it > 0) _stats.value = store.loadStats() }
     fun tradeCount(): Int = store.tradeCount()
     fun statsMigrated(): Boolean = store.statsMigrated()

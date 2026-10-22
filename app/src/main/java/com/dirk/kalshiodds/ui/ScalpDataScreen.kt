@@ -160,9 +160,11 @@ fun ScalpDataScreen(viewModel: DecisionViewModel, onBack: () -> Unit, onOpenScal
     val paperOrders by viewModel.paperOrders.collectAsState()
     val scalpAll by viewModel.scalpAll.collectAsState()
     val scalpStats by viewModel.scalpStats.collectAsState()
+    val resetNote by com.dirk.kalshiodds.decision.ScalpBankrollReset.note.collectAsState()
     ScalpDataContent(
         trades = trades, scalpAll = scalpAll, stats = scalpStats, paperOrders = paperOrders, onBack = onBack, onOpenScalp = onOpenScalp,
-        onReset = viewModel::resetPaperBankrollTo20k, onEdit = viewModel::editPaperOrder, onCancel = viewModel::cancelPaperOrder
+        onReset = viewModel::resetPaperBankrollTo20k, onEdit = viewModel::editPaperOrder, onCancel = viewModel::cancelPaperOrder,
+        resetNote = resetNote
     )
 }
 
@@ -204,7 +206,8 @@ fun ScalpDataContent(
     onReset: () -> Unit,
     onEdit: (String, Double?, Int?) -> Unit,
     onCancel: (String) -> Unit,
-    stats: List<com.dirk.kalshiodds.decision.ScalpStat>? = null
+    stats: List<com.dirk.kalshiodds.decision.ScalpStat>? = null,
+    resetNote: String? = null
 ) {
     val colors = DipTheme.colors
     val view by androidx.compose.runtime.produceState<ScalpDataView?>(null, trades, scalpAll, stats) {
@@ -235,9 +238,11 @@ fun ScalpDataContent(
         }
         item {
             var confirm by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
-            androidx.compose.material3.OutlinedButton(onClick = {
-                if (confirm) { onReset(); confirm = false } else confirm = true
-            }) { androidx.compose.material3.Text(if (confirm) PaperResetCopy.CONFIRM else PaperResetCopy.BUTTON) }
+            androidx.compose.material3.OutlinedButton(
+                onClick = { if (confirm) { onReset(); confirm = false } else confirm = true },
+                modifier = Modifier.fillMaxWidth().height(44.dp)
+            ) { androidx.compose.material3.Text(if (confirm) ScalpBankrollResetCopy.CONFIRM else ScalpBankrollResetCopy.BUTTON) }
+            if (!resetNote.isNullOrBlank()) Text(resetNote, color = colors.textSecondary, style = MaterialTheme.typography.labelSmall)
         }
         item {
             com.dirk.kalshiodds.ui.components.PaperOrdersPanel(
@@ -311,9 +316,15 @@ fun ScalpDataContent(
     }
 }
 
-/** 0.3.46 shared copy for the $20,000 reset button (Settings + Scalp Data). */
+/** 0.3.46 shared copy for the $20,000 reset button on Settings. Scalp uses [ScalpBankrollResetCopy]. */
 object PaperResetCopy {
     const val BUTTON = "Reset paper bankroll to $20,000"
     const val CONFIRM = "Tap again to reset — history is archived"
     const val DONE = "Paper bankroll reset to $20,000 — prior paper fills archived, no Kalshi orders"
+}
+
+/** Scalp tab and Scalp Data. Two taps. Paper history is archived, not deleted. */
+object ScalpBankrollResetCopy {
+    const val BUTTON = "Reset scalping bankroll"
+    const val CONFIRM = "Tap again to reset — history is archived"
 }

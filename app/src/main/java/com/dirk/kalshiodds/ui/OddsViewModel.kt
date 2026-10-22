@@ -267,6 +267,18 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun resetScalpingBankroll() {
+        vmScope.launch(Dispatchers.IO) {
+            ioCatching {
+                val msg = container.resetScalpingBankroll(container.clock.nowMs())
+                _scalpTab.update { it.copy(resetNote = msg) }
+                scalpTabBoardsAtMs = 0L
+                arenaChartReadAtMs = 0L
+                refreshScalpTab()
+            }
+        }
+    }
+
     fun selectScalpCoin(coin: String?) { _scalpTab.update { it.copy(coin = coin) }; scalpTabBoardsAtMs = 0L }
     fun selectScalpMarket(ticker: String) { _scalpTab.update { it.copy(selectedTicker = ticker) } }
     fun selectScalpSide(side: String) { _scalpTab.update { it.copy(side = if (side.equals("NO", true)) "NO" else "YES") } }
@@ -376,7 +388,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             val quote = marks[liveTicker] ?: marks[liveTicker.uppercase()]
             next = next.copy(arenaChart = next.arenaChart.copy(nowMs = now, bookAtMs = quote?.bookAtMs))
         }
-        _scalpTab.value = next
+        val sharedNote = com.dirk.kalshiodds.decision.ScalpBankrollReset.note.value
+        _scalpTab.value = next.copy(resetNote = sharedNote ?: _scalpTab.value.resetNote ?: next.resetNote)
     }
 
     private fun byCoinPerModel(

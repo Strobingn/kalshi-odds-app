@@ -1137,10 +1137,12 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
     /** 0.3.38 paper scalps: insert or replace one row by id. Never deletes. */
     override fun upsertScalp(trade: com.dirk.kalshiodds.decision.ScalpTrade) {
         var synced = 0
-        db.readableDatabase.rawQuery("SELECT state, synced FROM ${com.dirk.kalshiodds.data.local.paper.ScalpSchema.TABLE} WHERE id = ?", arrayOf(trade.id)).use { c ->
+        var archived = 0
+        db.readableDatabase.rawQuery("SELECT state, synced, IFNULL(archived,0) FROM ${com.dirk.kalshiodds.data.local.paper.ScalpSchema.TABLE} WHERE id = ?", arrayOf(trade.id)).use { c ->
             if (c.moveToFirst()) {
                 val prevState = c.getString(0)
                 val prevSynced = c.getInt(1)
+                archived = c.getInt(2)
                 val opened = trade.state == com.dirk.kalshiodds.decision.ScalpState.OPEN && prevState != "OPEN"
                 val closed = trade.state == com.dirk.kalshiodds.decision.ScalpState.CLOSED && prevState != "CLOSED"
                 synced = if (opened || closed) 0 else prevSynced
@@ -1169,6 +1171,7 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
             put("rule_version", trade.ruleVersion)
             put("scalper_id", com.dirk.kalshiodds.decision.ScalpModels.scalperIdOf(trade) ?: "")
             put("synced", synced)
+            put("archived", archived)
         }
         db.writableDatabase.insertWithOnConflict(
             com.dirk.kalshiodds.data.local.paper.ScalpSchema.TABLE, null, v, SQLiteDatabase.CONFLICT_REPLACE
@@ -1307,11 +1310,11 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
         // Open rows stay in memory. Recently closed rows are a bounded page (entry rules), not the whole table.
         val since = System.currentTimeMillis() - 20 * 60_000L
         val open = scalpRows(
-            "SELECT * FROM ${ST.TABLE} WHERE state NOT IN ('CLOSED','NO_FILL') ORDER BY signal_at_ms DESC LIMIT $ACTIVE_OPEN_CAP",
+            "SELECT * FROM ${ST.TABLE} WHERE IFNULL(archived,0)=0 AND state NOT IN ('CLOSED','NO_FILL') ORDER BY signal_at_ms DESC LIMIT $ACTIVE_OPEN_CAP",
             null
         )
         val recent = scalpRows(
-            "SELECT * FROM ${ST.TABLE} WHERE state IN ('CLOSED','NO_FILL') AND closed_at_ms >= ? ORDER BY closed_at_ms DESC LIMIT $ACTIVE_RECENT_CAP",
+            "SELECT * FROM ${ST.TABLE} WHERE IFNULL(archived,0)=0 AND state IN ('CLOSED','NO_FILL') AND closed_at_ms >= ? ORDER BY closed_at_ms DESC LIMIT $ACTIVE_RECENT_CAP",
             arrayOf(since.toString())
         )
         (open + recent).distinctBy { it.id }
@@ -1321,19 +1324,19 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
     override fun pageTrades(scalperId: String, afterClosedAtMs: Long?, afterId: String?, limit: Int): List<com.dirk.kalshiodds.decision.ScalpTrade> = runCatching {
         val ids = com.dirk.kalshiodds.decision.KeptScalpers.storedIds(scalperId)
         val marks = ids.joinToString(",") { "?" }
-        if (afterClosedAtMs == null) scalpRows("SELECT * FROM ${ST.TABLE} WHERE scalper_id IN ($marks) AND state = 'CLOSED' ORDER BY closed_at_ms DESC, id DESC LIMIT $limit", ids.toTypedArray())
-        else scalpRows("SELECT * FROM ${ST.TABLE} WHERE scalper_id IN ($marks) AND state = 'CLOSED' AND (closed_at_ms < ? OR (closed_at_ms = ? AND id < ?)) ORDER BY closed_at_ms DESC, id DESC LIMIT $limit",
+        if (afterClosedAtMs == null) scalpRows("SELECT * FROM ${ST.TABLE} WHERE IFNULL(archived,0)=0 AND scalper_id IN ($marks) AND state = 'CLOSED' ORDER BY closed_at_ms DESC, id DESC LIMIT $limit", ids.toTypedArray())
+        else scalpRows("SELECT * FROM ${ST.TABLE} WHERE IFNULL(archived,0)=0 AND scalper_id IN ($marks) AND state = 'CLOSED' AND (closed_at_ms < ? OR (closed_at_ms = ? AND id < ?)) ORDER BY closed_at_ms DESC, id DESC LIMIT $limit",
             (ids + afterClosedAtMs.toString() + afterClosedAtMs.toString() + (afterId ?: "")).toTypedArray())
     }.getOrDefault(emptyList())
 
     override fun windowPrimaryTrades(ticker: String, limit: Int): List<com.dirk.kalshiodds.decision.ScalpTrade> =
-        scalpRows("SELECT * FROM ${ST.TABLE} INDEXED BY idx_scalp_ticker WHERE ticker = ? AND scalper_id IS NOT NULL AND scalper_id != '' ORDER BY signal_at_ms DESC LIMIT ${limit.coerceIn(1, 600)}", arrayOf(ticker.uppercase()))
+        scalpRows("SELECT * FROM ${ST.TABLE} INDEXED BY idx_scalp_ticker WHERE IFNULL(archived,0)=0 AND ticker = ? AND scalper_id IS NOT NULL AND scalper_id != '' ORDER BY signal_at_ms DESC LIMIT ${limit.coerceIn(1, 600)}", arrayOf(ticker.uppercase()))
             .filter { it.isPrimary }.sortedBy { it.signalAtMs }
 
     override fun windowTrades(scalperId: String, ticker: String): List<com.dirk.kalshiodds.decision.ScalpTrade> {
         val ids = com.dirk.kalshiodds.decision.KeptScalpers.storedIds(scalperId)
         val marks = ids.joinToString(",") { "?" }
-        return scalpRows("SELECT * FROM ${ST.TABLE} INDEXED BY idx_scalp_ticker WHERE ticker = ? AND scalper_id IN ($marks) ORDER BY signal_at_ms",
+        return scalpRows("SELECT * FROM ${ST.TABLE} INDEXED BY idx_scalp_ticker WHERE IFNULL(archived,0)=0 AND ticker = ? AND scalper_id IN ($marks) ORDER BY signal_at_ms",
             arrayOf(ticker.uppercase(), *ids.toTypedArray()))
     }
 
@@ -1362,7 +1365,7 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
     /** 0.3.67/0.3.68 background indexer: rows with agg_v < AGG_V → tagged + counted whole, [limit] per transaction. */
     override fun migrateStatsChunk(limit: Int): Int {
         val w = db.writableDatabase
-        val rows = runCatching { scalpRows("SELECT * FROM ${ST.TABLE} WHERE agg_v < ${ST.AGG_V} LIMIT $limit", null) }.getOrDefault(emptyList())
+        val rows = runCatching { scalpRows("SELECT * FROM ${ST.TABLE} WHERE IFNULL(archived,0)=0 AND agg_v < ${ST.AGG_V} LIMIT $limit", null) }.getOrDefault(emptyList())
         if (rows.isEmpty()) return 0
         w.beginTransaction()
         try {
@@ -1381,6 +1384,55 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
     override fun tradeCount(): Int = runCatching {
         db.readableDatabase.rawQuery("SELECT COUNT(*) FROM ${ST.TABLE}", null).use { c -> if (c.moveToFirst()) c.getInt(0) else 0 }
     }.getOrDefault(0)
+
+    override fun archiveDisplayedRun(flattened: List<com.dirk.kalshiodds.decision.ScalpTrade>, atMs: Long, note: String, cashUsd: Double): Int {
+        val w = db.writableDatabase
+        w.beginTransaction()
+        try {
+            flattened.forEach { upsertScalp(it) }
+            var n = 0
+            w.rawQuery("SELECT COUNT(*) FROM ${ST.TABLE} WHERE IFNULL(archived,0)=0", null).use { c ->
+                if (c.moveToFirst()) n = c.getInt(0)
+            }
+            w.execSQL("UPDATE ${ST.TABLE} SET archived = 1, agg_v = ${ST.AGG_V} WHERE IFNULL(archived,0)=0")
+            w.execSQL("DELETE FROM ${ST.STATS}")
+            w.execSQL("DELETE FROM ${ST.DAILY}")
+            w.execSQL("DELETE FROM ${ST.EXITS}")
+            w.execSQL("DELETE FROM ${ST.WINDOWS}")
+            val v = ContentValues().apply {
+                put("at_ms", atMs)
+                put("note", note)
+                put("archived_n", n)
+                put("cash_usd", cashUsd)
+                put("synced", 0)
+            }
+            w.insertWithOnConflict(ST.RESETS, null, v, SQLiteDatabase.CONFLICT_REPLACE)
+            w.setTransactionSuccessful()
+            return n
+        } finally { w.endTransaction() }
+    }
+
+    override fun unsyncedScalpResets(): List<com.dirk.kalshiodds.decision.ScalpResetMarker> = runCatching {
+        val out = ArrayList<com.dirk.kalshiodds.decision.ScalpResetMarker>()
+        db.readableDatabase.rawQuery("SELECT at_ms, note, archived_n, cash_usd, synced FROM ${ST.RESETS} WHERE synced = 0 ORDER BY at_ms", null).use { c ->
+            while (c.moveToNext()) out += com.dirk.kalshiodds.decision.ScalpResetMarker(
+                c.getLong(0), c.getString(1) ?: "", c.getInt(2), c.getDouble(3), c.getInt(4) != 0
+            )
+        }
+        out
+    }.getOrDefault(emptyList())
+
+    override fun markScalpResetsSynced(atMs: List<Long>) {
+        if (atMs.isEmpty()) return
+        val w = db.writableDatabase
+        w.beginTransaction()
+        try {
+            atMs.chunked(500).forEach { ch ->
+                w.execSQL("UPDATE ${ST.RESETS} SET synced = 1 WHERE at_ms IN (${ch.joinToString(",") { "?" }})", ch.toTypedArray())
+            }
+            w.setTransactionSuccessful()
+        } finally { w.endTransaction() }
+    }
 
     fun unmigratedCount(): Int = runCatching {
         db.readableDatabase.rawQuery("SELECT COUNT(*) FROM ${ST.TABLE} WHERE agg_v < ${ST.AGG_V}", null).use { c -> if (c.moveToFirst()) c.getInt(0) else 0 }
@@ -1423,7 +1475,7 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
 
     override fun loadScalps(): List<com.dirk.kalshiodds.decision.ScalpTrade> = runCatching {
         // 0.3.67: bounded (tuner input only); the UI never loads the whole table.
-        scalpRows("SELECT * FROM ${ST.TABLE} WHERE state = 'CLOSED' ORDER BY closed_at_ms DESC LIMIT 6000", null)
+        scalpRows("SELECT * FROM ${ST.TABLE} WHERE IFNULL(archived,0)=0 AND state = 'CLOSED' ORDER BY closed_at_ms DESC LIMIT 6000", null)
     }.getOrDefault(emptyList())
 
     private fun scalpFromCursor(c: android.database.Cursor): com.dirk.kalshiodds.decision.ScalpTrade {
@@ -1511,7 +1563,7 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
     /** Closed scalps held to settlement (the note carries a settlement fill). Bounded. */
     fun settlementScalps(sinceMs: Long, limit: Int = 4_000): List<com.dirk.kalshiodds.decision.ScalpTrade> = runCatching {
         scalpRows(
-            "SELECT * FROM ${ST.TABLE} WHERE state = 'CLOSED' AND closed_at_ms >= ? AND note LIKE '%scalpFill=%' AND note LIKE '%,X%' " +
+            "SELECT * FROM ${ST.TABLE} WHERE IFNULL(archived,0)=0 AND state = 'CLOSED' AND closed_at_ms >= ? AND note LIKE '%scalpFill=%' AND note LIKE '%,X%' " +
                 "ORDER BY closed_at_ms DESC LIMIT ${limit.coerceIn(1, 8_000)}",
             arrayOf(sinceMs.toString())
         )
@@ -1526,7 +1578,7 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
             "SELECT id, ticker, side, state, signal_at_ms, signal_ask, fair_at_signal, contracts, entry_price, entry_fee_usd, " +
                 "entry_at_ms, NULL AS exit_decided_at_ms, exit_reason, sold_contracts, proceeds_usd, exit_fee_usd, closed_at_ms, " +
                 "net_usd, '' AS note, rule_version FROM ${ST.TABLE} " +
-                "WHERE state = 'CLOSED' AND closed_at_ms >= ? AND net_usd IS NOT NULL " +
+                "WHERE IFNULL(archived,0)=0 AND state = 'CLOSED' AND closed_at_ms >= ? AND net_usd IS NOT NULL " +
                 "AND (rule_version IS NULL OR rule_version LIKE '%|P' OR INSTR(rule_version, '|') = 0) " +
                 "ORDER BY closed_at_ms DESC LIMIT ${limit.coerceIn(1, 12_000)}",
             arrayOf(sinceMs.toString())

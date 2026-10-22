@@ -165,7 +165,8 @@ fun ScalpTabScreen(viewModel: OddsViewModel, onOpenScalpData: () -> Unit, onOpen
         onOpenAlgo = onOpenAlgo,
         aiPanel = aiPanel,
         onAiFollows = { on -> aiStore?.setFollows(on) },
-        extras = extras
+        extras = extras,
+        onResetBankroll = viewModel::resetScalpingBankroll
     )
 }
 
@@ -187,7 +188,8 @@ fun ScalpTabContent(
     onOpenSettings: () -> Unit = {},
     aiPanel: AiWatchPanelModel? = null,
     onAiFollows: (Boolean) -> Unit = {},
-    extras: LiveWindowExtras = LiveWindowExtras()
+    extras: LiveWindowExtras = LiveWindowExtras(),
+    onResetBankroll: () -> Unit = {}
 ) {
     if (showCoinCards) {
         var ladder by rememberSaveable { mutableStateOf(false) }
@@ -200,7 +202,7 @@ fun ScalpTabContent(
                         aiPanel = aiPanel, onAiFollows = onAiFollows, extras = extras)
                 }
             }
-        } else KashiArenaContent(st, onOpenAlgo, onOpenSettings, onOpenScalpData, { ladder = true }, aiPanel = aiPanel, onAiFollows = onAiFollows, extras = extras)
+        } else KashiArenaContent(st, onOpenAlgo, onOpenSettings, onOpenScalpData, { ladder = true }, aiPanel = aiPanel, onAiFollows = onAiFollows, extras = extras, onResetBankroll = onResetBankroll)
         return
     }
     var qty by remember { mutableIntStateOf(PriceLadder.PRESET_SIZES[1]) }

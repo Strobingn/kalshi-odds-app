@@ -11,6 +11,8 @@ object ScalpSchema {
     const val DAILY = "scalp_daily"
     const val EXITS = "scalp_exits"
     const val WINDOWS = "scalp_windows"
+    /** Reset markers. Rows are inserted, never deleted. Analysis splits history on at_ms. */
+    const val RESETS = "scalp_resets"
     const val FROM_VERSION = 7
     const val VERSION = 11
 
@@ -138,6 +140,18 @@ object ScalpSchema {
     const val AGG_V = 2
     val COL_AGG = "ALTER TABLE $TABLE ADD COLUMN agg_v INTEGER NOT NULL DEFAULT 0"
     val IDX_AGG = "CREATE INDEX IF NOT EXISTS idx_scalp_agg ON $TABLE(agg_v)"
+    /** 1.0.31: prior runs stay in scalp_trades. Display queries skip archived = 1. Never DROP the column. */
+    val COL_ARCHIVED = "ALTER TABLE $TABLE ADD COLUMN archived INTEGER NOT NULL DEFAULT 0"
+    val IDX_ARCHIVED = "CREATE INDEX IF NOT EXISTS idx_scalp_archived ON $TABLE(archived, state, closed_at_ms)"
+    val CREATE_RESETS = """
+        CREATE TABLE IF NOT EXISTS $RESETS (
+          at_ms INTEGER PRIMARY KEY,
+          note TEXT NOT NULL,
+          archived_n INTEGER NOT NULL,
+          cash_usd REAL NOT NULL,
+          synced INTEGER NOT NULL DEFAULT 0
+        )
+    """.trimIndent()
 
     /**
      * 0.3.68 one-time on v10 → v11: MOVE (rename, never drop) the 0.3.67 aggregate tables aside; fresh tables are then
@@ -157,6 +171,7 @@ object ScalpSchema {
         out += STATS_COLS; out += DAILY_COLS
         out += CREATE_EXITS; out += CREATE_WINDOWS; out += IDX_WIN_CLOSE
         out += COL_AGG; out += IDX_AGG
+        out += COL_ARCHIVED; out += IDX_ARCHIVED; out += CREATE_RESETS
         return out
     }
 }
