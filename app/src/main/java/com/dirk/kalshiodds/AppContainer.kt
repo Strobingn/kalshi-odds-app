@@ -239,15 +239,15 @@ class AppContainer(context: Context) {
         }
         return com.dirk.kalshiodds.llm.WindowSnapshot(key, closeMs, com.dirk.kalshiodds.llm.AiWindowContext.compose(live, lines), com.dirk.kalshiodds.llm.AiWindowContext.fingerprint(market, scalpers))
     }
+    val scalpBankroll = com.dirk.kalshiodds.decision.ScalpBankroll()
     val scalp = com.dirk.kalshiodds.decision.ScalpBook(
         (resultsImpl as? com.dirk.kalshiodds.decision.ScalpPersistence)
             ?: com.dirk.kalshiodds.decision.InMemoryScalpPersistence(),
         tuneStore = com.dirk.kalshiodds.decision.SharedPrefsScalpTuneStore(app),
         liveExtras = true,
         controls = scalpControls,
-        // 0.3.40: total open scalp cost ≤ free paper bankroll (cash not tied up in Autopilot paper bets).
-        // 0.3.59 experiment: scalpers' paper bankroll is unlimited (no cash check). P&L still per algo; Autopilot unchanged.
-        bankrollUsd = { Double.POSITIVE_INFINITY }
+        // Open paper clips are limited by free paper cash. The reader is bound after [paper] exists.
+        bankrollUsd = { scalpBankroll.usd }
     )
     /** 1.0.9 paper insights: auto-bench, alerts (hot streak / big loss / strong AI). Never touches real money. */
     val scalpInsightNotifier by lazy { com.dirk.kalshiodds.signal.notify.ScalpInsightNotifier(app) }
@@ -472,6 +472,7 @@ class AppContainer(context: Context) {
     }
 
     init {
+        scalpBankroll.read = { paper.book.snapshot().cashUsd.coerceAtLeast(0.0) }
         // 0.3.46: paper MARKET fills walk the live WS book (VWAP of consumed levels, capped at total displayed depth).
         paper.book.depth = { ticker, side, buy ->
             val b = scoring.book.snapshotBook(ticker)?.takeIf { scoring.book.hasSnapshot(ticker) }

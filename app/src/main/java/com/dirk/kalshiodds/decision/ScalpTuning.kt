@@ -184,7 +184,7 @@ data class ScalpParams(
             m
         }
 
-        fun byId(id: String): ScalpParams? = BY_ID[id]
+        fun byId(id: String): ScalpParams? = BY_ID[id] ?: ScalpVariants.fairParams(id)
 
         fun coinOf(ticker: String): String {
             val u = ticker.uppercase()

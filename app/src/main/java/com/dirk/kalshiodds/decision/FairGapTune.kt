@@ -50,9 +50,14 @@ object FairGapTune {
     const val FAIRH60_MIN_CENTS = 40
 
     fun isTweaked(code: String?): Boolean = code != null && code !in KEEP
-    fun ownsRules(code: String?): Boolean = code != null && code in OWN_RULES
-    /** 24–42¢ entry gate. Keep and own-rule scalpers are exempt. Exits still use [isTweaked]. */
-    fun entryGated(code: String?): Boolean = isTweaked(code) && !ownsRules(code)
+    fun ownsRules(code: String?): Boolean = code != null && (code in OWN_RULES || code.removeSuffix("f") in OWN_RULES)
+    /**
+     * 24–42¢ entry gate. Kept winners, their paper variants, and own-rule scalpers are exempt.
+     * The gate was cancelling sf16f / sf41 / sf04 at save time because the card id is not the
+     * bare family code in [OWN_RULES]. Exits still use [isTweaked].
+     */
+    fun entryGated(code: String?): Boolean = isTweaked(code) && !ownsRules(code) &&
+        code !in KeptScalpers.IDS && !ScalpVariants.isLive(code)
     /** Late-favourite leg uses the fair-gap ask gate only when this is true. */
     fun favUsesFairGapGate(code: String?): Boolean = entryGated(code)
 

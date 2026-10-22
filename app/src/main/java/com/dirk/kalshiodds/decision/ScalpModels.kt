@@ -163,7 +163,52 @@ object ScalpModels {
         SF17F("sf17f", "sf17 Late fav 60s-avg fair", ShockFav.v("sf17").summary()),
         V2_G10_MK("v2-g10-t12-s08-d15-w300-mk", "v2 · Fair-gap", "v2 exits on maker fair-gap g10-t12-s08-d15-w300. Paper only."),
         V2_DIP_SEED("v2-dip-g05-t08-s06-d10-w180", "v2 · Dip-hunter", "v2 exits on dip-hunter dip-g05-t08-s06-d10-w180. Paper only."),
-        FCFADE_H600("fcfade-h600", "Forecast fade", "Forecast fade, horizon 600s, entry band 40–49¢. Paper only.")
+        FCFADE_H600("fcfade-h600", "Forecast fade", "Forecast fade, horizon 600s, entry band 40–49¢. Paper only."),
+        SF41_V1("sf41-v1", ScalpVariants.label("sf41-v1"), ScalpVariants.blurb("sf41-v1")),
+        SF41_V2("sf41-v2", ScalpVariants.label("sf41-v2"), ScalpVariants.blurb("sf41-v2")),
+        SF41_V3("sf41-v3", ScalpVariants.label("sf41-v3"), ScalpVariants.blurb("sf41-v3")),
+        SF42_V1("sf42-v1", ScalpVariants.label("sf42-v1"), ScalpVariants.blurb("sf42-v1")),
+        SF42_V2("sf42-v2", ScalpVariants.label("sf42-v2"), ScalpVariants.blurb("sf42-v2")),
+        SF42_V3("sf42-v3", ScalpVariants.label("sf42-v3"), ScalpVariants.blurb("sf42-v3")),
+        SF43_V1("sf43-v1", ScalpVariants.label("sf43-v1"), ScalpVariants.blurb("sf43-v1")),
+        SF43_V2("sf43-v2", ScalpVariants.label("sf43-v2"), ScalpVariants.blurb("sf43-v2")),
+        SF43_V3("sf43-v3", ScalpVariants.label("sf43-v3"), ScalpVariants.blurb("sf43-v3")),
+        SF04_V1("sf04-v1", ScalpVariants.label("sf04-v1"), ScalpVariants.blurb("sf04-v1")),
+        SF04_V2("sf04-v2", ScalpVariants.label("sf04-v2"), ScalpVariants.blurb("sf04-v2")),
+        SF04_V3("sf04-v3", ScalpVariants.label("sf04-v3"), ScalpVariants.blurb("sf04-v3")),
+        SF07_V1("sf07-v1", ScalpVariants.label("sf07-v1"), ScalpVariants.blurb("sf07-v1")),
+        SF07_V2("sf07-v2", ScalpVariants.label("sf07-v2"), ScalpVariants.blurb("sf07-v2")),
+        SF07_V3("sf07-v3", ScalpVariants.label("sf07-v3"), ScalpVariants.blurb("sf07-v3")),
+        SF08_V1("sf08-v1", ScalpVariants.label("sf08-v1"), ScalpVariants.blurb("sf08-v1")),
+        SF08_V2("sf08-v2", ScalpVariants.label("sf08-v2"), ScalpVariants.blurb("sf08-v2")),
+        SF08_V3("sf08-v3", ScalpVariants.label("sf08-v3"), ScalpVariants.blurb("sf08-v3")),
+        SF15_V1("sf15-v1", ScalpVariants.label("sf15-v1"), ScalpVariants.blurb("sf15-v1")),
+        SF15_V2("sf15-v2", ScalpVariants.label("sf15-v2"), ScalpVariants.blurb("sf15-v2")),
+        SF15_V3("sf15-v3", ScalpVariants.label("sf15-v3"), ScalpVariants.blurb("sf15-v3")),
+        SF16F_V1("sf16f-v1", ScalpVariants.label("sf16f-v1"), ScalpVariants.blurb("sf16f-v1")),
+        SF16F_V2("sf16f-v2", ScalpVariants.label("sf16f-v2"), ScalpVariants.blurb("sf16f-v2")),
+        SF16F_V3("sf16f-v3", ScalpVariants.label("sf16f-v3"), ScalpVariants.blurb("sf16f-v3")),
+        SF17F_V1("sf17f-v1", ScalpVariants.label("sf17f-v1"), ScalpVariants.blurb("sf17f-v1")),
+        SF17F_V2("sf17f-v2", ScalpVariants.label("sf17f-v2"), ScalpVariants.blurb("sf17f-v2")),
+        SF17F_V3("sf17f-v3", ScalpVariants.label("sf17f-v3"), ScalpVariants.blurb("sf17f-v3")),
+        G14_T12_S08_D15_W300_V1("g14-t12-s08-d15-w300-v1", ScalpVariants.label("g14-t12-s08-d15-w300-v1"), ScalpVariants.blurb("g14-t12-s08-d15-w300-v1")),
+        G14_T12_S08_D15_W300_V2("g14-t12-s08-d15-w300-v2", ScalpVariants.label("g14-t12-s08-d15-w300-v2"), ScalpVariants.blurb("g14-t12-s08-d15-w300-v2")),
+        G14_T12_S08_D15_W300_V3("g14-t12-s08-d15-w300-v3", ScalpVariants.label("g14-t12-s08-d15-w300-v3"), ScalpVariants.blurb("g14-t12-s08-d15-w300-v3")),
+        G16_T14_S08_D15_W300_V1("g16-t14-s08-d15-w300-v1", ScalpVariants.label("g16-t14-s08-d15-w300-v1"), ScalpVariants.blurb("g16-t14-s08-d15-w300-v1")),
+        G16_T14_S08_D15_W300_V2("g16-t14-s08-d15-w300-v2", ScalpVariants.label("g16-t14-s08-d15-w300-v2"), ScalpVariants.blurb("g16-t14-s08-d15-w300-v2")),
+        G16_T14_S08_D15_W300_V3("g16-t14-s08-d15-w300-v3", ScalpVariants.label("g16-t14-s08-d15-w300-v3"), ScalpVariants.blurb("g16-t14-s08-d15-w300-v3")),
+        V2_G10_T12_S08_D15_W300_MK_V1("v2-g10-t12-s08-d15-w300-mk-v1", ScalpVariants.label("v2-g10-t12-s08-d15-w300-mk-v1"), ScalpVariants.blurb("v2-g10-t12-s08-d15-w300-mk-v1")),
+        V2_G10_T12_S08_D15_W300_MK_V2("v2-g10-t12-s08-d15-w300-mk-v2", ScalpVariants.label("v2-g10-t12-s08-d15-w300-mk-v2"), ScalpVariants.blurb("v2-g10-t12-s08-d15-w300-mk-v2")),
+        V2_G10_T12_S08_D15_W300_MK_V3("v2-g10-t12-s08-d15-w300-mk-v3", ScalpVariants.label("v2-g10-t12-s08-d15-w300-mk-v3"), ScalpVariants.blurb("v2-g10-t12-s08-d15-w300-mk-v3")),
+        V2_DIP_G05_T08_S06_D10_W180_V1("v2-dip-g05-t08-s06-d10-w180-v1", ScalpVariants.label("v2-dip-g05-t08-s06-d10-w180-v1"), ScalpVariants.blurb("v2-dip-g05-t08-s06-d10-w180-v1")),
+        V2_DIP_G05_T08_S06_D10_W180_V2("v2-dip-g05-t08-s06-d10-w180-v2", ScalpVariants.label("v2-dip-g05-t08-s06-d10-w180-v2"), ScalpVariants.blurb("v2-dip-g05-t08-s06-d10-w180-v2")),
+        V2_DIP_G05_T08_S06_D10_W180_V3("v2-dip-g05-t08-s06-d10-w180-v3", ScalpVariants.label("v2-dip-g05-t08-s06-d10-w180-v3"), ScalpVariants.blurb("v2-dip-g05-t08-s06-d10-w180-v3")),
+        DIP_G05_T08_S06_D10_W180_MK_V1("dip-g05-t08-s06-d10-w180-mk-v1", ScalpVariants.label("dip-g05-t08-s06-d10-w180-mk-v1"), ScalpVariants.blurb("dip-g05-t08-s06-d10-w180-mk-v1")),
+        DIP_G05_T08_S06_D10_W180_MK_V2("dip-g05-t08-s06-d10-w180-mk-v2", ScalpVariants.label("dip-g05-t08-s06-d10-w180-mk-v2"), ScalpVariants.blurb("dip-g05-t08-s06-d10-w180-mk-v2")),
+        DIP_G05_T08_S06_D10_W180_MK_V3("dip-g05-t08-s06-d10-w180-mk-v3", ScalpVariants.label("dip-g05-t08-s06-d10-w180-mk-v3"), ScalpVariants.blurb("dip-g05-t08-s06-d10-w180-mk-v3")),
+        FCFADE_H600_V1("fcfade-h600-v1", ScalpVariants.label("fcfade-h600-v1"), ScalpVariants.blurb("fcfade-h600-v1")),
+        FCFADE_H600_V2("fcfade-h600-v2", ScalpVariants.label("fcfade-h600-v2"), ScalpVariants.blurb("fcfade-h600-v2")),
+        FCFADE_H600_V3("fcfade-h600-v3", ScalpVariants.label("fcfade-h600-v3"), ScalpVariants.blurb("fcfade-h600-v3"))
     }
 
     const val V2_BLURB = "v2 paper: new trades default to a 3¢ bid-peak trail active from entry and independent 20% fill-price stop. Existing trades retain saved exits. Preserve positive/inconclusive entry settings; bounded adjustments for sustained losses. Every trade has a protective stop. Exit in the final minute unless fresh CF fair ≥ 97%, bid ≥ 90¢ and holding beats selling. Decisions are estimates, never guaranteed wins. Actual stop/trail and adaptation evidence are in the trade note."
@@ -172,10 +217,12 @@ object ScalpModels {
      * and is labeled [KeptScalpers.REMOVED_LABEL]. Stored rows are not deleted.
      * Order matches the ranking, best net first. At most [KeptScalpers.MAX_SLOTS]; empty slots stay empty.
      */
-    val ALL: List<Model> = listOf(
+    val WINNERS: List<Model> = listOf(
         Model.SF42, Model.V2_G10_MK, Model.G14, Model.SF16F, Model.SF15, Model.SF17F,
         Model.V2_DIP_SEED, Model.SF07, Model.SF04, Model.SF08, Model.FCFADE_H600, Model.SF41
     )
+    /** Kept winners, then paper nudges. Parents stay first and unchanged. */
+    val ALL: List<Model> = WINNERS + Model.values().filter { ScalpVariants.isLive(it.code) }
     private val RAW_ALL: List<Model> = Model.values().toList()
     private val KEPT_CODES: Set<String> = ALL.map { it.code }.toSet()
     val REMOVED_CODES: Set<String> = RAW_ALL.map { it.code }.filter { it !in KEPT_CODES }.toSet()

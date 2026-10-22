@@ -236,6 +236,9 @@ internal fun ArenaStrategyRow(row: ScalpModels.Row, st: ScalpTabState, onOpen: (
                 else if (st.controls.autoBench && bench != null && !bench.trading) Text("BENCHED · shadow only · " + bench.reason, color = c.down, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, maxLines = 2)
                 else if (bench?.status == com.dirk.kalshiodds.decision.insights.BenchStatus.FORCED_ACTIVE) Text("Bench override · forced trading", color = c.spot, style = MaterialTheme.typography.labelSmall)
                 pause?.takeIf { it != "Bench · forced benched" }?.let { Text(it, color = c.down, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, maxLines = 2) }
+                st.entryGates[row.model.code]?.let {
+                    Text(it, color = c.down, style = MaterialTheme.typography.labelSmall, maxLines = 2, modifier = Modifier.testTag("NO_ENTRY_" + row.model.code))
+                }
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text(if (row.roundTrips > 0) ScalpTabCopy.money(row.netUsd) else "—", color = pnlColor(row.netUsd), style = ArenaUi.mono(MaterialTheme.typography.titleMedium), fontWeight = FontWeight.Bold)

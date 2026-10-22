@@ -206,9 +206,14 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                                     if (cur != null) runCatching { container.aiWatcher.noteKalshi(cur.copy(atMs = now1, btc = spot, points = emptyList())) }
                                 }
                             }
-                        val open = container.scalp.openTickers()
-                        val withOpen = live.filter { it.ticker in open }
-                        if (withOpen.isNotEmpty()) runScalp(withOpen, s)
+                        container.scalp.expireOrphans(now1)
+                        val current = live.filter {
+                            com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(it.ticker) in com.dirk.kalshiodds.domain.CryptoMarkets.FIFTEEN_SERIES &&
+                                com.dirk.kalshiodds.decision.ScalpParams.coinOf(it.ticker) == com.dirk.kalshiodds.decision.ShockFav.TRADE_COIN &&
+                                (it.closeTimeEpochMs ?: 0L) > now1
+                        }
+                        if (current.isNotEmpty()) runScalp(current, s)
+                        else container.scalp.noteOutage("outage")
                     }
                 }
                 _state.update { it.copy(feedStatus = feedStatusLine()) }
@@ -290,7 +295,10 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val marks = container.scalp.marks.value
         val statsSnap = container.scalp.stats.value
         val bidFor: (com.dirk.kalshiodds.decision.ScalpTrade) -> Double? = { t -> marks[t.ticker.uppercase()]?.bid(t.side) }
-        var next = cur.copy(controls = container.scalpControls.state.value, feedback = com.dirk.kalshiodds.decision.ScalpModels.V2_MODELS.associate { it.code to container.scalpControls.feedback(it.code) }, activeScalps = trades.filter { it.state != com.dirk.kalshiodds.decision.ScalpState.CLOSED && it.state != com.dirk.kalshiodds.decision.ScalpState.NO_FILL },
+        val gates = com.dirk.kalshiodds.decision.ScalpModels.ALL.mapNotNull { m ->
+            container.scalp.gateLine(m.code, wkey)?.let { m.code to it }
+        }.toMap()
+        var next = cur.copy(controls = container.scalpControls.state.value, entryGates = gates, feedback = com.dirk.kalshiodds.decision.ScalpModels.V2_MODELS.associate { it.code to container.scalpControls.feedback(it.code) }, activeScalps = trades.filter { it.state != com.dirk.kalshiodds.decision.ScalpState.CLOSED && it.state != com.dirk.kalshiodds.decision.ScalpState.NO_FILL },
             scalpBids = trades.mapNotNull { t -> bidFor(t)?.let { t.id to it } }.toMap(), markets = markets, selectedTicker = sel, currentWindowKey = wkey, updatedAtMs = now)
         // 0.3.67/0.3.68: everything from aggregate tables (stats, daily, exits, windows) — never a trade scan.
         val tBoard0 = android.os.SystemClock.elapsedRealtime()
@@ -1776,7 +1784,18 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             // 0.3.59: scalpers trade Bitcoin only (ETH/SOL markets only to wind down positions opened before 0.3.59).
             val tradeThis = com.dirk.kalshiodds.decision.ScalpTradeGate.trades(market.ticker, openScalps)
             if (!tradeThis && !s.paperTradingEnabled) return@forEach
-            val book = hub.scoring.book.snapshotBook(market.ticker) ?: return@forEach
+            val wsBook = hub.scoring.book.snapshotBook(market.ticker)
+            val wsAge = hub.scoring.book.bookAgeMs(market.ticker, now)
+            val restAt = _state.value.snapshot?.takeIf { !it.fromCache }?.fetchedAtEpochMs
+            val restAge = restAt?.let { (now - it).coerceAtLeast(0L) }
+            val bookFresh = wsBook != null && wsAge != null && wsAge <= com.dirk.kalshiodds.decision.ScalpRule.FRESH_BOOK_MS
+            val restFresh = restAge != null && restAge <= com.dirk.kalshiodds.decision.ScalpRule.FRESH_BOOK_MS &&
+                market.yesBid != null && market.yesAsk != null
+            if (!bookFresh && !restFresh) {
+                container.scalp.noteOutage(market.ticker)
+                return@forEach
+            }
+            val book = wsBook
             val spot = settlementFor(market.ticker, now).spot
             val coin = when {
                 series.contains("SOL") -> "SOL"
@@ -1785,25 +1804,39 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             }
             val sigma = container.scalp.observeSpot(coin, spot, now)
                 ?: com.dirk.kalshiodds.decision.ScalpRule.defaultSigmaPerSec(market.ticker)
-            val q = com.dirk.kalshiodds.decision.ScalpRule.quoteFromBook(
-                ticker = market.ticker,
-                nowMs = now,
-                closeMs = market.closeTimeEpochMs,
-                bookAgeMs = hub.scoring.book.bookAgeMs(market.ticker, now),
-                yesBids = book.yes,
-                noBids = book.no,
-                spot = spot,
-                strike = market.floorStrike ?: hub.scoring.book.strike(market.ticker),
-                sigmaPerSec = sigma
-            ) ?: return@forEach
-            // 0.3.43 CF-reprice inputs: CF Benchmarks settlement-aware price + tick age (no Coinbase fallback),
-            // and whether the book is waiting on a re-snapshot after a seq gap.
+            val strike = market.floorStrike ?: hub.scoring.book.strike(market.ticker)
+            val q = if (bookFresh && book != null) {
+                com.dirk.kalshiodds.decision.ScalpRule.quoteFromBook(
+                    ticker = market.ticker,
+                    nowMs = now,
+                    closeMs = market.closeTimeEpochMs,
+                    bookAgeMs = wsAge,
+                    yesBids = book.yes,
+                    noBids = book.no,
+                    spot = spot,
+                    strike = strike,
+                    sigmaPerSec = sigma
+                )
+            } else {
+                val closeMs = market.closeTimeEpochMs
+                if (closeMs == null || market.yesBid == null || market.yesAsk == null) null
+                else com.dirk.kalshiodds.decision.ScalpRule.Quote(
+                    ticker = market.ticker, nowMs = now, closeMs = closeMs, bookAtMs = restAt ?: now,
+                    yesBid = market.yesBid, yesBidSize = null, yesAsk = market.yesAsk, yesAskSize = market.yesAskSize,
+                    spot = spot, strike = strike, sigmaPerSec = sigma
+                )
+            } ?: run {
+                container.scalp.noteOutage(market.ticker)
+                return@forEach
+            }
+            // 0.3.43 CF-reprice inputs: CF Benchmarks settlement-aware price + tick age (no Coinbase fallback).
+            // A missing websocket snapshot is not a stuck gap once a fresh REST touch is in hand.
             val cfId = com.dirk.kalshiodds.signal.ws.CfBenchmarks.indexForSeries(series)
             val cfTick = cfId?.let { container.cfFeed.latest(it) }
             val qq = q.copy(
                 cfSpot = cfId?.let { container.cfFeed.settlementPrice(it, now, q.tauS) },
                 cfAgeMs = cfTick?.ageMs(now),
-                bookGap = !hub.scoring.book.hasSnapshot(market.ticker)
+                bookGap = bookFresh && !hub.scoring.book.hasSnapshot(market.ticker)
             )
             if (tradeThis) {
                 // 0.3.62: a paper-scalp exception must never take down the quote lane / app.
@@ -1812,8 +1845,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 runCatching {
                     container.scalp.onForecastQuote(
                         qq,
-                        top3Yes = book.yes.filter { it.second > 0 }.sortedBy { it.first }.takeLast(3).sumOf { it.second },
-                        top3No = book.no.filter { it.second > 0 }.sortedBy { it.first }.takeLast(3).sumOf { it.second },
+                        top3Yes = book?.yes?.filter { it.second > 0 }?.sortedBy { it.first }?.takeLast(3)?.sumOf { it.second } ?: (market.yesAskSize ?: 0.0),
+                        top3No = book?.no?.filter { it.second > 0 }?.sortedBy { it.first }?.takeLast(3)?.sumOf { it.second } ?: 0.0,
                         enabled = s.paperTradingEnabled
                     )
                 }

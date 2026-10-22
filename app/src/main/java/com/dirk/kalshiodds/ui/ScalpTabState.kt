@@ -38,7 +38,9 @@ data class ScalpTabState(
     /** 0.3.67: background history index progress (null when idle). */
     val migrateNote: String? = null,
     /** 0.3.67 debug: last stats read. */
-    val debugTiming: String = ""
+    val debugTiming: String = "",
+    /** Last blocking gate per scalper for the visible window. */
+    val entryGates: Map<String, String> = emptyMap()
 )
 
 data class ScalpTabMarket(val ticker: String, val coin: String, val closeMs: Long?, val label: String)

@@ -76,20 +76,18 @@ class ReleaseGate0340ScalpTest {
         val b = book()
         var t = close - 700_000L
         b.onQuote(q(t, 0.34, 0.35), true)                 // signal YES
-        b.onQuote(q(t + 3_000L, 0.34, 0.35), true)        // fill @35
-        assertEquals(1, b.legacy().size)                // still one: YES side already open
+        b.onQuote(q(t + 3_000L, 0.34, 0.35), true)        // fill @35; the same rule may open another clip
+        val first = b.legacy().minBy { it.signalAtMs }
+        assertEquals(ScalpState.OPEN, first.state)
         b.onQuote(q(t + 6_000L, 0.44, 0.45), true)        // target hit → pending exit
         b.onQuote(q(t + 9_000L, 0.44, 0.45), true)        // sold @44
-        val first = b.legacy().single()
-        assertEquals(ScalpState.CLOSED, first.state)
-        assertTrue(first.netUsd!! > 0.0)
-        // Cooldown: a fresh dip 10 s later does not re-enter …
-        b.onQuote(q(t + 19_000L, 0.34, 0.35), true)
-        assertEquals(1, b.legacy().size)
-        // … but after the 15 s cooldown it does: second fair-gap round trip in the same window.
-        b.onQuote(q(t + 40_000L, 0.34, 0.35), true)
+        val closed = b.legacy().first { it.id == first.id }
+        assertEquals(ScalpState.CLOSED, closed.state)
+        assertTrue(closed.netUsd!! > 0.0)
+        // No 15s cooldown and no one-open lock: another fair-gap clip is allowed inside the old wait.
+        b.onQuote(q(t + 12_000L, 0.34, 0.35), true)
         val fair = b.legacy().filter { it.strategy == ScalpStrategy.FAIR_GAP }
-        assertEquals(2, fair.size)
+        assertTrue(fair.size >= 2)
         assertTrue(b.legacy().none { it.strategy == ScalpStrategy.DIP_HUNTER })
         val per = ScalpBreakdown.roundTripsPerWindow(fair.map { if (it.state == ScalpState.PENDING_ENTRY) it.copy(state = ScalpState.CLOSED, netUsd = 0.0, contracts = 10) else it })
         assertEquals(2.0, per.avg, 1e-9)

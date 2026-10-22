@@ -100,13 +100,12 @@ class ReleaseGate0340MultiStrategyTest {
         b.onQuote(q(t, 0.44, 0.45), true)
         b.onQuote(q(t + 30_000L, 0.34, 0.35), true) // fair-gap + dip-hunter both fire on YES
         b.onQuote(q(t + 33_000L, 0.34, 0.35), true) // both fill
-        b.onQuote(q(t + 36_000L, 0.34, 0.35), true) // same signal again: no second open per strategy/side
-        // 0.3.50: the sixth model (maker-first dip) also runs as a primary; check the taker models here.
+        b.onQuote(q(t + 36_000L, 0.34, 0.35), true) // same signal again: another clip is allowed
         val open = b.snapshot().filter { it.state == ScalpState.OPEN && !it.isMaker && !it.variantId.endsWith("-h60") && !it.variantId.contains("-t99-") }
         assertEquals(setOf(ScalpStrategy.FAIR_GAP, ScalpStrategy.DIP_HUNTER), open.map { it.strategy }.toSet())
-        assertEquals(2, b.snapshot().count { !it.isMaker && !it.variantId.endsWith("-h60") && !it.variantId.contains("-t99-") && it.variantId !in com.dirk.kalshiodds.decision.ScalpParams.FAIR_TWEAKS.map { t -> t.id } }) // 0.3.61: dip-hold sibling also fires
-        open.groupBy { it.strategy to it.side }.values.forEach { assertEquals(1, it.size) }
+        assertTrue(open.size >= 2)
         assertTrue(open.all { it.isPrimary })
+        assertTrue(b.openCostUsd() <= 1_000.0)
     }
 
     @Test
@@ -131,7 +130,8 @@ class ReleaseGate0340MultiStrategyTest {
         val roomy = book(bankroll = 1_000.0)
         roomy.onQuote(q(t, 0.44, 0.45), true)
         roomy.onQuote(q(t + 30_000L, 0.34, 0.35), true)
-        assertEquals(1, roomy.snapshot().count { !it.isMaker && !it.variantId.endsWith("-h60") && !it.variantId.contains("-t99-") && it.variantId !in com.dirk.kalshiodds.decision.ScalpParams.FAIR_TWEAKS.map { t -> t.id } })
+        assertTrue(roomy.snapshot().count { !it.isMaker && !it.variantId.endsWith("-h60") && !it.variantId.contains("-t99-") && it.variantId !in com.dirk.kalshiodds.decision.ScalpParams.FAIR_TWEAKS.map { t -> t.id } } >= 1)
+        assertTrue(roomy.openCostUsd() <= 1_000.0 + 1e-9)
     }
 
     private fun closed(window: Int, variant: ScalpParams, cents: Double, i: Int): ScalpTrade {

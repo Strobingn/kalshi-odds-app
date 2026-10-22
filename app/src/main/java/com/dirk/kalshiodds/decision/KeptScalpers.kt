@@ -38,7 +38,7 @@ object ScalpPortfolio {
 }
 
 object KeptScalpers {
-    const val MAX_SLOTS = 15
+    const val MAX_SLOTS = 80
     const val REMOVED_LABEL = "removed strategy"
 
     const val FAIR_ID = "g14-t12-s08-d15-w300"
@@ -85,7 +85,12 @@ object KeptScalpers {
      * Old aggregate ids that are exactly one kept variant (sf16 only ever booked sf16f).
      * Read-time only. Stored rows are not rewritten or deleted.
      */
-    val STAT_ALIASES: Map<String, String> = mapOf("sf16" to "sf16f", "sf17" to "sf17f")
+    val STAT_ALIASES: Map<String, String> = mapOf(
+        "sf16" to "sf16f",
+        "sf17" to "sf17f",
+        // 1.0.22 renamed the maker fair-gap card. Old closed rows stay in the table; the card reads them.
+        "g10-t12-s08-d15-w300-mk" to V2_FAIR_ID
+    )
 
     fun isKept(id: String?): Boolean = id != null && id in IDS
     fun spec(id: String): Spec? = BY_ID[id]

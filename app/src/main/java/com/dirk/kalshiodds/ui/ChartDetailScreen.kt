@@ -35,6 +35,7 @@ import com.dirk.kalshiodds.ui.charts.FeeWaterfall
 import com.dirk.kalshiodds.ui.charts.KnobTimeline
 import com.dirk.kalshiodds.ui.charts.LineSeries
 import com.dirk.kalshiodds.ui.charts.MultiLineChart
+import com.dirk.kalshiodds.ui.charts.SignalModelPanels
 import java.util.Locale
 import kotlin.math.roundToInt
 import com.dirk.kalshiodds.ui.components.AiFairLabel
@@ -173,6 +174,7 @@ fun ChartDetailScreen(
                         contentLabel = "AI UP chance versus market"
                     )
                 }
+            SignalModelPanels(market)
             OrderBookCard(book)
             CumulativeDepthChart(ChartGallery.cumulativeDepth(book?.yes.orEmpty(), book?.no.orEmpty()))
             run {

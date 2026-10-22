@@ -156,7 +156,8 @@ class InMemoryScalpPersistence : ScalpPersistence {
         rows.values.filter { it.ticker.equals(ticker, true) && ScalpModels.scalperIdOf(it) == scalperId }.sortedBy { it.signalAtMs }
     }
     override fun unsyncedClosed(limit: Int): List<ScalpTrade> = synchronized(rows) {
-        rows.values.filter { it.state == ScalpState.CLOSED && it.isPrimary }.sortedBy { it.closedAtMs }.take(limit)
+        rows.values.filter { it.isPrimary && (it.state == ScalpState.CLOSED || it.state == ScalpState.OPEN) }
+            .sortedBy { it.entryAtMs ?: it.closedAtMs ?: it.signalAtMs }.take(limit)
     }
     override fun tradeCount(): Int = synchronized(rows) { rows.size }
     /** Test helper: bulk insert rows and build totals. */
