@@ -65,9 +65,15 @@ object ScalpV2 {
     fun peakRule(t: ScalpTrade): Boolean = savedNumber(t.note, "v2peakrule", 0.0) == 1.0
     fun stopPercent(t: ScalpTrade): Double = savedNumber(t.note, "v2stopPct", 20.0).coerceIn(1.0, 99.0)
     fun percentStopPrice(entry: Double, percent: Double): Double = entry * (1.0 - percent / 100.0)
-    fun peakExit(entry: Double, percent: Double, peakBid: Double, bid: Double, trail: Double): String? = when {
+    /**
+     * Percent stop always cuts a loser. The trail banks a winner only when the
+     * exit is net-positive after both taker fees. A 3¢ give-back from the entry
+     * bid on a 12¢ fill loses the spread plus the fee and is not an exit.
+     */
+    fun peakExit(entry: Double, percent: Double, peakBid: Double, bid: Double, trail: Double, contracts: Int = CLIP): String? = when {
         bid <= percentStopPrice(entry, percent) + 1e-9 -> "V2 stop loss ${Math.round(percent)}% below fill"
-        bid <= peakBid - trail + 1e-9 -> "V2 trail ${Math.round(trail * 100)}¢ below peak bid"
+        bid <= peakBid - trail + 1e-9 && ScalpRule.netAfterFees(entry, bid, contracts.coerceAtLeast(1)) > 1e-9 ->
+            "V2 trail ${Math.round(trail * 100)}¢ below peak bid"
         else -> null
     }
     fun entryRiskNote(note: String, bid: Double?): String {
