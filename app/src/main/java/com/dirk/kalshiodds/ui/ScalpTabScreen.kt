@@ -407,6 +407,9 @@ private fun CombinedBoard(rows: List<ScalpModels.Row>) {
             else "$tn round trips · $tw wins / $tl losses · net ${ScalpTabCopy.money(tnet)} after fees",
             style = MaterialTheme.typography.labelMedium,
             fontFamily = FontFamily.Monospace, color = if (tn == 0) c.textSecondary else if (tnet >= 0) c.up else c.down)
+        if (com.dirk.kalshiodds.decision.ScalpPortfolio.countsShared(rows.map { it.model.code })) {
+            Text(com.dirk.kalshiodds.decision.ScalpPortfolio.NOTE, style = MaterialTheme.typography.labelSmall, color = c.textSecondary)
+        }
         Spacer(Modifier.height(6.dp))
         rows.forEachIndexed { i, r ->
             val traded = r.roundTrips > 0

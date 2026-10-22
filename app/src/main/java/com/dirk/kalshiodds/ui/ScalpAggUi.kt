@@ -1,6 +1,7 @@
 package com.dirk.kalshiodds.ui
 
 import com.dirk.kalshiodds.decision.ScalpBook
+import com.dirk.kalshiodds.decision.ScalpPortfolio
 import com.dirk.kalshiodds.decision.ScalpModels
 import com.dirk.kalshiodds.decision.ScalpRule
 import com.dirk.kalshiodds.decision.ScalpStat
@@ -28,7 +29,7 @@ object ScalpAggUi {
             "Avg win / loss: " + (all.avgWin?.let { String.format(Locale.US, "%+.2f", it) } ?: "—") + " / " + (all.avgLoss?.let { String.format(Locale.US, "%+.2f", it) } ?: "—"),
             "ROI on cost: " + (all.roi?.let { String.format(Locale.US, "%+.1f%%", it * 100) } ?: "—"),
             "95% CI $/trade (normal): " + (ci?.let { String.format(Locale.US, "[%+.3f, %+.3f]", it.first, it.second) } ?: "—")
-        )
+        ).let { lines -> if (ScalpPortfolio.countsShared(st.map { it.scalperId })) lines + ScalpPortfolio.NOTE else lines }
         val breakdown = ScalpModels.leaderboardFromStats(st, exits = book.loadExits()).filter { it.roundTrips > 0 }.take(12).map { r ->
             String.format(Locale.US, "%s · %d trips · %+.2f USD · win %s%s%s", r.model.label, r.roundTrips, r.netUsd,
                 r.winRate?.let { String.format(Locale.US, "%.0f%%", it * 100) } ?: "—", if (r.exitReasons.isNotBlank()) " · " + r.exitReasons else "",

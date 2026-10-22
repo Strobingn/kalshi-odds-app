@@ -110,12 +110,14 @@ class ShadowBook(
                 abs(it.limitPrice - incoming.limitPrice) < PaperAutopilot.PRICE_DELTA
         }
         if (hit != null) return Recorded(hit, false)
-        val booked = incoming.booked && incoming.depthFill && incoming.stakeUsd > 0.0
+        val affordable = incoming.stakeUsd <= cur.cashUsd + 1e-6
+        val booked = incoming.booked && incoming.depthFill && incoming.stakeUsd > 0.0 && affordable
         val row = incoming.copy(
             id = incoming.id.ifBlank { idFactory() },
             booked = booked,
             unfilledReason = when {
                 booked -> null
+                !affordable && incoming.stakeUsd > 0.0 -> "free bankroll cannot cover the clip"
                 else -> incoming.unfilledReason ?: "Would not fill at the intended limit"
             },
             createdAtMs = if (incoming.createdAtMs > 0L) incoming.createdAtMs else nowMs()

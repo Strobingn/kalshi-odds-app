@@ -23,9 +23,9 @@ data class ScalpControls(
     val greenContracts: Int = 25,
     /** Research strategies: shared parameters (window exposure cap, Kelly, maker edge, late window). */
     val research: Research.Params = Research.Params(),
-    /** 1.0.9 auto-bench: settled trades judged per scalper (net after fees < 0 → benched; shadow > 0 → back). */
+    /** 1.0.9 auto-bench. Off unless the owner turns it on. Net after fees < 0 can bench; shadow > 0 can return. */
     val benchWindow: Int = 30,
-    val autoBench: Boolean = true,
+    val autoBench: Boolean = false,
     /** 1.0.9 manual bench override per scalper code: "ACTIVE" or "BENCHED" (absent = auto). */
     val benchOverrides: Map<String, String> = emptyMap(),
     /** 1.0.9 estimated slippage, cents per contract per taker leg (reality-check line on scalper cards). */
@@ -80,6 +80,7 @@ data class ScalpControls(
     }
     fun walkBuy(levels: List<Pair<Double, Double>>, wanted: Int, limit: Double): Triple<Int, Double, Double> {
         var count = 0; var value = 0.0; var fees = 0.0
+        val lots = ArrayList<Pair<Double, Int>>()
         for ((price, size) in levels.sortedBy { it.first }) {
             if (!ScalpRule.buyPriceOk(price) || price > limit || !size.isFinite() || size < 1) continue
             var lo = 0
@@ -89,11 +90,27 @@ data class ScalpControls(
                 val cost = value + fees + mid * price + ScalpRule.orderFee(mid, price)
                 if (maxStakeUsd == 0.0 || cost <= maxStakeUsd + 1e-9) lo = mid else hi = mid - 1
             }
-            if (lo > 0) { count += lo; value += lo * price; fees += ScalpRule.orderFee(lo, price) }
+            if (lo > 0) {
+                count += lo; value += lo * price; lots += price to lo
+                fees = ScalpRule.sweepFee(lots)
+            }
             if (count >= wanted) break
         }
         return Triple(count, value, fees)
     }
+    /**
+     * Card line for a stopped scalper. Automatic bench and the AI watcher do not count.
+     * Null means the card should not say paused.
+     */
+    fun pausedReason(code: String, open: Int = 0, entriesLastHour: Int = 0, todayNet: Double = 0.0): String? {
+        if (!enabled || killSwitch || code in disabledStrategies) return "Entries paused"
+        if (benchOverrides[code] == "BENCHED") return "Bench · forced benched"
+        if (maxOpen > 0 && open >= maxOpen) return "V2 open-position limit"
+        if (maxTradesPerHour > 0 && entriesLastHour >= maxTradesPerHour) return "V2 hourly entry limit"
+        if (maxDailyLossUsd > 0.0 && todayNet <= -maxDailyLossUsd) return "V2 daily loss limit"
+        return null
+    }
+
     fun dipOk(prices: List<Double>, ask: Double): Boolean {
         if (dipCents <= 0) return true
         if (prices.size < 3) return false
@@ -145,6 +162,17 @@ class MemoryScalpControls(initial: ScalpControls = ScalpControls()) : ScalpContr
     }
 }
 /**
+ * One-time: saved books that were auto-benching (the 1.0.9 default) or had AI benches
+ * start with auto-bench off and an empty AI bench set. The flag sticks, so turning the
+ * toggle back on is not undone on the next launch. Force trade / Force bench are not touched.
+ */
+object ScalpAutoBenchMigration {
+    const val FLAG = "autobench_cleared_1024"
+
+    fun apply(saved: ScalpControls): ScalpControls = saved.copy(autoBench = false, aiBench = emptySet())
+}
+
+/**
  * Trade bookkeeping stays in memory. A single delayed IO job commits the latest dirty
  * values together, avoiding per-fill apply() work that Android drains on Main at lifecycle changes.
  * Settings/feedback keys are unchanged, so 0.3.70 data is read without a migration/reset.
@@ -153,7 +181,15 @@ class SavedScalpControls(context: Context, private val flushDelayMs: Long = 1_00
     private val prefs = context.applicationContext.getSharedPreferences("kashi_v2_controls", Context.MODE_PRIVATE)
     private val json = Json { ignoreUnknownKeys = true }
     override val state = MutableStateFlow(read())
-    private fun read() = runCatching { json.decodeFromString<ScalpControls>(prefs.getString("settings", "{}")!!).normalized() }.getOrDefault(ScalpControls())
+    private fun read(): ScalpControls {
+        val raw = runCatching { json.decodeFromString<ScalpControls>(prefs.getString("settings", "{}")!!).normalized() }.getOrDefault(ScalpControls())
+        if (prefs.getBoolean(ScalpAutoBenchMigration.FLAG, false)) return raw
+        val next = ScalpAutoBenchMigration.apply(raw)
+        val edit = prefs.edit().putBoolean(ScalpAutoBenchMigration.FLAG, true)
+        if (next != raw) edit.putString("settings", json.encodeToString(next.normalized()))
+        edit.apply()
+        return next.normalized()
+    }
     private val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key -> if (key == "settings") state.value = read() }
     private val lock = Any()
     private val writerLock = Any()

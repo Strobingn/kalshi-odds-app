@@ -31,6 +31,7 @@ object RichTradeMath {
 
     enum class ExitBucket(val label: String) {
         TP("TP"),
+        FAIR("Fair"),
         STOP("Stop"),
         SETTLE("Settle"),
         TIME("Time"),
@@ -134,6 +135,8 @@ object RichTradeMath {
         val last = raw.substringAfterLast(" → ").lowercase(Locale.US)
         return when {
             last.contains("settl") -> ExitBucket.SETTLE
+            last.contains("fair-value") || last.contains("beats fair") || last.contains("crossed fair") ||
+                last.contains("above fair") -> ExitBucket.FAIR
             last.contains("time") || last.contains("hold") || last.contains("s left") ||
                 last.contains("minute") || last.contains("before close") -> ExitBucket.TIME
             last.contains("stop") -> ExitBucket.STOP

@@ -717,7 +717,7 @@ class PaperBook(
             val px = walked?.vwap ?: px0
             @Suppress("NAME_SHADOWING") val wantContracts = walked?.filled ?: wantContracts
             val cur = _state.value
-            val (qty, capped) = PaperBuy.capContracts(wantContracts, cur.cashUsd, px)
+            val (qty, capped) = PaperBuy.capContracts(wantContracts, cur.cashUsd, px, feeRate)
             if (qty < 1) {
                 val msg = String.format(
                     java.util.Locale.US,
@@ -730,13 +730,12 @@ class PaperBook(
                 publish(cur.copy(lastMessage = msg))
                 return PaperBuy.Outcome(ok = false, message = msg)
             }
-            val stake = qty * px
-            val fees = com.dirk.kalshiodds.signal.trade.KalshiFee.total(qty, px)
-            val debit = stake + fees
+            val fees = com.dirk.kalshiodds.signal.trade.KalshiFee.total(qty, px, feeRate)
+            val debit = com.dirk.kalshiodds.signal.trade.KalshiFee.totalCost(qty, px, feeRate)
             val row = newFill(
                 ticker = ticker,
                 side = want,
-                stakeUsd = stake,
+                stakeUsd = debit,
                 contracts = qty,
                 limitPrice = px,
                 source = source,
@@ -774,7 +773,7 @@ class PaperBook(
                 message = msg,
                 capped = capped,
                 contracts = qty,
-                stakeUsd = stake
+                stakeUsd = debit
             )
         }
     }
@@ -872,7 +871,7 @@ class PaperBook(
             val row = newFill(
                 ticker = ticker,
                 side = want,
-                stakeUsd = n * px,
+                stakeUsd = n * px + fee,
                 contracts = n,
                 limitPrice = px,
                 source = "paper-limit",
@@ -933,14 +932,15 @@ class PaperBook(
             val n = min(left, open.contracts)
             if (n <= 0) continue
             val sliceFee = if (requested <= 0) 0.0 else feeUsd * n / requested.toDouble()
+            val sliceStake = if (open.contracts <= 0) 0.0 else open.stakeUsd * n / open.contracts.toDouble()
             val sliceProceeds = n * exitPrice - sliceFee
-            val slicePnl = sliceProceeds - n * open.limitPrice
+            val slicePnl = sliceProceeds - sliceStake
             val remaining = open.contracts - n
             val row = open.copy(
                 id = if (remaining > 0) idFactory() else open.id,
                 settled = true,
                 contracts = n,
-                stakeUsd = if (remaining > 0) n * open.limitPrice else open.stakeUsd,
+                stakeUsd = sliceStake,
                 outcome = "sell",
                 won = slicePnl >= 0.0,
                 pnlUsd = slicePnl,
@@ -952,7 +952,7 @@ class PaperBook(
             replaced[open.id] = if (remaining > 0) {
                 open.copy(
                     contracts = remaining,
-                    stakeUsd = remaining * open.limitPrice,
+                    stakeUsd = (open.stakeUsd - sliceStake).coerceAtLeast(0.0),
                     updatedAtMs = at
                 )
             } else {
@@ -1068,13 +1068,14 @@ class PaperBook(
             }
             val qty = walked?.filled ?: qty0
             val sellPx = walked?.vwap ?: px
+            val exitFee = KalshiFee.total(qty, sellPx, feeRate)
             val closed = closeFifo(
                 cur = cur,
                 ticker = ticket.ticker,
                 side = want,
                 qtyWant = qty,
                 exitPrice = sellPx,
-                feeUsd = 0.0,
+                feeUsd = exitFee,
                 requested = qty,
                 noteFor = { soldQty, _ ->
                     "Paper sell $soldQty ct @ PX · never sent to Kalshi"

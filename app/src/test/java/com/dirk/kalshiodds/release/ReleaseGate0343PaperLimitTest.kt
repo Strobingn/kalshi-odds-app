@@ -82,7 +82,8 @@ class ReleaseGate0343PaperLimitTest {
         assertEquals(6, after.filledQty)
         assertEquals(4, p.openContracts(t, "YES"))
         val sold = p.snapshot().fills.first { it.outcome == "sell" }
-        assertEquals(6 * (0.33 - 0.30), sold.pnlUsd!!, 1e-9) // maker fee $0 on KXBTC15M
+        val entryFee = KalshiFee.total(10, 0.30)
+        assertEquals(6 * 0.33 - (10 * 0.30 + entryFee) * 6.0 / 10.0, sold.pnlUsd!!, 1e-6) // sell is maker $0; entry taker fee stays in the cost
     }
 
     @Test
@@ -222,6 +223,6 @@ class ReleaseGate0343MigrationTest {
         assertTrue(sql.contains("CREATE TABLE IF NOT EXISTS PAPER_ORDERS"))
         assertFalse(sql.contains("DROP")); assertFalse(sql.contains("ALTER")); assertFalse(sql.contains("DELETE"))
         assertTrue(com.dirk.kalshiodds.data.local.paper.PaperOrderSchema.upgradeSql(9).isEmpty())
-        assertEquals(12, com.dirk.kalshiodds.AppIdentity.DB_VERSION)
+        assertEquals(13, com.dirk.kalshiodds.AppIdentity.DB_VERSION) // 1.0.24: chart_ticks.fair_yes_pp
     }
 }

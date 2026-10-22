@@ -205,7 +205,8 @@ class ReleaseGate0338Test {
         assertEquals(ScalpState.CLOSED, done.state)
         val expectedProceeds = 4 * 0.51 + 6 * 0.50
         assertEquals(expectedProceeds, done.proceedsUsd, 1e-9)
-        assertEquals(ScalpRule.orderFee(4, 0.51) + ScalpRule.orderFee(6, 0.50), done.exitFeeUsd, 1e-9)
+        assertEquals(com.dirk.kalshiodds.signal.trade.KalshiFee.sweepFee(listOf(4 to 0.51, 6 to 0.50)), done.exitFeeUsd, 1e-9)
+        assertTrue(done.exitFeeUsd <= ScalpRule.orderFee(4, 0.51) + ScalpRule.orderFee(6, 0.50) + 1e-9)
     }
 
     @Test

@@ -52,7 +52,7 @@ class UnlimitedPaperTest {
         assertEquals(2, open.size)
         assertEquals(listOf("YES", "YES"), open.map { it.side }.sorted())
         assertEquals(2, open.map { it.id }.toSet().size)
-        assertEquals(1000.0 - a.stakeUsd - b.stakeUsd - KalshiFee.total(4, 0.40) - KalshiFee.total(3, 0.42), book.snapshot().cashUsd, 1e-6)
+        assertEquals(1000.0 - a.stakeUsd - b.stakeUsd, book.snapshot().cashUsd, 1e-6)
         assertTrue(PaperAutopilot.freeBankroll(book.snapshot()) < 1000.0)
     }
 
@@ -192,7 +192,8 @@ class UnlimitedPaperTest {
         assertEquals(HonestScorecard.pnlAfterFee(1, 0.40, yes.stakeUsd, true, false), yes.pnlUsd!!, 1e-9)
         assertEquals(HonestScorecard.pnlAfterFee(1, 0.45, no.stakeUsd, false, false), no.pnlUsd!!, 1e-9)
         assertEquals(0.15 - feeYes - feeNo, yes.pnlUsd!! + no.pnlUsd!!, 1e-9)
-        assertEquals(0.0, no.pnlUsd!! + no.stakeUsd + feeNo, 1e-9)
+        assertEquals(0.0, no.pnlUsd!! + no.stakeUsd, 1e-9)
+        assertEquals(1_000.0 + yes.pnlUsd!! + no.pnlUsd!!, book.snapshot().cashUsd, 1e-6)
 
         val trades = book.snapshot().fills.mapNotNull { RichTradeMath.fromPaper(it) }
         val window = RichTradeMath.windowSplits(trades).single()
@@ -217,7 +218,9 @@ class UnlimitedPaperTest {
         assertNotNull(sold)
         assertEquals(0.55, sold!!.exitPrice!!, 1e-12)
         assertEquals("55¢", KalshiQuoteDisplay.formatPriceCents(sold.shownPrice()))
-        assertEquals(6 * (0.55 - 0.40), sold.pnlUsd!!, 1e-9)
+        val entry = KalshiFee.totalCost(10, 0.40)
+        val exitFee = KalshiFee.total(6, 0.55)
+        assertEquals(6 * 0.55 - exitFee - entry * 6.0 / 10.0, sold.pnlUsd!!, 1e-6)
         assertTrue(sold.settled)
         assertEquals(6, sold.contracts)
         val open = book.snapshot().fills.filter { !it.settled }
@@ -241,7 +244,11 @@ class UnlimitedPaperTest {
         assertEquals(4, soldRows.first { it.limitPrice == 0.30 }.contracts)
         assertEquals(1, soldRows.first { it.limitPrice == 0.50 }.contracts)
         assertEquals(5, fifo.snapshot().fills.filter { !it.settled }.sumOf { it.contracts })
-        assertEquals(4 * (0.55 - 0.30) + 1 * (0.55 - 0.50), soldRows.sumOf { it.pnlUsd ?: 0.0 }, 1e-9)
+        val fee5 = KalshiFee.total(5, 0.55)
+        val oldStake = KalshiFee.totalCost(4, 0.30)
+        val newStake = KalshiFee.totalCost(6, 0.50)
+        val fifoPnl = (4 * 0.55 - fee5 * 4.0 / 5.0 - oldStake) + (1 * 0.55 - fee5 * 1.0 / 5.0 - newStake / 6.0)
+        assertEquals(fifoPnl, soldRows.sumOf { it.pnlUsd ?: 0.0 }, 1e-6)
     }
 
     @Test

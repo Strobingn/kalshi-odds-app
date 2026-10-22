@@ -341,9 +341,8 @@ class KalshiFeeAndWinTargetTest {
         val fill = book.manualFill(ticket)
         assertTrue(fill != null)
         assertEquals(ticket.contracts, fill!!.contracts)
-        assertEquals(ticket.contracts * ticket.limitPrice, fill.stakeUsd, 1e-6)
-        val debit = fill.stakeUsd + KalshiFee.total(fill.contracts, fill.limitPrice)
-        assertTrue(abs(1_000.0 - debit - book.snapshot().cashUsd) < 1e-6)
+        assertEquals(ticket.contracts * ticket.limitPrice + KalshiFee.total(fill.contracts, fill.limitPrice), fill.stakeUsd, 1e-6)
+        assertTrue(abs(1_000.0 - fill.stakeUsd - book.snapshot().cashUsd) < 1e-6)
         assertTrue(fill.note.contains("win-target") || fill.note.contains("Paper"))
     }
 

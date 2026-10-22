@@ -256,8 +256,18 @@ class ScoringEngine(
             }
         }
         val spotFeat = external.forSeries(tick.series)
-        val modelSpot = spotFeat?.takeIf { it.modelUsable }?.lastPrice
-        modelSpot?.let { book.noteSpot(tick.ticker, it, nowMs) }
+        val cached = spotFeat?.takeIf { it.modelUsable }
+        val cachedPx = cached?.lastPrice
+        val cachedAt = cached?.fetchedAtMs ?: 0L
+        val livePx = book.lastSpot(tick.ticker)
+        val liveAt = book.lastSpotAtMs(tick.ticker)
+        // CF / last live print wins when it is newer than the 25s Coinbase cache.
+        // Minute-bar sigma below is unchanged, so calibration still sees the same vol input.
+        val modelSpot = when {
+            livePx != null && liveAt > cachedAt -> livePx
+            else -> cachedPx ?: livePx
+        }
+        modelSpot?.let { book.noteSpot(tick.ticker, it, if (liveAt > cachedAt) liveAt else nowMs) }
         book.push(tick, nowMs)
         // 0.3.43: score / display the merged per-ticker quote, never a raw trade print (bid = ask = trade)
         // or a stale/suppressed update. Trade size / taker side / latency come from the incoming tick.
@@ -570,6 +580,7 @@ class ScoringEngine(
                     .coerceIn(0.01, 5.0)
             } ?: com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.typicalSigma(tick.series)
         }
+        sigmaAnnual?.let { book.noteSigma(tick.series, it) }
         val digitalFairPp = if (modelSpot != null && strikeUsd != null && sigmaAnnual != null) {
             com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.pFinishAbove(
                 spot = modelSpot,

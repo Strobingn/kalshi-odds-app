@@ -30,6 +30,7 @@ class FrozenStrategyDisplayTest {
     private val frozen = BenchDecision("dip", BenchStatus.BENCHED, 0, 0.0, 0.0, ScalpFreeze.BADGE + " · 1.0.14 default (lost money Oct 17–19) · Force trade unfreezes")
 
     @Test fun statusLineNamesTheFreeze() {
+        assertEquals("Bench · auto off", benchStatusLine(null, false, autoBenchEnabled = false))
         assertEquals("Bench · auto", benchStatusLine(null, false))
         assertEquals("Bench · auto · BENCHED (shadow only)", benchStatusLine(null, true))
         assertTrue(benchStatusLine(null, true, frozen = true).contains("FROZEN - losing"))
@@ -40,7 +41,7 @@ class FrozenStrategyDisplayTest {
         BenchRegistry.publish(mapOf("dip" to frozen))
         val row = ScalpModels.rowFromStat(ScalpStat("dip", n = 12, wins = 3, netUsd = -7.5))
         assertEquals(ScalpModels.Model.DIP_HUNTER, row.model)
-        rule.setContent { KalshiOddsTheme { ArenaStrategyRow(row, ScalpTabState(algoAllTime = mapOf(row.model to row))) {} } }
+        rule.setContent { KalshiOddsTheme { ArenaStrategyRow(row, ScalpTabState(controls = ScalpControls(autoBench = true), algoAllTime = mapOf(row.model to row))) {} } }
         rule.onNodeWithText(ScalpModels.Model.DIP_HUNTER.label, useUnmergedTree = true).assertExists()
         rule.onNodeWithTag("FROZEN_BADGE_dip", useUnmergedTree = true).assertExists()
         rule.onNodeWithText("12 trades", substring = true, useUnmergedTree = true).assertExists()
@@ -48,7 +49,7 @@ class FrozenStrategyDisplayTest {
 
     @Test fun settingsScreenShowsFrozenWithForceTrade() {
         BenchRegistry.publish(mapOf("dip" to frozen))
-        rule.setContent { KalshiOddsTheme { ScalpStrategySettingsContent(ScalpModels.Model.DIP_HUNTER, ScalpControls(), onBenchOverride = {}) } }
+        rule.setContent { KalshiOddsTheme { ScalpStrategySettingsContent(ScalpModels.Model.DIP_HUNTER, ScalpControls(autoBench = true), onBenchOverride = {}) } }
         rule.onNodeWithText("Bench · auto · FROZEN - losing (no new paper trades) · Force trade unfreezes").assertExists()
         rule.onNodeWithText("Force trade").assertExists()
     }

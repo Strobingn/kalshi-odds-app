@@ -90,8 +90,8 @@ class AiRelease1014Test {
 
         val open = MemoryScalpControls()
         watcher(open, store, paper = { listOf(PaperTape(code, 30, 0, -30.0, 0.0, losing, emptyList())) }).tick()
-        assertTrue(code in open.state.value.aiBench)
-        assertEquals("FROZEN", store.adjustments.value.first().newValue)
+        assertFalse(code in open.state.value.aiBench)
+        assertTrue(store.adjustments.value.none { it.setting == "bench" })
     }
 
     @Test fun tunerCannotTouchRealMoneyAndOldRecordsLoad() {

@@ -19,11 +19,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -159,28 +154,17 @@ fun ChartDetailScreen(
                     contentLabel = "UP and DOWN bids"
                 )
             }
-            var aiSamples by remember(market.ticker) { mutableStateOf(emptyList<ChartShapes.Sample>()) }
-            val aiNow = market.aiYesPercent?.takeIf { it.isFinite() && it in 0.0..100.0 }
-                ?: market.importedModelPp?.takeIf { it.isFinite() && it in 0.0..100.0 }
-            val stamp = points.lastOrNull()?.tMs
-            LaunchedEffect(market.ticker, aiNow, stamp) {
-                if (aiNow != null) {
-                    val t = stamp ?: System.currentTimeMillis()
-                    val last = aiSamples.lastOrNull()
-                    if (last == null || last.tMs != t || last.value != aiNow) {
-                        aiSamples = (aiSamples + ChartShapes.Sample(t, aiNow)).takeLast(360)
-                    }
-                }
-            }
+            val aiSamples = ChartShapes.aiSamples(points)
             ChartBlock(
                     "AI UP chance vs market UP",
-                    "Market is the recorded UP bid. AI is marked as this screen sees it — older AI samples are not stored."
+                    "Market is the recorded UP bid. AI is the live fair stored on each print. Times are ET."
                 ) {
                     MultiLineChart(
                         series = listOf(
                             LineSeries("Market UP", colors.upButton, ChartShapes.bidSamples(points, true), maxGapMs = 15_000),
-                            LineSeries("AI UP", colors.textPrimary, aiSamples, dashed = true)
+                            LineSeries("AI UP", colors.textPrimary, aiSamples, dashed = true, maxGapMs = 15_000)
                         ),
+                        xFormat = { com.dirk.kalshiodds.domain.EtTime.clockBare(it) },
                         yFormat = { "${it.roundToInt()}" },
                         fixedRange = 0.0 to 100.0,
                         guideY = 50.0,

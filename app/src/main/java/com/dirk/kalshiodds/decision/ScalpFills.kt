@@ -21,9 +21,20 @@ object ScalpFills {
     private val pattern = Regex("scalpFill=([0-9]+),([0-9]+),([0-9.]+),([0-9.]+),([SX])")
     fun sell(t: ScalpTrade, atMs: Long, n: Int, proceeds: Double, fee: Double, settlement: Boolean = false): ScalpTrade {
         require(n in 1..t.remaining && proceeds.isFinite() && proceeds >= 0 && fee.isFinite() && fee >= 0)
-        val token = String.format(Locale.US, "scalpFill=%d,%d,%.8f,%.8f,%s", atMs, n, proceeds / n, fee, if (settlement) "X" else "S")
+        val price = proceeds / n
+        val marginal = if (settlement) 0.0 else {
+            val prev = sales(t).filter { !it.settlement }
+            val prevFee = com.dirk.kalshiodds.signal.trade.KalshiFee.sweepFee(prev.map { it.contracts to it.price })
+            val nextFee = com.dirk.kalshiodds.signal.trade.KalshiFee.sweepFee(prev.map { it.contracts to it.price } + (n to price))
+            (nextFee - prevFee).coerceAtLeast(0.0)
+        }
+        val token = String.format(Locale.US, "scalpFill=%d,%d,%.8f,%.8f,%s", atMs, n, price, marginal, if (settlement) "X" else "S")
+        val settledFee = sales(t).filter { it.settlement }.sumOf { it.fee }
+        val liveFee = if (settlement) sales(t).filter { !it.settlement }.sumOf { it.fee } else {
+            com.dirk.kalshiodds.signal.trade.KalshiFee.sweepFee(sales(t).filter { !it.settlement }.map { it.contracts to it.price } + (n to price))
+        }
         return t.copy(soldContracts = t.soldContracts + n, proceedsUsd = t.proceedsUsd + proceeds,
-            exitFeeUsd = t.exitFeeUsd + fee, note = "${t.note} · $token")
+            exitFeeUsd = liveFee + settledFee + if (settlement) 0.0 else 0.0, note = "${t.note} · $token")
     }
     fun executionNotes(note: String): String = (orderPattern.findAll(note).toList() + pattern.findAll(note).toList())
         .sortedBy { it.range.first }.joinToString(" · ") { it.value }

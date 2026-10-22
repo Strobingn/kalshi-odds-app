@@ -243,13 +243,13 @@ class AiWindowWatchTest {
         )
         w.tick()
         assertEquals(1, calls)
-        assertTrue(first in controls.state.value.aiBench)
+        assertFalse(first in controls.state.value.aiBench)
         nowMs += 10_000
         paperCode = second
         snap = snap.copy(fingerprint = "inside-cap")
         w.tick()
         assertEquals(1, calls)
-        assertTrue(second in controls.state.value.aiBench)
+        assertFalse(second in controls.state.value.aiBench)
     }
 
     @Test fun liveCardUpdatesOnEveryTickWithoutAnotherChatCall() {

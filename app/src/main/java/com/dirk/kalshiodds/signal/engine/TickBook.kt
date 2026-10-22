@@ -37,6 +37,9 @@ class TickBook(private val maxPoints: Int = 80) {
     private val bidsByTicker = linkedMapOf<String, ArrayDeque<BidSample>>()
     private val spotsByTicker = linkedMapOf<String, ArrayDeque<SpotSample>>()
     private val lastSpotByTicker = linkedMapOf<String, Double>()
+    private val lastSpotAtMs = linkedMapOf<String, Long>()
+    private val sigmaBySeries = HashMap<String, Double>()
+    private val lastFairByTicker = HashMap<String, Double>()
     private val maxBidPoints = 240
     private val maxSpotPoints = 180
 
@@ -44,7 +47,8 @@ class TickBook(private val maxPoints: Int = 80) {
         val tMs: Long,
         val yesBid: Double?,
         val noBid: Double?,
-        val spotUsd: Double? = null
+        val spotUsd: Double? = null,
+        val aiYesPp: Float? = null
     )
 
     data class SpotSample(
@@ -218,7 +222,8 @@ class TickBook(private val maxPoints: Int = 80) {
                 tMs = b.tMs,
                 upBidCents = b.yesBid?.times(100.0)?.toFloat(),
                 downBidCents = b.noBid?.times(100.0)?.toFloat(),
-                spotUsd = spot
+                spotUsd = spot,
+                aiYesPp = b.aiYesPp
             )
         }.let { com.dirk.kalshiodds.chart.ChartSeriesBuilder.cleanBidPoints(it) }
     }
@@ -232,6 +237,7 @@ class TickBook(private val maxPoints: Int = 80) {
         if (!CryptoMarkets.isCryptoTicker(ticker)) return
         val px = spotUsd?.takeIf { it.isFinite() && it > 0.0 } ?: return
         lastSpotByTicker[ticker] = px
+        lastSpotAtMs[ticker] = nowMs
         val q = spotsByTicker.getOrPut(ticker) { ArrayDeque() }
         val last = q.lastOrNull()
         if (last != null && nowMs - last.tMs < 400L && kotlin.math.abs(last.spotUsd - px) < 0.01) {
@@ -243,6 +249,32 @@ class TickBook(private val maxPoints: Int = 80) {
 
     @Synchronized
     fun lastSpot(ticker: String): Double? = lastSpotByTicker[ticker]
+
+    @Synchronized
+    fun lastSpotAtMs(ticker: String): Long = lastSpotAtMs[ticker] ?: 0L
+
+    /** Annualized sigma from the last full score. The chart fair uses it between scores. */
+    @Synchronized
+    fun noteSigma(series: String, sigmaAnnual: Double) {
+        if (series.isBlank() || !sigmaAnnual.isFinite() || sigmaAnnual <= 0.0) return
+        sigmaBySeries[series.uppercase()] = sigmaAnnual
+    }
+
+    @Synchronized
+    fun lastFair(ticker: String): Double? = lastFairByTicker[ticker]
+
+    @Synchronized
+    fun liveFair(ticker: String, series: String, nowMs: Long): Double? {
+        val spot = lastSpotByTicker[ticker] ?: return lastFairByTicker[ticker]
+        val strike = strikeByTicker[ticker] ?: return lastFairByTicker[ticker]
+        val close = closeByTicker[ticker] ?: return lastFairByTicker[ticker]
+        val tte = (close - nowMs) / 1000.0
+        val sig = sigmaBySeries[series.uppercase()]
+            ?: com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.typicalSigma(series)
+        val fair = com.dirk.kalshiodds.signal.fair.LiveFair.yesPercent(spot, strike, tte, sig) ?: return lastFairByTicker[ticker]
+        lastFairByTicker[ticker] = fair
+        return fair
+    }
 
     private fun recordBid(tick: MarketTick, nowMs: Long) {
         val (yesBid, yesAsk) = QuoteSanity.usablePair(tick.yesBid, tick.yesAsk)
@@ -257,16 +289,17 @@ class TickBook(private val maxPoints: Int = 80) {
         val q = bidsByTicker.getOrPut(tick.ticker) { ArrayDeque() }
         val last = q.lastOrNull()
         val spot = lastSpotByTicker[tick.ticker]
+        val fair = liveFair(tick.ticker, tick.series, nowMs)?.toFloat()
         if (last != null && nowMs - last.tMs < 400L &&
             last.yesBid == chartYes && last.noBid == chartNo
         ) {
-            if (spot != null && last.spotUsd == null) {
+            if (spot != null && last.spotUsd == null || fair != null && last.aiYesPp != fair) {
                 q.removeLast()
-                q.addLast(last.copy(spotUsd = spot))
+                q.addLast(last.copy(spotUsd = spot ?: last.spotUsd, aiYesPp = fair ?: last.aiYesPp))
             }
             return
         }
-        q.addLast(BidSample(nowMs, chartYes, chartNo, spot))
+        q.addLast(BidSample(nowMs, chartYes, chartNo, spot, fair))
         while (q.size > maxBidPoints) q.removeFirst()
     }
 

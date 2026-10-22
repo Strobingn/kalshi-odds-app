@@ -87,9 +87,15 @@ object PaperAutopilot {
     fun anchoredYes(modelYes: Double, marketYes: Double): Double =
         (marketYes + ANCHOR * (modelYes - marketYes)).coerceIn(0.0, 1.0)
 
-    /** Bankroll minus money already riding on open paper positions. */
-    fun freeBankroll(paper: PaperBookState): Double =
-        (paper.paperBankrollUsd - paper.openStakeUsd).coerceAtLeast(0.0)
+    /**
+     * Cash still free to put on a new clip. Open paper stake and any extra open
+     * exposure (shadow clips on the same bankroll) come off first, and the result
+     * cannot exceed the cash that is actually sitting in the book.
+     */
+    fun freeBankroll(paper: PaperBookState, extraOpenUsd: Double = 0.0): Double {
+        val room = paper.paperBankrollUsd - paper.openStakeUsd - extraOpenUsd.coerceAtLeast(0.0)
+        return min(room, paper.cashUsd).coerceAtLeast(0.0)
+    }
 
     /**
      * One budget for every clip in the window: half of the capped Kelly

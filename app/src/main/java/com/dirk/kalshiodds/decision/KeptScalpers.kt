@@ -8,6 +8,35 @@ import kotlin.math.exp
  * Twelve kept. The board holds at most [MAX_SLOTS]; the other slots stay empty.
  * Nothing here places a live order.
  */
+/**
+ * sf04, sf07, and sf08 often print the same contract. An all-scalpers total that adds
+ * their stats counts that fill once per scalper. Per-scalper rows stay as booked.
+ */
+object ScalpPortfolio {
+    val SHARED = setOf("sf04", "sf07", "sf08")
+    const val NOTE = "sf04, sf07, and sf08 often buy the same contract. This total adds each scalper, so a shared fill is counted once for each of them."
+
+    fun countsShared(ids: Collection<String>): Boolean = SHARED.count { it in ids } >= 2
+
+    /** One copy of a shared shock fill (same ticker, side, cent, and 5s entry bucket). Other scalpers always count. */
+    fun dedupedNet(trades: List<ScalpTrade>): Double {
+        val seen = HashSet<String>()
+        var net = 0.0
+        for (t in trades) {
+            if (t.state != ScalpState.CLOSED || t.netUsd == null || !t.netUsd.isFinite()) continue
+            val id = t.variantId
+            if (id in SHARED) {
+                val cent = kotlin.math.round((t.entryPrice ?: t.signalAsk) * 100.0).toInt()
+                val bucket = (t.entryAtMs ?: t.signalAtMs) / 5_000L
+                val key = "${t.ticker.uppercase()}|${t.side.uppercase()}|$cent|$bucket"
+                if (!seen.add(key)) continue
+            }
+            net += t.netUsd
+        }
+        return net
+    }
+}
+
 object KeptScalpers {
     const val MAX_SLOTS = 15
     const val REMOVED_LABEL = "removed strategy"

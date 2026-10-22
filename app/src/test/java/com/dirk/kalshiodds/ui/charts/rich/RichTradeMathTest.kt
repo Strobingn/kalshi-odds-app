@@ -291,7 +291,8 @@ class RichTradeMathTest {
 
     @Test fun exitReasonsFollowTheLastClause() {
         assertEquals(ExitBucket.TP, RichTradeMath.exitBucket(ScalpRule.ExitReason.PROFIT_TARGET.label))
-        assertEquals(ExitBucket.TP, RichTradeMath.exitBucket(ScalpRule.ExitReason.GAP_CLOSED.label))
+        assertEquals(ExitBucket.FAIR, RichTradeMath.exitBucket(ScalpRule.ExitReason.GAP_CLOSED.label))
+        assertEquals(ExitBucket.FAIR, RichTradeMath.exitBucket("take-profit: bid beats fair after fee"))
         assertEquals(ExitBucket.STOP, RichTradeMath.exitBucket(ScalpRule.ExitReason.STOP.label))
         assertEquals(ExitBucket.SETTLE, RichTradeMath.exitBucket(ScalpRule.ExitReason.SETTLED.label))
         assertEquals(ExitBucket.TIME, RichTradeMath.exitBucket(ScalpRule.ExitReason.TIME_STOP.label))

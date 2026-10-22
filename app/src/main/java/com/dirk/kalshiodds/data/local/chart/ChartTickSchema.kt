@@ -18,10 +18,13 @@ object ChartTickSchema {
           yes_ask REAL,
           no_ask REAL,
           spot_usd REAL,
+          fair_yes_pp REAL,
           source TEXT,
           UNIQUE(ticker, t_ms)
         )
     """.trimIndent()
+
+    val ADD_FAIR = "ALTER TABLE $TABLE ADD COLUMN fair_yes_pp REAL"
 
     val INDEX = "CREATE INDEX IF NOT EXISTS idx_chart_ticks_ticker ON $TABLE(ticker, t_ms)"
 

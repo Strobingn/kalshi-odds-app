@@ -18,9 +18,9 @@ class PaperBuyTest {
         val out = PaperBuy.execute(book, ticket(TicketKind.MANUAL, ticker = "KXBTC15M-M", contracts = 10, stake = 2.0, px = 0.20))
         assertTrue(out.ok)
         assertEquals(10, out.contracts)
-        assertEquals(2.0, out.stakeUsd, 1e-9)
         val fees = com.dirk.kalshiodds.signal.trade.KalshiFee.total(10, 0.20)
-        assertEquals(1_000.0 - 2.0 - fees, book.snapshot().cashUsd, 1e-9)
+        assertEquals(2.0 + fees, out.stakeUsd, 1e-9)
+        assertEquals(1_000.0 - out.stakeUsd, book.snapshot().cashUsd, 1e-9)
         assertTrue(out.message.contains("PAPER"))
     }
 
@@ -56,6 +56,7 @@ class PaperBuyTest {
         assertEquals(20, out.contracts)
         val fees = com.dirk.kalshiodds.signal.trade.KalshiFee.total(20, 0.20)
         assertEquals(1_000.0 - 4.0 - fees, book.snapshot().cashUsd, 1e-9)
+        assertEquals(4.0 + fees, out.stakeUsd, 1e-9)
     }
 
     @Test
@@ -78,9 +79,10 @@ class PaperBuyTest {
         val (maxQty, _) = PaperBuy.capContracts(4_000, 1_000.0, 0.40)
         assertEquals(maxQty, out.contracts)
         assertTrue(out.contracts in 1..2_499)
-        assertEquals(out.contracts * 0.40, out.stakeUsd, 1e-9)
+        val allIn = com.dirk.kalshiodds.signal.trade.KalshiFee.totalCost(out.contracts, 0.40)
+        assertEquals(allIn, out.stakeUsd, 1e-6)
         assertTrue(book.snapshot().cashUsd + 1e-6 >= 0.0)
-        assertTrue(book.snapshot().cashUsd < 1_000.0 - out.stakeUsd + 1e-6)
+        assertEquals(1_000.0 - out.stakeUsd, book.snapshot().cashUsd, 1e-6)
     }
 
     @Test

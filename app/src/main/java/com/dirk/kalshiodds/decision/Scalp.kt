@@ -3,7 +3,6 @@ package com.dirk.kalshiodds.decision
 import com.dirk.kalshiodds.signal.trade.KalshiFee
 import java.util.Locale
 import java.util.UUID
-import kotlin.math.ceil
 import kotlin.math.exp
 import kotlin.math.ln
 import kotlin.math.sqrt
@@ -93,12 +92,15 @@ object ScalpRule {
         }
     }
 
-    /** Taker fee for one order of [contracts] at [price], rounded up to the cent (dollars). */
+    /** Taker fee for one order of [contracts] at [price], rounded up to the cent once (dollars). */
     fun orderFee(contracts: Int, price: Double): Double {
         if (contracts <= 0 || !price.isFinite() || price <= 0.0 || price >= 1.0) return 0.0
-        val cents = ceil(7.0 * contracts * price * (1.0 - price) - 1e-9)
-        return cents / 100.0
+        return KalshiFee.total(contracts, price)
     }
+
+    /** One order swept across prices. Ceil once, not once per level. */
+    fun sweepFee(lots: List<Pair<Double, Int>>): Double =
+        KalshiFee.sweepFee(lots.map { (px, n) -> n to px })
 
     fun feePerContract(contracts: Int, price: Double): Double =
         if (contracts <= 0) 0.0 else orderFee(contracts, price) / contracts
@@ -367,7 +369,7 @@ object ScalpRule {
         CF_EXIT_BY_CLOSE("mandatory exit: 90 s left"),
         CF_TIME("time exit: 90 s hold"),
         CF_GAP_GONE("early exit: CF gap disappeared"),
-        GAP_CLOSED("take-profit: bid beats fair after fee"),
+        GAP_CLOSED("fair-value exit: bid crossed fair after the exit fee"),
         TURN_DOWN("turn-down: fair fell below entry"),
         PROFIT_TARGET("profit target hit"),
         STOP("stop hit"),
@@ -387,8 +389,9 @@ object ScalpRule {
         if (bid != null && bid > 0.0) {
             if (bid - entry >= p.target - 1e-12) return ExitReason.PROFIT_TARGET
             if (bid <= entry - p.stop + 1e-12) return ExitReason.STOP
-            // 0.3.65: fair-value take-profit only when the round trip nets > $0 after both taker fees.
-            if (fair != null && bid - feePerContract(CONTRACTS, bid) >= fair && netAfterFees(entry, bid) > 1e-9) return ExitReason.GAP_CLOSED
+            // Fair-value exit, not a take-profit: the bid has crossed fair after the exit fee.
+            // That can be a loss when fair fell. The profit target is [ExitReason.PROFIT_TARGET].
+            if (fair != null && bid - feePerContract(CONTRACTS, bid) >= fair - 1e-12) return ExitReason.GAP_CLOSED
         }
         if (fair != null && fair <= entry - p.turnDown + 1e-12) return ExitReason.TURN_DOWN
         return null
@@ -1915,18 +1918,20 @@ class ScalpBook(
         return out
     }
 
-    /** Lift ask levels (best first) up to [maxPx] for [want] contracts → (filled, $ cost, fees per level). */
+    /** Lift ask levels (best first) up to [maxPx] for [want] contracts → (filled, $ cost, one order fee). */
     private fun walkBuy(q: ScalpRule.Quote, side: String, want: Int, maxPx: Double): Triple<Int, Double, Double> {
-        var n = 0; var usd = 0.0; var fee = 0.0
-        for ((px, sz) in q.askLadder(side)) { if (n >= want || px > maxPx + 1e-9) break; val k = minOf(want - n, kotlin.math.floor(sz + 1e-9).toInt()); if (k > 0) { n += k; usd += k * px; fee += ScalpRule.orderFee(k, px) } }
-        return Triple(n, usd, fee)
+        var n = 0; var usd = 0.0
+        val lots = ArrayList<Pair<Double, Int>>()
+        for ((px, sz) in q.askLadder(side)) { if (n >= want || px > maxPx + 1e-9) break; val k = minOf(want - n, kotlin.math.floor(sz + 1e-9).toInt()); if (k > 0) { n += k; usd += k * px; lots += px to k } }
+        return Triple(n, usd, ScalpRule.sweepFee(lots))
     }
 
-    /** Hit bid levels (best first) for up to [want] contracts → (sold, $ proceeds, fees per level). */
+    /** Hit bid levels (best first) for up to [want] contracts → (sold, $ proceeds, one order fee). */
     private fun walkSell(q: ScalpRule.Quote, side: String, want: Int): Triple<Int, Double, Double> {
-        var n = 0; var usd = 0.0; var fee = 0.0
-        for ((px, sz) in q.bidLadder(side)) { if (n >= want || px <= 0.0) break; val k = minOf(want - n, kotlin.math.floor(sz + 1e-9).toInt()); if (k > 0) { n += k; usd += k * px; fee += ScalpRule.orderFee(k, px) } }
-        return Triple(n, usd, fee)
+        var n = 0; var usd = 0.0
+        val lots = ArrayList<Pair<Double, Int>>()
+        for ((px, sz) in q.bidLadder(side)) { if (n >= want || px <= 0.0) break; val k = minOf(want - n, kotlin.math.floor(sz + 1e-9).toInt()); if (k > 0) { n += k; usd += k * px; lots += px to k } }
+        return Triple(n, usd, ScalpRule.sweepFee(lots))
     }
 
     /** V2 paper lane: frozen per-entry adaptive params, protective stops, delayed exits and near-close re-evaluation. */
@@ -2045,8 +2050,10 @@ class ScalpBook(
                     }
                     val next = if (sp.walk) {
                         // 0.3.68: hit real bid levels down the book (any price — it is an exit); partial = rest next quote.
-                        var left = t.remaining; var usd = 0.0; var fee = 0.0; var n = 0
-                        for ((px, sz) in q.bidLadder(t.side)) { if (left <= 0 || px <= 0.0) break; val k = minOf(left, kotlin.math.floor(sz + 1e-9).toInt()); if (k > 0) { usd += k * px; fee += ScalpRule.orderFee(k, px); n += k; left -= k } }
+                        var left = t.remaining; var usd = 0.0; var n = 0
+                        val lots = ArrayList<Pair<Double, Int>>()
+                        for ((px, sz) in q.bidLadder(t.side)) { if (left <= 0 || px <= 0.0) break; val k = minOf(left, kotlin.math.floor(sz + 1e-9).toInt()); if (k > 0) { usd += k * px; lots += px to k; n += k; left -= k } }
+                        val fee = ScalpRule.sweepFee(lots)
                         if (n <= 0) { if (base !== t) out += base; continue }
                         ScalpFills.sell(base, q.nowMs, n, usd, fee)
                     } else {

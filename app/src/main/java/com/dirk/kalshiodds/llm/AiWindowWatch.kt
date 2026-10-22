@@ -540,37 +540,12 @@ class AiWindowWatcher(
         return logged
     }
 
-    /** Bench from paper stats. Force trade / Force bench and a manual bench edit this window always win. */
-    private fun autoBench() {
-        val tapes = runCatching { paper() }.getOrDefault(emptyList())
-        if (tapes.isEmpty()) return
-        val at = now()
-        val logged = ArrayList<AiAdjustment>()
-        val start = controls.state.value
-        var cur = start
-        val window = maxOf(AiBench.MIN_TRADES, cur.benchWindow)
-        for (t in tapes) {
-            if (ScalpModels.modelByCode(t.code) == null) continue
-            val manual = cur.benchOverrides[t.code]
-            if (manual == "ACTIVE" || manual == "BENCHED") continue
-            if (store.manualBlocks("strategy.${t.code}.bench", at)) continue
-            val was = t.code in cur.aiBench
-            val d = AiBench.decide(was, t.recentReal, t.shadow, window)
-            when {
-                d.bench && !was -> {
-                    cur = cur.copy(aiBench = cur.aiBench + t.code)
-                    logged += AiAdjustment(at, t.code, "bench", "ACTIVE", "FROZEN", d.reason)
-                }
-                d.unbench && was -> {
-                    cur = cur.copy(aiBench = cur.aiBench - t.code)
-                    logged += AiAdjustment(at, t.code, "bench", "FROZEN", "ACTIVE", d.reason)
-                }
-            }
-        }
-        if (cur.aiBench != start.aiBench) controls.save(cur)
-        logged.forEach { store.addAdjustment(it) }
-        if (logged.isNotEmpty()) runCatching { onBenched() }
-    }
+    /**
+     * The watcher tunes knobs only. It does not bench.
+     * Force trade / Force bench stay on [com.dirk.kalshiodds.decision.ScalpControls.benchOverrides].
+     * Automatic bench is the settings toggle, off unless the owner turns it on.
+     */
+    private fun autoBench() = Unit
 
     companion object {
         /** On-device bench/freeze cadence. The chat LLM cap is [AiLiveFeed.MIN_SPACING_MS], not this poll. */
