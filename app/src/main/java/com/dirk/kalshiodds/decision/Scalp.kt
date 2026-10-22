@@ -610,7 +610,9 @@ class ScalpBook(
             val p = tuned(baseP, ScalpModels.modelOf(t)?.code)
             step(t, q, p)?.let { changed += it }
         }
-        if (enabled) {
+        if (!q.fresh() || q.bookGap || q.yesBid == null || q.yesAsk == null) {
+            gates.noteOutage(ScalpModels.windowKeyOf(q.ticker).ifBlank { "outage" }, KeptScalpers.IDS + ScalpVariants.IDS)
+        } else if (enabled) {
             val run = (primaries + variants).distinctBy { it.id }
             // 0.3.50: per-model slice usage computed once per quote from active rows (was a full-ledger scan per candidate).
             val sliceUsed = HashMap<ScalpModels.Model, Double>()
@@ -1149,9 +1151,10 @@ class ScalpBook(
             val next = ScalpFills.sell(base, q.nowMs, n, n * bid, ScalpRule.orderFee(n, bid))
             changed += if (next.remaining <= 0) close(next, q.nowMs, reason) else next
         }
-        if (!q.fresh()) gates.noteOutage(ScalpModels.windowKeyOf(q.ticker), KeptScalpers.IDS + ScalpVariants.IDS)
+        if (!q.fresh() || q.bookGap) gates.noteOutage(ScalpModels.windowKeyOf(q.ticker).ifBlank { "outage" }, KeptScalpers.IDS + ScalpVariants.IDS)
         // 0.3.59: Scalp tab is Bitcoin only — sf entries on BTC markets only (other coins' spot is signal input).
-        if (enabled && live && coin == ShockFav.TRADE_COIN) {
+        // A seq gap is the same outage as a stale book: no new clip until the next intact tick.
+        if (enabled && live && !q.bookGap && coin == ShockFav.TRADE_COIN) {
             val sigma: Double? = sig
             var openCost = openCostUsd()
             val bankroll = bankrollUsd()
@@ -1685,11 +1688,11 @@ class ScalpBook(
             if (!isActive(t)) continue
             val closeAt = closeSeen[t.ticker.uppercase()] ?: ScalpTicker.closeMs(t.ticker) ?: continue
             if (nowMs < closeAt) continue
-            val next = if (t.state == ScalpState.PENDING_ENTRY) {
-                t.copy(state = ScalpState.NO_FILL, closedAtMs = nowMs, note = "${t.note}; no fill: window closed")
+            val next = if (t.state == ScalpState.PENDING_ENTRY || t.remaining <= 0) {
+                t.copy(state = ScalpState.NO_FILL, closedAtMs = nowMs, restingLimit = null, note = "${t.note}; no fill: window closed")
             } else {
                 val px = t.entryPrice ?: 0.0
-                val n = t.remaining.coerceAtLeast(0)
+                val n = t.remaining
                 close(
                     ScalpFills.sell(t, nowMs, n, n * px, 0.0, settlement = true),
                     nowMs,

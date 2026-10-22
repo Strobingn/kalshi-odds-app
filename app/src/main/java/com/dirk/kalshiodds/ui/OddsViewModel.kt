@@ -207,11 +207,15 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                                 }
                             }
                         container.scalp.expireOrphans(now1)
-                        val current = live.filter {
+                        val btc15 = live.filter {
                             com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(it.ticker) in com.dirk.kalshiodds.domain.CryptoMarkets.FIFTEEN_SERIES &&
-                                com.dirk.kalshiodds.decision.ScalpParams.coinOf(it.ticker) == com.dirk.kalshiodds.decision.ShockFav.TRADE_COIN &&
-                                (it.closeTimeEpochMs ?: 0L) > now1
+                                com.dirk.kalshiodds.decision.ScalpParams.coinOf(it.ticker) == com.dirk.kalshiodds.decision.ShockFav.TRADE_COIN
                         }
+                        val currentTicker = com.dirk.kalshiodds.decision.ScalpRecovery.currentTicker(
+                            btc15.map { com.dirk.kalshiodds.decision.ScalpRecovery.Card(it.ticker, it.closeTimeEpochMs) },
+                            now1
+                        )
+                        val current = btc15.filter { it.ticker.equals(currentTicker, true) }
                         if (current.isNotEmpty()) runScalp(current, s)
                         else container.scalp.noteOutage("outage")
                     }
@@ -1805,11 +1809,12 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             val sigma = container.scalp.observeSpot(coin, spot, now)
                 ?: com.dirk.kalshiodds.decision.ScalpRule.defaultSigmaPerSec(market.ticker)
             val strike = market.floorStrike ?: hub.scoring.book.strike(market.ticker)
+            val closeMs = market.closeTimeEpochMs ?: com.dirk.kalshiodds.decision.ScalpTicker.closeMs(market.ticker)
             val q = if (bookFresh && book != null) {
                 com.dirk.kalshiodds.decision.ScalpRule.quoteFromBook(
                     ticker = market.ticker,
                     nowMs = now,
-                    closeMs = market.closeTimeEpochMs,
+                    closeMs = closeMs,
                     bookAgeMs = wsAge,
                     yesBids = book.yes,
                     noBids = book.no,
@@ -1818,7 +1823,6 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                     sigmaPerSec = sigma
                 )
             } else {
-                val closeMs = market.closeTimeEpochMs
                 if (closeMs == null || market.yesBid == null || market.yesAsk == null) null
                 else com.dirk.kalshiodds.decision.ScalpRule.Quote(
                     ticker = market.ticker, nowMs = now, closeMs = closeMs, bookAtMs = restAt ?: now,
