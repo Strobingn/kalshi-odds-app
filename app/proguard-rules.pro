@@ -5,3 +5,6 @@
 -keepclasseswithmembers class * {
     @kotlinx.serialization.Serializable <fields>;
 }
+
+# ONNX Runtime (scalper trees): JNI looks these classes up by name.
+-keep class ai.onnxruntime.** { *; }

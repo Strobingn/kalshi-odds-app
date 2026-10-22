@@ -86,7 +86,8 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
             paperOn = secrets.paperAiEnabled,
             learningOn = container.learningMode,
             scalpingStatus = container.llmSupervisor.status.value,
-            paperStatus = container.paperAi.status.value + " · " + container.paperAi.record.value
+            paperStatus = container.paperAi.status.value + " · " + container.paperAi.record.value,
+            paperLessons = container.paperAi.lessons().takeLast(8).reversed()
         )
         val bets = container.paperAi.openBets() + container.paperAi.settledBets()
         return AiDashboard.build(base, System.currentTimeMillis(), container.aiActivity.events.value, strategies, bets)

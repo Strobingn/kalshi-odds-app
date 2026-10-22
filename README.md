@@ -19,6 +19,23 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.16.2 (Claude branch): the ML scalper runs on ONNX Runtime; Paper AI tops out at 85¢
+
+- **ONNX Runtime.** The ML scalper's 146 trees now run on ONNX Runtime Mobile 1.31.0 (CPU, one thread, full
+  graph optimisation) from `assets/scalper_model.onnx`. `tools/research/scalp/export_onnx.py` writes it from
+  `scalper_model.json` as one TreeEnsembleRegressor; each double threshold becomes the largest float32 not above
+  it, so every split lands where the Kotlin trees put it, and missing values go the same way.
+  - The app opens it off the main thread, refuses a file built from other trees (the JSON's sha256 and the
+    feature names are in the model's metadata), and switches over only after it matches the Kotlin trees on 65
+    rows that sit on, just over and just under every split. If it is missing, stale, different or ever fails,
+    the scalper stays on (or goes back to) the Kotlin trees. The ML scalper's settings card says which it runs
+    on (`ScalperModel.engine`).
+  - Checked against the trees on the recorded window's 130 rows and 3,000 threshold-edge rows
+    (`test_export_onnx.py`, in the unit-test workflow) and on ONNX Runtime's JVM build (`OnnxTreesTest`).
+    The retrain workflow rebuilds and checks the ONNX file with every new model.
+- **Paper AI:** the highest price it buys is 85¢ (was 90¢). Its lessons now show on the AI tab and in its chat,
+  each bet line shows the fair price, and a look-back that got no answer is tried again on the next minute.
+
 ## 1.16.1 (Claude branch): the Paper AI borrows ideas from TradingAgents
 
 From [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) (a multi-agent LLM
@@ -30,7 +47,7 @@ one call a minute are taken. Paper only.
   saw the spot price but never the strike, so it could not tell which side Bitcoin was on.
 - **Bull vs bear.** Each bet must state the best case for UP and for DOWN before picking a side, in the same
   call (no extra cost). Both are saved on the bet.
-- **Unlimited paper bets.** Any bet inside the limits (20–880 s into the window, ask 10–90¢, up to 50
+- **Unlimited paper bets.** Any bet inside the limits (20–880 s into the window, ask 10–85¢, up to 50
   contracts) is placed, with no cap per window. Each bet also saves the fair price for its side and a
   `chanceCents` (`PaperAiCalibration`: its confidence cut to the share of claimed edge that has shown up,
   averaged with the fair price), for the review only; neither ever blocks a bet.

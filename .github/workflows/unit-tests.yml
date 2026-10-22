@@ -48,6 +48,8 @@ jobs:
           PYTHONPATH=tools/research/scalp python3 tools/research/scalp/test_rec_sim.py
           PYTHONPATH=tools/research/scalp python3 tools/research/scalp/test_depth_sim.py
           PYTHONPATH=tools/research/scalp python3 tools/research/scalp/test_gate_scalper.py
+          pip install -q onnx onnxruntime
+          PYTHONPATH=tools/research/scalp python3 tools/research/scalp/test_export_onnx.py
 
       - name: Kotlin unit tests
         run: ./gradlew :app:testDebugUnitTest --no-daemon --continue

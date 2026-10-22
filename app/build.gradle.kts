@@ -16,8 +16,8 @@ android {
         applicationId = "com.dirk.kalshiodds.claude"
         minSdk = 26
         targetSdk = 35
-        versionCode = 70
-        versionName = "1.16.1"
+        versionCode = 71
+        versionName = "1.16.2"
         // In-app update check (ui/AppUpdate.kt): the Build APK run that made
         // this APK. 0 / "local" when built outside GitHub Actions.
         buildConfigField(
@@ -131,6 +131,8 @@ dependencies {
 
     // On-device ML
     implementation("org.tensorflow:tensorflow-lite:2.14.0")
+    // ONNX Runtime: runs the scalper's trees (assets/scalper_model.onnx). The JVM build runs the same model in unit tests.
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.31.0")
 
     // Persistence + encrypted API-key storage (never commit secrets)
     implementation("androidx.datastore:datastore-preferences:1.1.1")
@@ -144,6 +146,7 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.10.0")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("com.microsoft.onnxruntime:onnxruntime:1.31.0")
     // Real org.json for JVM unit tests (Android stubs JSONObject by default).
     testImplementation("org.json:json:20240303")
     testImplementation("org.robolectric:robolectric:4.14.1")

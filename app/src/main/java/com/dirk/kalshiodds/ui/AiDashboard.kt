@@ -70,7 +70,9 @@ data class AiDashboardState(
     val paperOpen: Int = 0,
     val paperNet: Double = 0.0,
     val recentChanges: List<String> = emptyList(),
-    val recentBets: List<String> = emptyList()
+    val recentBets: List<String> = emptyList(),
+    /** The Paper AI's lessons, written after each settled window it bet on; newest first. */
+    val paperLessons: List<String> = emptyList()
 )
 
 object AiDashboard {
@@ -160,7 +162,8 @@ object AiDashboard {
                 (it.pnlUsd ?: 0.0) < 0 -> "LOST " + fmtSignedUsd(it.pnlUsd ?: 0.0)
                 else -> it.result
             }
-            "${clock.format(Date(it.openedMs))}  ${if (it.side == "YES") "UP" else "DOWN"} x${it.contracts} @ ${Math.round(it.price * 100)}¢ · ${it.confidence}% · $res"
+            val fair = it.fairCents?.let { f -> " · fair ${Math.round(f)}%" }.orEmpty()
+            "${clock.format(Date(it.openedMs))}  ${if (it.side == "YES") "UP" else "DOWN"} x${it.contracts} @ ${Math.round(it.price * 100)}¢ · ${it.confidence}%$fair · $res"
         }
 
         val trades = ran.sumOf { it.closed }
@@ -290,6 +293,10 @@ fun AiDashboardContent(s: AiDashboardState, onOpenKeys: () -> Unit = {}) {
         AiCard("Paper AI bets", "Newest first") {
             if (s.recentBets.isEmpty()) Empty("No bets yet")
             s.recentBets.forEach { Text(it, fontSize = 11.sp, color = c.textPrimary) }
+        }
+        AiCard("Paper AI lessons", "Written after each window it bet on settles; newest first") {
+            if (s.paperLessons.isEmpty()) Empty("No lessons yet")
+            s.paperLessons.forEach { Text(it, fontSize = 11.sp, color = c.textPrimary) }
         }
         AiCard("Scalping AI journal", "Newest first") {
             if (s.recentChanges.isEmpty()) Empty("No changes yet")

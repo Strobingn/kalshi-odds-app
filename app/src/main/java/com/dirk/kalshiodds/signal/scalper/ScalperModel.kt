@@ -37,8 +37,60 @@ class ScalperModel(
 
     val treeCount: Int get() = trees.size
 
+    /** The ONNX Runtime copy of these trees ([OnnxTrees]), or null to walk them in Kotlin. */
+    @Volatile
+    private var onnx: ((FloatArray) -> Double)? = null
+
+    /** Which engine [predict] runs on now, for the screens: "ONNX Runtime (CPU)" or "Kotlin trees (…why)". */
+    @Volatile
+    var engine: String = "Kotlin trees"
+        private set
+
+    /**
+     * Run [predict] on [run] (the ONNX model of these same trees) from now on, once it gives the Kotlin trees' answer
+     * on [probes] rows built from every split ([probeRows]). Returns null when attached, else why not (the Kotlin trees
+     * stay). If [run] ever throws later, [predict] goes back to the Kotlin trees for good and says so in [engine].
+     */
+    fun attachOnnx(run: (FloatArray) -> Double, label: String = "ONNX Runtime (CPU)", probes: List<FloatArray> = probeRows()): String? {
+        var worst = 0.0
+        for (x in probes) {
+            val got = runCatching { run(x) }.getOrElse { e ->
+                return fallBack("ONNX did not run: ${e.message ?: e.javaClass.simpleName}")
+            }
+            if (!got.isFinite()) return fallBack("ONNX gave a non-number")
+            worst = maxOf(worst, kotlin.math.abs(got - predictTrees(x)))
+        }
+        if (worst > PARITY_TOLERANCE_CENTS) return fallBack("ONNX differs from the trees by ${"%.6f".format(java.util.Locale.US, worst)}¢")
+        onnx = run
+        engine = label
+        return null
+    }
+
+    /** Stay on the Kotlin trees and say why in [engine] (the ONNX file could not be opened). */
+    fun markKotlin(why: String) {
+        fallBack(why)
+    }
+
+    private fun fallBack(why: String): String {
+        onnx = null
+        engine = "Kotlin trees ($why)"
+        return why
+    }
+
     /** Expected cents per contract for a front-of-queue scalp with these [x] features. */
     fun predict(x: FloatArray): Double {
+        require(x.size == features.size) { "expected ${features.size} features, got ${x.size}" }
+        val o = onnx
+        if (o != null) {
+            val v = runCatching { o(x) }.getOrNull()
+            if (v != null && v.isFinite()) return v
+            fallBack("ONNX stopped answering")
+        }
+        return predictTrees(x)
+    }
+
+    /** [predict] on the Kotlin trees alone. */
+    fun predictTrees(x: FloatArray): Double {
         require(x.size == features.size) { "expected ${features.size} features, got ${x.size}" }
         var sum = 0.0
         for (t in trees) {
@@ -71,8 +123,36 @@ class ScalperModel(
     fun expectedCents(prediction: Double, contractsAhead: Double): Double =
         prediction - queuePenaltyCents(contractsAhead)
 
+    /**
+     * Rows that sit on, just under and just over the trees' splits (and one with every feature missing), so a check
+     * of another engine reaches every branch kind. Deterministic.
+     */
+    fun probeRows(count: Int = 64): List<FloatArray> {
+        val n = features.size
+        val byFeature = Array(n) { ArrayList<Double>() }
+        for (t in trees) for (i in t.feature.indices) if (t.feature[i] >= 0) byFeature[t.feature[i]] += t.threshold[i]
+        val rows = ArrayList<FloatArray>(count + 1)
+        for (j in 0 until count) {
+            rows += FloatArray(n) { k ->
+                val ths = byFeature[k]
+                if (ths.isEmpty()) return@FloatArray (j % 7 - 3).toFloat()
+                val f = ths[(j * 31 + k * 17) % ths.size].toFloat()
+                when ((j + k) % 3) {
+                    0 -> f
+                    1 -> Math.nextUp(f)
+                    else -> Math.nextDown(f)
+                }
+            }
+        }
+        rows += FloatArray(n) { Float.NaN }
+        return rows
+    }
+
     companion object {
         const val ASSET_NAME = "scalper_model.json"
+        const val ONNX_ASSET_NAME = "scalper_model.onnx"
+        /** Largest difference, in cents, allowed between the ONNX model and the Kotlin trees (float32 leaf sums). */
+        const val PARITY_TOLERANCE_CENTS = 1e-3
 
         fun parse(raw: String): ScalperModel {
             val o = JSONObject(raw)

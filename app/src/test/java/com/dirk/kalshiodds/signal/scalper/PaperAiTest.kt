@@ -122,4 +122,31 @@ class PaperAiTest {
         p.tick()
         assertEquals(1, prompts.count { it == PaperAi.REFLECT_SYSTEM })
     }
+
+    @Test
+    fun theHighestPriceItBuysIs85Cents() {
+        val at85 = ai("""{"decision":"YES","contracts":1,"confidence":95,"reason":"favourite"}""", feed(yesAsk = 85.0))
+        assertTrue(at85.tick().startsWith("bet YES"))
+        val at86 = ai("""{"decision":"YES","contracts":1,"confidence":95,"reason":"favourite"}""", feed(yesAsk = 86.0))
+        assertTrue(at86.tick().startsWith("rejected"))
+        assertTrue(at86.openBets().isEmpty())
+    }
+
+    @Test
+    fun aLookBackWithNoAnswerIsTriedAgainNextTick() {
+        var reflectAnswer: String? = null
+        val reflectCalls = IntArray(1)
+        val chat = LlmChat { system, _, _ ->
+            if (system == PaperAi.REFLECT_SYSTEM) { reflectCalls[0]++; reflectAnswer }
+            else """{"decision":"YES","contracts":1,"confidence":70,"reason":"up"}"""
+        }
+        val p = PaperAi(chat = chat, feed = feed())
+        p.tick(); p.onSettled(ticker, "no")
+        p.tick()
+        assertTrue(p.lessons().isEmpty())
+        reflectAnswer = """{"lesson":"DOWN won; the UP lean was wrong"}"""
+        p.tick()
+        assertEquals(2, reflectCalls[0])
+        assertEquals(listOf("DOWN won; the UP lean was wrong"), p.lessons())
+    }
 }

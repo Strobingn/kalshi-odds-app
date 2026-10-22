@@ -328,7 +328,7 @@ class AppContainer(context: Context) {
         tuning = scalperStore.tuning,
         context = { which ->
             if (which == com.dirk.kalshiodds.signal.scalper.AiChat.PAPER) {
-                "Paper AI record: ${paperAi.record.value}\nStatus: ${paperAi.status.value}\nOpen bets: ${paperAi.openBets().joinToString { it.side + " " + it.ticker }}\nLive feed: ${supervisorFeed()}"
+                "Paper AI record: ${paperAi.record.value}\nStatus: ${paperAi.status.value}\nOpen bets: ${paperAi.openBets().joinToString { it.side + " " + it.ticker }}\nLessons from settled windows: ${paperAi.lessons().takeLast(5).joinToString(" | ")}\nLive feed: ${supervisorFeed()}"
             } else {
                 "Scalping AI status: ${llmSupervisor.status.value}\nRecent journal: ${llmSupervisor.log.value.take(5).joinToString(" | ")}\nLive feed: ${supervisorFeed()}"
             }

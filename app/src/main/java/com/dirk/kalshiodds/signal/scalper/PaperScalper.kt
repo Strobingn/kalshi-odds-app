@@ -877,10 +877,38 @@ class ScalperStore(context: Context) {
         persist = { st -> runCatching { prefs.edit().putString(CHECKS_KEY, json.encodeToString(ContractCheckState.serializer(), st)).apply() } }
     )
 
-    /** The trained model from assets, or null when it cannot be read (the fast strategies still run). */
-    val model: ScalperModel? = runCatching {
-        context.assets.open(ScalperModel.ASSET_NAME).bufferedReader().use { ScalperModel.parse(it.readText()) }
+    /** The exact bytes of the trained model in assets (the ONNX copy is checked against them). */
+    private val modelBytes: ByteArray? = runCatching {
+        context.assets.open(ScalperModel.ASSET_NAME).use { it.readBytes() }
     }.getOrNull()
+
+    /** The trained model from assets, or null when it cannot be read (the fast strategies still run). */
+    val model: ScalperModel? = modelBytes?.let { b -> runCatching { ScalperModel.parse(String(b, Charsets.UTF_8)) }.getOrNull() }
+
+    /**
+     * The same trees on ONNX Runtime ([OnnxTrees]), opened off the main thread. [ScalperModel.predict] switches to it
+     * once it has matched the Kotlin trees, and stays on the Kotlin trees if the file is missing, stale or fails.
+     */
+    @Volatile
+    private var onnx: OnnxTrees? = null
+
+    init {
+        val m = model
+        val json = modelBytes
+        if (m != null && json != null) {
+            Thread({
+                val why = runCatching {
+                    val bytes = context.assets.open(ScalperModel.ONNX_ASSET_NAME).use { it.readBytes() }
+                    val trees = OnnxTrees.open(bytes, json, m.features)
+                    val failed = m.attachOnnx(trees::predict)
+                    if (failed == null) onnx = trees else trees.close()
+                    failed
+                }.getOrElse { e -> "ONNX not loaded: ${e.message ?: e.javaClass.simpleName}" }
+                if (why != null && !m.engine.contains("(")) m.markKotlin(why)
+                if (why != null) android.util.Log.w("ScalperModel", why)
+            }, "scalper-onnx").apply { isDaemon = true }.start()
+        }
+    }
 
     private fun load(): ScalperState {
         val raw = prefs.getString(KEY, null) ?: return ScalperState.fresh()

@@ -145,7 +145,7 @@ private fun SideChoice(current: String?, onPick: (String?) -> Unit) {
  * ML scalper's own cut, shown as its trigger's default.
  */
 @Composable
-internal fun StrategySettingsCard(st: ScalpStrategy, tuning: ScalpTuning, modelTheta: Double?) {
+internal fun StrategySettingsCard(st: ScalpStrategy, tuning: ScalpTuning, modelTheta: Double?, modelEngine: String? = null) {
     val colors = DipTheme.colors
     var k by remember(st) { mutableStateOf(tuning.knobs(st)) }
     fun save(n: ScalpKnobs) {
@@ -163,6 +163,8 @@ internal fun StrategySettingsCard(st: ScalpStrategy, tuning: ScalpTuning, modelT
             Switch(checked = k.enabled, onCheckedChange = { save(k.copy(enabled = it)) }, modifier = Modifier.testTag("STRATEGY_ENABLED"))
         }
         ScalpTriggers.of(st)?.let { spec ->
+            // Only the ML scalper's trigger defaults to the model's own cut; it also says what the model runs on.
+            if (spec.default.isNaN() && modelEngine != null) Muted("Model runs on $modelEngine")
             val def = if (spec.default.isNaN()) (modelTheta ?: 0.0) else spec.default
             KnobSlider(
                 spec.label, t.trigger(def), spec.min, spec.max, spec.step, "KNOB_TRIGGER", k.trigger != null,

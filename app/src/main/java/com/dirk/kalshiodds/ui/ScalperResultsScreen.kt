@@ -177,6 +177,7 @@ fun ScalperResultsRoute(onBack: (() -> Unit)?, onOpenSettings: () -> Unit = {}) 
         live = live,
         tuning = container?.scalper?.engine?.tuning,
         modelTheta = store?.model?.thetaCents,
+        modelEngine = store?.model?.engine,
         checks = checks,
         onResetPaper = container?.scalper?.let { sc ->
             {
@@ -277,6 +278,8 @@ fun ScalperResultsScreen(
     tuning: com.dirk.kalshiodds.signal.scalper.ScalpTuning? = null,
     /** The ML scalper's own cut, shown as its trigger's default. */
     modelTheta: Double? = null,
+    /** What the ML scalper's model runs on ([com.dirk.kalshiodds.signal.scalper.ScalperModel.engine]); null hides it. */
+    modelEngine: String? = null,
     /** Clears the paper record (after a confirm); null hides the button. */
     onResetPaper: (() -> Unit)? = null,
     /** The contract checks' lines ([com.dirk.kalshiodds.signal.scalper.ContractChecks.lines]); null hides the card. */
@@ -291,7 +294,7 @@ fun ScalperResultsScreen(
         if (hasBack) BackHandler { openName = null }
         // Each strategy's page opens at its top, not where the last one was left.
         val pageState = remember(open) { if (open == initialOpen) pageListState else LazyListState() }
-        StrategyPage(open, state, chartTrades, pageState, tuning, modelTheta) { openName = null }
+        StrategyPage(open, state, chartTrades, pageState, tuning, modelTheta, modelEngine) { openName = null }
         return
     }
     if (settingsOpen && tuning != null) {
@@ -845,6 +848,7 @@ internal fun StrategyPage(
     listState: LazyListState,
     tuning: com.dirk.kalshiodds.signal.scalper.ScalpTuning? = null,
     modelTheta: Double? = null,
+    modelEngine: String? = null,
     onBack: () -> Unit
 ) {
     val colors = DipTheme.colors
@@ -914,7 +918,7 @@ internal fun StrategyPage(
                 }
             }
             if (tuning != null) {
-                item(key = "settings") { StrategySettingsCard(st, tuning, modelTheta) }
+                item(key = "settings") { StrategySettingsCard(st, tuning, modelTheta, modelEngine) }
             }
             item(key = "numbers") { ChartCard("Every number", "Paper dollars after fees.", "CHART_NUMBERS") { StrategyNumbers(st, detail) } }
             item(key = "more_toggle") {

@@ -235,8 +235,9 @@ class PaperAi(
             put("calibration", calibrationJson())
             put("yourNotes", buildJsonArray { for (l in synchronized(lock) { lessons.takeLast(10) }) add(JsonPrimitive(l)) })
         }
-        val answer = chat.ask(REFLECT_SYSTEM, ctx.toString(), REFLECT_TOOLS)
-        val lesson = answer?.let { runCatching { Json.parseToJsonElement(it).jsonObject }.getOrNull() }
+        // No answer (provider down, rate limit): keep the window queued and look back on it next tick.
+        val answer = chat.ask(REFLECT_SYSTEM, ctx.toString(), REFLECT_TOOLS) ?: return
+        val lesson = answer.let { runCatching { Json.parseToJsonElement(it).jsonObject }.getOrNull() }
             ?.let { (it["lesson"] as? JsonPrimitive)?.contentOrNull?.trim() }?.takeIf { it.isNotBlank() }?.take(300)
         synchronized(lock) {
             toReflect = toReflect.drop(1)
@@ -295,7 +296,7 @@ class PaperAi(
         const val ENTRY_FROM_S = 20
         const val ENTRY_UNTIL_S = 880
         const val MIN_ASK_CENTS = 10.0
-        const val MAX_ASK_CENTS = 90.0
+        const val MAX_ASK_CENTS = 85.0
         const val MAX_CONTRACTS = 50
         const val KEEP_BETS = 300
         const val MAX_LESSONS = 30
