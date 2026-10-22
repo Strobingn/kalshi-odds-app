@@ -73,9 +73,16 @@ class AiScreenScreenshotTest {
     )
 
     private fun chatShot(name: String, heightDp: Int, msgs: List<ChatMsg>, busy: Boolean, which: String = AiChat.SCALPING) {
+        // The screen itself is resized: what a phone leaves above an open keyboard.
+        paparazzi.unsafeUpdateConfig(
+            deviceConfig = DeviceConfig.PIXEL_6.copy(
+                softButtons = false, screenWidth = 411, screenHeight = heightDp, xdpi = 160, ydpi = 160,
+                density = com.android.resources.Density.MEDIUM
+            )
+        )
         paparazzi.snapshot(name = name) {
             KalshiOddsTheme(darkTheme = true) {
-                Column(Modifier.background(DipTheme.colors.bg).height(heightDp.dp)) {
+                Column(Modifier.background(DipTheme.colors.bg).fillMaxSize()) {
                     AiHeader {}
                     AiSectionTabs(1) {}
                     AiChatContent(which, msgs, busy = busy, onWhich = {}, onSend = {}, onApply = {}, onCancel = {}, onClear = {})
