@@ -16,8 +16,20 @@ class UnlimitedWindowEntriesTest {
         val close = ScalpTicker.closeMs(ticker)!!
         val start = close - 800_000L
         val book = ScalpBook(bankrollUsd = { 100_000.0 })
-        repeat(60) { i ->
-            book.onQuote(quote(start + i * 4_000L, yesBid = 0.34, yesAsk = 0.35, spot = 101_000.0), true)
+        // A trigger that stays true is one clip. It has to go quiet before it can fire again.
+        repeat(8) { i ->
+            book.onQuote(quote(start + i * 3_000L, yesBid = 0.34, yesAsk = 0.35, spot = 101_000.0), true)
+        }
+        val steady = book.snapshot().count { it.variantId == KeptScalpers.FAIR_ID && it.state != ScalpState.NO_FILL }
+        assertEquals(1, steady)
+        var at = start + 24_000L
+        repeat(50) {
+            book.onQuote(quote(at, yesBid = 0.48, yesAsk = 0.49, spot = 100_000.0), true)
+            at += 3_000L
+            book.onQuote(quote(at, yesBid = 0.34, yesAsk = 0.35, spot = 101_000.0), true)
+            at += 3_000L
+            book.onQuote(quote(at, yesBid = 0.34, yesAsk = 0.35, spot = 101_000.0), true)
+            at += 3_000L
         }
         val yes = book.snapshot().filter {
             it.variantId == KeptScalpers.FAIR_ID && it.side == "YES" &&
@@ -27,10 +39,9 @@ class UnlimitedWindowEntriesTest {
         yes.filter { it.entryPrice != null && it.contracts > 0 }.forEach { t ->
             assertEquals(ScalpRule.orderFee(t.contracts, t.entryPrice!!), t.entryFeeUsd, 1e-9)
         }
-        val flip = start + 60 * 4_000L
-        repeat(4) { i ->
-            book.onQuote(quote(flip + i * 4_000L, yesBid = 0.64, yesAsk = 0.65, spot = 99_000.0), true)
-        }
+        val flip = at
+        book.onQuote(quote(flip, yesBid = 0.48, yesAsk = 0.49, spot = 100_000.0), true)
+        book.onQuote(quote(flip + 4_000L, yesBid = 0.64, yesAsk = 0.65, spot = 99_000.0), true)
         val no = book.snapshot().filter {
             it.variantId == KeptScalpers.FAIR_ID && it.side == "NO" &&
                 it.state != ScalpState.NO_FILL

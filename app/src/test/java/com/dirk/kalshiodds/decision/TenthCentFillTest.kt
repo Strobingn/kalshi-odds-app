@@ -99,8 +99,8 @@ class TenthCentFillTest {
         }
         val rows = scalp.snapshot().filter { it.variantId == "sf42" }
         val opened = rows.filter { it.state == ScalpState.OPEN || it.state == ScalpState.CLOSED || it.state == ScalpState.PENDING_EXIT }
-        assertTrue(rows.joinToString(" | ") { "${it.state} ${it.note}" }, opened.size >= 3)
-        assertTrue(opened.all { it.contracts in 1..10 })
+        assertEquals(rows.joinToString(" | ") { "${it.state} ${it.note}" }, 1, opened.size)
+        assertEquals(4, opened.single().contracts)
     }
 
     private fun bookQuote(at: Long, yesBid: Double) = book(at).copy(yesBid = yesBid, yesBidSize = 20.0)

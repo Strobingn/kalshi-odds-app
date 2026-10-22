@@ -58,6 +58,12 @@ object FairGapTune {
      */
     fun entryGated(code: String?): Boolean = isTweaked(code) && !ownsRules(code) &&
         code !in KeptScalpers.IDS && !ScalpVariants.isLive(code)
+
+    /**
+     * 1.0.3 hold-instead-of-stop applies only to removed losers.
+     * Kept winners and their variants keep their own stop, target, and hold.
+     */
+    fun fairGapHoldExit(code: String?): Boolean = entryGated(code)
     /** Late-favourite leg uses the fair-gap ask gate only when this is true. */
     fun favUsesFairGapGate(code: String?): Boolean = entryGated(code)
 
