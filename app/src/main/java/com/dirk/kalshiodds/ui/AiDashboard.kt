@@ -36,6 +36,8 @@ data class StrategyResult(val name: String, val closed: Int, val wins: Int, val 
 /** Everything the AI tab's dashboard shows. Built by [AiDashboard.build]; the screen only draws it. */
 data class AiDashboardState(
     val version: String = "",
+    /** "Now using Groq · 312 of 500 calls, …" */
+    val rotation: String = "",
     val keys: List<Pair<String, Boolean>> = listOf("Groq" to false, "Mistral" to false, "Gemini" to false),
     val scalpingOn: Boolean = true,
     val paperOn: Boolean = true,
@@ -216,6 +218,7 @@ fun AiDashboardContent(s: AiDashboardState, onOpenKeys: () -> Unit = {}) {
         } else if (s.lastError.isNotBlank()) {
             Banner("Last AI call failed: ${s.lastError}", c.down, "Test keys", onOpenKeys)
         }
+        if (s.rotation.isNotBlank()) Text(s.rotation, fontSize = 11.sp, color = c.textSecondary)
         AiStatusCard("SCALPING AI", s.scalpingOn, "Tunes the scalping algorithms every 60 s", s.scalpingStatus, scalpColor)
         AiStatusCard("PAPER AI", s.paperOn, "Places paper bets every minute", s.paperStatus, paperColor)
 

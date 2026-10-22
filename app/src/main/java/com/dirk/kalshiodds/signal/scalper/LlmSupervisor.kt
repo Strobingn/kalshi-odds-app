@@ -276,7 +276,9 @@ class HttpLlmChat(
     private val onError: (String) -> Unit = {},
     /** Told of every attempt, for the AI tab's call charts and its error line. */
     private val onCall: (LlmAttempt) -> Unit = {},
-    private val http: OkHttpClient = OkHttpClient.Builder().callTimeout(40, TimeUnit.SECONDS).build()
+    private val http: OkHttpClient = OkHttpClient.Builder().callTimeout(40, TimeUnit.SECONDS).build(),
+    /** Shared provider rotation (switch every 500 answered calls); null = always in [providers] order. */
+    private val rotation: LlmRotation? = null
 ) : LlmChat {
 
     /** The last failure in words ("groq openai/gpt-oss-120b: HTTP 429 Rate limit reached …"), or "" after a success. */
@@ -353,7 +355,9 @@ class HttpLlmChat(
     /** Tries each provider with a key, and each of its models from the one that last worked, until [call] returns. */
     private fun <T> each(call: (LlmProvider, String) -> T): T? {
         var anyKey = false
-        for (p in providers) {
+        val keyed = providers.filter { it.key().isNotBlank() }
+        val ordered = rotation?.let { r -> r.order(keyed.map { it.name }).mapNotNull { n -> keyed.firstOrNull { it.name == n } } } ?: keyed
+        for (p in ordered) {
             if (p.key().isBlank()) continue
             anyKey = true
             var i = p.modelIndex.coerceIn(0, p.models.lastIndex)
@@ -365,6 +369,7 @@ class HttpLlmChat(
                     val out = call(p, model)
                     p.modelIndex = i
                     lastError = ""
+                    rotation?.answered(p.name)
                     runCatching { onCall(LlmAttempt(p.name, model, true, System.currentTimeMillis() - t0)) }
                     return out
                 } catch (e: Exception) {

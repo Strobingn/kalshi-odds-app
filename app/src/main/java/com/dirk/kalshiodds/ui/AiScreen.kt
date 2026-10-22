@@ -278,11 +278,10 @@ fun AiKeysContent(
             SwitchRow("Paper AI", "Places paper bets every minute (up to 50 contracts)", s.paperOn, onPaper)
             SwitchRow("Learning mode", "Small retired strategies bet on paper too; the 17 big losers stay out", s.learningOn, onLearning)
         }
-        AiCard("Which provider each AI uses", "If one fails or hits its free limit, the next one answers") {
-            Text("Scalping AI: Groq → Gemini → Mistral", fontSize = 12.sp, color = c.textPrimary)
-            Text("Paper AI: Gemini → Mistral → Groq", fontSize = 12.sp, color = c.textPrimary)
-            Text("Chat: Groq → Gemini → Mistral", fontSize = 12.sp, color = c.textPrimary)
-            Text("Groq models tried in order: gpt-oss-120b, qwen3.8-27b, gpt-oss-20b. A retired model is skipped automatically.", fontSize = 11.sp, color = c.textSecondary)
+        AiCard("Provider rotation", "All AIs share one provider for 500 answered calls, then switch to the next one with a key") {
+            Text("Groq → Gemini → Mistral → Groq …", fontSize = 12.sp, color = c.textPrimary)
+            if (s.rotation.isNotBlank()) Text(s.rotation, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.accentBlue)
+            Text("If the current one fails or hits its free limit, that call goes to the next provider at once. Groq models are tried in order: gpt-oss-120b, qwen3.8-27b, gpt-oss-20b; a retired model is skipped.", fontSize = 11.sp, color = c.textSecondary)
         }
     }
 }

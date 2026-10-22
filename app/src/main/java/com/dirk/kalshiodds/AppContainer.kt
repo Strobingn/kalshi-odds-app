@@ -246,6 +246,21 @@ class AppContainer(context: Context) {
             }
         }
     }
+    /** Both AIs and the chat share one provider: 500 answered calls each, then the next one with a key. */
+    val llmRotation = com.dirk.kalshiodds.signal.scalper.LlmRotation(
+        names = listOf("groq", "gemini", "mistral"),
+        every = 500,
+        hasKey = { n ->
+            when (n) {
+                "groq" -> extraSecrets.groqApiKey.isNotBlank()
+                "mistral" -> extraSecrets.mistralApiKey.isNotBlank()
+                else -> extraSecrets.geminiApiKey.isNotBlank()
+            }
+        },
+        load = { supervisorPrefs.getString("rotation_provider", null)?.let { it to supervisorPrefs.getInt("rotation_calls", 0) } },
+        save = { n, c -> supervisorPrefs.edit().putString("rotation_provider", n).putInt("rotation_calls", c).apply() }
+    )
+
     /** Every AI call, change, verdict and paper bet, for the AI tab's charts. Kept on the phone. */
     val aiActivity = com.dirk.kalshiodds.signal.scalper.AiActivity(
         load = { supervisorPrefs.getString("ai_activity", null) },
@@ -279,7 +294,7 @@ class AppContainer(context: Context) {
     /** Scalping AI: tunes the scalping algorithms every 60 s. Groq, then Gemini, then Mistral. */
     val llmSupervisor = com.dirk.kalshiodds.signal.scalper.LlmSupervisor(
         tuning = scalperStore.tuning,
-        chat = com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders("groq", "gemini", "mistral"), onError = llmError("errors"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.SCALPING)),
+        chat = com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders("groq", "gemini", "mistral"), onError = llmError("errors"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.SCALPING), rotation = llmRotation),
         feed = { supervisorFeed() },
         stats = { name -> scalperStore.ledger.snapshot().stats(name) },
         sink = { kind, line -> supervisorLog.append(kind, line) },
@@ -295,7 +310,7 @@ class AppContainer(context: Context) {
 
     /** Paper AI: a different AI. Decides one paper bet per window. Gemini, then Mistral, then Groq. Own memory and journal. */
     val paperAi = com.dirk.kalshiodds.signal.scalper.PaperAi(
-        chat = com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders("gemini", "mistral", "groq"), onError = llmError("paper_ai_errors"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.PAPER)),
+        chat = com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders("gemini", "mistral", "groq"), onError = llmError("paper_ai_errors"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.PAPER), rotation = llmRotation),
         feed = { supervisorFeed() },
         sink = { kind, line -> supervisorLog.append(kind, line) },
         persistMemory = { json -> supervisorPrefs.edit().putString("paper_ai_memory", json).apply() },
@@ -309,7 +324,7 @@ class AppContainer(context: Context) {
     )
 
     /** The chat screen: one thread per AI, history kept on the phone. */
-    private val chatLlm = com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders("groq", "gemini", "mistral"), onError = llmError("chat_errors"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.CHAT))
+    private val chatLlm = com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders("groq", "gemini", "mistral"), onError = llmError("chat_errors"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.CHAT), rotation = llmRotation)
     val aiChat = com.dirk.kalshiodds.signal.scalper.AiChat(
         ask = { msgs -> chatLlm.chat(msgs) },
         tuning = scalperStore.tuning,

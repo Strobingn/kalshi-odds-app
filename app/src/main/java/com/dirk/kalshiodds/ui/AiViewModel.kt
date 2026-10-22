@@ -27,7 +27,8 @@ data class AiKeysState(
     val learningOn: Boolean = true,
     val testing: Boolean = false,
     val testLines: List<String> = emptyList(),
-    val message: String = ""
+    val message: String = "",
+    val rotation: String = ""
 )
 
 /** The AI tab: dashboard (rebuilt every 2 s), the two chat threads, keys, switches and the key test. */
@@ -48,6 +49,7 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.Default) {
             while (isActive) {
                 runCatching { _dashboard.value = buildDashboard() }
+                _keys.update { it.copy(rotation = rotationLine()) }
                 delay(2_000L)
             }
         }
@@ -59,7 +61,13 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
         "Gemini" to secrets.geminiApiKey.isNotBlank()
     )
 
+    private fun rotationLine(): String {
+        val r = container.llmRotation.state.value
+        return "Now using ${r.provider.replaceFirstChar { it.uppercase() }} · ${r.calls} of ${r.every} calls, then the next provider with a key"
+    }
+
     private fun keysNow() = AiKeysState(
+        rotation = rotationLine(),
         saved = savedKeys(),
         scalpingOn = secrets.supervisorEnabled,
         paperOn = secrets.paperAiEnabled,
@@ -74,6 +82,7 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
         }
         val base = AiDashboardState(
             version = AppVersion.label,
+            rotation = rotationLine(),
             keys = savedKeys(),
             scalpingOn = secrets.supervisorEnabled,
             paperOn = secrets.paperAiEnabled,
