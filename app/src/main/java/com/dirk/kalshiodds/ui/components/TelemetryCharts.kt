@@ -5,6 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -1077,6 +1079,7 @@ fun BucketVisualBar(
  * Plots predicted probability vs actual empirical win rate against the 45° ideal line,
  * plus visual Brier score bars (Model vs Market, lower wins).
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun CalibrationAndBrierChartCard(
     honest: ScorecardMetrics.Honest?,
@@ -1084,8 +1087,8 @@ fun CalibrationAndBrierChartCard(
     modifier: Modifier = Modifier
 ) {
     val calPoints = remember(picks) { TelemetryChartMath.calibrationCurve(picks) }
-    val hasBrier = honest?.showBrier == true && honest.modelBrier != null && honest.marketBrier != null
-    if (calPoints.isEmpty() && !hasBrier) return
+    val brierReady = honest != null && honest.showBrier && honest.modelBrier != null && honest.marketBrier != null
+    if (calPoints.isEmpty() && !brierReady) return
 
     val colors = DipTheme.colors
     Column(
@@ -1095,10 +1098,11 @@ fun CalibrationAndBrierChartCard(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        if (hasBrier && honest != null) {
-            val modelB = honest.modelBrier ?: 0.25
-            val mktB = honest.marketBrier ?: 0.25
-            val sideB = honest.sideBrier ?: modelB
+        if (brierReady) {
+            val h = honest ?: return@Column
+            val modelB = h.modelBrier ?: 0.25
+            val mktB = h.marketBrier ?: 0.25
+            val sideB = h.sideBrier ?: modelB
             val maxB = maxOf(modelB, mktB, sideB, 0.30)
             Text(
                 "Forecast Brier comparison (lower is better)",
@@ -1194,9 +1198,10 @@ fun CalibrationAndBrierChartCard(
                     drawCircle(hitColor, radius = 4.5.dp.toPx(), center = Offset(x, y))
                 }
             }
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 calPoints.forEach { pt ->
                     Text(
