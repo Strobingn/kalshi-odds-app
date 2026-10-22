@@ -24,6 +24,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dirk.kalshiodds.KalshiOddsApp
 import com.dirk.kalshiodds.llm.ChatMessage
@@ -107,8 +108,9 @@ fun AiChatContent(
         dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Cancel") } }
     )
 
+    var statusOpen by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().background(c.bg).windowInsetsPadding(dipContentInsets()).testTag("AI_TAB")) {
-        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("AI", color = c.textPrimary, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                 Text("PAPER ONLY · never places real-money orders", color = c.spot, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
@@ -118,13 +120,18 @@ fun AiChatContent(
                 Icon(Icons.Outlined.DeleteSweep, "Clear chat history", tint = if (messages.isNotEmpty()) c.down else c.textSecondary)
             }
         }
-        Text("Paper strategy: $strategyStatus", color = c.textSecondary, style = MaterialTheme.typography.bodySmall, maxLines = 2,
-            modifier = Modifier.padding(horizontal = 16.dp))
-        if (live != null) AiLiveFeedCard(live, liveOn, onLiveFeed)
+        TextButton(onClick = { statusOpen = !statusOpen }, modifier = Modifier.padding(horizontal = 8.dp)) {
+            Text(if (statusOpen) "Hide status" else "Paper strategy: $strategyStatus")
+        }
+        if (statusOpen) {
+            Text("Paper strategy: $strategyStatus", color = c.textSecondary, style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+            if (live != null) AiLiveFeedCard(live, liveOn, onLiveFeed)
+        }
         if (showKey) KeyFields(initialKey, initialModel, initialBase, providerLabel) { k, m, b -> onSaveKey(k, m, b); showKey = false }
 
         LazyColumn(state = list, modifier = Modifier.weight(1f).fillMaxWidth().testTag("AI_MESSAGES"),
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (messages.isEmpty() && !busy) item(key = "empty") {
                 Text(if (unavailable) "AI chat is unavailable on this device." else
                     "Ask why a strategy is winning or losing, or ask me to change a paper setting (stops, cooldowns, bankroll, per-strategy params). Every change needs your Apply.",
@@ -139,9 +146,11 @@ fun AiChatContent(
             }
         }
 
-        Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth().imePadding().testTag("AI_INPUT_BAR")) {
-            Row(Modifier.padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        val inputBar = Modifier.fillMaxWidth().imePadding().then(if (LocalDipTabBar.current) Modifier else Modifier.navigationBarsPadding())
+        Surface(color = c.surface, modifier = inputBar.testTag("AI_INPUT_BAR")) {
+            Row(Modifier.padding(horizontal = 12.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(input, { input = it }, placeholder = { Text(if (hasKey) "Ask about trades, results or settings" else "Save an LLM key first (key icon)") },
+                    textStyle = MaterialTheme.typography.bodyLarge,
                     maxLines = 4, modifier = Modifier.weight(1f).testTag("AI_INPUT"))
                 IconButton(enabled = !busy && input.isNotBlank(), onClick = { val q = input; input = ""; onSend(q) }, modifier = Modifier.testTag("AI_SEND")) {
                     Icon(Icons.AutoMirrored.Filled.Send, "Send", tint = if (!busy && input.isNotBlank()) c.accentBlue else c.textSecondary)
@@ -230,7 +239,7 @@ private fun MessageBubble(m: ChatMessage, onApply: (Long) -> Unit, onCancel: (Lo
     val mine = m.role == ChatMessage.USER
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
         when (m.role) {
-            ChatMessage.PROPOSAL -> Column(Modifier.fillMaxWidth(0.92f).border(1.dp, c.accentBlue, shape).background(c.surface, shape).padding(12.dp).testTag("AI_PROPOSAL")) {
+            ChatMessage.PROPOSAL -> Column(Modifier.fillMaxWidth().border(1.dp, c.accentBlue, shape).background(c.surface, shape).padding(16.dp).testTag("AI_PROPOSAL")) {
                 Text("Settings change (paper)", color = c.textPrimary, fontWeight = FontWeight.SemiBold)
                 Text(m.key.orEmpty(), color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
                 Text("${m.oldValue} → ${m.newValue}", color = c.textPrimary, style = MaterialTheme.typography.titleMedium)
@@ -251,9 +260,15 @@ private fun MessageBubble(m: ChatMessage, onApply: (Long) -> Unit, onCancel: (Lo
                     ChatMessage.CHANGE -> (if (m.status == ChatMessage.APPLIED) c.upContainer else c.surfaceAlt) to c.textPrimary
                     else -> c.surface to c.textPrimary
                 }
-                Text(m.text, color = fg, style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.widthIn(max = 320.dp).background(bg, shape).padding(horizontal = 12.dp, vertical = 8.dp)
-                        .testTag(if (m.role == ChatMessage.ERROR) "AI_ERROR" else "AI_MSG"))
+                Column(
+                    Modifier.fillMaxWidth().background(bg, shape).padding(horizontal = 16.dp, vertical = 14.dp)
+                        .testTag(if (m.role == ChatMessage.ERROR) "AI_ERROR" else "AI_MSG"),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(if (mine) "You" else "AI", color = fg, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                    Text(m.text, color = fg, style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 24.sp))
+                    Text(com.dirk.kalshiodds.domain.EtTime.clock(m.atMs), color = fg.copy(alpha = 0.8f), style = MaterialTheme.typography.labelMedium)
+                }
             }
         }
     }

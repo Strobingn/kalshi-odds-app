@@ -62,11 +62,11 @@ object MistralApi {
                 }
                 throw LlmModelUnavailable(LlmProviders.MISTRAL, "model not on plan")
             }
-            if (GeminiApi.billing(raw.code, raw.body)) throw LlmBillingRequired(LlmProviders.MISTRAL, raw.body.take(180))
             if (raw.code == 429) {
                 val retry = raw.headers.entries.firstOrNull { it.key.equals("retry-after", true) }?.value
                 throw LlmRateLimited(LlmClient.retryAfterMs(retry), "$current rate limited")
             }
+            if (GeminiApi.billing(raw.code, raw.body)) throw LlmBillingRequired(LlmProviders.MISTRAL, raw.body.take(180))
             if (raw.code !in 200..299) {
                 throw IllegalStateException("$current failed: HTTP ${raw.code}: ${raw.body.take(200)}")
             }

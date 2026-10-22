@@ -30,7 +30,7 @@ class AiWindowWatchTest {
     private val research = KeptScalpers.FAIR_ID
     private var nowMs = 1_700_000_000_000L
     private var snap = WindowSnapshot("W1", 1_700_000_900_000L, "live window", "fp-1")
-    private var provider = LlmProviders.XAI
+    private var provider = LlmProviders.MISTRAL
 
     @Test fun clampsToTheAiLearnsBandAndDoesNotRestartTheLearner() {
         val c = MemoryScalpControls(ScalpControls(strategySettings = mapOf(
@@ -146,10 +146,10 @@ class AiWindowWatchTest {
         nowMs += 5_000
         snap = snap.copy(windowKey = "W2", fingerprint = "fp-next")
         w.tick()
-        assertEquals(2, calls) // a window roll inside 60s does not call the chat LLM
+        assertEquals(4, calls) // free pace is open, so a window roll calls again
         nowMs += 60_000
         w.tick()
-        assertEquals(3, calls)
+        assertEquals(5, calls)
     }
 
     @Test fun atMostThreeChangesPerScalperPerWindow() {
@@ -176,18 +176,16 @@ class AiWindowWatchTest {
         val seen = mutableListOf<LlmEndpoint>()
         val w = watcher(MemoryScalpControls()) { ep, _ -> seen += ep; reply("""{"adjustments":[]}""") }
         w.tick()
-        provider = LlmProviders.OPENAI
+        provider = LlmProviders.GROQ
         nowMs += 1_000
         snap = snap.copy(windowKey = "W2", fingerprint = "fp-2")
         w.tick()
-        assertEquals(listOf(LlmProviders.XAI), seen.map { it.provider })
+        assertEquals(listOf(LlmProviders.MISTRAL, LlmProviders.GROQ), seen.map { it.provider })
+        provider = LlmProviders.OPENAI
         nowMs += 60_000
+        snap = snap.copy(windowKey = "W3", fingerprint = "fp-3")
         w.tick()
-        assertEquals(listOf(LlmProviders.XAI, LlmProviders.OPENAI), seen.map { it.provider })
-        assertEquals("https://api.x.ai/v1", seen[0].baseUrl)
-        assertEquals("grok-4.7", seen[0].model)
-        assertEquals("https://api.openai.com/v1", seen[1].baseUrl)
-        assertEquals("gpt-4.1", seen[1].model)
+        assertEquals(listOf(LlmProviders.MISTRAL, LlmProviders.GROQ), seen.map { it.provider })
     }
 
     @Test fun mistralUsesTheFreePaceInsteadOfThePaidCap() {
@@ -206,22 +204,18 @@ class AiWindowWatchTest {
         assertEquals(2, calls)
     }
 
-    @Test fun everyChatProviderSharesOneSixtySecondCap() {
+    @Test fun paidProvidersAreNotCalledAutomatically() {
         val seen = mutableListOf<String>()
         val w = watcher(MemoryScalpControls()) { ep, _ -> seen += ep.provider; reply("""{"adjustments":[]}""") }
         w.tick()
-        for (id in listOf(LlmProviders.OPENAI, LlmProviders.OPENROUTER, LlmProviders.CUSTOM)) {
+        assertEquals(listOf(LlmProviders.MISTRAL), seen)
+        for (id in listOf(LlmProviders.OPENAI, LlmProviders.OPENROUTER, LlmProviders.CUSTOM, LlmProviders.XAI)) {
             provider = id
-            nowMs += 5_000
+            nowMs += 60_000
             snap = snap.copy(windowKey = "W-$id", fingerprint = "fp-$id")
             w.tick()
         }
-        assertEquals(listOf(LlmProviders.XAI), seen)
-        provider = LlmProviders.OPENAI
-        nowMs += 60_000
-        snap = snap.copy(windowKey = "W-open", fingerprint = "fp-open")
-        w.tick()
-        assertEquals(listOf(LlmProviders.XAI, LlmProviders.OPENAI), seen)
+        assertEquals(listOf(LlmProviders.MISTRAL), seen)
     }
 
     @Test fun onDeviceFreezeRunsWhileTheChatLlmWaits() {
@@ -244,7 +238,7 @@ class AiWindowWatchTest {
         w.tick()
         assertEquals(1, calls)
         assertFalse(first in controls.state.value.aiBench)
-        nowMs += 10_000
+        nowMs += 100
         paperCode = second
         snap = snap.copy(fingerprint = "inside-cap")
         w.tick()
@@ -265,7 +259,7 @@ class AiWindowWatchTest {
         w.noteKalshi(point(0))
         assertEquals(1, calls)
         repeat(6) { i ->
-            nowMs += 3_000
+            nowMs += 40
             w.noteKalshi(point(i + 1))
         }
         assertEquals(1, calls)

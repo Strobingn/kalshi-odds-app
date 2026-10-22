@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.llm
 
+import com.dirk.kalshiodds.domain.EtTime
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import org.json.JSONArray
@@ -47,8 +48,15 @@ class AiWatchStore(private val file: File? = null) {
     private val dailyCaps = HashMap<String, Int>()
     /** Optional monthly token cap per provider. Missing means no cap. */
     private val monthlyCaps = HashMap<String, Long>()
-    /** Provider reported billing or a paid tier. Automatic calls stay off until Dirk marks the key free again. */
-    private val billingHold = HashMap<String, String>()
+    /**
+     * Temporary automatic-call pause after an unambiguous billing response.
+     * Not written to disk, and it does not change the free-tier switch.
+     */
+    private val billingUntil = HashMap<String, Long>()
+    private val billingNote = HashMap<String, String>()
+    /** Why the last automatic call left the selected free provider. Display only. */
+    private var lastSwitch: String? = null
+    private val BILLING_PAUSE_MS = 15 * 60_000L
     private var priceTable: List<ModelPrice>? = null
     private val usage = ArrayList<UsageBucket>()
     private val hours = ArrayList<UsageHour>()
@@ -80,24 +88,32 @@ class AiWatchStore(private val file: File? = null) {
 
     fun setLiveFeed(on: Boolean) = synchronized(lock) { liveFeed = on; publishConfig(); persist() }
 
-    /** True when this provider may place an automatic LLM call. Manual chat does not ask. */
-    fun autoAllowed(provider: String, model: String): Boolean = synchronized(lock) {
+    /** True when this provider may place an automatic LLM call. Manual chat does not ask. A paid provider never may. */
+    fun autoAllowed(provider: String, model: String, nowMs: Long = System.currentTimeMillis()): Boolean = synchronized(lock) {
         if (!autoCalls || provider.isBlank()) return@synchronized false
-        if (billingHold.containsKey(provider)) return@synchronized false
-        if (LlmProviders.freeFamily(provider, model)) return@synchronized freeTier[provider] ?: true
-        true
+        if (!LlmProviders.freeFamily(provider, model)) return@synchronized false
+        if (billingPaused(provider, nowMs)) return@synchronized false
+        freeTier[provider] ?: true
     }
 
+    /** The saved free-tier switch. A temporary billing pause does not turn this off. */
     fun freeTierOn(provider: String, model: String): Boolean = synchronized(lock) {
-        if (billingHold.containsKey(provider)) return@synchronized false
         freeTier[provider] ?: LlmProviders.freeFamily(provider, model)
     }
+
+    fun lastSwitchLine(): String? = synchronized(lock) { lastSwitch }
 
     fun setFreeTier(provider: String, on: Boolean) = synchronized(lock) {
         val id = provider.trim()
         if (id.isEmpty()) return@synchronized
         freeTier[id] = on
-        if (on) billingHold.remove(id)
+        if (on) { billingUntil.remove(id); billingNote.remove(id) }
+        persist(); bump()
+    }
+
+    /** Automatic call left [from] for [to]. Does not change the saved provider, model, or switches. */
+    fun noteFallback(from: String, to: String, reason: String, atMs: Long = System.currentTimeMillis()) = synchronized(lock) {
+        lastSwitch = "Fell through from ${LlmProviders.shortLabel(from)} to ${LlmProviders.shortLabel(to)} · $reason · ${EtTime.clock(atMs)}"
         persist(); bump()
     }
 
@@ -132,16 +148,32 @@ class AiWatchStore(private val file: File? = null) {
         monthTokensLocked(provider, nowMs) < cap
     }
 
-    fun markBilled(provider: String, detail: String) = synchronized(lock) {
+    /**
+     * Unambiguous billing. Pauses automatic calls for this provider only, for 15 minutes.
+     * Does not persist, and does not change the free-tier flag or the automatic-calls switch.
+     */
+    fun markBilled(provider: String, detail: String, atMs: Long = System.currentTimeMillis()) = synchronized(lock) {
         val id = provider.trim().ifBlank { return@synchronized }
-        val label = LlmProviders.spec(id).label
-        billingHold[id] = "$label is manual-only: the provider reported billing or a paid tier. ${detail.take(140)}".trim()
-        freeTier[id] = false
+        val until = atMs + BILLING_PAUSE_MS
+        val label = LlmProviders.shortLabel(id)
+        billingUntil[id] = until
+        billingNote[id] = "$label automatic calls paused until ${EtTime.clock(until)} · billing required. ${detail.take(120)}".trim()
+        lastSwitch = "Paused $label · billing required · ${EtTime.clock(atMs)}"
         persist(); bump()
     }
 
-    fun blockNotice(provider: String, model: String): String = synchronized(lock) {
-        billingHold[provider]?.let { return@synchronized it }
+    private fun billingPaused(provider: String, nowMs: Long): Boolean {
+        val until = billingUntil[provider] ?: return false
+        if (nowMs >= until) {
+            billingUntil.remove(provider)
+            billingNote.remove(provider)
+            return false
+        }
+        return true
+    }
+
+    fun blockNotice(provider: String, model: String, nowMs: Long = System.currentTimeMillis()): String = synchronized(lock) {
+        if (billingPaused(provider, nowMs)) return@synchronized billingNote[provider].orEmpty()
         if (LlmProviders.freeFamily(provider, model) && freeTier[provider] == false) {
             return@synchronized "${LlmProviders.spec(provider).label} is manual-only: this key is not marked free tier."
         }
@@ -324,15 +356,20 @@ class AiWatchStore(private val file: File? = null) {
                     if (n > 0L) monthlyCaps[k] = n
                 }
             }
-            billingHold.clear()
+            // A quota error used to be saved as billingHold plus freeTier=false. Drop that hold
+            // and put the free-tier switch back. An explicit off with no hold stays off.
+            var repairedHold = false
             js.optJSONObject("billingHold")?.let { obj ->
                 val keys = obj.keys()
                 while (keys.hasNext()) {
                     val k = keys.next()
-                    val msg = obj.optString(k)
-                    if (msg.isNotBlank()) billingHold[k] = msg
+                    if (obj.optString(k).isNotBlank() && freeTier[k] == false) {
+                        freeTier.remove(k)
+                        repairedHold = true
+                    }
                 }
             }
+            lastSwitch = js.optString("lastSwitch").takeIf { it.isNotBlank() }
             intervalMs = js.optLong("intervalMs", AiWatchConfig.DEFAULT_INTERVAL_MS)
                 .coerceIn(AiWatchConfig.MIN_INTERVAL_MS, AiWatchConfig.MAX_INTERVAL_MS)
             budgetUsd = if (js.has("budgetUsd") && !js.isNull("budgetUsd")) js.optDouble("budgetUsd").takeIf { it.isFinite() && it > 0.0 } else null
@@ -387,6 +424,7 @@ class AiWatchStore(private val file: File? = null) {
                 }
             }
             publishConfig(); publishSummary()
+            if (repairedHold) persist()
             val now = System.currentTimeMillis()
             (monthlyCaps.keys + usage.map { it.provider }).forEach { publishMonthlyLocked(it, now) }
         }
@@ -403,7 +441,8 @@ class AiWatchStore(private val file: File? = null) {
             .put("freeTier", JSONObject().apply { freeTier.forEach { (k, v) -> put(k, v) } })
             .put("dailyCap", JSONObject().apply { dailyCaps.forEach { (k, v) -> put(k, v) } })
             .put("monthlyTokenCap", JSONObject().apply { monthlyCaps.forEach { (k, v) -> put(k, v) } })
-            .put("billingHold", JSONObject().apply { billingHold.forEach { (k, v) -> put(k, v) } })
+            .put("billingHold", JSONObject())
+            .put("lastSwitch", lastSwitch ?: "")
         if (priceTable == null) js.put("prices", JSONObject.NULL) else js.put("prices", JSONArray().apply {
             priceTable.orEmpty().forEach { put(JSONObject().put("model", it.model).put("input", it.inputPerMillion).put("output", it.outputPerMillion)) }
         })

@@ -27,7 +27,8 @@ class LlmPaperStrategy(
     private val pacer: FreeCallPacer = FreeCallPacer(),
     private val alternates: () -> List<LlmEndpoint> = { emptyList() },
     private val quotaOf: (LlmEndpoint) -> FreeQuota? = { LlmProviders.baseQuota(it.provider, it.model) },
-    private val onBilling: (String, String) -> Unit = { _, _ -> }
+    private val onBilling: (String, String) -> Unit = { _, _ -> },
+    private val onProviderSwitch: (String, String, String) -> Unit = { _, _, _ -> }
 ) {
     private val _status = MutableStateFlow("needs key")
     val status: StateFlow<String> = _status
@@ -77,7 +78,8 @@ class LlmPaperStrategy(
             },
             allowed = { autoCalls() && LlmProviders.freeFamily(it.provider, it.model) },
             ask = { use, msgs -> client.chatReply(msgs, 20, use, automatic = true) },
-            onBilling = onBilling
+            onBilling = onBilling,
+            onFallback = { from, to, reason -> onProviderSwitch(from.provider, to.provider, reason) }
         )
         if (hit != null) {
             sleepMs = CYCLE_MS

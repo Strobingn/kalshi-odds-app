@@ -159,6 +159,7 @@ internal fun ScalpWindowChart(d: ScalpAlgoDetail, onWindow: (String) -> Unit = {
             }
             Text("○ Buy order   ▲ Buy fill   ■ Sell fill   · Signal", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
             Text("Green UP · red DOWN · both sides. Dashed 50¢ buy ceiling · tap a marker for price and time", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
+            data.quietSideLine()?.let { Text(it, color = c.textSecondary, style = MaterialTheme.typography.bodySmall) }
             run {
                 val upAny = data.points.any { it.upBidCents != null }
                 val downAny = data.points.any { it.downBidCents != null }

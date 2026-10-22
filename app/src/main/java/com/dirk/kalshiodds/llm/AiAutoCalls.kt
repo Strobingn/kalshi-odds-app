@@ -31,8 +31,9 @@ object AiAutoCalls {
 
     /**
      * One automatic free-tier call, or null when the pace, budget, overlap, or a dead key says to skip.
-     * On 429, try the next configured free provider. Never a paid one.
-     * A billing response is reported and that provider is left for the caller to shut off; the next free provider may run.
+     * On a rate limit, quota, timeout, or other error, try the next free provider. Never a paid one.
+     * A billing response pauses that one provider; the next free provider may still run.
+     * [onFallback] is display-only. It must not change the saved provider, model, or switches.
      */
     fun callFree(
         selected: LlmEndpoint,
@@ -44,17 +45,20 @@ object AiAutoCalls {
         quotaOf: (LlmEndpoint) -> FreeQuota?,
         allowed: (LlmEndpoint) -> Boolean,
         ask: (LlmEndpoint, List<Pair<String, String>>) -> LlmClient.Reply,
-        onBilling: (String, String) -> Unit
+        onBilling: (String, String) -> Unit,
+        onFallback: (LlmEndpoint, LlmEndpoint, String) -> Unit = { _, _, _ -> }
     ): Pair<LlmEndpoint, LlmClient.Reply>? {
-        if (!allowed(selected) || !LlmProviders.freeFamily(selected.provider, selected.model)) return null
+        if (!LlmProviders.freeFamily(selected.provider, selected.model)) return null
         val tail = slots.asSequence()
             .filter { it.usable && it.provider != selected.provider }
             .filter { LlmProviders.freeFamily(it.provider, it.model) && allowed(it) }
             .distinctBy { it.provider }
             .sortedBy { LlmProviders.freeFallbackRank(it.provider) }
             .toList()
-        val order = listOf(selected) + tail
+        val order = (if (allowed(selected)) listOf(selected) else emptyList()) + tail
+        if (order.isEmpty()) return null
         val tokens = AiCompact.tokens(messages, reserveCompletion)
+        var failed: Pair<LlmEndpoint, String>? = if (allowed(selected)) null else selected to "paused"
         for (ep in order) {
             if (!allowed(ep)) continue
             val quota = quotaOf(ep) ?: continue
@@ -64,17 +68,24 @@ object AiAutoCalls {
                 val reply = ask(use, messages)
                 pacer.record(use.provider, model, nowMs, tokens)
                 pacer.noteRemaining(use.provider, model, reply.remainingRequests, reply.remainingTokens, nowMs)
+                val prior = failed
+                if (prior != null && prior.first.provider != use.provider) onFallback(prior.first, use, prior.second)
                 return use to reply
             } catch (e: LlmSkipped) {
-                return null
+                if (e.message == "timeout") failed = use to "timeout"
+                else return null
             } catch (e: LlmRateLimited) {
                 pacer.note429(use.provider, model, e.retryAfterMs, nowMs)
+                failed = use to "rate limit"
             } catch (e: LlmModelUnavailable) {
                 // The plan rejected every model on this provider. Try the next free provider. Do not back off.
+                failed = use to "model not on plan"
             } catch (e: LlmBillingRequired) {
                 onBilling(e.provider.ifBlank { use.provider }, e.message ?: "billing")
+                failed = use to "billing required"
             } catch (e: Exception) {
                 pacer.note429(use.provider, model, quota.perModelPaceMs.coerceAtLeast(1_000L), nowMs)
+                failed = use to "error"
             }
         }
         return null

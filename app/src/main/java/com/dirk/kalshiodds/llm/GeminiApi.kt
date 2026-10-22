@@ -46,17 +46,26 @@ object GeminiApi {
         return "not_found" in b || "not found" in b || "no longer available" in b
     }
 
-    /** Billing or an explicit paid tier. A 429 rate limit is not billing. */
+    /**
+     * Unambiguous billing. A 429, a timeout, or a quota/rate-limit body is not billing,
+     * even when Gemini says "check your plan and billing details".
+     */
     fun billing(code: Int, body: String): Boolean {
+        if (code == 429 || code == 408) return false
         if (code == 402) return true
         val b = body.lowercase()
+        if (listOf(
+                "rate limit", "ratelimit", "too many requests", "resource exhausted",
+                "quota exceeded", "exceeded your current quota", "retry in"
+            ).any { it in b }
+        ) return false
         return listOf(
-            "billing",
             "payment required",
-            "paid tier",
             "enable billing",
+            "billing account",
             "insufficient credit",
-            "requires payment"
+            "requires payment",
+            "paid tier"
         ).any { it in b }
     }
 
@@ -91,10 +100,10 @@ object GeminiApi {
                     continue
                 }
             }
-            if (billing(raw.code, raw.body)) throw LlmBillingRequired(LlmProviders.GEMINI, raw.body.take(180))
             if (raw.code == 429) {
                 throw LlmRateLimited(LlmClient.retryAfterMs(raw.headers["retry-after"]), "$current rate limited")
             }
+            if (billing(raw.code, raw.body)) throw LlmBillingRequired(LlmProviders.GEMINI, raw.body.take(180))
             if (raw.code !in 200..299) {
                 throw IllegalStateException("$current failed: HTTP ${raw.code}: ${raw.body.take(200)}")
             }
