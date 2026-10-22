@@ -29,13 +29,24 @@ class LearningModeTest {
     }
 
     @Test
-    fun learningModeRunsAndShowsEveryStrategy() = learning {
-        assertEquals(ScalpStrategy.values().toList(), ScalpStrategy.ACTIVE)
-        assertTrue(ScalpStrategy.RETIRED.isEmpty())
-        for (st in retired) assertFalse(st.name, ScalpStrategy.isRetired(st.name))
-        // The screens read the same list, so the retired strategies get rows and settings.
-        assertEquals(ScalpStrategy.values().size, ArenaTable.rows(ScalperState.fresh(), emptyList()).size)
-        assertEquals(ScalpStrategy.values().size, ScalperResults.leaderboard(ScalperState.fresh()).size)
+    fun learningModeRunsEveryStrategyExceptTheBigLosers() = learning {
+        val big = listOf(
+            ScalpStrategy.DIP_HUNTER, ScalpStrategy.MOMENTUM_SNIPER, ScalpStrategy.EXTREME_REVERSION, ScalpStrategy.WHALE_FOLLOW,
+            ScalpStrategy.STRETCH_FADE, ScalpStrategy.DIP_HUNTER_REST, ScalpStrategy.ML_REST, ScalpStrategy.MOMENTUM_SNIPER_REST,
+            ScalpStrategy.BOOK_IMBALANCE, ScalpStrategy.EXTREME_REVERSION_REST, ScalpStrategy.PANIC_FADE, ScalpStrategy.STEADY_CLIMB,
+            ScalpStrategy.TREND_PULLBACK, ScalpStrategy.BOUNCE, ScalpStrategy.FLOW_FOLLOW, ScalpStrategy.PENNY_SCALPER,
+            ScalpStrategy.BREAKOUT_50
+        )
+        val expected = ScalpStrategy.values().filter { it !in big }
+        assertEquals(expected, ScalpStrategy.ACTIVE)
+        assertEquals(big.toSet(), ScalpStrategy.RETIRED)
+        for (st in big) assertTrue(st.name, ScalpStrategy.isRetired(st.name))
+        // The smaller retired strategies come back.
+        for (st in retired.filter { it !in big }) assertFalse(st.name, ScalpStrategy.isRetired(st.name))
+        assertTrue(ScalpStrategy.ACTIVE.size > ScalpStrategy.values().size - retired.size)
+        // The screens read the same list.
+        assertEquals(expected.size, ArenaTable.rows(ScalperState.fresh(), emptyList()).size)
+        assertEquals(expected.size, ScalperResults.leaderboard(ScalperState.fresh()).size)
     }
 
     @Test
@@ -45,6 +56,7 @@ class LearningModeTest {
 
         val on = learning { window() }
         assertTrue("the retired scalpers place bets", retired.any { on.stats(it.name).posted > 0 })
+        assertEquals("a big loser never bets", 0, on.stats("DIP_HUNTER").posted)
         assertTrue(
             "far more bets than the late strategies alone",
             on.stats(ScalperState.ALL).posted > off.stats(ScalperState.ALL).posted
@@ -54,7 +66,7 @@ class LearningModeTest {
     @Test
     fun retiredStrategiesBetSmallInLearningModeAndTheMoneyMakersKeepTheirSize() {
         val t = ScalpTuning()
-        val loser = ScalpStrategy.DIP_HUNTER
+        val loser = ScalpStrategy.IMPROVE_1C
         val winner = ScalpStrategy.LATE_COMEBACK
         // Off: everything that runs bets the arena's size.
         assertEquals(t.defaultContracts, t.tuned(winner).contracts)
@@ -70,7 +82,7 @@ class LearningModeTest {
 
     @Test
     fun theSupervisorCanTuneARetiredStrategyOnlyInLearningMode() {
-        val st = ScalpStrategy.DIP_HUNTER
+        val st = ScalpStrategy.IMPROVE_1C
         assertTrue(SupervisorBounds.apply(ScalpTuning(), st.name, "targetCents", 12.0) is SupervisorBounds.Change.Rejected)
         learning {
             val t = ScalpTuning()

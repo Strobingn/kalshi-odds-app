@@ -19,11 +19,14 @@ object AppRoutes {
     const val CHART = "chart"
     const val ARB = "arb"
 
+    /** Chat with the Scalping AI or the Paper AI (reached from Data; not a bottom tab). */
+    const val AI_CHAT = "ai-chat"
+
     /** Strategy arena (paper scalper): the 15-strategy leaderboard, totals, bankroll chart and every trade. */
     const val SCALPER = "scalper"
 
     val ALL: List<String> = listOf(
-        HOME, SETTINGS, SCORECARD, DATA, HISTORY, SIGNAL_HISTORY, CHART, ARB, SCALPER
+        HOME, SETTINGS, SCORECARD, DATA, HISTORY, SIGNAL_HISTORY, CHART, ARB, SCALPER, AI_CHAT
     )
 
     /** Destinations deliberately exposed in the persistent bottom navigation. */

@@ -39,6 +39,20 @@ class SecureExtraStore(context: Context) {
             prefs.edit().putString(KEY_MISTRAL, value.trim()).commit()
         }
 
+    /** Gemini key (free tier), the third provider slot for both AIs. */
+    var geminiApiKey: String
+        get() = prefs.getString(KEY_GEMINI, "").orEmpty()
+        set(value) {
+            prefs.edit().putString(KEY_GEMINI, value.trim()).commit()
+        }
+
+    /** The Paper AI (one paper bet per window) runs while this is on (the default) and a key is saved. */
+    var paperAiEnabled: Boolean
+        get() = prefs.getBoolean(KEY_PAPER_AI_ON, true)
+        set(value) {
+            prefs.edit().putBoolean(KEY_PAPER_AI_ON, value).commit()
+        }
+
     /** The AI supervisor tunes the paper scalper every minute while this is on (the default) and a key is saved. */
     var supervisorEnabled: Boolean
         get() = prefs.getBoolean(KEY_SUPERVISOR_ON, true)
@@ -85,6 +99,8 @@ class SecureExtraStore(context: Context) {
         private const val KEY_GITHUB = "github_token"
         private const val KEY_GROQ = "groq_api_key"
         private const val KEY_MISTRAL = "mistral_api_key"
+        private const val KEY_GEMINI = "gemini_api_key"
+        private const val KEY_PAPER_AI_ON = "paper_ai_enabled"
         private const val KEY_SUPERVISOR_ON = "ai_supervisor_enabled"
         private const val KEY_DEMO_ID = "kalshi_demo_key_id"
         private const val KEY_DEMO_PEM = "kalshi_demo_private_key_pem"

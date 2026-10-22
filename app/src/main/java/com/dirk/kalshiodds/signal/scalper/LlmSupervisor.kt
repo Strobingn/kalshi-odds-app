@@ -235,8 +235,24 @@ fun interface LlmChat {
     fun ask(system: String, user: String, tools: JsonArray): String?
 }
 
-/** An OpenAI-compatible provider. Groq and Mistral both speak this. */
-class LlmProvider(val name: String, val baseUrl: String, val model: String, val key: () -> String)
+/** An OpenAI-compatible provider. Groq, Mistral and Gemini all speak this. */
+class LlmProvider(
+    val name: String,
+    val baseUrl: String,
+    val model: String,
+    /** "required" forces the tool call; Gemini's compatibility layer is only documented with "auto". */
+    val toolChoice: String = "required",
+    val key: () -> String
+) {
+    companion object {
+        const val GROQ_URL = "https://api.groq.com/openai/v1"
+        const val MISTRAL_URL = "https://api.mistral.ai/v1"
+        const val GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
+        const val GROQ_MODEL = "llama-3.3-70b-versatile"
+        const val MISTRAL_MODEL = "mistral-large-latest"
+        const val GEMINI_MODEL = "gemini-2.5-flash"
+    }
+}
 
 /** Tries each provider in order; the next one is used when one is down, rate limited or returns junk. */
 class HttpLlmChat(
@@ -253,7 +269,7 @@ class HttpLlmChat(
                     put("model", p.model)
                     put("temperature", 0.2)
                     put("max_tokens", 1024)
-                    put("tool_choice", "required")
+                    put("tool_choice", p.toolChoice)
                     put("tools", tools)
                     putJsonArray("messages") {
                         add(buildJsonObject { put("role", "system"); put("content", system) })
@@ -283,7 +299,48 @@ class HttpLlmChat(
         return null
     }
 
+    /**
+     * A plain chat turn for the chat screen: [messages] are (role, text) pairs, system first. Tries each provider in order
+     * and returns (provider name, answer text), or null when none answered. [onError] gets each failure.
+     */
+    fun chat(messages: List<Pair<String, String>>): Pair<String, String>? {
+        for (p in providers) {
+            val key = p.key().trim()
+            if (key.isEmpty()) continue
+            try {
+                val body = buildJsonObject {
+                    put("model", p.model)
+                    put("temperature", 0.4)
+                    put("max_tokens", 900)
+                    putJsonArray("messages") {
+                        for ((role, text) in messages) add(buildJsonObject { put("role", role); put("content", text) })
+                    }
+                }
+                val req = Request.Builder()
+                    .url(p.baseUrl.trimEnd('/') + "/chat/completions")
+                    .header("Authorization", "Bearer $key")
+                    .post(body.toString().toRequestBody("application/json".toMediaType()))
+                    .build()
+                val text = http.newCall(req).execute().use { r ->
+                    val raw = r.body?.string().orEmpty()
+                    if (!r.isSuccessful) { onError("${p.name} HTTP ${r.code}"); null } else parseContent(raw)
+                }
+                if (!text.isNullOrBlank()) return p.name to text
+                onError("${p.name}: empty answer")
+            } catch (e: Exception) {
+                onError("${p.name}: ${e.javaClass.simpleName}")
+            }
+        }
+        return null
+    }
+
     companion object {
+        /** `choices[0].message.content`, or null. */
+        fun parseContent(responseText: String): String? = runCatching {
+            Json.parseToJsonElement(responseText).jsonObject["choices"]!!.jsonArray[0].jsonObject["message"]!!
+                .jsonObject["content"]!!.jsonPrimitive.content
+        }.getOrNull()
+
         /** `choices[0].message.tool_calls[0].function.arguments`, or null. */
         fun parseArguments(responseText: String): String? = runCatching {
             Json.parseToJsonElement(responseText).jsonObject["choices"]!!.jsonArray[0].jsonObject["message"]!!

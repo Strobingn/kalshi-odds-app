@@ -326,22 +326,35 @@ enum class ScalpStrategy(
         }
 
         /**
-         * Learning mode (Data → AI supervisor, on by default): every strategy runs and shows, retired or not, so the
+         * Learning mode (Data → AI supervisor, on by default): every strategy except the big losers runs and shows, retired or not, so the
          * paper arena places as many bets as it can and the AI supervisor has data on all of them. Off = only the
          * strategies that made money in the replay. Read on every decision, so flipping it takes effect at once.
          */
         @Volatile
         var learningMode: Boolean = false
 
-        /** The strategies taken out of the arena (none while [learningMode] is on). */
-        val RETIRED: Set<ScalpStrategy> get() = if (learningMode) emptySet() else RETIRED_BASE
+        /**
+         * The big losers: high-volume scalpers that lost about $1,000 to $48,000 each in the 11-day replay. They stay
+         * out of the arena even in learning mode. The smaller retired strategies come back in learning mode.
+         */
+        private val BIG_LOSERS: Set<ScalpStrategy> by lazy {
+            setOf(
+                DIP_HUNTER, MOMENTUM_SNIPER, EXTREME_REVERSION, WHALE_FOLLOW, STRETCH_FADE, DIP_HUNTER_REST, ML_REST,
+                MOMENTUM_SNIPER_REST, BOOK_IMBALANCE, EXTREME_REVERSION_REST, PANIC_FADE, STEADY_CLIMB, TREND_PULLBACK,
+                BOUNCE, FLOW_FOLLOW, PENNY_SCALPER, BREAKOUT_50
+            )
+        }
+
+        /** The strategies taken out of the arena: all retired ones, or only the big losers while [learningMode] is on. */
+        val RETIRED: Set<ScalpStrategy> get() = if (learningMode) BIG_LOSERS else RETIRED_BASE
 
         private val ACTIVE_BASE: List<ScalpStrategy> by lazy { values().filter { it !in RETIRED_BASE } }
-        private val ALL_STRATEGIES: List<ScalpStrategy> by lazy { values().toList() }
+        private val ACTIVE_LEARNING: List<ScalpStrategy> by lazy { values().filter { it !in BIG_LOSERS } }
         private val RETIRED_NAMES: Set<String> by lazy { RETIRED_BASE.mapTo(HashSet()) { it.name } }
+        private val BIG_LOSER_NAMES: Set<String> by lazy { BIG_LOSERS.mapTo(HashSet()) { it.name } }
 
-        /** The strategies the arena runs and shows: the replay's money makers, or all of them in [learningMode]. */
-        val ACTIVE: List<ScalpStrategy> get() = if (learningMode) ALL_STRATEGIES else ACTIVE_BASE
+        /** The strategies the arena runs and shows: the replay's money makers, plus the small retired ones in [learningMode]. */
+        val ACTIVE: List<ScalpStrategy> get() = if (learningMode) ACTIVE_LEARNING else ACTIVE_BASE
 
         /**
          * Contracts per order a retired strategy bets while [learningMode] is on. They lost on every one of the 11
@@ -354,7 +367,7 @@ enum class ScalpStrategy(
         fun isRetiredBase(st: ScalpStrategy): Boolean = st in RETIRED_BASE
 
         /** A trade-file or ledger name of a retired strategy. */
-        fun isRetired(name: String): Boolean = !learningMode && name in RETIRED_NAMES
+        fun isRetired(name: String): Boolean = name in (if (learningMode) BIG_LOSER_NAMES else RETIRED_NAMES)
 
         /** Price move over 10 s that the dip-hunter and the momentum-sniper react to. */
         const val FAST_MOVE_DOLLARS = 0.02

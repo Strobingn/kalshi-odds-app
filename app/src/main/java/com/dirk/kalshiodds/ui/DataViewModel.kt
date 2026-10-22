@@ -40,6 +40,8 @@ data class DataUiState(
     val githubTokenDraft: String = "",
     val groqKeyDraft: String = "",
     val mistralKeyDraft: String = "",
+    val geminiKeyDraft: String = "",
+    val paperAiOn: Boolean = true,
     val supervisorOn: Boolean = false,
     val learningMode: Boolean = true,
     val syncLine: String? = null,
@@ -54,6 +56,7 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _state = MutableStateFlow(DataUiState(
         supervisorOn = container.extraSecrets.supervisorEnabled,
+        paperAiOn = container.extraSecrets.paperAiEnabled,
         learningMode = container.learningMode
     ))
     val state: StateFlow<DataUiState> = _state.asStateFlow()
@@ -61,6 +64,18 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
     /** AI supervisor (signal/scalper/LlmSupervisor.kt): last tick, and its newest journal lines. */
     val supervisorStatus: StateFlow<String> = container.llmSupervisor.status
     val supervisorLog: StateFlow<List<String>> = container.llmSupervisor.log
+
+    /** Paper AI (signal/scalper/PaperAi.kt): a separate AI that places one paper bet per window. */
+    val paperAiStatus: StateFlow<String> = container.paperAi.status
+    val paperAiLog: StateFlow<List<String>> = container.paperAi.log
+    val paperAiRecord: StateFlow<String> = container.paperAi.record
+
+    fun setGeminiKeyDraft(v: String) = _state.update { it.copy(geminiKeyDraft = v) }
+
+    fun setPaperAiOn(on: Boolean) {
+        container.extraSecrets.paperAiEnabled = on
+        _state.update { it.copy(paperAiOn = on) }
+    }
 
     fun setGroqKeyDraft(v: String) = _state.update { it.copy(groqKeyDraft = v) }
 
@@ -71,11 +86,14 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
         val m = _state.value.mistralKeyDraft.trim()
         if (g.isNotEmpty()) container.extraSecrets.groqApiKey = g
         if (m.isNotEmpty()) container.extraSecrets.mistralApiKey = m
+        val gem = _state.value.geminiKeyDraft.trim()
+        if (gem.isNotEmpty()) container.extraSecrets.geminiApiKey = gem
         _state.update {
             it.copy(
                 groqKeyDraft = "",
                 mistralKeyDraft = "",
-                message = if (g.isEmpty() && m.isEmpty()) "Nothing to save" else "AI supervisor keys stored (encrypted)"
+                geminiKeyDraft = "",
+                message = if (g.isEmpty() && m.isEmpty() && gem.isEmpty()) "Nothing to save" else "AI keys stored (encrypted)"
             )
         }
     }

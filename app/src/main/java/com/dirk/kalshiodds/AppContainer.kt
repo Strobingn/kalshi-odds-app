@@ -231,19 +231,30 @@ class AppContainer(context: Context) {
         }
 
     val supervisorLog = com.dirk.kalshiodds.signal.scalper.SupervisorLog(java.io.File(app.filesDir, "supervisor"))
+
+    /**
+     * Provider slots (Groq, Mistral, Gemini; keys saved encrypted on the Data screen). Each AI has its OWN order so the two
+     * AIs spread across the free tiers: the Scalping AI calls every 60 s, the Paper AI once per window.
+     */
+    private fun llmProviders(vararg order: String): List<com.dirk.kalshiodds.signal.scalper.LlmProvider> {
+        val P = com.dirk.kalshiodds.signal.scalper.LlmProvider
+        return order.map { n ->
+            when (n) {
+                "groq" -> com.dirk.kalshiodds.signal.scalper.LlmProvider("groq", P.GROQ_URL, P.GROQ_MODEL) { extraSecrets.groqApiKey }
+                "mistral" -> com.dirk.kalshiodds.signal.scalper.LlmProvider("mistral", P.MISTRAL_URL, P.MISTRAL_MODEL) { extraSecrets.mistralApiKey }
+                else -> com.dirk.kalshiodds.signal.scalper.LlmProvider("gemini", P.GEMINI_URL, P.GEMINI_MODEL, "auto") { extraSecrets.geminiApiKey }
+            }
+        }
+    }
+    val anyLlmKey: Boolean
+        get() = extraSecrets.groqApiKey.isNotBlank() || extraSecrets.mistralApiKey.isNotBlank() || extraSecrets.geminiApiKey.isNotBlank()
+    private fun llmError(kind: String): (String) -> Unit =
+        { msg -> supervisorLog.append(kind, "{\"ts\":${System.currentTimeMillis()},\"error\":\"$msg\"}") }
+
+    /** Scalping AI: tunes the scalping algorithms every 60 s. Groq, then Gemini, then Mistral. */
     val llmSupervisor = com.dirk.kalshiodds.signal.scalper.LlmSupervisor(
         tuning = scalperStore.tuning,
-        chat = com.dirk.kalshiodds.signal.scalper.HttpLlmChat(
-            providers = listOf(
-                com.dirk.kalshiodds.signal.scalper.LlmProvider(
-                    "groq", "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile"
-                ) { extraSecrets.groqApiKey },
-                com.dirk.kalshiodds.signal.scalper.LlmProvider(
-                    "mistral", "https://api.mistral.ai/v1", "mistral-large-latest"
-                ) { extraSecrets.mistralApiKey }
-            ),
-            onError = { msg -> supervisorLog.append("errors", "{\"ts\":${System.currentTimeMillis()},\"error\":\"$msg\"}") }
-        ),
+        chat = com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders("groq", "gemini", "mistral"), onError = llmError("errors")),
         feed = { supervisorFeed() },
         stats = { name -> scalperStore.ledger.snapshot().stats(name) },
         sink = { kind, line -> supervisorLog.append(kind, line) },
@@ -255,6 +266,36 @@ class AppContainer(context: Context) {
             }
         }.getOrNull() ?: com.dirk.kalshiodds.signal.scalper.SupervisorMemory()
     )
+
+    /** Paper AI: a different AI. Decides one paper bet per window. Gemini, then Mistral, then Groq. Own memory and journal. */
+    val paperAi = com.dirk.kalshiodds.signal.scalper.PaperAi(
+        chat = com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders("gemini", "mistral", "groq"), onError = llmError("paper_ai_errors")),
+        feed = { supervisorFeed() },
+        sink = { kind, line -> supervisorLog.append(kind, line) },
+        persistMemory = { json -> supervisorPrefs.edit().putString("paper_ai_memory", json).apply() },
+        initialMemory = runCatching {
+            supervisorPrefs.getString("paper_ai_memory", null)?.let {
+                kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+                    .decodeFromString(com.dirk.kalshiodds.signal.scalper.PaperAiMemory.serializer(), it)
+            }
+        }.getOrNull() ?: com.dirk.kalshiodds.signal.scalper.PaperAiMemory()
+    )
+
+    /** The chat screen: one thread per AI, history kept on the phone. */
+    private val chatLlm = com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders("gemini", "groq", "mistral"), onError = llmError("chat_errors"))
+    val aiChat = com.dirk.kalshiodds.signal.scalper.AiChat(
+        ask = { msgs -> chatLlm.chat(msgs) },
+        tuning = scalperStore.tuning,
+        context = { which ->
+            if (which == com.dirk.kalshiodds.signal.scalper.AiChat.PAPER) {
+                "Paper AI record: ${paperAi.record.value}\nStatus: ${paperAi.status.value}\nOpen bets: ${paperAi.openBets().joinToString { it.side + " " + it.ticker }}\nLive feed: ${supervisorFeed()}"
+            } else {
+                "Scalping AI status: ${llmSupervisor.status.value}\nRecent journal: ${llmSupervisor.log.value.take(5).joinToString(" | ")}\nLive feed: ${supervisorFeed()}"
+            }
+        },
+        load = { supervisorPrefs.getString("chat_json", null) },
+        save = { json -> supervisorPrefs.edit().putString("chat_json", json).apply() }
+    )
     private val supervisorScope = kotlinx.coroutines.CoroutineScope(
         kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO
     )
@@ -264,13 +305,13 @@ class AppContainer(context: Context) {
         supervisorScope.launch {
             while (true) {
                 kotlinx.coroutines.delay(60_000L)
-                if (extraSecrets.supervisorEnabled) {
-                    if (extraSecrets.groqApiKey.isBlank() && extraSecrets.mistralApiKey.isBlank()) {
-                        llmSupervisor.idle("add a Groq or Mistral key on the Data screen to start")
-                    } else {
-                        runCatching { llmSupervisor.tick() }
-                    }
+                if (!anyLlmKey) {
+                    if (extraSecrets.supervisorEnabled) llmSupervisor.idle("add a Groq, Mistral or Gemini key on the Data screen to start")
+                    if (extraSecrets.paperAiEnabled) paperAi.idle("add a Groq, Mistral or Gemini key on the Data screen to start")
+                    continue
                 }
+                if (extraSecrets.supervisorEnabled) runCatching { llmSupervisor.tick() }
+                if (extraSecrets.paperAiEnabled) runCatching { paperAi.tick() }
             }
         }
     }
@@ -404,6 +445,7 @@ class AppContainer(context: Context) {
             clearLead.ledger.settle(ticker, result)
             lateComeback.ledger.settle(ticker, result)
             scalper.settle(ticker, result)
+            paperAi.onSettled(ticker, result)
             paperLimits.closeTicker(ticker)
             recorder.onSettled(ticker, result)
         },
