@@ -18,7 +18,8 @@ object SignalCopy {
         val call: String,
         val modelLine: String,
         val outcome: String?,
-        val details: String?
+        val details: String?,
+        val edgePts: Double? = null
     )
 
     fun callLabel(side: String?): String = when (SignalStance.normalizeSide(side)) {
@@ -97,7 +98,8 @@ object SignalCopy {
             call = resolved.call,
             modelLine = modelVsMarketLine(modelYes, marketYes, resolved.lineSide),
             outcome = outcomeLabel(settled),
-            details = mergeDetails(resolved.detailsExtra, details)
+            details = mergeDetails(resolved.detailsExtra, details),
+            edgePts = displayedEdgePts(modelYes, marketYes, resolved.lineSide)
         )
     }
 
@@ -114,7 +116,8 @@ object SignalCopy {
             call = resolved.call,
             modelLine = modelVsMarketLine(resolved.modelYes, resolved.marketYes, resolved.lineSide),
             outcome = outcomeLabel(settled),
-            details = mergeDetails(resolved.detailsExtra, detailsForAlert(alert))
+            details = mergeDetails(resolved.detailsExtra, detailsForAlert(alert)),
+            edgePts = displayedEdgePts(resolved.modelYes, resolved.marketYes, resolved.lineSide)
         )
     }
 

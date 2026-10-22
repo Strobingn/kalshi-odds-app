@@ -48,7 +48,11 @@ import com.dirk.kalshiodds.data.local.history.HistoryAssembler
 import com.dirk.kalshiodds.data.local.history.HistoryBet
 import com.dirk.kalshiodds.data.local.history.HistorySession
 import com.dirk.kalshiodds.data.local.history.SettingsChange
+import com.dirk.kalshiodds.ui.components.BetPnlSequenceChart
+import com.dirk.kalshiodds.ui.components.EquityAndDrawdownChartCard
+import com.dirk.kalshiodds.ui.components.SignalEdgeDistributionCard
 import com.dirk.kalshiodds.ui.components.SignalSummaryCard
+import com.dirk.kalshiodds.ui.components.TelemetryChartMath
 import com.dirk.kalshiodds.domain.MarketUiModel
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -110,10 +114,22 @@ fun HistoryScreen(
                         if (state.pnl.size >= 2) {
                             item { CumulativePnlChart(state.pnl) }
                         }
+                        if (state.bets.size >= 2) {
+                            item { BetPnlSequenceChart(state.bets) }
+                        }
                         items(state.bets, key = { it.id }) { BetRow(it) }
                     }
-                    1 -> items(state.signals, key = { it.id }) { row ->
-                        SignalSummaryCard(signalCard(row))
+                    1 -> {
+                        if (state.signals.isNotEmpty()) {
+                            item {
+                                SignalEdgeDistributionCard(
+                                    TelemetryChartMath.historySignalDistribution(state.signals)
+                                )
+                            }
+                        }
+                        items(state.signals, key = { it.id }) { row ->
+                            SignalSummaryCard(signalCard(row))
+                        }
                     }
                     2 -> items(state.sessions, key = { it.id }) { SessionRow(it) }
                     3 -> {
@@ -230,26 +246,7 @@ private fun TotalsCard(t: HistoryAssembler.Totals) {
 
 @Composable
 private fun CumulativePnlChart(points: List<Pair<Long, Double>>) {
-    val colors = DipTheme.colors
-    val color = colors.textPrimary
-    Column(Modifier.fillMaxWidth()) {
-        Text("Cumulative P&L", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
-        Canvas(Modifier.fillMaxWidth().height(96.dp).padding(top = 4.dp)) {
-            val ys = points.map { it.second }
-            val minY = (ys.minOrNull() ?: 0.0) - 1.0
-            val maxY = (ys.maxOrNull() ?: 0.0) + 1.0
-            val spanY = (maxY - minY).coerceAtLeast(1.0)
-            val path = Path()
-            points.forEachIndexed { i, p ->
-                val x = size.width * i / (points.size - 1).coerceAtLeast(1).toFloat()
-                val y = size.height * (1f - ((p.second - minY) / spanY).toFloat()).coerceIn(0f, 1f)
-                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
-            }
-            drawPath(path, color, style = Stroke(width = 3f, cap = StrokeCap.Round))
-            val zero = size.height * (1f - ((0.0 - minY) / spanY).toFloat()).coerceIn(0f, 1f)
-            drawLine(color.copy(alpha = 0.25f), Offset(0f, zero), Offset(size.width, zero), strokeWidth = 1f)
-        }
-    }
+    EquityAndDrawdownChartCard(title = "Cumulative P&L", points = points)
 }
 
 @Composable

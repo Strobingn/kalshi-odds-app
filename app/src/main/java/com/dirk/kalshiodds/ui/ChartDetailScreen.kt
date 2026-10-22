@@ -33,6 +33,7 @@ import com.dirk.kalshiodds.ui.components.TapeConflictBanner
 import com.dirk.kalshiodds.ui.components.TargetNowLine
 import com.dirk.kalshiodds.ui.components.TimeLeftLabel
 import com.dirk.kalshiodds.ui.components.UpDownBuyButtons
+import com.dirk.kalshiodds.ui.components.WindowMicrostructureChart
 import com.dirk.kalshiodds.ui.theme.DipTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -106,6 +107,11 @@ fun ChartDetailScreen(
                 "Orange = Coinbase/Binance spot with dashed TARGET. Green/red = UP/DOWN best bids. Drag to scrub.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary,
+                modifier = Modifier.padding(top = 12.dp)
+            )
+            WindowMicrostructureChart(
+                points = points,
+                market = market,
                 modifier = Modifier.padding(top = 12.dp)
             )
             UpDownBuyButtons(

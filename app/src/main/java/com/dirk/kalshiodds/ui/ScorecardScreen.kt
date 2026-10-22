@@ -40,8 +40,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.feedback.ScorecardLedger
 import com.dirk.kalshiodds.signal.feedback.ScorecardMetrics
+import com.dirk.kalshiodds.ui.components.BucketVisualBar
+import com.dirk.kalshiodds.ui.components.CalibrationAndBrierChartCard
+import com.dirk.kalshiodds.ui.components.EquityAndDrawdownChartCard
 import com.dirk.kalshiodds.ui.theme.DipTheme
 import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -188,10 +192,17 @@ fun ScorecardScreen(
                 if (ledger.cumulativePnl.size >= 2) {
                     item { CumulativePnlCard(ledger.cumulativePnl) }
                 }
-                item { SectionCard(ScorecardCopy.SIDE_TITLE) { view.bySide.forEach { BucketRow(it) } } }
-                item { SectionCard(ScorecardCopy.PRICE_TITLE) { view.byPrice.forEach { BucketRow(it) } } }
-                item { SectionCard(ScorecardCopy.TIME_TITLE) { view.timeOfDay.forEach { BucketRow(it) } } }
-                item { SectionCard(ScorecardCopy.CONF_TITLE) { view.byConfidence.forEach { BucketRow(it) } } }
+                if (ledger.picks.isNotEmpty() || snap?.honest?.showBrier == true) {
+                    item { CalibrationAndBrierChartCard(honest = snap?.honest, picks = ledger.picks) }
+                }
+                val sideMaxPnl = view.bySide.maxOfOrNull { abs(it.pnlUsd) } ?: 0.0
+                val priceMaxPnl = view.byPrice.maxOfOrNull { abs(it.pnlUsd) } ?: 0.0
+                val timeMaxPnl = view.timeOfDay.maxOfOrNull { abs(it.pnlUsd) } ?: 0.0
+                val confMaxPnl = view.byConfidence.maxOfOrNull { abs(it.pnlUsd) } ?: 0.0
+                item { SectionCard(ScorecardCopy.SIDE_TITLE) { view.bySide.forEach { BucketRow(it, sideMaxPnl) } } }
+                item { SectionCard(ScorecardCopy.PRICE_TITLE) { view.byPrice.forEach { BucketRow(it, priceMaxPnl) } } }
+                item { SectionCard(ScorecardCopy.TIME_TITLE) { view.timeOfDay.forEach { BucketRow(it, timeMaxPnl) } } }
+                item { SectionCard(ScorecardCopy.CONF_TITLE) { view.byConfidence.forEach { BucketRow(it, confMaxPnl) } } }
                 item {
                     Text(
                         ScorecardCopy.PICKS_TITLE,
@@ -324,37 +335,38 @@ private fun SectionCard(title: String, content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun BucketRow(bucket: ScorecardCopy.Bucket) {
+private fun BucketRow(bucket: ScorecardCopy.Bucket, maxAbsPnlUsd: Double = 0.0) {
     val colors = DipTheme.colors
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            bucket.label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = if (bucket.label.startsWith("UP") || bucket.label.contains("UP picks")) {
-                colors.up
-            } else if (bucket.label.startsWith("DOWN") || bucket.label.contains("DOWN picks")) {
-                colors.down
-            } else {
-                colors.textPrimary
-            },
-            fontWeight = FontWeight.SemiBold
-        )
-        Text(
-            if (bucket.settledCount <= 0) {
-                ScorecardCopy.EM_DASH
-            } else {
-                "${bucket.wins}-${bucket.losses} · ${ScorecardCopy.percentOrDash(bucket.hitRate)} · ${bucket.settledCount}" +
-                    " · ${ScorecardLedger.signedUsd(bucket.pnlUsd)}"
-            },
-            style = MaterialTheme.typography.bodyMedium,
-            color = colors.textPrimary
-        )
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                bucket.label,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (bucket.label.startsWith("UP") || bucket.label.contains("UP picks")) {
+                    colors.up
+                } else if (bucket.label.startsWith("DOWN") || bucket.label.contains("DOWN picks")) {
+                    colors.down
+                } else {
+                    colors.textPrimary
+                },
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                if (bucket.settledCount <= 0) {
+                    ScorecardCopy.EM_DASH
+                } else {
+                    "${bucket.wins}-${bucket.losses} · ${ScorecardCopy.percentOrDash(bucket.hitRate)} · ${bucket.settledCount}" +
+                        " · ${ScorecardLedger.signedUsd(bucket.pnlUsd)}"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.textPrimary
+            )
+        }
+        BucketVisualBar(bucket = bucket, maxAbsPnlUsd = maxAbsPnlUsd)
     }
 }
 
@@ -453,40 +465,7 @@ private fun SettledPickRow(pick: ScorecardCopy.RecentPick) {
 
 @Composable
 private fun CumulativePnlCard(points: List<Pair<Long, Double>>) {
-    val colors = DipTheme.colors
-    val last = points.last().second
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(colors.surface, RoundedCornerShape(16.dp))
-            .padding(16.dp)
-    ) {
-        Text(ScorecardCopy.PNL_TITLE, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
-        Text(
-            ScorecardLedger.signedUsd(last),
-            fontWeight = FontWeight.Bold,
-            color = if (last >= 0) colors.up else colors.down
-        )
-        Canvas(Modifier.fillMaxWidth().height(96.dp).padding(top = 8.dp)) {
-            val ys = points.map { it.second }
-            val minY = (ys.minOrNull() ?: 0.0) - 1.0
-            val maxY = (ys.maxOrNull() ?: 0.0) + 1.0
-            val spanY = (maxY - minY).coerceAtLeast(1.0)
-            val path = Path()
-            points.forEachIndexed { i, p ->
-                val x = size.width * i / (points.size - 1).coerceAtLeast(1).toFloat()
-                val y = size.height * (1f - ((p.second - minY) / spanY).toFloat()).coerceIn(0f, 1f)
-                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
-            }
-            drawPath(
-                path,
-                if (last >= 0) colors.up else colors.down,
-                style = Stroke(width = 3f, cap = StrokeCap.Round)
-            )
-            val zero = size.height * (1f - ((0.0 - minY) / spanY).toFloat()).coerceIn(0f, 1f)
-            drawLine(colors.textSecondary.copy(alpha = 0.25f), Offset(0f, zero), Offset(size.width, zero), strokeWidth = 1f)
-        }
-    }
+    EquityAndDrawdownChartCard(title = ScorecardCopy.PNL_TITLE, points = points)
 }
 
 @Composable

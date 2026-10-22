@@ -174,7 +174,15 @@ class WiringAuditTest {
         Control("Last order error skip lifecycle", com.dirk.kalshiodds.signal.trade.LastOrderErrorOnce::class.java, "isNotAnOrderError"),
         Control("Last order error clear stale", com.dirk.kalshiodds.signal.trade.LastOrderErrorStore::class.java, "clearStaleLifecycleNotice"),
         Control("Void stale tickers", com.dirk.kalshiodds.signal.trade.TicketSession::class.java, "voidTickers"),
-        Control("Replace proposals", com.dirk.kalshiodds.signal.trade.TicketSession::class.java, "replaceProposals")
+        Control("Replace proposals", com.dirk.kalshiodds.signal.trade.TicketSession::class.java, "replaceProposals"),
+        Control("Telemetry quote gauge", com.dirk.kalshiodds.ui.components.TelemetryChartMath::class.java, "quoteGauge"),
+        Control("Telemetry feature drivers chart", com.dirk.kalshiodds.ui.components.TelemetryChartMath::class.java, "driverBars"),
+        Control("Telemetry ensemble chart", com.dirk.kalshiodds.ui.components.TelemetryChartMath::class.java, "ensembleBars"),
+        Control("Telemetry micro gauges", com.dirk.kalshiodds.ui.components.TelemetryChartMath::class.java, "microGauges"),
+        Control("Telemetry spread/delta chart", com.dirk.kalshiodds.ui.components.TelemetryChartMath::class.java, "spreadDeltaSeries"),
+        Control("Telemetry equity & drawdown curve", com.dirk.kalshiodds.ui.components.TelemetryChartMath::class.java, "equityCurve"),
+        Control("Telemetry calibration curve", com.dirk.kalshiodds.ui.components.TelemetryChartMath::class.java, "calibrationCurve"),
+        Control("Telemetry signal edge distribution", com.dirk.kalshiodds.ui.components.TelemetryChartMath::class.java, "signalCardDistribution")
     )
 
     @Test

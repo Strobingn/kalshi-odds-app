@@ -299,6 +299,31 @@ class HomeScreenScreenshotTest {
     )
 
     @Test
+    fun darkChartDetailWithMicrostructure() {
+        val m = HomeFixtures.screenshotPhoneBtc()
+        val pts = (0 until 24).map { i ->
+            com.dirk.kalshiodds.chart.BidPoint(
+                tMs = HomeFixtures.NOW_MS - (23 - i) * 30_000L,
+                upBidCents = 30f + (i % 5) * 1.2f,
+                downBidCents = 67f - (i % 5) * 1.0f,
+                spotUsd = 84_130.0 + i * 1.5 - (i % 4) * 3.0
+            )
+        }
+        paparazzi.snapshot(name = "chart_detail_dark") {
+            KalshiOddsTheme(darkTheme = true) {
+                ChartDetailScreen(
+                    market = m,
+                    points = pts,
+                    onBack = {},
+                    onBuyYes = {},
+                    onBuyNo = {}
+                )
+            }
+        }
+        copyLatest("chart_detail_dark")
+    }
+
+    @Test
     fun lightSignals() = snapSignals("signals_light", dark = false)
 
     @Test
