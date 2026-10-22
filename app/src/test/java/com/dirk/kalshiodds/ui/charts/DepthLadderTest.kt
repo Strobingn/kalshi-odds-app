@@ -1,6 +1,7 @@
 package com.dirk.kalshiodds.ui.charts
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -9,7 +10,7 @@ import kotlin.math.round
 
 /**
  * The BTC 9:45 PM book: UP bids at 3.4–3.8¢, DOWN bids at 95.7–96.1¢.
- * Whole-cent books (74¢ / 25¢) stay on 1¢ rows.
+ * Each side stays on the price Kalshi quotes. Whole-cent books stay on 1¢ rows.
  */
 class DepthLadderTest {
     private val upDollars = listOf(
@@ -67,53 +68,81 @@ class DepthLadderTest {
         assertNull(ChartShapes.levelDeci(Double.NaN))
     }
 
-    @Test fun subCentBookMapsBothSidesOntoOneContiguousYesAxis() {
+    @Test fun eachSideKeepsItsOwnQuotedPriceAndTenthCentRows() {
         val fromDollars = ChartShapes.depthRungs(upDollars, downDollars)
         val fromCents = ChartShapes.depthRungs(upCents, downCents)
-        assertEquals(decis(fromDollars), decis(fromCents))
-        assertEquals(fromDollars.map { it.upSize }, fromCents.map { it.upSize })
-        assertEquals(fromDollars.map { it.downSize }, fromCents.map { it.downSize })
+        assertEquals(decis(fromDollars.up), decis(fromCents.up))
+        assertEquals(decis(fromDollars.down), decis(fromCents.down))
+        assertEquals(fromDollars.up.map { it.size }, fromCents.up.map { it.size })
+        assertEquals(fromDollars.down.map { it.size }, fromCents.down.map { it.size })
 
-        val rungs = fromDollars
-        assertEquals(
-            listOf("4.3¢", "4.2¢", "4.1¢", "4¢", "3.9¢", "3.8¢", "3.7¢", "3.6¢", "3.5¢", "3.4¢"),
-            rungs.map { it.label() }
-        )
-        assertTrue(rungs.none { abs(it.cents) < 0.05 })
-        assertTrue(rungs.none { it.label() == "0¢" || it.label() == "89¢" })
-        for (i in 0 until rungs.lastIndex) {
-            assertEquals(0.1, rungs[i].cents - rungs[i + 1].cents, 1e-9)
+        val ladder = fromDollars
+        assertEquals(listOf("3.8¢", "3.7¢", "3.6¢", "3.5¢", "3.4¢"), ladder.up.map { it.label() })
+        assertEquals(listOf("96.1¢", "96¢", "95.9¢", "95.8¢", "95.7¢"), ladder.down.map { it.label() })
+        assertTrue(ladder.up.none { it.label() == "4¢" || it.label() == "0¢" })
+        assertTrue(ladder.down.none { it.label() == "3.9¢" || it.label() == "4¢" })
+        for (i in 0 until ladder.up.lastIndex) {
+            assertEquals(0.1, ladder.up[i].cents - ladder.up[i + 1].cents, 1e-9)
+        }
+        for (i in 0 until ladder.down.lastIndex) {
+            assertEquals(0.1, ladder.down[i].cents - ladder.down[i + 1].cents, 1e-9)
         }
 
-        val up38 = rungs.first { round(it.cents * 10.0).toInt() == 38 }
-        assertEquals(10577.0, up38.upSize, 0.0)
-        assertEquals(0.0, up38.downSize, 0.0)
-        val up34 = rungs.first { round(it.cents * 10.0).toInt() == 34 }
-        assertEquals(2.0, up34.upSize, 0.0)
-        val down961 = rungs.first { round(it.cents * 10.0).toInt() == 39 }
-        assertEquals(1925.0, down961.downSize, 0.0)
-        assertEquals(0.0, down961.upSize, 0.0)
-        assertEquals("3.9¢ · DOWN 1925 (96.1¢ bid)", ChartShapes.depthReadout(down961))
-        assertEquals("3.8¢ · UP 10577", ChartShapes.depthReadout(up38))
+        assertEquals(10577.0, ladder.up.first { round(it.cents * 10.0).toInt() == 38 }.size, 0.0)
+        assertEquals(2.0, ladder.up.first { round(it.cents * 10.0).toInt() == 34 }.size, 0.0)
+        val down961 = ladder.down.first { round(it.cents * 10.0).toInt() == 961 }
+        assertEquals(1925.0, down961.size, 0.0)
+        assertEquals("DOWN 96.1¢ · 1,925", ChartShapes.depthReadout(false, down961))
+        assertEquals("UP 3.8¢ · 10,577", ChartShapes.depthReadout(true, ladder.up.first()))
+        assertFalse(ChartShapes.depthReadout(false, down961).contains("3.9"))
+        assertFalse(ChartShapes.DEPTH_LADDER_CAPTION.contains("100¢ minus"))
+        assertFalse(ChartShapes.DEPTH_LADDER_CAPTION.contains("YES price"))
 
-        assertEquals(1.0, ChartShapes.depthBarFraction(10577.0, rungs), 1e-12)
-        val downFrac = ChartShapes.depthBarFraction(1925.0, rungs)
+        assertEquals(1.0, ChartShapes.depthBarFraction(10577.0, ladder), 1e-12)
+        val downFrac = ChartShapes.depthBarFraction(1925.0, ladder)
         assertEquals(1925.0 / 10577.0, downFrac, 1e-12)
         assertTrue(downFrac > 0.15)
-        assertTrue(ChartShapes.depthBarFraction(60.0, rungs) > 0.0)
-        assertTrue(ChartShapes.depthBarFraction(60.0, rungs) < downFrac)
+        val tiny = ChartShapes.depthBarFraction(60.0, ladder)
+        assertTrue(tiny > 0.0)
+        assertTrue(tiny < downFrac)
+    }
+
+    @Test fun downBidsAreNeverDrawnAtOneHundredMinusThePrice() {
+        val cheap = ChartShapes.depthRungs(emptyList(), listOf(0.029 to 2611.0))
+        assertEquals(listOf("2.9¢"), cheap.down.map { it.label() })
+        assertTrue(cheap.up.isEmpty())
+        assertEquals("DOWN 2.9¢ · 2,611", ChartShapes.depthReadout(false, cheap.down.single()))
+        assertTrue(cheap.down.none { it.label() == "97.1¢" })
+
+        val rich = ChartShapes.depthRungs(emptyList(), listOf(0.961 to 1925.0))
+        assertEquals(listOf("96.1¢"), rich.down.map { it.label() })
+        assertTrue(rich.down.none { it.label() == "3.9¢" })
+
+        val screenshot = ChartShapes.depthRungs(
+            yes = listOf(0.966 to 326.0, 0.965 to 12.0),
+            no = listOf(0.029 to 2611.0, 0.022 to 800.0)
+        )
+        assertEquals(listOf("96.6¢", "96.5¢"), screenshot.up.map { it.label() })
+        assertEquals(
+            listOf("2.9¢", "2.8¢", "2.7¢", "2.6¢", "2.5¢", "2.4¢", "2.3¢", "2.2¢"),
+            screenshot.down.map { it.label() }
+        )
+        val labels = (screenshot.up + screenshot.down).map { it.label() }
+        assertTrue(labels.none { it == "97.1¢" || it == "97.8¢" || it == "3.4¢" })
+        assertEquals(2611.0, screenshot.down.first().size, 0.0)
+        assertEquals(800.0, screenshot.down.last().size, 0.0)
+        assertEquals(0.0, screenshot.down[1].size, 0.0)
     }
 
     @Test fun aSizeWallAwayFromTheTouchDoesNotSwallowTheLadder() {
         val yes = upDollars + listOf(0.001 to 9_999_999.0)
         val no = downDollars + listOf(0.50 to 9_999_999.0)
-        val rungs = ChartShapes.depthRungs(yes, no)
-        assertEquals(
-            listOf("4.3¢", "4.2¢", "4.1¢", "4¢", "3.9¢", "3.8¢", "3.7¢", "3.6¢", "3.5¢", "3.4¢"),
-            rungs.map { it.label() }
-        )
-        assertEquals(10577.0, ChartShapes.depthMaxSize(rungs), 0.0)
-        assertTrue(rungs.none { it.upSize > 20_000.0 || it.downSize > 20_000.0 })
+        val ladder = ChartShapes.depthRungs(yes, no)
+        assertEquals(listOf("3.8¢", "3.7¢", "3.6¢", "3.5¢", "3.4¢"), ladder.up.map { it.label() })
+        assertEquals(listOf("96.1¢", "96¢", "95.9¢", "95.8¢", "95.7¢"), ladder.down.map { it.label() })
+        assertEquals(10577.0, ChartShapes.depthMaxSize(ladder), 0.0)
+        assertTrue(ladder.up.none { it.size > 20_000.0 })
+        assertTrue(ladder.down.none { it.size > 20_000.0 })
     }
 
     @Test fun wholeCentBookStaysOnWholeCentRows() {
@@ -125,44 +154,60 @@ class DepthLadderTest {
             yes = listOf(74.0 to 100.0, 73.0 to 40.0),
             no = listOf(25.0 to 80.0, 24.0 to 20.0)
         )
-        assertEquals(listOf(76.0, 75.0, 74.0, 73.0), fromDollars.map { it.cents })
-        assertEquals(fromDollars.map { it.cents }, fromCents.map { it.cents })
-        assertEquals(listOf("76¢", "75¢", "74¢", "73¢"), fromDollars.map { it.label() })
-        assertEquals(100.0, fromDollars.first { it.cents == 74.0 }.upSize, 0.0)
-        assertEquals(0.0, fromDollars.first { it.cents == 74.0 }.downSize, 0.0)
-        assertEquals(80.0, fromDollars.first { it.cents == 75.0 }.downSize, 0.0)
-        assertEquals(20.0, fromDollars.first { it.cents == 76.0 }.downSize, 0.0)
-        assertEquals(40.0, fromDollars.first { it.cents == 73.0 }.upSize, 0.0)
-        assertEquals("75¢ · DOWN 80 (25¢ bid)", ChartShapes.depthReadout(fromDollars.first { it.cents == 75.0 }))
-        for (i in 0 until fromDollars.lastIndex) {
-            assertEquals(1.0, fromDollars[i].cents - fromDollars[i + 1].cents, 0.0)
+        assertEquals(listOf(74.0, 73.0), fromDollars.up.map { it.cents })
+        assertEquals(listOf(25.0, 24.0), fromDollars.down.map { it.cents })
+        assertEquals(fromDollars.up.map { it.cents }, fromCents.up.map { it.cents })
+        assertEquals(fromDollars.down.map { it.cents }, fromCents.down.map { it.cents })
+        assertEquals(listOf("74¢", "73¢"), fromDollars.up.map { it.label() })
+        assertEquals(listOf("25¢", "24¢"), fromDollars.down.map { it.label() })
+        assertEquals(100.0, fromDollars.up.first { it.cents == 74.0 }.size, 0.0)
+        assertEquals(40.0, fromDollars.up.first { it.cents == 73.0 }.size, 0.0)
+        assertEquals(80.0, fromDollars.down.first { it.cents == 25.0 }.size, 0.0)
+        assertEquals(20.0, fromDollars.down.first { it.cents == 24.0 }.size, 0.0)
+        assertEquals("DOWN 25¢ · 80", ChartShapes.depthReadout(false, fromDollars.down.first()))
+        assertTrue(fromDollars.down.none { it.cents == 75.0 || it.cents == 76.0 })
+        for (i in 0 until fromDollars.up.lastIndex) {
+            assertEquals(1.0, fromDollars.up[i].cents - fromDollars.up[i + 1].cents, 0.0)
+        }
+        for (i in 0 until fromDollars.down.lastIndex) {
+            assertEquals(1.0, fromDollars.down[i].cents - fromDollars.down[i + 1].cents, 0.0)
         }
     }
 
     @Test fun deepWholeCentBookStaysAroundTheTouch() {
         val yes = (1..74).map { it / 100.0 to 1.0 }
         val no = (1..25).map { it / 100.0 to 1.0 }
-        val rungs = ChartShapes.depthRungs(yes, no)
-        assertEquals(16, rungs.size)
-        assertEquals(82.0, rungs.first().cents, 0.0)
-        assertEquals(67.0, rungs.last().cents, 0.0)
-        assertEquals(1.0, rungs.first { it.cents == 74.0 }.upSize, 0.0)
-        assertEquals(1.0, rungs.first { it.cents == 75.0 }.downSize, 0.0)
-        assertTrue(rungs.none { it.cents < 67.0 || it.cents > 82.0 })
-        for (i in 0 until rungs.lastIndex) {
-            assertEquals(1.0, rungs[i].cents - rungs[i + 1].cents, 0.0)
+        val ladder = ChartShapes.depthRungs(yes, no)
+        assertEquals((74 downTo 67).map { it.toDouble() }, ladder.up.map { it.cents })
+        assertEquals((25 downTo 18).map { it.toDouble() }, ladder.down.map { it.cents })
+        assertEquals(1.0, ladder.up.first { it.cents == 74.0 }.size, 0.0)
+        assertEquals(1.0, ladder.down.first { it.cents == 25.0 }.size, 0.0)
+        assertTrue(ladder.up.none { it.cents < 67.0 || it.cents > 74.0 })
+        assertTrue(ladder.down.none { it.cents > 25.0 || it.cents < 18.0 })
+        for (i in 0 until ladder.up.lastIndex) {
+            assertEquals(1.0, ladder.up[i].cents - ladder.up[i + 1].cents, 0.0)
         }
     }
 
     @Test fun subCentGapInsideTheTouchIsFilled() {
-        val rungs = ChartShapes.depthRungs(
+        val ladder = ChartShapes.depthRungs(
             yes = listOf(0.604 to 1.0, 0.60 to 12.0),
             no = emptyList()
         )
-        assertEquals(listOf("60.4¢", "60.3¢", "60.2¢", "60.1¢", "60¢"), rungs.map { it.label() })
-        assertEquals(1.0, rungs.first().upSize, 0.0)
-        assertEquals(12.0, rungs.last().upSize, 0.0)
-        assertEquals(0.0, rungs[1].upSize, 0.0)
+        assertEquals(listOf("60.4¢", "60.3¢", "60.2¢", "60.1¢", "60¢"), ladder.up.map { it.label() })
+        assertTrue(ladder.down.isEmpty())
+        assertEquals(1.0, ladder.up.first().size, 0.0)
+        assertEquals(12.0, ladder.up.last().size, 0.0)
+        assertEquals(0.0, ladder.up[1].size, 0.0)
+    }
+
+    @Test fun tenthOnOneSideDoesNotRoundThatSide() {
+        val ladder = ChartShapes.depthRungs(
+            yes = listOf(0.604 to 5.0, 0.60 to 1.0),
+            no = listOf(0.40 to 7.0, 0.39 to 2.0)
+        )
+        assertEquals(listOf("60.4¢", "60.3¢", "60.2¢", "60.1¢", "60¢"), ladder.up.map { it.label() })
+        assertEquals(listOf("40¢", "39¢"), ladder.down.map { it.label() })
     }
 
     @Test fun dragReadsTheTopRowFirst() {
@@ -173,7 +218,41 @@ class DepthLadderTest {
         assertEquals(0, ChartShapes.depthRowAt(10f, 0f, 10))
     }
 
-    @Test fun cumulativeDepthKeepsSubCentTicksAndComplements() {
+    @Test fun barsStayProportionalAndATinyRowStaysVisible() {
+        val max = 10577.0
+        val lane = 200f
+        val floor = 4f
+        assertEquals(0f, ChartShapes.depthBarPx(0.0, max, lane, floor), 0f)
+        assertEquals(lane, ChartShapes.depthBarPx(max, max, lane, floor), 0.01f)
+        val mid = ChartShapes.depthBarPx(1925.0, max, lane, floor)
+        val tiny = ChartShapes.depthBarPx(60.0, max, lane, floor)
+        val speck = ChartShapes.depthBarPx(2.0, max, lane, floor)
+        assertEquals(lane * 1925.0 / max, mid.toDouble(), 0.05)
+        assertTrue(mid > tiny)
+        assertTrue(tiny >= floor)
+        assertTrue(speck >= floor)
+        assertTrue(speck < mid)
+        assertTrue(tiny < lane)
+    }
+
+    @Test fun priceLabelsAndBarsUseSeparateLanes() {
+        val wide = ChartShapes.depthColumnLayout(columnPx = 400f, labelPx = 80f, sizePx = 70f, minBarPx = 28f, gapPx = 4f)
+        assertEquals(80f, wide.labelWidth, 0.01f)
+        assertTrue(wide.showsSize)
+        assertTrue(wide.barLeft >= wide.labelWidth)
+        assertTrue(wide.sizeLeft >= wide.barLeft + wide.barWidth - 0.01f)
+        assertEquals(400f, wide.sizeLeft + wide.sizeWidth, 0.05f)
+        assertTrue(wide.barWidth >= 28f)
+
+        val narrow = ChartShapes.depthColumnLayout(columnPx = 140f, labelPx = 80f, sizePx = 70f, minBarPx = 28f, gapPx = 4f)
+        assertFalse(narrow.showsSize)
+        assertEquals(80f, narrow.labelWidth, 0.01f)
+        assertTrue(narrow.barLeft >= narrow.labelWidth)
+        assertTrue(narrow.barWidth > 0f)
+        assertEquals(140f, narrow.barLeft + narrow.barWidth, 0.05f)
+    }
+
+    @Test fun cumulativeBidsUseQuotedPricesAndAsksStayAsks() {
         val series = ChartGallery.cumulativeDepth(upDollars, downDollars)
         val same = ChartGallery.cumulativeDepth(upCents, downCents)
         assertEquals(listOf("UP bid", "UP ask", "DOWN bid", "DOWN ask"), series.map { it.name })
@@ -196,11 +275,26 @@ class DepthLadderTest {
         val downBid = series.first { it.name == "DOWN bid" }
         assertEquals(listOf(96.1, 96.0, 95.9, 95.8, 95.7), downBid.cents)
         assertEquals(1925.0, downBid.size.first(), 0.0)
+        assertTrue(downBid.cents.none { abs(it - 3.9) < 0.05 })
 
         val downAsk = series.first { it.name == "DOWN ask" }
         assertEquals(listOf(96.2, 96.3, 96.4, 96.5, 96.6), downAsk.cents)
         assertEquals(10577.0, downAsk.size.first(), 0.0)
         assertEquals(22132.0, downAsk.size.last(), 0.0)
+
+        val quoted = ChartGallery.cumulativeDepth(
+            yes = listOf(0.966 to 326.0, 0.90 to 10.0),
+            no = listOf(0.029 to 2611.0, 0.022 to 100.0)
+        )
+        assertEquals(listOf(96.6, 90.0), quoted.first { it.name == "UP bid" }.cents)
+        assertEquals(listOf(2.9, 2.2), quoted.first { it.name == "DOWN bid" }.cents)
+        val summary = ChartGallery.depthSummary(quoted)
+        assertTrue(summary.contains("UP bid 96.6¢"))
+        assertTrue(summary.contains("DOWN bid 2.9¢"))
+        assertTrue(summary.contains("UP ask 97.1¢"))
+        assertTrue(summary.contains("DOWN ask 3.4¢"))
+        assertFalse(summary.contains("DOWN bid 97.1"))
+        assertFalse(summary.contains("DOWN bid 97.8"))
     }
 
     @Test fun cumulativeScaleSeparatesSubCentClustersFromZero() {
@@ -228,12 +322,14 @@ class DepthLadderTest {
     }
 
     @Test fun pointFourCentsIsNotAZeroRow() {
-        val rungs = ChartShapes.depthRungs(listOf(0.004 to 50.0), listOf(0.995 to 10.0))
-        assertEquals(listOf("0.5¢", "0.4¢"), rungs.map { it.label() })
-        assertEquals(50.0, rungs.last().upSize, 0.0)
-        assertEquals(10.0, rungs.first().downSize, 0.0)
-        assertTrue(rungs.none { it.label() == "0¢" || it.label() == "1¢" })
+        val ladder = ChartShapes.depthRungs(listOf(0.004 to 50.0), listOf(0.995 to 10.0))
+        assertEquals(listOf("0.4¢"), ladder.up.map { it.label() })
+        assertEquals(listOf("99.5¢"), ladder.down.map { it.label() })
+        assertEquals(50.0, ladder.up.single().size, 0.0)
+        assertEquals(10.0, ladder.down.single().size, 0.0)
+        assertTrue(ladder.up.none { it.label() == "0¢" || it.label() == "1¢" })
+        assertTrue(ladder.down.none { it.label() == "0.5¢" || it.label() == "1¢" })
     }
 
-    private fun decis(rungs: List<ChartShapes.DepthRung>) = rungs.map { round(it.cents * 10.0).toInt() }
+    private fun decis(levels: List<ChartShapes.DepthLevel>) = levels.map { round(it.cents * 10.0).toInt() }
 }

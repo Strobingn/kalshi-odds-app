@@ -74,17 +74,20 @@ class ChartShapesTest {
     }
 
     @Test fun depthKeepsBothSidesAndDropsEmpty() {
-        val rungs = ChartShapes.depthRungs(
+        val ladder = ChartShapes.depthRungs(
             yes = listOf(0.60 to 10.0, 0.10 to 4.0, 0.60 to 2.0, -1.0 to 9.0),
             no = listOf(0.40 to 5.0, 0.40 to 1.0, 0.20 to 0.0)
         )
-        // 40¢ DOWN is the YES ask at 60¢. The 10¢ bid is 50¢ from that touch, so the
-        // ladder stays on the inside market instead of jumping 60¢ → 10¢.
-        assertEquals(listOf(60.0), rungs.map { it.cents })
-        assertEquals("60¢", rungs[0].label())
-        assertEquals(12.0, rungs[0].upSize, 0.0)
-        assertEquals(6.0, rungs[0].downSize, 0.0)
-        assertEquals("60¢ · UP 12 · DOWN 6 (40¢ bid)", ChartShapes.depthReadout(rungs[0]))
+        // 10¢ is 50¢ from the 60¢ UP touch, so that side stays on the inside bid.
+        // 40¢ DOWN stays at 40¢. It is not moved to the 60¢ YES ask.
+        assertEquals(listOf(60.0), ladder.up.map { it.cents })
+        assertEquals("60¢", ladder.up[0].label())
+        assertEquals(12.0, ladder.up[0].size, 0.0)
+        assertEquals(listOf(40.0), ladder.down.map { it.cents })
+        assertEquals(6.0, ladder.down[0].size, 0.0)
+        assertEquals("UP 60¢ · 12", ChartShapes.depthReadout(true, ladder.up[0]))
+        assertEquals("DOWN 40¢ · 6", ChartShapes.depthReadout(false, ladder.down[0]))
+        assertTrue(!ChartShapes.depthReadout(false, ladder.down[0]).contains("60¢"))
         assertTrue(ChartShapes.depthRungs(emptyList(), emptyList()).isEmpty())
     }
 

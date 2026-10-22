@@ -244,7 +244,7 @@ fun CalibrationPlot(
     }
 }
 
-/** UP and DOWN cumulative bids and asks on one price axis. Asks are dashed. */
+/** UP and DOWN cumulative bids and asks. Each series uses that side's own price. Asks are dashed. */
 @Composable
 fun CumulativeDepthChart(series: List<ChartGallery.DepthSeries>, modifier: Modifier = Modifier) {
     val c = DipTheme.colors
@@ -254,7 +254,7 @@ fun CumulativeDepthChart(series: List<ChartGallery.DepthSeries>, modifier: Modif
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         Text("Order book depth", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
-        Text("Cumulative contracts. Solid is bids, dashed is asks. UP and DOWN share the scale. Size is contracts, not cents times contracts.", style = MaterialTheme.typography.bodySmall, color = c.textSecondary)
+        Text("Cumulative contracts. Solid is bids, dashed is asks. Each side uses its own price. Size is contracts, not cents times contracts.", style = MaterialTheme.typography.bodySmall, color = c.textSecondary)
         if (series.isEmpty()) {
             ChartEmptyState(height = 160.dp)
             return
@@ -266,7 +266,7 @@ fun CumulativeDepthChart(series: List<ChartGallery.DepthSeries>, modifier: Modif
             ChartGallery.depthSummary(series),
             color = c.textPrimary,
             style = MaterialTheme.typography.labelMedium,
-            maxLines = 4,
+            maxLines = 8,
             overflow = TextOverflow.Ellipsis
         )
         Canvas(Modifier.fillMaxWidth().height(200.dp)) {
