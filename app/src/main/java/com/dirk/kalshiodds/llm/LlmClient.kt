@@ -86,8 +86,8 @@ class LlmClient(private val settings: LlmSettings, private val flight: LlmFlight
                 }
             },
             onSwitch = { next ->
+                // This call may try the fallback model. The saved model stays what Dirk set.
                 LlmEvents.push(ModelSwitchEvent(System.currentTimeMillis(), ep.provider, ep.model, next, "404"))
-                settings.saveModelOnly(ep.provider, next)
             }
         )
 
@@ -106,8 +106,8 @@ class LlmClient(private val settings: LlmSettings, private val flight: LlmFlight
                 }
             },
             onSwitch = { from, to ->
+                // This call walks the free-plan chain. The saved model stays ministral-8b unless Dirk changes it.
                 LlmEvents.push(ModelSwitchEvent(System.currentTimeMillis(), ep.provider, from, to, "model not on plan"))
-                settings.saveModelOnly(ep.provider, to)
             }
         )
 
@@ -129,8 +129,8 @@ class LlmClient(private val settings: LlmSettings, private val flight: LlmFlight
         http.newCall(req).execute().use { response ->
             val txt = response.body?.string().orEmpty()
             val headers = headerMap(response)
-            if (GeminiApi.billing(response.code, txt)) throw LlmBillingRequired(ep.provider, txt.take(180))
             if (response.code == 429) throw LlmRateLimited(retryAfterMs(headers["retry-after"]), "$requested rate limited: ${txt.take(160)}")
+            if (GeminiApi.billing(response.code, txt)) throw LlmBillingRequired(ep.provider, txt.take(180))
             if (!response.isSuccessful) throw IllegalStateException("$requested failed: HTTP ${response.code}: ${txt.take(200)}")
             val js = JSONObject(txt)
             val used = js.optString("model").ifBlank { requested }

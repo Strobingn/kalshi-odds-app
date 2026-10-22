@@ -102,7 +102,8 @@ class AppContainer(context: Context) {
             pacer = freePacer,
             alternates = { freeSlots() },
             quotaOf = { ep -> com.dirk.kalshiodds.llm.LlmProviders.effectiveQuota(ep.provider, ep.model, aiWatch.dailyCap(ep.provider, ep.model)) },
-            onBilling = { provider, detail -> aiWatch.markBilled(provider, detail) }
+            onBilling = { provider, detail -> aiWatch.markBilled(provider, detail) },
+            onProviderSwitch = { from, to, reason -> aiWatch.noteFallback(from, to, reason) }
         )
     }
     private val aiScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)

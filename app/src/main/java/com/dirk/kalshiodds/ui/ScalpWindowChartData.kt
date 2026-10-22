@@ -29,6 +29,31 @@ data class ScalpWindowChartData(
     }.sortedBy { it.atMs }
     /** UP and DOWN markers together. Same rows [markers] returns, one side at a time. */
     fun allMarkers(): List<Marker> = (markers("YES") + markers("NO")).sortedWith(compareBy({ it.atMs }, { it.id }))
+
+    /**
+     * One side has markers and the other does not. The missing side's ask is the complement of the
+     * recorded bid, so a 5¢ UP print says why DOWN did not trigger.
+     */
+    fun quietSideLine(): String? {
+        if (closeMs <= startMs) return null
+        val marks = allMarkers()
+        val up = marks.any { !it.side.equals("NO", true) }
+        val down = marks.any { it.side.equals("NO", true) }
+        if (up == down) return null
+        val missingDown = up && !down
+        val name = if (missingDown) "DOWN" else "UP"
+        val ask = complementaryAskCents(missingDown)
+        val reason = if (ask != null && ask > ScalpRule.ENTRY_HI * 100.0 + 1e-6) "ask above 55¢ ceiling" else "no scalper took this side"
+        return "no $name trigger this window ($reason)"
+    }
+
+    private fun complementaryAskCents(missingDown: Boolean): Double? {
+        val last = points.lastOrNull { point ->
+            point.tMs in startMs..minOf(nowMs, closeMs) && (if (missingDown) point.upBidCents != null else point.downBidCents != null)
+        } ?: return null
+        val bid = if (missingDown) last.upBidCents else last.downBidCents
+        return bid?.toDouble()?.let { 100.0 - it }
+    }
     private fun onThisMarket(t: ScalpTrade) = ticker.isEmpty() || t.ticker.equals(ticker, true)
     /** YES and UP are the same side. Stored cents (1–100) are not a dollar price. */
     fun bid(side: String): Double? {

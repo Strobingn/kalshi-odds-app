@@ -6,6 +6,8 @@ import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.dirk.kalshiodds.chart.BidPoint
@@ -207,6 +209,7 @@ class ScreenRegressionSmokeTest {
             )
         }
         assertShown("Why did Fair-gap buy?")
+        compose.onNodeWithText("Paper strategy: watching", substring = true).performClick()
         assertShown("AI live feed")
         assertShown("UP")
         assertShown("DOWN")

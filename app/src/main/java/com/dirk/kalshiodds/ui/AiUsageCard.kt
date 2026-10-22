@@ -167,6 +167,10 @@ fun AiUsageSettingsCard(store: AiWatchStore, settings: LlmSettings) {
             Switch(checked = store.freeTierOn(provider, editedModel), onCheckedChange = { store.setFreeTier(provider, it) })
         }
         Text("Active provider: ${LlmProviders.spec(active.provider).label} · $kind", color = colors.onSurface, style = MaterialTheme.typography.bodySmall)
+        val lastSwitch = remember(safety) { store.lastSwitchLine() }
+        if (!lastSwitch.isNullOrBlank()) {
+            Text("Last provider switch: $lastSwitch", color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+        }
         // Keyed on the saved slot, not the text being typed, so the field does not vanish on the first keystroke.
         if (slot.apiKey.isBlank()) {
             Text(
