@@ -229,7 +229,7 @@ fun AiDashboardContent(s: AiDashboardState, onOpenKeys: () -> Unit = {}) {
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             StatTile("Arena net", fmtSignedUsd(s.arenaNet), if (s.arenaNet >= 0) c.up else c.down, "${s.arenaTrades} trades")
-            StatTile("Arena win rate", "${Math.round(s.arenaWinRate * 100)}%", if (s.arenaWinRate >= 0.5) c.up else c.down, "after fees")
+            StatTile("Arena win rate", if (s.arenaTrades == 0) "—" else "${Math.round(s.arenaWinRate * 100)}%", if (s.arenaTrades == 0) c.textPrimary else if (s.arenaWinRate >= 0.5) c.up else c.down, "after fees")
             StatTile("Paper AI net", fmtSignedUsd(s.paperNet), if (s.paperNet >= 0) c.up else c.down, "${s.paperWins}W · ${s.paperLosses}L · ${s.paperOpen} open")
         }
 
