@@ -363,9 +363,12 @@ class PaperScalper(
     private val onReset: () -> Boolean = { true },
     /** YES fair price from the live spot ([ScalpFair]) for Kashi's late favourites; null when unknown. */
     private val fairYes: (ticker: String, nowMs: Long) -> Double? = { _, _ -> null },
-    /** What runs. The retired strategies ([ScalpStrategy.RETIRED]) open nothing; tests and the replay pass them all. */
-    private val strategies: List<ScalpStrategy> = ScalpStrategy.ACTIVE
+    /** What runs; null = [ScalpStrategy.ACTIVE]. The retired strategies open nothing unless learning mode is on; tests and the replay pass them all. */
+    private val strategies: List<ScalpStrategy>? = null
 ) {
+    /** What runs now: the list passed in, else [ScalpStrategy.ACTIVE] (all of them while learning mode is on). */
+    private val running: List<ScalpStrategy> get() = strategies ?: ScalpStrategy.ACTIVE
+
     private val grids = HashMap<String, PrintGrid>()
     private val lastDecision = HashMap<String, IntArray>()   // ticker -> last decision second per cadence slot
     /** Once-a-window strategies (the opening ride, late edge) that already bought on a ticker. */
@@ -553,7 +556,7 @@ class PaperScalper(
                 else -> s in PrintGrid.MIN_DECISION_SECOND..PrintGrid.MAX_DECISION_SECOND
             }
         }
-        val due0 = strategies.filter { st ->
+        val due0 = running.filter { st ->
             val t = tuning.tuned(st)
             t.enabled && s - last[st.ordinal + 1] >= t.cadenceSeconds && inWindow(st, t) && t.inMinutes(s) &&
                 (done == null || st !in done) && !pausedForLoss(st, t.dailyLossUsd, nowMs)
@@ -912,7 +915,7 @@ data class ScalperSummary(
     val note: String
 ) {
     companion object {
-        val TITLE = "Strategy arena · ${ScalpStrategy.ACTIVE.size} at once · PAPER ONLY"
+        val TITLE: String get() = "Strategy arena · ${ScalpStrategy.ACTIVE.size} at once · PAPER ONLY"
 
         /** The queue-aware subset on the recorded order books: a short queue was a level about to break. */
         const val QUEUE_AWARE_HISTORY = "−1.73¢"

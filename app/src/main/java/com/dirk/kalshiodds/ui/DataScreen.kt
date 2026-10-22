@@ -126,6 +126,15 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
                 modifier = Modifier.fillMaxWidth().height(48.dp)
             ) { Text("Save keys") }
             Button(
+                onClick = { viewModel.setLearningMode(!state.learningMode) },
+                modifier = Modifier.fillMaxWidth().height(52.dp)
+            ) { Text(if (state.learningMode) "Learning mode: ON · every strategy bets" else "Learning mode: OFF · money-makers only") }
+            Text(
+                "Learning mode runs every strategy on paper, retired ones too, so the arena places as many paper bets as it can and the AI has data on all of them. Paper only.",
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.textSecondary
+            )
+            Button(
                 onClick = { viewModel.setSupervisorOn(!state.supervisorOn) },
                 modifier = Modifier.fillMaxWidth().height(52.dp)
             ) { Text(if (state.supervisorOn) "AI supervisor: ON (tap to stop)" else "AI supervisor: OFF (tap to start)") }

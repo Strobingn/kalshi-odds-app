@@ -39,9 +39,9 @@ class SecureExtraStore(context: Context) {
             prefs.edit().putString(KEY_MISTRAL, value.trim()).commit()
         }
 
-    /** The AI supervisor tunes the paper scalper every minute while this is on and a key is saved. */
+    /** The AI supervisor tunes the paper scalper every minute while this is on (the default) and a key is saved. */
     var supervisorEnabled: Boolean
-        get() = prefs.getBoolean(KEY_SUPERVISOR_ON, false)
+        get() = prefs.getBoolean(KEY_SUPERVISOR_ON, true)
         set(value) {
             prefs.edit().putBoolean(KEY_SUPERVISOR_ON, value).commit()
         }

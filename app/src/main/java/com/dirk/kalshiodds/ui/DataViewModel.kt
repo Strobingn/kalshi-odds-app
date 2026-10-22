@@ -41,6 +41,7 @@ data class DataUiState(
     val groqKeyDraft: String = "",
     val mistralKeyDraft: String = "",
     val supervisorOn: Boolean = false,
+    val learningMode: Boolean = true,
     val syncLine: String? = null,
     val modelBusy: Boolean = false
 )
@@ -51,7 +52,10 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
     private val dataPrefs = container.dataPrefs
     private val modelStore = container.importedModel
 
-    private val _state = MutableStateFlow(DataUiState(supervisorOn = container.extraSecrets.supervisorEnabled))
+    private val _state = MutableStateFlow(DataUiState(
+        supervisorOn = container.extraSecrets.supervisorEnabled,
+        learningMode = container.learningMode
+    ))
     val state: StateFlow<DataUiState> = _state.asStateFlow()
 
     /** AI supervisor (signal/scalper/LlmSupervisor.kt): last tick, and its newest journal lines. */
@@ -74,6 +78,11 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
                 message = if (g.isEmpty() && m.isEmpty()) "Nothing to save" else "AI supervisor keys stored (encrypted)"
             )
         }
+    }
+
+    fun setLearningMode(on: Boolean) {
+        container.learningMode = on
+        _state.update { it.copy(learningMode = on) }
     }
 
     fun setSupervisorOn(on: Boolean) {

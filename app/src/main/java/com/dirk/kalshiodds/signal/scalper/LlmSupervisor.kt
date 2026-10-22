@@ -313,7 +313,7 @@ class LlmSupervisor(
     private val sink: (String, String) -> Unit = { _, _ -> },
     private val persistMemory: (String) -> Unit = {},
     initialMemory: SupervisorMemory = SupervisorMemory(),
-    private val strategies: List<ScalpStrategy> = ScalpStrategy.ACTIVE
+    private val strategies: List<ScalpStrategy>? = null
 ) {
     private data class Pending(
         val strategy: String,
@@ -340,6 +340,11 @@ class LlmSupervisor(
 
     /** Newest-first journal lines, for the settings screen. */
     val log: StateFlow<List<String>> = _log.asStateFlow()
+
+    /** Show why nothing is running (no key saved, say) without calling the LLM. */
+    fun idle(reason: String) {
+        _status.value = "AI supervisor · $reason"
+    }
 
     /** Record one closed paper scalp with the settings it ran under. Call it from the scalper's close hook. */
     fun onClosed(c: ClosedScalp) {
@@ -483,7 +488,7 @@ class LlmSupervisor(
         put("feed", feed())
         val idle = ArrayList<String>()
         putJsonArray("strategies") {
-            for (st in strategies) {
+            for (st in strategies ?: ScalpStrategy.ACTIVE) {
                 val k = tuning.knobs(st)
                 val s = stats(st.name)
                 if (k.isDefault && s.closed == 0) {
@@ -556,9 +561,12 @@ class LlmSupervisor(
             Every minute you get the live feed, each strategy's settings and results, the last closed trades
             together with the exact settings each ran under, your earlier changes with their measured result
             (better/worse), and your own notes.
-            Most running strategies buy late and hold to settlement; their targetCents / stopCents matter little,
-            while the entry band, minutes, secondsLeft, edgeCents, trigger and size matter most. Strategies
-            that retired are not offered to you.
+            Two kinds of strategy run. Scalpers (holdsToSettlement=false) buy a move and sell at targetCents or
+            stopCents, so target, stop, timeout, trigger and size matter most. Late buy-and-hold strategies
+            (holdsToSettlement=true) ride to the settlement, so the entry band, minutes, secondsLeft, edgeCents,
+            trigger and size matter most. The arena is in learning mode: all of them bet on paper as often as
+            they can so you have data on every one. Tune them hard; do not just switch things off after a few
+            losses, and re-enable a strategy you disabled if the market has changed.
             Rules:
             - Learn from every trade: what won, what lost, and which settings were in force.
             - There is no cooldown. You may change anything on any tick, but a single trade is weak evidence;

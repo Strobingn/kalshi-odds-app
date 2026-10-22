@@ -116,6 +116,11 @@ class AppContainer(context: Context) {
     val clearLead = com.dirk.kalshiodds.signal.trend.ClearLeadStore(app)
     /** Paper record of the late-comeback rule (the phone's call that made money on the recorded days). Never orders. */
     val lateComeback = com.dirk.kalshiodds.signal.trend.LateComebackStore(app)
+    /** Learning mode: every strategy bets on paper (default on). Set before anything reads the strategy list. */
+    private val learningModeBoot: Boolean = app.getSharedPreferences("bitcoin_claude_supervisor", Context.MODE_PRIVATE)
+        .getBoolean("learning_mode", true)
+        .also { com.dirk.kalshiodds.signal.scalper.ScalpStrategy.learningMode = it }
+
     /** Paper scalper record and model (docs/scalping-2026-10-09.md). Never orders. */
     val scalperStore = com.dirk.kalshiodds.signal.scalper.ScalperStore(app)
     val scalper = com.dirk.kalshiodds.signal.scalper.PaperScalper(
@@ -217,6 +222,14 @@ class AppContainer(context: Context) {
      * Data → "AI supervisor" is on and a key is saved.
      */
     private val supervisorPrefs = app.getSharedPreferences("bitcoin_claude_supervisor", Context.MODE_PRIVATE)
+    /** Learning mode on/off (Data → AI supervisor). Takes effect on the next decision, no restart. */
+    var learningMode: Boolean
+        get() = com.dirk.kalshiodds.signal.scalper.ScalpStrategy.learningMode
+        set(value) {
+            com.dirk.kalshiodds.signal.scalper.ScalpStrategy.learningMode = value
+            supervisorPrefs.edit().putBoolean("learning_mode", value).apply()
+        }
+
     val supervisorLog = com.dirk.kalshiodds.signal.scalper.SupervisorLog(java.io.File(app.filesDir, "supervisor"))
     val llmSupervisor = com.dirk.kalshiodds.signal.scalper.LlmSupervisor(
         tuning = scalperStore.tuning,
@@ -251,7 +264,13 @@ class AppContainer(context: Context) {
         supervisorScope.launch {
             while (true) {
                 kotlinx.coroutines.delay(60_000L)
-                if (extraSecrets.supervisorEnabled) runCatching { llmSupervisor.tick() }
+                if (extraSecrets.supervisorEnabled) {
+                    if (extraSecrets.groqApiKey.isBlank() && extraSecrets.mistralApiKey.isBlank()) {
+                        llmSupervisor.idle("add a Groq or Mistral key on the Data screen to start")
+                    } else {
+                        runCatching { llmSupervisor.tick() }
+                    }
+                }
             }
         }
     }

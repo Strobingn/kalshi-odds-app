@@ -313,7 +313,7 @@ enum class ScalpStrategy(
          * this engine on their defaults. They no longer run or show; the enum keeps them so
          * older paper records and trade files still read.
          */
-        val RETIRED: Set<ScalpStrategy> by lazy {
+        private val RETIRED_BASE: Set<ScalpStrategy> by lazy {
             setOf(
                 LATE_TIEBREAK, OPENING_DRIVE, HEAVY_FAVORITE, QUIET_MAKER, MOMENTUM_HOLD, EARLY_FAVORITE,
                 SQUEEZE_BREAKOUT, LATE_FAVORITE, LONG_SHOT, RANGE_FLOOR, IMPROVE_1C, OPENING_RIDE, BREAKOUT_50,
@@ -325,12 +325,26 @@ enum class ScalpStrategy(
             )
         }
 
-        /** The strategies the arena runs and shows: every one that made money in the replay. */
-        val ACTIVE: List<ScalpStrategy> by lazy { values().filter { it !in RETIRED } }
-        private val RETIRED_NAMES: Set<String> by lazy { RETIRED.mapTo(HashSet()) { it.name } }
+        /**
+         * Learning mode (Data → AI supervisor, on by default): every strategy runs and shows, retired or not, so the
+         * paper arena places as many bets as it can and the AI supervisor has data on all of them. Off = only the
+         * strategies that made money in the replay. Read on every decision, so flipping it takes effect at once.
+         */
+        @Volatile
+        var learningMode: Boolean = false
+
+        /** The strategies taken out of the arena (none while [learningMode] is on). */
+        val RETIRED: Set<ScalpStrategy> get() = if (learningMode) emptySet() else RETIRED_BASE
+
+        private val ACTIVE_BASE: List<ScalpStrategy> by lazy { values().filter { it !in RETIRED_BASE } }
+        private val ALL_STRATEGIES: List<ScalpStrategy> by lazy { values().toList() }
+        private val RETIRED_NAMES: Set<String> by lazy { RETIRED_BASE.mapTo(HashSet()) { it.name } }
+
+        /** The strategies the arena runs and shows: the replay's money makers, or all of them in [learningMode]. */
+        val ACTIVE: List<ScalpStrategy> get() = if (learningMode) ALL_STRATEGIES else ACTIVE_BASE
 
         /** A trade-file or ledger name of a retired strategy. */
-        fun isRetired(name: String): Boolean = name in RETIRED_NAMES
+        fun isRetired(name: String): Boolean = !learningMode && name in RETIRED_NAMES
 
         /** Price move over 10 s that the dip-hunter and the momentum-sniper react to. */
         const val FAST_MOVE_DOLLARS = 0.02

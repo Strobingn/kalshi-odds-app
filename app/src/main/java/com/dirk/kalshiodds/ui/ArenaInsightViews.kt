@@ -54,10 +54,11 @@ import kotlin.math.hypot
 // ---------------------------------------------------------------- live window
 
 /**
- * The window being traded right now: its YES price second by second, with a
- * ring at every paper entry and a dot at every exit (blue made money, red
- * lost, grey still open), joined by a thin line. DOWN trades are drawn on
- * the YES line (a DOWN entry at 40¢ sits at 60¢). Tap a mark to read it.
+ * The window being traded right now: the UP price (blue) and the DOWN price
+ * (orange) second by second, with a ring at every paper entry and a dot at
+ * every exit (green made money, red lost, grey still open), joined by a thin
+ * line. Each mark sits on its own side's line (UP at its UP price, DOWN at its
+ * DOWN price). Tap a mark to read it.
  */
 @Composable
 internal fun LiveWindowChart(window: LiveWindow?, markers: List<ArenaStats.Marker>, selected: ScalpStrategy?) {
@@ -68,7 +69,9 @@ internal fun LiveWindowChart(window: LiveWindow?, markers: List<ArenaStats.Marke
         return
     }
     var tapped by remember(window.ticker) { mutableStateOf<ArenaStats.Marker?>(null) }
-    val prices = window.mids.map { it.second } + markers.map { it.yesPrice }
+    // A mark sits on its own side's line: UP at its YES price, DOWN at its DOWN price (1 − YES).
+    fun onLine(m: ArenaStats.Marker) = if (m.side.equals("NO", ignoreCase = true)) 1.0 - m.yesPrice else m.yesPrice
+    val prices = window.mids.map { it.second } + window.mids.map { 1.0 - it.second } + markers.map { onLine(it) }
     val lo = (prices.minOrNull() ?: 0.0).let { kotlin.math.floor(it * 20) / 20 }.coerceAtLeast(0.0)
     val hi = (prices.maxOrNull() ?: 1.0).let { kotlin.math.ceil(it * 20) / 20 }.coerceAtMost(1.0).let { if (it - lo < 0.1) lo + 0.1 else it }
     val openN = markers.count { it.kind == ArenaStats.MarkerKind.OPEN }
@@ -78,7 +81,7 @@ internal fun LiveWindowChart(window: LiveWindow?, markers: List<ArenaStats.Marke
         if (t == null) {
             Readout(
                 ScalperResults.cents(window.mids.last().second),
-                "UP now · ${ArenaStats.clock(window.mids.last().first.toDouble())} in · $closedN closed, $openN open · tap a mark"
+                "UP now · DOWN ${ScalperResults.cents(1.0 - window.mids.last().second)} · ${ArenaStats.clock(window.mids.last().first.toDouble())} in · $closedN closed, $openN open · tap a mark"
             )
         } else {
             Readout(ArenaStats.clock(t.second), ArenaStats.markerLabel(t))
@@ -95,12 +98,12 @@ internal fun LiveWindowChart(window: LiveWindow?, markers: List<ArenaStats.Marke
                             val h = size.height.toFloat()
                             val best = markers.minByOrNull { m ->
                                 val mx = (m.second / PrintGrid.SECONDS).toFloat() * w
-                                val my = h * (1f - ((m.yesPrice - lo) / (hi - lo)).toFloat())
+                                val my = h * (1f - ((onLine(m) - lo) / (hi - lo)).toFloat())
                                 hypot(mx - o.x, my - o.y)
                             }
                             tapped = best?.takeIf { m ->
                                 val mx = (m.second / PrintGrid.SECONDS).toFloat() * w
-                                val my = h * (1f - ((m.yesPrice - lo) / (hi - lo)).toFloat())
+                                val my = h * (1f - ((onLine(m) - lo) / (hi - lo)).toFloat())
                                 hypot(mx - o.x, my - o.y) < 28.dp.toPx()
                             }
                         }
@@ -120,7 +123,12 @@ internal fun LiveWindowChart(window: LiveWindow?, markers: List<ArenaStats.Marke
                 }
                 val path = Path()
                 window.mids.forEachIndexed { i, (s, p) -> if (i == 0) path.moveTo(x(s.toDouble()), y(p)) else path.lineTo(x(s.toDouble()), y(p)) }
-                drawPath(path, colors.textSecondary, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+                drawPath(path, ac.series[0], style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+                val downPath = Path()
+                window.mids.forEachIndexed { i, (s, p) ->
+                    if (i == 0) downPath.moveTo(x(s.toDouble()), y(1.0 - p)) else downPath.lineTo(x(s.toDouble()), y(1.0 - p))
+                }
+                drawPath(downPath, ac.series[1], style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
                 val dim = { m: ArenaStats.Marker -> selected != null && m.strategy != selected }
                 fun colorOf(m: ArenaStats.Marker): Color = when {
                     m.kind == ArenaStats.MarkerKind.OPEN -> ac.muted
@@ -133,11 +141,11 @@ internal fun LiveWindowChart(window: LiveWindow?, markers: List<ArenaStats.Marke
                     if (e.kind != ArenaStats.MarkerKind.ENTRY) continue
                     val x2 = exitOf[e.key] ?: continue
                     val a = if (dim(e)) 0.15f else 0.6f
-                    drawLine(colorOf(e).copy(alpha = a), Offset(x(e.second), y(e.yesPrice)), Offset(x(x2.second), y(x2.yesPrice)), strokeWidth = 1.dp.toPx())
+                    drawLine(colorOf(e).copy(alpha = a), Offset(x(e.second), y(onLine(e))), Offset(x(x2.second), y(onLine(x2))), strokeWidth = 1.dp.toPx())
                 }
                 for (m in markers) {
                     val c = colorOf(m).copy(alpha = if (dim(m)) 0.25f else 1f)
-                    val center = Offset(x(m.second), y(m.yesPrice))
+                    val center = Offset(x(m.second), y(onLine(m)))
                     when (m.kind) {
                         ArenaStats.MarkerKind.EXIT -> {
                             drawCircle(ac.surface, radius = 6.dp.toPx(), center = center)
@@ -158,11 +166,20 @@ internal fun LiveWindowChart(window: LiveWindow?, markers: List<ArenaStats.Marke
             listOf("0:00", "5:00", "10:00", "15:00").forEach { Muted(it) }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            LineKey(ac.series[0]); Muted("UP")
+            LineKey(ac.series[1]); Muted("DOWN")
             RingKey(ac.gain); Muted("entry")
             DotKey(ac.gain); Muted("exit, won")
             DotKey(ac.loss); Muted("lost")
             RingKey(ac.muted); Muted("open")
         }
+    }
+}
+
+@Composable
+internal fun LineKey(color: Color) {
+    Canvas(Modifier.width(14.dp).height(10.dp)) {
+        drawLine(color, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
     }
 }
 
