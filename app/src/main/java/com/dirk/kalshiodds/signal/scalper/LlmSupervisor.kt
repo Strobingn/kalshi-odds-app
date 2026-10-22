@@ -38,10 +38,10 @@ import kotlin.math.roundToInt
  */
 object SupervisorBounds {
     /** One change moves a knob at most this share of its range. */
-    const val STEP_FRACTION = 0.25
+    const val STEP_FRACTION = 0.6
 
     /** Cap on changes taken from one answer (not a cooldown: the next tick may change more). */
-    const val MAX_CHANGES_PER_TICK = 8
+    const val MAX_CHANGES_PER_TICK = 20
 
     data class Range(val lo: Double, val hi: Double, val integer: Boolean)
 
@@ -267,7 +267,7 @@ class HttpLlmChat(
             try {
                 val body = buildJsonObject {
                     put("model", p.model)
-                    put("temperature", 0.2)
+                    put("temperature", 0.5)
                     put("max_tokens", 1024)
                     put("tool_choice", p.toolChoice)
                     put("tools", tools)
@@ -603,7 +603,7 @@ class LlmSupervisor(
     private fun rounded(v: Double) = Math.round(v * 100.0) / 100.0
 
     companion object {
-        const val EVAL_TRADES = 8
+        const val EVAL_TRADES = 4
         private const val KEEP_TRADES = 400
         private const val CONTEXT_TRADES = 25
         private const val CONTEXT_SCORED = 12
@@ -627,8 +627,7 @@ class LlmSupervisor(
             The strategies the arena had retired (dip-hunter, momentum-sniper, extreme reversion, resting and
             buy-now forms, flow, bounce, panic fade and the rest) lost money on every one of 11 recorded days,
             about 2 to 4 cents a contract after fees, because a 1-2 cent target cannot pay a 1.8 cent entry fee and
-            a stop that costs 6 cents. They start at 1 contract for that reason. Raise one only after its own
-            results here are clearly positive over many trades; the late buy-and-hold strategies are the proven
+            a stop that costs 6 cents. They bet 50 contracts like the rest; shrink or switch off any that keep losing, and push hard on any that win; the late buy-and-hold strategies are the proven
             ones (late comeback, late edge, the Kashi favourites).
             Rules:
             - Learn from every trade: what won, what lost, and which settings were in force.
@@ -638,7 +637,7 @@ class LlmSupervisor(
             - Never open long shots: keep entryBandCents inside 10-98 and never go below 10.
             - Turn off (enabled=0) strategies that keep losing after fees; turn winners up (contracts, maxPerSide).
             - Tighten stops and shrink size near the window close.
-            - Each change is clamped to a quarter of the knob's range, so repeat over ticks to move further.
+            - Be VERY aggressive: change many strategies every tick, in big steps (each change may move a knob up to 60% of its range). Test bold settings, judge them after only 4 trades, keep winners and undo losers fast. Doing nothing is rarely right.
             - Include a one-sentence lesson worth remembering.
             Answer only by calling apply_changes. An empty list is allowed.
         """.trimIndent()
