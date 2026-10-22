@@ -258,12 +258,15 @@ class LlmProvider(
 class HttpLlmChat(
     private val providers: List<LlmProvider>,
     private val onError: (String) -> Unit = {},
+    /** Told of every attempt: (provider, answered ok, milliseconds). Feeds the AI tab's call charts. */
+    private val onCall: (String, Boolean, Long) -> Unit = { _, _, _ -> },
     private val http: OkHttpClient = OkHttpClient.Builder().callTimeout(40, TimeUnit.SECONDS).build()
 ) : LlmChat {
     override fun ask(system: String, user: String, tools: JsonArray): String? {
         for (p in providers) {
             val key = p.key().trim()
             if (key.isEmpty()) continue
+            val t0 = System.currentTimeMillis()
             try {
                 val body = buildJsonObject {
                     put("model", p.model)
@@ -290,9 +293,11 @@ class HttpLlmChat(
                         parseArguments(text)
                     }
                 }
+                runCatching { onCall(p.name, args != null, System.currentTimeMillis() - t0) }
                 if (args != null) return args
                 onError("${p.name}: no tool call in the answer")
             } catch (e: Exception) {
+                runCatching { onCall(p.name, false, System.currentTimeMillis() - t0) }
                 onError("${p.name}: ${e.javaClass.simpleName}")
             }
         }
@@ -307,6 +312,7 @@ class HttpLlmChat(
         for (p in providers) {
             val key = p.key().trim()
             if (key.isEmpty()) continue
+            val t0 = System.currentTimeMillis()
             try {
                 val body = buildJsonObject {
                     put("model", p.model)
@@ -325,9 +331,11 @@ class HttpLlmChat(
                     val raw = r.body?.string().orEmpty()
                     if (!r.isSuccessful) { onError("${p.name} HTTP ${r.code}"); null } else parseContent(raw)
                 }
+                runCatching { onCall(p.name, !text.isNullOrBlank(), System.currentTimeMillis() - t0) }
                 if (!text.isNullOrBlank()) return p.name to text
                 onError("${p.name}: empty answer")
             } catch (e: Exception) {
+                runCatching { onCall(p.name, false, System.currentTimeMillis() - t0) }
                 onError("${p.name}: ${e.javaClass.simpleName}")
             }
         }
@@ -370,7 +378,9 @@ class LlmSupervisor(
     private val sink: (String, String) -> Unit = { _, _ -> },
     private val persistMemory: (String) -> Unit = {},
     initialMemory: SupervisorMemory = SupervisorMemory(),
-    private val strategies: List<ScalpStrategy>? = null
+    private val strategies: List<ScalpStrategy>? = null,
+    /** Told of each journal event (applied, rejected, scored) with the strategy, for the AI tab. */
+    private val onEvent: (String, JsonObject) -> Unit = { _, _ -> }
 ) {
     private data class Pending(
         val strategy: String,
@@ -498,6 +508,7 @@ class LlmSupervisor(
         }.toString()
         _log.value = (listOf(line) + _log.value).take(12)
         runCatching { sink("journal", line) }
+        runCatching { onEvent(event, body) }
     }
 
     private fun savedMemory() {
@@ -531,6 +542,12 @@ class LlmSupervisor(
                 if (avgAfter > p.avgBefore) "better" else "worse"
             )
             memory = memory.copy(scored = (memory.scored + s).takeLast(KEEP_SCORED))
+            runCatching {
+                onEvent(s.verdict, buildJsonObject {
+                    put("strategy", s.strategy); put("param", s.param); put("new", s.new)
+                    put("avgNetBeforeUsd", s.avgNetBeforeUsd); put("avgNetAfterUsd", s.avgNetAfterUsd)
+                })
+            }
             it.remove()
             changed = true
         }

@@ -56,7 +56,9 @@ class PaperAi(
     private val nowMs: () -> Long = { System.currentTimeMillis() },
     private val sink: (String, String) -> Unit = { _, _ -> },
     private val persistMemory: (String) -> Unit = {},
-    initialMemory: PaperAiMemory = PaperAiMemory()
+    initialMemory: PaperAiMemory = PaperAiMemory(),
+    /** Told of each bet, skip, rejection and settlement, for the AI tab. */
+    private val onEvent: (String, JsonObject) -> Unit = { _, _ -> }
 ) {
     private val lock = Any()
     private val json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
@@ -156,6 +158,7 @@ class PaperAi(
     private fun journal(kind: String, body: JsonObject) {
         val line = buildJsonObject { put("ts", nowMs()); put("event", kind); for ((k, v) in body) put(k, v) }
         runCatching { sink("paper_ai", line.toString()) }
+        runCatching { onEvent(kind, body) }
     }
 
     private fun save() {
