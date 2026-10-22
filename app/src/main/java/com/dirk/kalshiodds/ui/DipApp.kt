@@ -1,7 +1,11 @@
 package com.dirk.kalshiodds.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalance
@@ -36,6 +40,7 @@ import com.dirk.kalshiodds.ui.theme.DipTheme
  * Home with no sheet: neither callback is enabled, so Android 14+ gesture
  * Back finishes the activity (predictive back-to-home).
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun DipApp(
     navigator: AppNavigator,
@@ -59,7 +64,9 @@ fun DipApp(
         onCancelSheet()
     }
     val palette = DipTheme.colors
-    val showBottomNavigation = navigator.current != AppRoutes.CHART
+    // While typing in the AI chat the keyboard needs the room: hide the tab bar so the input sits right on the keyboard.
+    val typingInChat = navigator.current == AppRoutes.AI_CHAT && WindowInsets.isImeVisible
+    val showBottomNavigation = navigator.current != AppRoutes.CHART && !typingInChat
     Scaffold(
         containerColor = palette.bg,
         bottomBar = {
@@ -71,7 +78,10 @@ fun DipApp(
             }
         }
     ) { contentPadding ->
-        Box(Modifier.padding(contentPadding)) {
+        // The AI tab handles the keyboard itself (imePadding), so it must know this padding was already applied.
+        val inner = if (navigator.current == AppRoutes.AI_CHAT) Modifier.padding(contentPadding).consumeWindowInsets(contentPadding)
+        else Modifier.padding(contentPadding)
+        Box(inner) {
             when (navigator.current) {
                 AppRoutes.SETTINGS -> settings()
                 AppRoutes.SCORECARD -> scorecard()

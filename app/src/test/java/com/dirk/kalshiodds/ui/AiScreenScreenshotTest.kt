@@ -63,23 +63,42 @@ class AiScreenScreenshotTest {
         }
     }
 
-    @Test
-    fun chat() {
-        val msgs = listOf(
-            ChatMsg(1, AiChat.SCALPING, "user", "Which scalpers are winning?", 0),
-            ChatMsg(2, AiChat.SCALPING, "ai", "[groq openai/gpt-oss-120b] Late edge and Kashi fav base carry the arena: +\$212 and +\$148 net. Improve 1c is bleeding fees; I'd cut its size and widen its target.", 0),
-            ChatMsg(3, AiChat.SCALPING, "proposal", "Change IMPROVE_1C targetCents to 6.0?", 0, "IMPROVE_1C", "targetCents", 6.0, "pending"),
-            ChatMsg(4, AiChat.SCALPING, "proposal", "Change IMPROVE_1C contracts to 20.0?", 0, "IMPROVE_1C", "contracts", 20.0, "applied"),
-            ChatMsg(5, AiChat.SCALPING, "change", "Applied: IMPROVE_1C contracts default → 20.0", 0)
-        )
-        paparazzi.snapshot(name = "ai_chat") {
+    private val chatMsgs = listOf(
+        ChatMsg(1, AiChat.SCALPING, "user", "Which scalpers are winning?", 0),
+        ChatMsg(2, AiChat.SCALPING, "ai", "[groq openai/gpt-oss-120b] Late edge and Kashi fav base carry the arena: +\$212 and +\$148 net. Improve 1c is bleeding fees; I'd widen its target and cut its size.", 0),
+        ChatMsg(3, AiChat.SCALPING, "proposal", "Change IMPROVE_1C targetCents to 6.0?", 0, "IMPROVE_1C", "targetCents", 6.0, "pending"),
+        ChatMsg(4, AiChat.SCALPING, "proposal", "Change IMPROVE_1C contracts to 20.0?", 0, "IMPROVE_1C", "contracts", 20.0, "applied"),
+        ChatMsg(5, AiChat.SCALPING, "change", "Applied: IMPROVE_1C contracts default → 20.0", 0),
+        ChatMsg(6, AiChat.SCALPING, "user", "And the late favourites?", 0)
+    )
+
+    private fun chatShot(name: String, heightDp: Int, msgs: List<ChatMsg>, busy: Boolean, which: String = AiChat.SCALPING) {
+        paparazzi.snapshot(name = name) {
             KalshiOddsTheme(darkTheme = true) {
-                Box(Modifier.background(DipTheme.colors.bg).height(900.dp)) {
-                    AiChatContent(AiChat.SCALPING, msgs, busy = true, onWhich = {}, onSend = {}, onApply = {}, onCancel = {}, onClear = {})
+                Column(Modifier.background(DipTheme.colors.bg).height(heightDp.dp)) {
+                    AiHeader {}
+                    AiSectionTabs(1) {}
+                    AiChatContent(which, msgs, busy = busy, onWhich = {}, onSend = {}, onApply = {}, onCancel = {}, onClear = {})
                 }
             }
         }
     }
+
+    @Test
+    fun chat() = chatShot("ai_chat", 900, chatMsgs, busy = true)
+
+    @Test
+    fun chatEmpty() = chatShot("ai_chat_empty", 900, emptyList(), busy = false)
+
+    @Test
+    fun chatEmptyPaper() = chatShot("ai_chat_empty_paper", 900, emptyList(), busy = false, which = AiChat.PAPER)
+
+    /** About what is left above a phone keyboard: nothing may overlap. */
+    @Test
+    fun chatWithKeyboardOpen() = chatShot("ai_chat_keyboard", 430, chatMsgs, busy = false)
+
+    @Test
+    fun chatEmptyWithKeyboardOpen() = chatShot("ai_chat_empty_keyboard", 430, emptyList(), busy = false)
 
     @Test
     fun keys() {
