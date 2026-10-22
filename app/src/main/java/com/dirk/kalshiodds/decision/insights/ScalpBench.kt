@@ -66,6 +66,7 @@ object ScalpBench {
      * @param override Override mode: AUTO uses normal rules, FORCE_ACTIVE/FORCE_BENCHED return forced status.
      * @return BenchDecision with status, counts, net values, and reason.
      */
+    @Suppress("UNUSED_PARAMETER")
     fun decide(
         scalperId: String,
         wasBenched: Boolean,
@@ -75,109 +76,16 @@ object ScalpBench {
         override: BenchOverride = BenchOverride.AUTO
     ): BenchDecision {
         val coercedWindow = window.coerceAtLeast(1)
-
-        // Handle overrides first
-        when (override) {
-            BenchOverride.FORCE_ACTIVE -> {
-                return BenchDecision(
-                    scalperId = scalperId,
-                    status = BenchStatus.FORCED_ACTIVE,
-                    settled = 0,
-                    netUsd = 0.0,
-                    shadowNetUsd = 0.0,
-                    reason = "forced active"
-                )
-            }
-            BenchOverride.FORCE_BENCHED -> {
-                return BenchDecision(
-                    scalperId = scalperId,
-                    status = BenchStatus.FORCED_BENCHED,
-                    settled = 0,
-                    netUsd = 0.0,
-                    shadowNetUsd = 0.0,
-                    reason = "forced benched"
-                )
-            }
-            BenchOverride.AUTO -> {
-                // Normal logic
-            }
-        }
-
-        // Filter and sort settled real trades
         val settledReal = realTrades
             .filter { it.state == ScalpState.CLOSED && it.netUsd != null && it.netUsd.isFinite() }
-            .sortedByDescending { it.closedAtMs }
+        val net = settledReal.take(coercedWindow).sumOf { it.netUsd ?: 0.0 }
 
-        // Filter and sort all settled trades (real + shadow) for unbench logic
-        val allSettled = (realTrades + shadowTrades)
-            .filter { it.state == ScalpState.CLOSED && it.netUsd != null && it.netUsd.isFinite() }
-            .sortedByDescending { it.closedAtMs }
-
-        if (!wasBenched) {
-            // Not currently benched - evaluate real trades
-            val considered = settledReal.take(coercedWindow)
-            val settledCount = considered.size
-            val net = considered.sumOf { it.netUsd!! }
-
-            if (settledCount < coercedWindow) {
-                return BenchDecision(
-                    scalperId = scalperId,
-                    status = BenchStatus.ACTIVE,
-                    settled = settledCount,
-                    netUsd = net,
-                    shadowNetUsd = 0.0,
-                    reason = "warming up $settledCount/$coercedWindow"
-                )
-            } else if (net < 0) {
-                return BenchDecision(
-                    scalperId = scalperId,
-                    status = BenchStatus.BENCHED,
-                    settled = settledCount,
-                    netUsd = net,
-                    shadowNetUsd = 0.0,
-                    reason = "net negative over last $coercedWindow trades"
-                )
-            } else {
-                return BenchDecision(
-                    scalperId = scalperId,
-                    status = BenchStatus.ACTIVE,
-                    settled = settledCount,
-                    netUsd = net,
-                    shadowNetUsd = 0.0,
-                    reason = "net non-negative over last $coercedWindow trades"
-                )
-            }
-        } else {
-            // Currently benched - evaluate shadow trades for unbenching
-            val shadowConsidered = allSettled.take(coercedWindow)
-            val shadowCount = shadowConsidered.size
-            val shadowNet = shadowConsidered.sumOf { it.netUsd!! }
-
-            if (shadowCount >= coercedWindow && shadowNet > 0) {
-                return BenchDecision(
-                    scalperId = scalperId,
-                    status = BenchStatus.ACTIVE,
-                    settled = shadowCount,
-                    netUsd = shadowNet,
-                    shadowNetUsd = shadowNet,
-                    reason = "unbenched: shadow net positive over last $coercedWindow trades"
-                )
-            } else {
-                // Stay benched - provide reason based on why
-                val reason = if (shadowCount < coercedWindow) {
-                    "stay benched: only $shadowCount shadow trades available"
-                } else {
-                    "stay benched: shadow net <= 0 over last $coercedWindow trades"
-                }
-                return BenchDecision(
-                    scalperId = scalperId,
-                    status = BenchStatus.BENCHED,
-                    settled = shadowCount,
-                    netUsd = shadowNet,
-                    shadowNetUsd = shadowNet,
-                    reason = reason
-                )
-            }
+        // Automatic bench is off. A losing streak, a shadow book, and a previous bench
+        // all stay trading. Force bench is the only way a scalper stops opening.
+        return when (override) {
+            BenchOverride.FORCE_ACTIVE -> BenchDecision(scalperId, BenchStatus.FORCED_ACTIVE, 0, 0.0, 0.0, "forced active")
+            BenchOverride.FORCE_BENCHED -> BenchDecision(scalperId, BenchStatus.FORCED_BENCHED, 0, 0.0, 0.0, "forced benched")
+            BenchOverride.AUTO -> BenchDecision(scalperId, BenchStatus.ACTIVE, settledReal.size, net, 0.0, "trading")
         }
     }
 }

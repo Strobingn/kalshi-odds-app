@@ -43,8 +43,9 @@ data class ScalpControls(
     /** 1.0.14 strategies the AI watcher has benched. Force trade / Force bench in [benchOverrides] still win. */
     val aiBench: Set<String> = emptySet()
 ) {
-    fun settings(code: String): ScalpStrategySettings = strategySettings[code]?.normalized() ?: ScalpStrategySettings()
-    fun normalized() = copy(strategySettings = strategySettings.mapValues { it.value.normalized() }, peakTrailCents = peakTrailCents.coerceIn(1, 20), stopLossPercent = stopLossPercent.coerceIn(1, 99), maxAskCents = maxAskCents.coerceIn(1, 55), greenContracts = greenContracts.coerceIn(1, 500), stopCents = stopCents.coerceIn(1, 99),
+    fun settings(code: String): ScalpStrategySettings =
+        ScalpParamSanity.settings(code, strategySettings[code] ?: ScalpStrategySettings())
+    fun normalized() = copy(strategySettings = strategySettings.mapValues { (code, raw) -> ScalpParamSanity.settings(code, raw) }, peakTrailCents = peakTrailCents.coerceIn(1, 20), stopLossPercent = stopLossPercent.coerceIn(1, 99), maxAskCents = maxAskCents.coerceIn(1, 55), greenContracts = greenContracts.coerceIn(1, 500), stopCents = stopCents.coerceIn(1, 99),
         takeProfitCents = takeProfitCents.coerceIn(0, 99), trailCents = trailCents.coerceIn(1, 20),
         armCents = armCents.coerceIn(1, 99), contracts = contracts.coerceIn(1, 1000),
         maxStakeUsd = maxStakeUsd.takeIf { it.isFinite() }?.coerceIn(0.0, 100_000.0) ?: 0.0,
@@ -54,7 +55,9 @@ data class ScalpControls(
         dipCents = dipCents.takeIf { it.isFinite() }?.coerceIn(0.0, 30.0) ?: 0.0,
         benchWindow = benchWindow.coerceIn(5, 500), slipCents = slipCents.takeIf { it.isFinite() }?.coerceIn(0.0, 10.0) ?: 1.0,
         bigLossUsd = bigLossUsd.takeIf { it.isFinite() }?.coerceIn(0.5, 10_000.0) ?: 5.0,
-        aiBench = aiBench.filter { ScalpModels.modelByCode(it) != null }.toSet()).let { clean ->
+        // 1.0.24 and again here: automatic bench and AI bench never come back. Only Force bench stops a scalper.
+        autoBench = false,
+        aiBench = emptySet()).let { clean ->
         clean.copy(algo = StrategyAlgo.sanitize(clean))
     }
     fun permits(modelCode: String) = enabled && !killSwitch && modelCode !in disabledStrategies
@@ -162,14 +165,16 @@ class MemoryScalpControls(initial: ScalpControls = ScalpControls()) : ScalpContr
     }
 }
 /**
- * One-time: saved books that were auto-benching (the 1.0.9 default) or had AI benches
- * start with auto-bench off and an empty AI bench set. The flag sticks, so turning the
- * toggle back on is not undone on the next launch. Force trade / Force bench are not touched.
+ * Saved books that were auto-benching, AI-benched, or frozen start trading again.
+ * [FLAG] was the 1.0.24 pass. [FLAG_1028] runs again because new -v1/-v2/-v3 ids
+ * were still frozen after that flag had already been set. Force trade / Force bench
+ * are not touched. A stored 1¢ floor is raised in [ScalpControls.normalized].
  */
 object ScalpAutoBenchMigration {
     const val FLAG = "autobench_cleared_1024"
+    const val FLAG_1028 = "trading_default_1028"
 
-    fun apply(saved: ScalpControls): ScalpControls = saved.copy(autoBench = false, aiBench = emptySet())
+    fun apply(saved: ScalpControls): ScalpControls = saved.copy(autoBench = false, aiBench = emptySet()).normalized()
 }
 
 /**
@@ -182,13 +187,17 @@ class SavedScalpControls(context: Context, private val flushDelayMs: Long = 1_00
     private val json = Json { ignoreUnknownKeys = true }
     override val state = MutableStateFlow(read())
     private fun read(): ScalpControls {
-        val raw = runCatching { json.decodeFromString<ScalpControls>(prefs.getString("settings", "{}")!!).normalized() }.getOrDefault(ScalpControls())
-        if (prefs.getBoolean(ScalpAutoBenchMigration.FLAG, false)) return raw
+        val raw = runCatching { json.decodeFromString<ScalpControls>(prefs.getString("settings", "{}")!!) }.getOrDefault(ScalpControls())
+        val already = prefs.getBoolean(ScalpAutoBenchMigration.FLAG, false) &&
+            prefs.getBoolean(ScalpAutoBenchMigration.FLAG_1028, false)
+        if (already) return raw.normalized()
         val next = ScalpAutoBenchMigration.apply(raw)
-        val edit = prefs.edit().putBoolean(ScalpAutoBenchMigration.FLAG, true)
-        if (next != raw) edit.putString("settings", json.encodeToString(next.normalized()))
-        edit.apply()
-        return next.normalized()
+        prefs.edit()
+            .putBoolean(ScalpAutoBenchMigration.FLAG, true)
+            .putBoolean(ScalpAutoBenchMigration.FLAG_1028, true)
+            .putString("settings", json.encodeToString(next))
+            .apply()
+        return next
     }
     private val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key -> if (key == "settings") state.value = read() }
     private val lock = Any()

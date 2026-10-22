@@ -103,13 +103,12 @@ class ScalpFreezeTest {
     @Test fun dollarLossAndDeepLossShareOneFrozenBadge() {
         val mild = List(30) { closed("sf41", it, -0.20) } // net -6: AI rule, not the -10 rule
         assertNull(ScalpFreeze.autoFreeze(mild))
-        val why = ScalpFreeze.reason("sf41", mild)!!
-        assertTrue(why.startsWith(ScalpFreeze.BADGE))
+        assertNull(ScalpFreeze.reason("sf41", mild))
         assertNull(ScalpFreeze.reason("sf41", List(30) { closed("sf41", it, -0.02) }))
         val deep = List(30) { closed("sf41", it, -0.50) }
-        assertTrue(ScalpFreeze.reason("sf41", deep)!!.contains("last 30 trades"))
+        assertNull(ScalpFreeze.reason("sf41", deep))
         val shadow = List(30) { closed("sf41", 200 + it, 0.40) }
-        assertNull("shadow improvement unfreezes a numeric freeze", ScalpFreeze.reason("sf41", deep, shadow, wasFrozen = true))
+        assertNull(ScalpFreeze.reason("sf41", deep, shadow, wasFrozen = true))
         assertNull("a removed code is not kept frozen by the old default list", ScalpFreeze.reason("dip", deep, shadow, wasFrozen = true))
         val forced = ScalpFreeze.apply(
             mapOf("sf41" to BenchDecision("sf41", BenchStatus.FORCED_ACTIVE, 0, 0.0, 0.0, "forced active")),
@@ -119,16 +118,21 @@ class ScalpFreezeTest {
         assertEquals(BenchStatus.FORCED_ACTIVE, forced.getValue("sf41").status)
     }
 
-    @Test fun autoFreezeAppliesThroughInsightsAndForceTradeWins() {
+    @Test fun lossesNeverFreezeEvenWhenAutoBenchWasSaved() {
         val controls = MemoryScalpControls(com.dirk.kalshiodds.decision.ScalpControls(autoBench = true))
+        assertFalse(controls.state.value.autoBench)
         val book = ScalpBook()
         val insights = ScalpInsights(book, controls, null) {}
         insights.start()
-        List(30) { closed("sf41", it, -0.50) }.forEach { insights.onSettled("sf41", it) }
-        assertTrue("sf41" in book.benched)
-        assertTrue(BenchRegistry.decisions.value.getValue("sf41").reason.contains("last 30 trades"))
-        controls.save(controls.state.value.copy(benchOverrides = mapOf("sf41" to "ACTIVE")))
+        List(40) { closed("sf41", it, -0.50) }.forEach { insights.onSettled("sf41", it) }
+        List(40) { closed("sf17f-v1", it, -2.0) }.forEach { insights.onSettled("sf17f-v1", it) }
+        assertFalse("sf41" in book.benched)
+        assertFalse("sf17f-v1" in book.benched)
+        assertTrue(BenchRegistry.decisions.value.getValue("sf41").trading)
+        assertTrue(BenchRegistry.decisions.value.getValue("sf17f-v1").trading)
+        controls.save(controls.state.value.copy(benchOverrides = mapOf("sf17f-v1" to "BENCHED")))
         insights.recompute()
+        assertTrue("sf17f-v1" in book.benched)
         assertFalse("sf41" in book.benched)
     }
 

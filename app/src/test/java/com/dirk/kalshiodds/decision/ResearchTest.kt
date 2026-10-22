@@ -51,13 +51,14 @@ class ResearchTest {
     @Test fun aiLearnsIsGentleBoundedAndManualWins() {
         var s = ScalpStrategySettings(edgeCents = 2)
         repeat(30) { s = Research.learn("r-hold", s, -1.0, 99) }
-        assertEquals(6, s.edgeCents)                       // at most +4¢ over your setting
+        assertEquals(14, s.edgeCents)                      // step scales with P&L, capped at +12¢ over the baseline
         assertTrue(s.aiNote.isNotBlank())
         repeat(60) { s = Research.learn("r-hold", s, 1.0, 99) }
         assertEquals(2, s.edgeCents)                       // never below your setting
         var o = ScalpStrategySettings(maxEntryCents = 50)
         repeat(60) { o = Research.learn("sf41", o, -1.0, 55) }
-        assertEquals(40, o.maxEntryCents)                  // at most −10¢
+        assertEquals(30, o.maxEntryCents)                  // at most −20¢ from the baseline
+        assertTrue((o.contracts ?: 10) < 10)
         o = o.copy(maxEntryCents = 45).manual()
         assertNull(o.aiBaseCents); assertEquals(0, o.aiN)
         val off = ScalpStrategySettings(aiLearns = false, edgeCents = 3)

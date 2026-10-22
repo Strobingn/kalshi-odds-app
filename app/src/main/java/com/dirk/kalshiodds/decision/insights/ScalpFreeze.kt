@@ -1,9 +1,7 @@
 package com.dirk.kalshiodds.decision.insights
 
-import com.dirk.kalshiodds.decision.AiBench
 import com.dirk.kalshiodds.decision.ScalpState
 import com.dirk.kalshiodds.decision.ScalpTrade
-import java.util.Locale
 
 /**
  * One paper freeze (1.0.15). A frozen strategy stops opening new paper trades and stays on the Scalp tab
@@ -48,31 +46,18 @@ object ScalpFreeze {
         return if (net < MAX_NET_USD && net / last.size < MAX_PER_TRADE_USD) net to last.size else null
     }
 
-    /** Why [code] is frozen, or null. [wasFrozen] lets a numeric freeze stay put until shadow paper improves. */
-    fun reason(code: String, real: List<ScalpTrade>, shadow: List<ScalpTrade> = emptyList(), wasFrozen: Boolean = false): String? {
-        if (code in DEFAULT_FROZEN) {
-            val note = com.dirk.kalshiodds.decision.ScalpRetune.cardNote(code)
-            if (note != null && note.startsWith("Frozen")) return "$BADGE · $note · Force trade unfreezes"
-            return "$BADGE · 1.0.14 default (lost money Oct 17–19) · Force trade unfreezes"
-        }
-        val cleared = shadowClears(shadow)
-        autoFreeze(real)?.let { (net, n) ->
-            if (cleared) return null
-            return String.format(Locale.US, "%s · last %d trades %+.2f USD (%+.2f/trade) · Force trade unfreezes", BADGE, n, net, net / n)
-        }
-        val nets = netsOf(real)
-        val call = AiBench.decide(wasFrozen, nets, netsOf(shadow), WINDOW)
-        if (call.unbench || cleared) return null
-        if (call.bench || wasFrozen) {
-            return String.format(Locale.US, "%s · paper net %+.2f over last %d trades · Force trade unfreezes", BADGE, call.netUsd, WINDOW)
-        }
-        return null
-    }
+    /**
+     * Always null. A losing book is not a freeze. [autoFreeze] still describes the old
+     * deep-loss numbers for tests; nothing applies them.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    fun reason(code: String, real: List<ScalpTrade>, shadow: List<ScalpTrade> = emptyList(), wasFrozen: Boolean = false): String? = null
 
     /**
      * Freeze on top of bench decisions. Force trade and Force bench are never rewritten.
      * [previous] is the last published decision, so a numeric freeze can wait for shadow improvement.
      */
+    @Suppress("UNUSED_PARAMETER")
     fun apply(
         decisions: Map<String, BenchDecision>,
         real: Map<String, List<ScalpTrade>>,
@@ -80,27 +65,8 @@ object ScalpFreeze {
         shadow: Map<String, List<ScalpTrade>> = emptyMap(),
         previous: Map<String, BenchDecision> = emptyMap()
     ): Map<String, BenchDecision> {
-        val out = LinkedHashMap(decisions)
-        for (code in DEFAULT_FROZEN + real.keys + shadow.keys + previous.keys) {
-            if (com.dirk.kalshiodds.decision.ScalpModels.modelByCode(code) == null) continue
-            if (overrides[code] == "ACTIVE" || overrides[code] == "BENCHED") continue
-            val rows = real[code].orEmpty()
-            val was = isFrozen(previous[code]) && code !in DEFAULT_FROZEN
-            val why = reason(code, rows, shadow[code].orEmpty(), was) ?: continue
-            val d = out[code]
-            out[code] = d?.copy(status = BenchStatus.BENCHED, reason = why)
-                ?: BenchDecision(code, BenchStatus.BENCHED, rows.size, rows.sumOf { it.netUsd ?: 0.0 }, 0.0, why)
-        }
-        return out
+        // Automatic freeze is off for every scalper, including -v1/-v2/-v3.
+        // Force bench stays whatever the caller already decided.
+        return decisions
     }
-
-    private fun shadowClears(shadow: List<ScalpTrade>): Boolean {
-        val nets = netsOf(shadow)
-        return nets.size >= WINDOW && nets.takeLast(WINDOW).sum() > 0.0
-    }
-
-    private fun netsOf(rows: List<ScalpTrade>): List<Double> =
-        rows.filter { it.state == ScalpState.CLOSED && it.netUsd != null && it.netUsd.isFinite() }
-            .sortedBy { it.closedAtMs ?: 0L }
-            .map { it.netUsd!! }
 }

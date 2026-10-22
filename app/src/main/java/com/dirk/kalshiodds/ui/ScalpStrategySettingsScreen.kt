@@ -18,13 +18,15 @@ import com.dirk.kalshiodds.decision.*
 import com.dirk.kalshiodds.ui.theme.DipTheme
 import kotlin.math.roundToInt
 
-/** Status under the Auto / Force trade / Force bench chips. Auto-off does not say paused. */
-internal fun benchStatusLine(override: String?, autoBenched: Boolean, frozen: Boolean = false, autoBenchEnabled: Boolean = true): String = when (override) {
+/**
+ * Status under the Trading / Force trade / Force bench chips.
+ * Trading means no manual override. It never means auto-freeze.
+ */
+@Suppress("UNUSED_PARAMETER")
+internal fun benchStatusLine(override: String?, autoBenched: Boolean = false, frozen: Boolean = false, autoBenchEnabled: Boolean = false): String = when (override) {
     "ACTIVE" -> "Bench · forced trading"
     "BENCHED" -> "Bench · forced benched"
-    else -> if (!autoBenchEnabled) "Bench · auto off"
-        else if (frozen) "Bench · auto · ${com.dirk.kalshiodds.decision.insights.ScalpFreeze.BADGE} (no new paper trades) · Force trade unfreezes"
-        else if (autoBenched) "Bench · auto · BENCHED (shadow only)" else "Bench · auto"
+    else -> "Bench · trading · no manual override"
 }
 
 /** Same label/value sliders as Claude's per-strategy settings. Saves on release, not on every drag frame. */
@@ -55,9 +57,11 @@ internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: Sc
     fun set(next: ScalpStrategySettings) = onChange(next.manual())
     val spec = ScalpV2.spec(model.code)
     val enabled = model.code !in controls.disabledStrategies
+    val floor = com.dirk.kalshiodds.decision.ScalpFloors.cents(model.code)
+    val priceHi = if (com.dirk.kalshiodds.decision.ScalpFloors.isFavorite(model.code)) 99 else 55
     val inheritedHigh = if (controls.manual) controls.maxAskCents else (spec.maxAsk * 100).roundToInt()
-    val high = maxOf(settings.minEntryCents, settings.maxEntryCents ?: inheritedHigh).coerceAtMost(50)
-    val low = settings.minEntryCents.coerceAtMost(high)
+    val high = maxOf(settings.minEntryCents, settings.maxEntryCents ?: inheritedHigh).coerceIn(floor + 1, priceHi)
+    val low = settings.minEntryCents.coerceIn(floor, high - 1)
     LazyColumn(Modifier.fillMaxSize().background(c.bg), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item(key = "settings-header") {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -77,12 +81,9 @@ internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: Sc
             if (!controls.enabled || controls.killSwitch) Text("Global entries are paused. Existing protective exits keep running.", color = c.spot, style = MaterialTheme.typography.bodySmall)
             // 1.0.9 manual bench override (Auto · Force trade · Force bench). Observed, so a tap updates the line.
             val ov = controls.benchOverrides[model.code]
-            val benched by com.dirk.kalshiodds.decision.insights.BenchRegistry.benched.collectAsState()
-            val benchedNow = model.code in benched
-            val frozenNow = com.dirk.kalshiodds.decision.insights.ScalpFreeze.isFrozen(com.dirk.kalshiodds.decision.insights.BenchRegistry.decisions.collectAsState().value[model.code])
-            Text(benchStatusLine(ov, benchedNow, frozenNow, controls.autoBench), color = if (ov == "BENCHED" || (controls.autoBench && benchedNow)) c.spot else c.textPrimary, fontWeight = FontWeight.SemiBold, modifier = Modifier.testTag("BENCH_STATUS"))
+            Text(benchStatusLine(ov), color = if (ov == "BENCHED") c.spot else c.textPrimary, fontWeight = FontWeight.SemiBold, modifier = Modifier.testTag("BENCH_STATUS"))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(null to "Auto", "ACTIVE" to "Force trade", "BENCHED" to "Force bench").forEach { (v, label) ->
+                listOf(null to "Trading", "ACTIVE" to "Force trade", "BENCHED" to "Force bench").forEach { (v, label) ->
                     FilterChip(selected = ov == v, onClick = { onBenchOverride(v) }, label = { Text(label) },
                         modifier = Modifier.testTag(if (v == null) "BENCH_AUTO" else "BENCH_$v"))
                 }
@@ -90,7 +91,7 @@ internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: Sc
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("AI learns", color = c.textPrimary, fontWeight = FontWeight.SemiBold)
-                    Text(if (settings.aiLearns) "Gently moves one slider from this strategy's own paper trades (every 3 closes, 1¢ at a time, bounded). Your changes always win." else "Off · sliders stay exactly where you set them", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+                    Text(if (settings.aiLearns) "After every close it moves several sliders. The step scales with that trade's P&L: winners get a looser buy range and a bigger clip, losers get tighter and smaller. It never freezes or benches. A change you make by hand resets the baseline." else "Off · sliders stay exactly where you set them", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
                 }
                 Switch(checked = settings.aiLearns, onCheckedChange = { onChange(settings.copy(aiLearns = it).manual()) }, modifier = Modifier.testTag("STRATEGY_AI_LEARNS"))
             }
@@ -100,9 +101,9 @@ internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: Sc
                     StrategyKnob("Edge needed after fees", settings.edgeCents ?: Research.defaultEdge(model.code), 0..30, "KNOB_EDGE", { "$it¢" }) { set(settings.copy(edgeCents = it)) }
                     StrategyKnob("Contracts an order", settings.contracts ?: controls.research.clip, 1..1000, "KNOB_CONTRACTS") { set(settings.copy(contracts = it)) }
                     val lateShown = if (Research.isLate(model.code)) Research.lateBand(model.code, null) else null
-                    val researchMin = if (settings.minEntryCents > 1) settings.minEntryCents else lateShown?.let { Math.round(it.lo * 100).toInt() } ?: settings.minEntryCents
+                    val researchMin = maxOf(floor, if (settings.minEntryCents > 1) settings.minEntryCents else lateShown?.let { Math.round(it.lo * 100).toInt() } ?: settings.minEntryCents)
                     val researchMax = settings.maxEntryCents ?: lateShown?.let { Math.round(it.hi * 100).toInt() } ?: 99
-                    StrategyKnob("Lowest price it buys", researchMin, 1..99, "KNOB_MIN", { "$it¢" }) { set(settings.copy(minEntryCents = it)) }
+                    StrategyKnob("Lowest price it buys", researchMin, floor..99, "KNOB_MIN", { "$it¢" }) { set(settings.copy(minEntryCents = it.coerceAtLeast(floor))) }
                     StrategyKnob("Highest price it buys", researchMax, researchMin..99, "KNOB_MAX", { "$it¢" }) { set(settings.copy(maxEntryCents = it)) }
                     Text("Research strategy: not bound by the 3¢ trail, window-start or >95% hold rules. Shared research limits (window exposure cap, Kelly, maker edge, late window) are in Global controls.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
                 }
@@ -116,8 +117,8 @@ internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: Sc
                     }
                     StrategyKnob("Trailing stop", settings.trailCents ?: if (controls.peakTrailEnabled) controls.peakTrailCents else if (controls.manual) controls.trailCents else (spec.trail * 100).roundToInt(), 1..20, "KNOB_TRAIL", { "$it¢" }) { set(settings.copy(trailCents = it)) }
                     StrategyKnob("Open at once, per side", settings.maxOpenPerSide, 1..20, "KNOB_MAXOPEN") { set(settings.copy(maxOpenPerSide = it)) }
-                    StrategyKnob("Lowest price it buys", low, 1..high, "KNOB_MIN", { "$it¢" }) { set(settings.copy(minEntryCents = it)) }
-                    StrategyKnob("Highest price it buys", high, low..55, "KNOB_MAX", { "$it¢" }) { set(settings.copy(maxEntryCents = it)) }
+                    StrategyKnob("Lowest price it buys", low, floor..high, "KNOB_MIN", { "$it¢" }) { set(settings.copy(minEntryCents = it.coerceAtLeast(floor))) }
+                    StrategyKnob("Highest price it buys", high, low..priceHi, "KNOB_MAX", { "$it¢" }) { set(settings.copy(maxEntryCents = it)) }
                     StrategyKnob("Entry checks every", settings.cadenceSeconds, 0..30, "KNOB_CADENCE", { if (it == 0) "Live" else "$it s" }) { set(settings.copy(cadenceSeconds = it)) }
                     StrategyKnob("Take profit after fees", settings.takeProfitCents ?: if (controls.manual) controls.takeProfitCents else 0, 0..99, "KNOB_TARGET", { if (it == 0) "Off" else "$it¢ / ct" }) { set(settings.copy(takeProfitCents = it)) }
                     StrategyKnob("Maximum hold", settings.maxHoldSeconds ?: controls.maxHoldSeconds, 0..3600, "KNOB_HOLD", { if (it == 0) "No timer" else "$it s" }) { set(settings.copy(maxHoldSeconds = it)) }
@@ -127,9 +128,9 @@ internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: Sc
                 else -> {
                     StrategyKnob("Until minute", settings.untilMinute, 1..14, "KNOB_UNTIL", { "minute $it" }) { set(settings.copy(untilMinute = it)) }
                     val shownMin = FairGapTune.effectiveMinCents(model.code, settings)
-                    val shownMax = settings.maxEntryCents ?: FairGapTune.defaultMaxCents(model.code) ?: 55
-                    StrategyKnob("Lowest price it buys", shownMin, 1..55, "KNOB_MIN", { "$it¢" }) { set(settings.copy(minEntryCents = it)) }
-                    StrategyKnob("Highest price it buys", shownMax, shownMin.coerceAtMost(55)..55, "KNOB_MAX", { "$it¢" }) { set(settings.copy(maxEntryCents = it)) }
+                    val shownMax = settings.maxEntryCents ?: FairGapTune.defaultMaxCents(model.code) ?: com.dirk.kalshiodds.decision.ScalpFloors.ceilingCents(model.code)
+                    StrategyKnob("Lowest price it buys", shownMin, floor..priceHi, "KNOB_MIN", { "$it¢" }) { set(settings.copy(minEntryCents = it.coerceAtLeast(floor))) }
+                    StrategyKnob("Highest price it buys", shownMax, shownMin.coerceAtMost(priceHi - 1)..priceHi, "KNOB_MAX", { "$it¢" }) { set(settings.copy(maxEntryCents = it)) }
                     StrategyKnob("Stop loss below fill", settings.stopLossPercent ?: 0, 0..99, "KNOB_STOP", { if (it == 0) "Strategy default" else "$it%" }) { set(settings.copy(stopLossPercent = it.takeIf { v -> v > 0 })) }
                     StrategyKnob("Take profit after fees", settings.takeProfitCents ?: 0, 0..99, "KNOB_TARGET", { if (it == 0) "Off" else "$it¢ / ct" }) { set(settings.copy(takeProfitCents = it)) }
                     StrategyKnob("Maximum hold", settings.maxHoldSeconds ?: 0, 0..3600, "KNOB_HOLD", { if (it == 0) "No timer" else "$it s" }) { set(settings.copy(maxHoldSeconds = it)) }

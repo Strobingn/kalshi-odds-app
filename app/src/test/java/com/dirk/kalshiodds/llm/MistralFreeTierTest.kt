@@ -53,11 +53,12 @@ class MistralFreeTierTest {
         assertEquals("Enter your Mistral API key", LlmProviders.keyPrompt(LlmProviders.MISTRAL))
         assertTrue(AiAutoCalls.defaultAuto(LlmProviders.MISTRAL, LlmProviders.MISTRAL_DEFAULT))
         val quota = LlmProviders.effectiveQuota(LlmProviders.MISTRAL, LlmProviders.MISTRAL_DEFAULT, 2_880)!!
-        assertEquals(30_000L, quota.perModelPaceMs)
+        assertEquals(LlmProviders.MISTRAL_PACE_MS, quota.perModelPaceMs)
+        assertEquals(320L, quota.perModelPaceMs)
         assertEquals(188, quota.requestsPerMinute)
         assertEquals(625_000L, quota.tokensPerMinute)
         assertEquals(2_880, quota.requestsPerDay)
-        assertEquals("Auto pace: every 30s", AiAutoCalls.paceLabel(true, ep, quota))
+        assertEquals("Auto pace: every 0.3s", AiAutoCalls.paceLabel(true, ep, quota))
         val settings = source("LlmSettings.kt")
         val saveModel = settings.substring(settings.indexOf("fun saveModelOnly"), settings.indexOf("companion object"))
         assertFalse(saveModel.contains("key."))
@@ -150,8 +151,8 @@ class MistralFreeTierTest {
         val paced = FreeCallPacer()
         paced.record(LlmProviders.MISTRAL, model, 0L, 100)
         paced.noteRemaining(LlmProviders.MISTRAL, model, 180, 500_000, 0L)
-        assertNull(paced.allow(LlmProviders.MISTRAL, listOf(model), quota, 29_000L, 100))
-        assertNotNull(paced.allow(LlmProviders.MISTRAL, listOf(model), quota, 30_000L, 100))
+        assertNull(paced.allow(LlmProviders.MISTRAL, listOf(model), quota, 0L, 100))
+        assertNotNull(paced.allow(LlmProviders.MISTRAL, listOf(model), quota, LlmProviders.MISTRAL_PACE_MS, 100))
         paced.record(LlmProviders.MISTRAL, model, 30_000L, 100)
         paced.noteRemaining(LlmProviders.MISTRAL, model, 4, 400_000, 30_000L)
         assertNull(paced.allow(LlmProviders.MISTRAL, listOf(model), quota, 119_000L, 100))
@@ -221,7 +222,10 @@ class MistralFreeTierTest {
             }
             t += 1_000L
         }
-        assertEquals(listOf(0L, 30_000L, 60_000L, 90_000L, 120_000L, 150_000L), hits)
+        assertEquals(180, hits.size)
+        assertEquals(0L, hits.first())
+        assertEquals(179_000L, hits.last())
+        assertTrue(hits.zipWithNext { a, b -> b - a }.all { it >= LlmProviders.MISTRAL_PACE_MS })
         val day = FreeCallPacer()
         var n = 0
         var prev = Long.MIN_VALUE

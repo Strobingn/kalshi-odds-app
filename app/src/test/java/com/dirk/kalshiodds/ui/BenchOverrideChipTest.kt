@@ -44,7 +44,7 @@ class BenchOverrideChipTest {
                 })
             }
         }
-        rule.onNodeWithText("Bench · auto · BENCHED (shadow only)").assertExists()
+        rule.onNodeWithText("Bench · trading · no manual override").assertExists()
         rule.onNodeWithTag("BENCH_AUTO").assertIsSelected()
 
         rule.onNodeWithText("Force trade").performClick()
@@ -60,10 +60,10 @@ class BenchOverrideChipTest {
         rule.onNodeWithText("Bench · forced benched").assertExists()
         assertEquals("BENCHED", controls.benchOverrides["fair"])
 
-        rule.onNodeWithText("Auto").performClick()
+        rule.onNodeWithText("Trading").performClick()
         rule.waitForIdle()
         rule.onNodeWithTag("BENCH_AUTO").assertIsSelected()
-        rule.onNodeWithText("Bench · auto · BENCHED (shadow only)").assertExists()
+        rule.onNodeWithText("Bench · trading · no manual override").assertExists()
         assertFalse(controls.benchOverrides.containsKey("fair"))
         assertEquals(listOf<String?>("ACTIVE", "BENCHED", null), taps)
     }

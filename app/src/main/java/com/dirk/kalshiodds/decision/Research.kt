@@ -135,26 +135,71 @@ object Research {
     fun defaultEdge(id: String): Int = LATE_SPECS[id]?.edgeCents ?: if (id == LATE) 10 else 2 // 1.0.3: late favourite → fair-gap 10¢ minimum gap
 
     /**
-     * "AI learns" (all strategies): every 3 closed paper trades, nudge ONE slider by 1¢ from the strategy's own net.
-     * Research → edge gate (+1¢ after a losing batch, −1¢ after a winning batch, never below your setting, at most +4¢).
-     * Others → highest buy price (−1¢ after a losing batch, +1¢ back after a winning one, never above your setting, at most −10¢).
+     * "AI learns": after every close, move several sliders. The step scales with that trade's P&L.
+     * Winners loosen (higher ceiling, lower floor down to the strategy floor, bigger clip).
+     * Losers tighten and shrink. It never freezes or benches. A manual edit clears [ScalpStrategySettings.aiBaseCents]
+     * and the next close starts from the values the owner set.
      */
     fun learn(code: String, s: ScalpStrategySettings, net: Double, defaultMaxCents: Int): ScalpStrategySettings {
-        if (!s.aiLearns) return s
-        val n = s.aiN + 1; val sum = s.aiNet + net
-        if (n < 3) return s.copy(aiN = n, aiNet = sum)
-        val money = String.format(java.util.Locale.US, "%+.2f", sum)
-        return if (isResearch(code)) {
-            val cur = s.edgeCents ?: defaultEdge(code); val base = s.aiBaseCents ?: cur
-            val nx = if (sum < 0) minOf(cur + 1, base + 4) else maxOf(cur - 1, base)
-            s.copy(edgeCents = nx, aiBaseCents = base, aiN = 0, aiNet = 0.0,
-                aiNote = if (nx == cur) "AI kept edge ${cur}¢ (last 3 trades $money)" else "AI moved edge ${cur}¢ → ${nx}¢ (last 3 trades $money)")
+        if (!s.aiLearns || !net.isFinite()) return s
+        val floor = ScalpFloors.cents(code)
+        val ceil = ScalpFloors.ceilingCents(code)
+        val step = PaperSettingTuner.stepCents(net)
+        val winner = net > 0.0
+        val notes = ArrayList<String>()
+        val min0 = s.minEntryCents.coerceAtLeast(floor)
+        var min = min0
+        var max = s.maxEntryCents
+        var edge = s.edgeCents
+        var contracts = s.contracts
+        var until = s.untilMinute
+        var stopPct = s.stopLossPercent
+        val anchor = s.aiBaseCents ?: if (isResearch(code)) s.edgeCents ?: defaultEdge(code) else s.maxEntryCents ?: defaultMaxCents
+        if (isResearch(code)) {
+            val cur = edge ?: defaultEdge(code)
+            val base = s.aiBaseCents ?: cur
+            val nx = if (winner) maxOf(cur - step, base) else minOf(cur + step, base + 12)
+            if (nx != cur) notes += "edge ${cur}¢ → ${nx}¢"
+            edge = nx
         } else {
-            val cur = s.maxEntryCents ?: defaultMaxCents; val base = s.aiBaseCents ?: cur
-            val nx = if (sum < 0) maxOf(cur - 1, base - 10, s.minEntryCents) else minOf(cur + 1, base)
-            s.copy(maxEntryCents = nx, aiBaseCents = base, aiN = 0, aiNet = 0.0,
-                aiNote = if (nx == cur) "AI kept highest buy ${cur}¢ (last 3 trades $money)" else "AI moved highest buy ${cur}¢ → ${nx}¢ (last 3 trades $money)")
+            val cur = max ?: defaultMaxCents
+            val base = s.aiBaseCents ?: cur
+            val nx = if (winner) minOf(cur + step, base + 12, ceil) else maxOf(cur - step, base - 20, floor + 1)
+            if (nx != cur) notes += "highest buy ${cur}¢ → ${nx}¢"
+            max = nx
         }
+        val clip0 = contracts ?: 10
+        val clip1 = if (winner) (clip0 + step).coerceAtMost(100) else (clip0 - step).coerceAtLeast(1)
+        if (clip1 != clip0) {
+            contracts = clip1
+            notes += "clip $clip0 → $clip1"
+        }
+        val min1 = if (winner) (min - step).coerceAtLeast(floor) else (min + 1).coerceAtMost(((max ?: ceil) - 1).coerceAtLeast(floor))
+        if (min1 != min) {
+            min = min1
+            notes += "lowest buy ${min0}¢ → ${min1}¢"
+        }
+        val until1 = if (winner) (until + 1).coerceAtMost(14) else (until - 1).coerceAtLeast(1)
+        if (until1 != until) until = until1
+        if (!isResearch(code) && stopPct != null && stopPct > 0) {
+            val nsp = if (winner) (stopPct + 1).coerceAtMost(40) else (stopPct - 1).coerceAtLeast(1)
+            if (nsp != stopPct) stopPct = nsp
+        }
+        val money = String.format(java.util.Locale.US, "%+.2f", net)
+        val why = if (winner) "winner" else "loser"
+        val note = if (notes.isEmpty()) "AI kept settings ($why $money)" else "AI $why $money · " + notes.joinToString(", ")
+        return ScalpParamSanity.settings(code, s.copy(
+            edgeCents = edge,
+            maxEntryCents = max,
+            minEntryCents = min,
+            contracts = contracts,
+            untilMinute = until,
+            stopLossPercent = stopPct,
+            aiBaseCents = anchor,
+            aiN = s.aiN + 1,
+            aiNet = 0.0,
+            aiNote = note
+        ))
     }
 
     /** Ceil helper used by tests. */

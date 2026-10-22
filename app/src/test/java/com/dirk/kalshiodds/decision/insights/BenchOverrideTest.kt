@@ -29,9 +29,9 @@ class BenchOverrideTest {
         val insights = ScalpInsights(book, controls, null) {}
         insights.start()
         series("fair", List(30) { -1.0 }).forEach { insights.onSettled("fair", it) }
-        assertTrue(book.benched.contains("fair"))
-        assertEquals(BenchStatus.BENCHED, BenchRegistry.decisions.value.getValue("fair").status)
-        assertFalse(BenchRegistry.decisions.value.getValue("fair").trading)
+        assertFalse(book.benched.contains("fair"))
+        assertEquals(BenchStatus.ACTIVE, BenchRegistry.decisions.value.getValue("fair").status)
+        assertTrue(BenchRegistry.decisions.value.getValue("fair").trading)
 
         controls.save(controls.state.value.copy(benchOverrides = mapOf("fair" to "ACTIVE")))
         insights.recompute()
@@ -47,9 +47,9 @@ class BenchOverrideTest {
 
         controls.save(controls.state.value.copy(benchOverrides = emptyMap()))
         insights.recompute()
-        assertEquals(BenchStatus.BENCHED, BenchRegistry.decisions.value.getValue("fair").status)
-        assertFalse(BenchRegistry.decisions.value.getValue("fair").trading)
-        assertTrue(book.benched.contains("fair"))
+        assertEquals(BenchStatus.ACTIVE, BenchRegistry.decisions.value.getValue("fair").status)
+        assertTrue(BenchRegistry.decisions.value.getValue("fair").trading)
+        assertFalse(book.benched.contains("fair"))
         assertTrue(controls.state.value.benchOverrides.isEmpty())
     }
 }

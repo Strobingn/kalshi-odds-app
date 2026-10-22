@@ -219,8 +219,7 @@ class AppContainer(context: Context) {
             val benchName = when {
                 controls.benchOverrides[m.code] == "ACTIVE" -> "FORCED_ACTIVE"
                 controls.benchOverrides[m.code] == "BENCHED" -> "FORCED_BENCHED"
-                m.code in controls.aiBench -> "BENCHED"
-                else -> b?.status?.name ?: "ACTIVE"
+                else -> "ACTIVE"
             }
             com.dirk.kalshiodds.llm.AiWindowContext.Scalper(
                 m.code, benchName, tape?.trades ?: fb.trades, tape?.netUsd ?: b?.netUsd ?: fb.meanNetPerContract, fields, opens,
