@@ -74,9 +74,23 @@ object ScalpParamSanity {
         return ScalpRule.CONTRACTS
     }
 
-    /** The size this scalper may fill. [explicit] is a manual or tuner clip and wins. Green size does not. */
-    fun ownClip(code: String, explicit: Int? = null): Int =
-        (explicit ?: builtinClip(code)).coerceIn(1, 500)
+    /**
+     * The size this scalper may fill. A saved contracts value can shrink the clip.
+     * It cannot grow past the variant's own clip (sf42-v1 is 5, not 8). Green size is not a clip.
+     */
+    fun ownClip(code: String, explicit: Int? = null): Int {
+        val builtin = builtinClip(code)
+        val chosen = (explicit ?: builtin).coerceIn(1, 500)
+        val variantCap = ScalpVariants.clipOf(code)
+        return if (variantCap != null) minOf(chosen, variantCap) else chosen
+    }
+
+    /** Algo column for the sync payload. Every live scalper names its clip. */
+    fun algoText(label: String, clip: Int): String {
+        if (label == KeptScalpers.REMOVED_LABEL) return label
+        if (label.contains("clip")) return label
+        return "$label · clip $clip"
+    }
 
     /**
      * Ask band written into v2 notes and read back at fill time.

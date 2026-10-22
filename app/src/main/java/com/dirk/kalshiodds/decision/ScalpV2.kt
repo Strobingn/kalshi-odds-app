@@ -76,6 +76,94 @@ object ScalpV2 {
             "V2 trail ${Math.round(trail * 100)}¢ below peak bid"
         else -> null
     }
+
+    /** v2 dip copies. A 20% stop on a 14–20¢ fill is 3–4¢, inside the spread and the fee. */
+    fun dipFamily(code: String): Boolean =
+        code == KeptScalpers.V2_DIP_ID || code.startsWith("v2-dip-") ||
+            ScalpVariants.of(code)?.kind == ScalpVariants.Kind.V2_DIP
+
+    /** Smallest absolute dip stop. The parent's configured stop is 6¢; a 4¢ variant stop is still inside the noise. */
+    const val MIN_DIP_STOP_CENTS = 6
+
+    fun configuredDipStopCents(code: String): Int {
+        val fromVariant = ScalpVariants.of(code)?.fair?.stop?.let { kotlin.math.round(it * 100.0).toInt() }
+        val fromParent = ScalpParams.byId(KeptScalpers.V2_DIP_BASE)?.stop?.let { kotlin.math.round(it * 100.0).toInt() }
+        return (fromVariant ?: fromParent ?: MIN_DIP_STOP_CENTS).coerceAtLeast(1)
+    }
+
+    /** Saved slider wins when it is at least [MIN_DIP_STOP_CENTS]. A tighter saved stop is raised to that floor. */
+    fun dipStopCents(code: String, savedCents: Int? = null): Int =
+        maxOf(savedCents ?: configuredDipStopCents(code), MIN_DIP_STOP_CENTS)
+
+    /**
+     * Dollars under the fill. At least the cents stop, and at least the spread plus both taker fees,
+     * so a 1¢ flicker cannot stop the trade out and charge two fees.
+     */
+    fun dipStopDistance(entry: Double, contracts: Int, stopCents: Int, spread: Double = 0.01): Double {
+        val px = entry.coerceIn(0.01, 0.99)
+        val n = contracts.coerceAtLeast(1)
+        val fees = ScalpRule.feePerContract(n, px) + ScalpRule.feePerContract(n, px)
+        return maxOf(stopCents / 100.0, spread + fees)
+    }
+
+    fun dipExit(entry: Double, bid: Double, peak: Double, trail: Double, stopDistance: Double, contracts: Int): String? {
+        val cents = kotlin.math.round(stopDistance * 100.0).toInt()
+        return when {
+            bid <= entry - stopDistance + 1e-9 -> "V2 stop loss ${cents}¢ below fill"
+            bid <= peak - trail + 1e-9 && ScalpRule.netAfterFees(entry, bid, contracts.coerceAtLeast(1)) > 1e-9 ->
+                "V2 trail ${Math.round(trail * 100)}¢ below peak bid"
+            else -> null
+        }
+    }
+
+    /** Half of [drop] is the dip model's expected retrace. It has to clear the spread and both taker fees. */
+    fun dipMoveClearsFees(drop: Double, ask: Double, contracts: Int, spread: Double = 0.01): Boolean {
+        if (drop <= 0.0 || !ask.isFinite() || ask <= 0.0 || ask >= 1.0) return false
+        val move = drop * 0.5
+        val exit = (ask + move).coerceIn(0.01, 0.99)
+        val n = contracts.coerceAtLeast(1)
+        val cost = spread + ScalpRule.feePerContract(n, ask) + ScalpRule.feePerContract(n, exit)
+        return move > cost + 1e-9
+    }
+
+    /** Reference ask for the v2 dip minimum. The 1.0.30 losses were 14–20¢ fills. */
+    const val DIP_EDGE_ASK = 0.18
+
+    /** Smallest dip, in dollars, whose half retrace clears spread and both taker fees at [ask]. */
+    fun feeClearingDipGap(ask: Double, contracts: Int, spread: Double = 0.01): Double {
+        for (cents in 2..40) {
+            val gap = cents / 100.0
+            if (dipMoveClearsFees(gap, ask, contracts, spread)) return gap
+        }
+        return 0.40
+    }
+
+    /**
+     * Walk [bids] with the dip stop and the target. Returns the exit bid and the reason,
+     * or the last bid with a null reason when the path never exits.
+     */
+    fun replayDip(
+        entry: Double,
+        bids: List<Double>,
+        contracts: Int,
+        stopCents: Int,
+        target: Double,
+        trail: Double = TRAIL,
+        spread: Double = 0.01
+    ): Pair<Double, String?> {
+        val n = contracts.coerceAtLeast(1)
+        val dist = dipStopDistance(entry, n, stopCents, spread)
+        var peak = bids.firstOrNull() ?: entry
+        for (bid in bids) {
+            peak = maxOf(peak, bid)
+            val stopOrTrail = dipExit(entry, bid, peak, trail, dist, n)
+            val targetHit = target > 0.0 && bid + 1e-9 >= entry + target &&
+                ScalpRule.netAfterFees(entry, bid, n) > 1e-9
+            val reason = stopOrTrail ?: if (targetHit) "V2 target +${kotlin.math.round(target * 100.0).toInt()}¢ after fees" else null
+            if (reason != null) return bid to reason
+        }
+        return (bids.lastOrNull() ?: entry) to null
+    }
     fun entryRiskNote(note: String, bid: Double?): String {
         if (savedNumber(note, "v2peakrule", 0.0) != 1.0) return note
         val peak = bid?.takeIf { it.isFinite() && it > 0 } ?: 0.0

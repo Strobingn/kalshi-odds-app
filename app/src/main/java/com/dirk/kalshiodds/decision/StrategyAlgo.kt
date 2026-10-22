@@ -134,7 +134,7 @@ object StrategyAlgo {
         val cap = contractCap(c)
         if (code.isNullOrBlank()) return fallback.coerceIn(1, cap)
         val explicit = c.strategySettings[code]?.contracts
-        if (explicit != null) return explicit.coerceIn(1, 500)
+        if (explicit != null) return ScalpParamSanity.ownClip(code, explicit)
         val own = ScalpParamSanity.ownClip(code, null)
         val algo = c.algo[code]?.get("contracts")?.takeIf { it.isFinite() }?.roundToInt()
         return minOf((algo ?: fallback).coerceIn(1, cap), own).coerceAtLeast(1)

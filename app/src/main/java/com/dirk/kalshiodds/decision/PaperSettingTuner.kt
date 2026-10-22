@@ -66,7 +66,7 @@ object PaperSettingTuner {
                 when (field) {
                     "minEntryCents" -> { lo = floor; hi = (ceil - 1).coerceAtLeast(floor) }
                     "maxEntryCents" -> { lo = ScalpFloors.minCeilingCents(tape.code); hi = ceil }
-                    "contracts" -> { lo = 1; hi = 100 }
+                    "contracts" -> { lo = 1; hi = ScalpVariants.clipOf(tape.code) ?: 100 }
                     "untilMinute" -> { lo = 1; hi = 14 }
                     "stopCents", "stopLossPercent" -> { lo = 1; hi = 48 }
                     "takeProfitCents" -> { lo = 0; hi = 40 }

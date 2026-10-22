@@ -702,7 +702,9 @@ class ScalpBook(
         for (spec in ScalpVariants.ALL) {
             val p0 = spec.fair ?: continue
             if (spec.kind == ScalpVariants.Kind.FADE || spec.kind == ScalpVariants.Kind.SIMPLE || spec.kind == ScalpVariants.Kind.SHOCK || spec.kind == ScalpVariants.Kind.FAV) continue
-            val p = p0
+            val p = if (spec.kind == ScalpVariants.Kind.V2_DIP) {
+                p0.copy(minGap = maxOf(p0.minGap, ScalpV2.feeClearingDipGap(ScalpV2.DIP_EDGE_ASK, spec.clip)))
+            } else p0
             val (sig, skip) = if (p.strategy == ScalpStrategy.FAIR_GAP) ScalpRule.entrySignal(q, p) else ScalpRule.strategySignal(q, p, listOf("YES", "NO"), recent)
             if (sig == null) { clearTrigger(spec.id, q.ticker); gates.block(spec.id, window, skip); continue }
             val px = if (p.maker) q.bid(sig.side) else sig.ask
@@ -717,7 +719,8 @@ class ScalpBook(
             val note = if (v2) {
                 val saved = controls.state.value.settings(spec.id)
                 val (minPx, maxPx) = ScalpParamSanity.v2Band(spec.id, saved.minEntryCents / 100.0, (saved.maxEntryCents ?: ScalpFloors.ceilingCents(spec.id)) / 100.0)
-                String.format(Locale.US, "v2 variant of %s · v2ask=%.4f · v2trail=%.4f · v2clip=%d · v2peakrule=1 · v2stopPct=20 · v2min=%.4f · v2until=14 · v2sidecap=20 · v2cadence=0", spec.parentId, maxPx, ScalpV2.TRAIL, n, minPx)
+                val stopC = if (spec.kind == ScalpVariants.Kind.V2_DIP) ScalpV2.dipStopCents(spec.id) else 0
+                String.format(Locale.US, "v2 variant of %s · v2ask=%.4f · v2trail=%.4f · v2clip=%d · v2peakrule=1 · v2stopC=%d · v2stopPct=20 · v2min=%.4f · v2until=14 · v2sidecap=20 · v2cadence=0", spec.parentId, maxPx, ScalpV2.TRAIL, n, stopC, minPx)
             } else String.format(Locale.US, "%s · variant %s", p.strategy.label, spec.id)
             out += ScalpTrade(
                 id = idFactory(), ticker = q.ticker.uppercase(), side = sig.side, state = ScalpState.PENDING_ENTRY,
@@ -737,17 +740,20 @@ class ScalpBook(
             ScalpParams.byId(KeptScalpers.V2_DIP_BASE) to KeptScalpers.V2_DIP_ID,
             ScalpParams.byId(KeptScalpers.V2_FAIR_BASE) to KeptScalpers.V2_FAIR_ID
         )
-        for ((p, v2Id) in bases) {
-            if (p == null) continue
-            val sig = if (p.strategy == ScalpStrategy.FAIR_GAP) ScalpRule.entrySignal(q, p).first
-                else ScalpRule.strategySignal(q, p, listOf("YES", "NO"), recent).first
+        for ((raw, v2Id) in bases) {
+            if (raw == null) continue
+            val signalParams = if (v2Id == KeptScalpers.V2_DIP_ID) {
+                raw.copy(minGap = maxOf(raw.minGap, ScalpV2.feeClearingDipGap(ScalpV2.DIP_EDGE_ASK, ScalpV2.CLIP)))
+            } else raw
+            val sig = if (signalParams.strategy == ScalpStrategy.FAIR_GAP) ScalpRule.entrySignal(q, signalParams).first
+                else ScalpRule.strategySignal(q, signalParams, listOf("YES", "NO"), recent).first
             if (sig == null) continue
-            val px = if (p.maker) q.bid(sig.side) ?: continue else sig.ask
+            val px = if (raw.maker) q.bid(sig.side) ?: continue else sig.ask
             if (!ScalpRule.buyPriceOk(px)) continue
             spawnV2(ScalpTrade(
                 id = "v2src-$v2Id", ticker = q.ticker.uppercase(), side = sig.side, state = ScalpState.PENDING_ENTRY,
-                signalAtMs = q.nowMs, signalAsk = px, fairAtSignal = sig.fair, note = "kept v2 source ${p.id}",
-                ruleVersion = "${ScalpRule.VERSION}|${p.id}|P"
+                signalAtMs = q.nowMs, signalAsk = px, fairAtSignal = sig.fair, note = "kept v2 source ${raw.id}",
+                ruleVersion = "${ScalpRule.VERSION}|${raw.id}|P"
             ))
         }
     }
@@ -2398,7 +2404,17 @@ class ScalpBook(
                     val target = ScalpV2.savedNumber(t.note, "v2tp", 0.0)
                     val timeExit = if (holdExpired) (if (fgT) "fair-gap rule: ${maxHold.toInt()}s hold done" else "V2 user max hold reached") else null
                     val priceExit = if (fgT) null else bid?.let {
-                        (if (ScalpV2.peakRule(t)) ScalpV2.peakExit(entry, ScalpV2.stopPercent(t), pk, it, trail, t.contracts)
+                        if (ScalpV2.dipFamily(fgCode)) {
+                            val cents = ScalpV2.dipStopCents(fgCode, entryView(fgCode)?.stopCents)
+                            val dist = ScalpV2.dipStopDistance(entry, t.contracts, cents)
+                            val strategyTarget = ScalpVariants.fairParams(fgCode)?.target
+                                ?: ScalpParams.byId(KeptScalpers.V2_DIP_BASE)?.target ?: 0.0
+                            val n = t.contracts.coerceAtLeast(1)
+                            ScalpV2.dipExit(entry, it, pk, trail, dist, n)
+                                ?: if (strategyTarget > 0.0 && it + 1e-9 >= entry + strategyTarget &&
+                                    ScalpRule.netAfterFees(entry, it, n) > 1e-9
+                                ) "V2 target +${kotlin.math.round(strategyTarget * 100.0).toInt()}¢ after fees" else null
+                        } else (if (ScalpV2.peakRule(t)) ScalpV2.peakExit(entry, ScalpV2.stopPercent(t), pk, it, trail, t.contracts)
                         else ScalpV2.exit(entry, stop, pk, it, armed, t.contracts, trail, armThreshold = arm, netGain = ScalpV2.netPerContract(t, it)))
                             ?: if (target > 0 && ScalpV2.netPerContract(t, it) >= target - 1e-9) "V2 user net take-profit" else null
                     }
