@@ -17,9 +17,9 @@ class ScalpTuningTest {
     @Test
     fun untouchedStrategiesRunOnTheirOwnDefaults() {
         for (st in ScalpStrategy.values()) {
-            val d = Tuned(st, ScalpKnobs(), 10)
+            val d = Tuned(st, ScalpKnobs(), ScalpTuning.DEFAULT_CONTRACTS)
             assertTrue(st.name, d.enabled)
-            assertEquals(st.name, 10, d.contracts)
+            assertEquals(st.name, ScalpTuning.DEFAULT_CONTRACTS, d.contracts)
             assertEquals(st.name, st.targetDollars, d.targetDollars, 0.0)
             assertEquals(st.name, st.stopDollars, d.stopDollars, 0.0)
             assertEquals(st.name, st.timeoutMs, d.timeoutMs)

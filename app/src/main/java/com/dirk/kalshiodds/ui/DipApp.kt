@@ -7,6 +7,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Assessment
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.ReceiptLong
@@ -102,6 +103,7 @@ private data class BottomDestination(
 private val bottomDestinations = listOf(
     BottomDestination(AppRoutes.HOME, "Home", Icons.Default.Home),
     BottomDestination(AppRoutes.SCALPER, "Arena", Icons.Default.EmojiEvents),
+    BottomDestination(AppRoutes.AI_CHAT, "AI", Icons.Default.AutoAwesome),
     BottomDestination(AppRoutes.SCORECARD, "Score", Icons.Default.Assessment),
     BottomDestination(AppRoutes.SIGNAL_HISTORY, "Live", Icons.Default.ReceiptLong),
     BottomDestination(AppRoutes.HISTORY, "Real", Icons.Default.AccountBalance),

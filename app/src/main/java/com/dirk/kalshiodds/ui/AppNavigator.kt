@@ -31,7 +31,7 @@ object AppRoutes {
 
     /** Destinations deliberately exposed in the persistent bottom navigation. */
     val PRIMARY: List<String> = listOf(
-        HOME, SCALPER, SCORECARD, SIGNAL_HISTORY, HISTORY, DATA, SETTINGS
+        HOME, SCALPER, AI_CHAT, SCORECARD, SIGNAL_HISTORY, HISTORY, DATA, SETTINGS
     )
 }
 

@@ -42,14 +42,9 @@ import com.dirk.kalshiodds.ui.theme.DipTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -> Unit, onOpenAiChat: () -> Unit = {}) {
+fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -> Unit) {
     val colors = DipTheme.colors
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val supervisorStatus by viewModel.supervisorStatus.collectAsStateWithLifecycle()
-    val supervisorLog by viewModel.supervisorLog.collectAsStateWithLifecycle()
-    val paperAiStatus by viewModel.paperAiStatus.collectAsStateWithLifecycle()
-    val paperAiLog by viewModel.paperAiLog.collectAsStateWithLifecycle()
-    val paperAiRecord by viewModel.paperAiRecord.collectAsStateWithLifecycle()
     val importFile = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? -> uri?.let(viewModel::importUri) }
@@ -101,83 +96,6 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
                 onClick = onOpenHistory,
                 modifier = Modifier.fillMaxWidth().height(52.dp)
             ) { Text("History") }
-
-            Section("Scalping AI + Paper AI (two separate AIs, paper only)")
-            Text(
-                "Two different AIs. The SCALPING AI watches the live 15-minute feed every 60 s and changes the scalping algorithms' settings, learning from every closed trade (no cooldown). The PAPER AI is separate: once per window it decides one paper bet (YES, NO or SKIP). Neither can place a real order. Free Groq, Mistral and Gemini keys are used with fallback (Scalping AI: Groq, Gemini, Mistral; Paper AI: Gemini, Mistral, Groq). Keys are stored encrypted on this phone.",
-                style = MaterialTheme.typography.labelMedium,
-                color = colors.textSecondary
-            )
-            OutlinedTextField(
-                value = state.groqKeyDraft,
-                onValueChange = viewModel::setGroqKeyDraft,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Groq API key") },
-                visualTransformation = PasswordVisualTransformation(),
-                singleLine = true
-            )
-            OutlinedTextField(
-                value = state.mistralKeyDraft,
-                onValueChange = viewModel::setMistralKeyDraft,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Mistral API key") },
-                visualTransformation = PasswordVisualTransformation(),
-                singleLine = true
-            )
-            OutlinedTextField(
-                value = state.geminiKeyDraft,
-                onValueChange = viewModel::setGeminiKeyDraft,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Gemini API key") },
-                visualTransformation = PasswordVisualTransformation(),
-                singleLine = true
-            )
-            OutlinedButton(
-                onClick = viewModel::saveSupervisorKeys,
-                modifier = Modifier.fillMaxWidth().height(48.dp)
-            ) { Text("Save keys") }
-            Button(
-                onClick = { viewModel.setLearningMode(!state.learningMode) },
-                modifier = Modifier.fillMaxWidth().height(52.dp)
-            ) { Text(if (state.learningMode) "Learning mode: ON · all but the big losers bet" else "Learning mode: OFF · money-makers only") }
-            Text(
-                "Learning mode runs the small retired strategies on paper again (50 contracts each) so the arena places as many bets as it can and the AI has data. The 17 big losers (each lost $1,000 to $48,000 in the replay) stay out. Paper only.",
-                style = MaterialTheme.typography.labelSmall,
-                color = colors.textSecondary
-            )
-            Button(
-                onClick = { viewModel.setSupervisorOn(!state.supervisorOn) },
-                modifier = Modifier.fillMaxWidth().height(52.dp)
-            ) { Text(if (state.supervisorOn) "Scalping AI: ON (tap to stop)" else "Scalping AI: OFF (tap to start)") }
-            Text(
-                supervisorStatus,
-                style = MaterialTheme.typography.labelMedium,
-                color = colors.textSecondary
-            )
-            supervisorLog.take(5).forEach { line ->
-                Text(
-                    line,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colors.textSecondary
-                )
-            }
-
-            Button(
-                onClick = { viewModel.setPaperAiOn(!state.paperAiOn) },
-                modifier = Modifier.fillMaxWidth().height(52.dp)
-            ) { Text(if (state.paperAiOn) "Paper AI: ON (tap to stop)" else "Paper AI: OFF (tap to start)") }
-            Text(
-                paperAiRecord + " · " + paperAiStatus,
-                style = MaterialTheme.typography.labelMedium,
-                color = colors.textSecondary
-            )
-            paperAiLog.take(4).forEach { line ->
-                Text(line, style = MaterialTheme.typography.labelSmall, color = colors.textSecondary)
-            }
-            Button(
-                onClick = onOpenAiChat,
-                modifier = Modifier.fillMaxWidth().height(52.dp)
-            ) { Text("Open AI chat (Scalping AI / Paper AI)") }
 
             Section("Market-data recordings")
             RecordingsExportSection(onExport = viewModel::exportRecordings)

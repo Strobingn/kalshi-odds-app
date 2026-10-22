@@ -149,12 +149,11 @@ class MainActivity : ComponentActivity() {
                             DataScreen(
                                 viewModel = dataViewModel,
                                 onBack = { navigator.back() },
-                                onOpenHistory = { navigator.open(AppRoutes.HISTORY) },
-                                onOpenAiChat = { navigator.open(AppRoutes.AI_CHAT) }
+                                onOpenHistory = { navigator.open(AppRoutes.HISTORY) }
                             )
                         },
                         aiChat = {
-                            com.dirk.kalshiodds.ui.AiChatScreen(onBack = { navigator.back() })
+                            com.dirk.kalshiodds.ui.AiChatScreen(onBack = { navigator.back() }, dataViewModel = dataViewModel)
                         },
                         history = {
                             com.dirk.kalshiodds.ui.HistoryScreen(
