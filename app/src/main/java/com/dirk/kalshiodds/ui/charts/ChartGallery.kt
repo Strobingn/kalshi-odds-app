@@ -8,6 +8,8 @@ import java.time.Instant
 import java.time.ZoneId
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.round
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
@@ -279,6 +281,7 @@ object ChartGallery {
     /**
      * Cumulative depth. YES levels are UP bids. NO levels are DOWN bids.
      * The other side's bids are the asks: an UP ask sits at 100¢ minus the DOWN bid.
+     * Prices stay on the 0.1¢ grid. 3.8¢ is not rounded to 4¢ or floored to 0¢.
      */
     fun cumulativeDepth(yes: List<Pair<Double, Double>>, no: List<Pair<Double, Double>>): List<DepthSeries> {
         val yesC = depthLevels(yes)
@@ -292,12 +295,64 @@ object ChartGallery {
         )
     }
 
+    /**
+     * Shared horizontal scale for [CumulativeDepthChart].
+     * A book parked at 4¢ and 96¢ is drawn as two clusters so a 0.4¢ step
+     * is not one pixel on a 0–100 axis, and neither cluster is pinned to x = 0.
+     */
+    data class DepthScale(
+        val split: Boolean,
+        val lo: Double,
+        val hi: Double,
+        val gapLo: Double = lo,
+        val gapHi: Double = hi
+    )
+
+    fun depthScale(cents: Collection<Double>): DepthScale {
+        val xs = cents.filter { it.isFinite() }.map { round(it * 10.0) / 10.0 }.distinct().sorted()
+        if (xs.isEmpty()) return DepthScale(false, 0.0, 100.0)
+        if (xs.size == 1) return DepthScale(false, xs[0] - 1.0, xs[0] + 1.0)
+        var gap = 0.0
+        var gapAt = 1
+        for (i in 1 until xs.size) {
+            val g = xs[i] - xs[i - 1]
+            if (g > gap) {
+                gap = g
+                gapAt = i
+            }
+        }
+        val span = xs.last() - xs.first()
+        if (gap > 15.0 && span > 0.0 && gap > span * 0.45) {
+            return DepthScale(true, xs.first(), xs.last(), xs[gapAt - 1], xs[gapAt])
+        }
+        val pad = max(0.4, span * 0.08)
+        return DepthScale(false, xs.first() - pad, xs.last() + pad)
+    }
+
+    /** 0 at the left of the plot, 1 at the right. Split books leave a gap at 0.5. */
+    fun depthFraction(cents: Double, scale: DepthScale): Float {
+        if (!cents.isFinite()) return 0f
+        if (!scale.split) {
+            val span = scale.hi - scale.lo
+            if (span <= 1e-9) return 0.5f
+            return ((cents - scale.lo) / span).toFloat().coerceIn(0f, 1f)
+        }
+        val mid = (scale.gapLo + scale.gapHi) / 2.0
+        return if (cents <= mid) {
+            val span = (scale.gapLo - scale.lo).takeIf { it > 1e-9 } ?: 1.0
+            (0.02 + 0.44 * ((cents - scale.lo) / span)).toFloat().coerceIn(0.02f, 0.46f)
+        } else {
+            val span = (scale.hi - scale.gapHi).takeIf { it > 1e-9 } ?: 1.0
+            (0.54 + 0.44 * ((cents - scale.gapHi) / span)).toFloat().coerceIn(0.54f, 0.98f)
+        }
+    }
+
     private fun depthLevels(levels: List<Pair<Double, Double>>): Map<Int, Double> {
         val acc = HashMap<Int, Double>()
         for ((price, size) in levels) {
-            if (!price.isFinite() || !size.isFinite() || size <= 0.0 || price !in 0.0..1.0) continue
-            val cents = (price * 100.0).roundToInt().coerceIn(0, 100)
-            acc[cents] = (acc[cents] ?: 0.0) + size
+            if (!size.isFinite() || size <= 0.0) continue
+            val deci = ChartShapes.levelDeci(price) ?: continue
+            acc[deci] = (acc[deci] ?: 0.0) + size
         }
         return acc
     }
@@ -306,9 +361,9 @@ object ChartGallery {
         var acc = 0.0
         val cents = ArrayList<Double>()
         val size = ArrayList<Double>()
-        for ((cent, qty) in levels.entries.sortedByDescending { it.key }) {
+        for ((deci, qty) in levels.entries.sortedByDescending { it.key }) {
             acc += qty
-            cents += cent.toDouble()
+            cents += deci / 10.0
             size += acc
         }
         return cents to size
@@ -316,16 +371,17 @@ object ChartGallery {
 
     private fun cumulativeAsks(otherBids: Map<Int, Double>): Pair<List<Double>, List<Double>> {
         val asks = HashMap<Int, Double>()
-        for ((cent, qty) in otherBids) {
-            val ask = (100 - cent).coerceIn(0, 100)
+        for ((deci, qty) in otherBids) {
+            val ask = 1000 - deci
+            if (ask !in 1..999) continue
             asks[ask] = (asks[ask] ?: 0.0) + qty
         }
         var acc = 0.0
         val cents = ArrayList<Double>()
         val size = ArrayList<Double>()
-        for ((cent, qty) in asks.entries.sortedBy { it.key }) {
+        for ((deci, qty) in asks.entries.sortedBy { it.key }) {
             acc += qty
-            cents += cent.toDouble()
+            cents += deci / 10.0
             size += acc
         }
         return cents to size

@@ -9,7 +9,9 @@ import java.time.Instant
 import java.time.ZoneId
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.max
 import kotlin.math.round
+import kotlin.math.roundToInt
 
 /**
  * Pure chart inputs. Every value comes from a recorded trade, window, bid, or note.
@@ -22,7 +24,14 @@ object ChartShapes {
     data class Bin(val label: String, val count: Int)
     data class HourCell(val hour: Int, val net: Double, val trades: Int)
     data class SideCount(val label: String, val up: Int, val down: Int)
-    data class DepthRung(val cents: Int, val upSize: Double, val downSize: Double)
+    /**
+     * One row on the shared YES price axis.
+     * [cents] is the YES price (0.1¢ precision). UP bids sit at their own price.
+     * A DOWN bid at q is drawn at 100¢ − q, the YES ask that bid implies.
+     */
+    data class DepthRung(val cents: Double, val upSize: Double, val downSize: Double) {
+        fun label(): String = ChartShapes.centLabel(cents)
+    }
     data class FlowNode(val title: String, val detail: String)
     data class TweakMark(val label: String, val note: String, val fromCents: Int?, val toCents: Int?)
     data class WindowEvent(val atMs: Long, val kind: String, val up: Boolean, val price: Double, val label: String)
@@ -219,26 +228,156 @@ object ChartShapes {
         if (up + down == 0) null else SideCount(label, up, down)
     }
 
+    /**
+     * Book price → tenth-of-a-cent index, 1..999 (0.1¢..99.9¢).
+     *
+     * 0.038 dollars, 3.8 cents, and the same tick written either way land on 38.
+     * 38 itself is 38¢ (a cent price), not 3.8¢. Deci-cent integers 101–999
+     * follow Kalshi: 380 → 38.0¢. Nothing below half a tenth rounds down to 0.
+     */
+    fun levelDeci(price: Double): Int? {
+        if (!price.isFinite() || price <= 0.0) return null
+        val cents = when {
+            price <= 1.0 + 1e-9 -> price * 100.0
+            price <= 100.0 + 1e-6 -> price
+            price < 1000.0 -> price / 10.0
+            else -> return null
+        }
+        if (!cents.isFinite()) return null
+        val deci = round(cents * 10.0).toInt()
+        return deci.takeIf { it in 1..999 }
+    }
+
+    /** "3.8¢", "0.4¢", "74¢". Whole cents drop the decimal. Never "0¢" for 0.4¢. */
+    fun centLabel(cents: Double): String {
+        if (!cents.isFinite()) return "—"
+        val deci = round(cents * 10.0).toInt()
+        val whole = deci / 10
+        val frac = abs(deci % 10)
+        return if (frac == 0) "$whole¢" else "$whole.$frac¢"
+    }
+
+    /** YES price opposite a DOWN bid (or the reverse), still on the 0.1¢ grid. */
+    fun complementCents(cents: Double): Double {
+        val deci = round(cents * 10.0).toInt()
+        return (1000 - deci) / 10.0
+    }
+
+    /**
+     * Ladder rows around the inside market.
+     *
+     * Prices stay on 0.1¢ when the book has a sub-cent tick, and on whole cents
+     * when every level is a whole cent. UP and DOWN share the YES axis: a DOWN
+     * bid at 96.1¢ is the row at 3.9¢. The window is the touch, not the eight
+     * highest whole cents of each side, so a 4¢ book does not jump from 89¢ to 0¢.
+     */
     fun depthRungs(
         yes: List<Pair<Double, Double>>,
         no: List<Pair<Double, Double>>,
         maxLevels: Int = 8
     ): List<DepthRung> {
-        fun clean(levels: List<Pair<Double, Double>>): Map<Int, Double> {
-            val acc = HashMap<Int, Double>()
-            for ((p, s) in levels) {
-                if (!p.isFinite() || !s.isFinite() || s <= 0.0 || p !in 0.0..1.0) continue
-                val c = round(p * 100.0).toInt().coerceIn(0, 100)
-                acc[c] = (acc[c] ?: 0.0) + s
+        val up = aggregateDeci(yes)
+        val downNative = aggregateDeci(no)
+        if (up.isEmpty() && downNative.isEmpty()) return emptyList()
+        val down = HashMap<Int, Double>()
+        for ((deci, size) in downNative) {
+            val yesAsk = 1000 - deci
+            if (yesAsk !in 1..999) continue
+            down[yesAsk] = (down[yesAsk] ?: 0.0) + size
+        }
+        val occupied = up.keys + down.keys
+        val step = if (occupied.all { it % 10 == 0 }) 10 else 1
+        val bestBid = up.keys.maxOrNull()
+        val bestAsk = down.keys.minOrNull()
+        val touch = when {
+            bestBid != null && bestAsk != null -> (bestBid + bestAsk) / 2.0
+            bestBid != null -> bestBid.toDouble()
+            else -> bestAsk!!.toDouble()
+        }
+        fun dist(deci: Int) = abs(deci - touch)
+        val keep = LinkedHashSet<Int>()
+        val perSide = maxLevels.coerceAtLeast(1)
+        up.keys.sortedBy { dist(it) }.take(perSide).forEach { keep.add(it) }
+        down.keys.sortedBy { dist(it) }.take(perSide).forEach { keep.add(it) }
+        val active = keep.toMutableSet()
+        while (active.size > 1 && spanRows(active, step) > DEPTH_MAX_ROWS) {
+            active.remove(farthest(active, up, down, ::dist))
+        }
+        if (active.isEmpty()) return emptyList()
+        val lo = (active.min() / step) * step
+        val hi = ((active.max() + step - 1) / step) * step
+        val rows = ArrayList<DepthRung>((hi - lo) / step + 1)
+        var cursor = hi
+        while (cursor >= lo) {
+            rows += DepthRung(cursor / 10.0, up[cursor] ?: 0.0, down[cursor] ?: 0.0)
+            cursor -= step
+        }
+        while (rows.size > 1 && rows.first().upSize <= 0.0 && rows.first().downSize <= 0.0) rows.removeAt(0)
+        while (rows.size > 1 && rows.last().upSize <= 0.0 && rows.last().downSize <= 0.0) rows.removeAt(rows.lastIndex)
+        return rows
+    }
+
+    /** Largest size on either side. Bar widths share this so a 10k UP bid cannot hide DOWN. */
+    fun depthMaxSize(rungs: List<DepthRung>): Double =
+        rungs.maxOfOrNull { max(it.upSize, it.downSize) }?.coerceAtLeast(1.0) ?: 1.0
+
+    fun depthBarFraction(size: Double, rungs: List<DepthRung>): Double {
+        if (!size.isFinite() || size <= 0.0) return 0.0
+        return (size / depthMaxSize(rungs)).coerceIn(0.0, 1.0)
+    }
+
+    /** Drag or tap y → row. The top of the ladder is the highest YES price. */
+    fun depthRowAt(y: Float, height: Float, rows: Int): Int {
+        if (rows <= 0 || height <= 0f) return 0
+        return ((y / height) * rows).toInt().coerceIn(0, rows - 1)
+    }
+
+    fun depthReadout(rung: DepthRung): String {
+        val parts = ArrayList<String>(3)
+        parts += rung.label()
+        if (rung.upSize > 0.0) parts += "UP ${rung.upSize.roundToInt()}"
+        if (rung.downSize > 0.0) parts += "DOWN ${rung.downSize.roundToInt()} (${centLabel(complementCents(rung.cents))} bid)"
+        return parts.joinToString(" · ")
+    }
+
+    private const val DEPTH_MAX_ROWS = 16
+
+    private fun aggregateDeci(levels: List<Pair<Double, Double>>): Map<Int, Double> {
+        val acc = HashMap<Int, Double>()
+        for ((price, size) in levels) {
+            if (!size.isFinite() || size <= 0.0) continue
+            val deci = levelDeci(price) ?: continue
+            acc[deci] = (acc[deci] ?: 0.0) + size
+        }
+        return acc
+    }
+
+    private fun spanRows(keys: Set<Int>, step: Int): Int {
+        if (keys.isEmpty()) return 0
+        val lo = (keys.min() / step) * step
+        val hi = ((keys.max() + step - 1) / step) * step
+        return (hi - lo) / step + 1
+    }
+
+    private fun farthest(
+        keys: Set<Int>,
+        up: Map<Int, Double>,
+        down: Map<Int, Double>,
+        dist: (Int) -> Double
+    ): Int {
+        var victim = keys.first()
+        var victimDist = dist(victim)
+        var victimSize = (up[victim] ?: 0.0) + (down[victim] ?: 0.0)
+        for (deci in keys) {
+            val d = dist(deci)
+            val size = (up[deci] ?: 0.0) + (down[deci] ?: 0.0)
+            if (d > victimDist + 1e-9 || (abs(d - victimDist) <= 1e-9 && size < victimSize)) {
+                victim = deci
+                victimDist = d
+                victimSize = size
             }
-            return acc.entries.sortedByDescending { it.key }.take(maxLevels).associate { it.key to it.value }
         }
-        val up = clean(yes)
-        val down = clean(no)
-        if (up.isEmpty() && down.isEmpty()) return emptyList()
-        return (up.keys + down.keys).distinct().sortedDescending().map { c ->
-            DepthRung(c, up[c] ?: 0.0, down[c] ?: 0.0)
-        }
+        return victim
     }
 
     fun tweakMark(label: String, note: String): TweakMark? {

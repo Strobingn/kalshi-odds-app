@@ -260,6 +260,8 @@ fun CumulativeDepthChart(series: List<ChartGallery.DepthSeries>, modifier: Modif
             return
         }
         val maxSize = series.maxOf { it.size.maxOrNull() ?: 0.0 }.coerceAtLeast(1.0)
+        val prices = series.flatMap { it.cents }
+        val scale = ChartGallery.depthScale(prices)
         Text(
             ChartGallery.depthSummary(series),
             color = c.textPrimary,
@@ -272,9 +274,19 @@ fun CumulativeDepthChart(series: List<ChartGallery.DepthSeries>, modifier: Modif
             val top = 8.dp.toPx()
             val plotW = (size.width - left - 8.dp.toPx()).coerceAtLeast(1f)
             val plotH = (size.height - top - 18.dp.toPx()).coerceAtLeast(1f)
-            fun x(cents: Double) = left + plotW * (cents / 100.0).toFloat().coerceIn(0f, 1f)
+            fun x(cents: Double) = left + plotW * ChartGallery.depthFraction(cents, scale)
             fun y(qty: Double) = top + plotH * (1f - (qty / maxSize).toFloat().coerceIn(0f, 1f))
             drawLine(c.border, Offset(left, top + plotH), Offset(left + plotW, top + plotH), 1.dp.toPx())
+            if (scale.split) {
+                val gapX = left + plotW * 0.5f
+                drawLine(
+                    c.border,
+                    Offset(gapX, top),
+                    Offset(gapX, top + plotH),
+                    1.dp.toPx(),
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 4.dp.toPx()))
+                )
+            }
             series.forEach { s ->
                 val color = if (s.up) c.upButton else c.downButton
                 val path = Path()
@@ -294,6 +306,21 @@ fun CumulativeDepthChart(series: List<ChartGallery.DepthSeries>, modifier: Modif
                     )
                 )
             }
+        }
+        val lo = prices.minOrNull()
+        val hi = prices.maxOrNull()
+        if (lo != null && hi != null) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(ChartShapes.centLabel(lo), color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
+                Text(ChartShapes.centLabel(hi), color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
+            }
+        }
+        if (scale.split) {
+            Text(
+                "Empty prices between the two sides are left out so 0.1¢ steps stay visible.",
+                style = MaterialTheme.typography.labelSmall,
+                color = c.textSecondary
+            )
         }
         series.forEach { s ->
             Text(s.name, color = if (s.up) c.up else c.down, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)

@@ -78,10 +78,13 @@ class ChartShapesTest {
             yes = listOf(0.60 to 10.0, 0.10 to 4.0, 0.60 to 2.0, -1.0 to 9.0),
             no = listOf(0.40 to 5.0, 0.40 to 1.0, 0.20 to 0.0)
         )
-        assertEquals(listOf(60, 40, 10), rungs.map { it.cents })
+        // 40¢ DOWN is the YES ask at 60¢. The 10¢ bid is 50¢ from that touch, so the
+        // ladder stays on the inside market instead of jumping 60¢ → 10¢.
+        assertEquals(listOf(60.0), rungs.map { it.cents })
+        assertEquals("60¢", rungs[0].label())
         assertEquals(12.0, rungs[0].upSize, 0.0)
-        assertEquals(0.0, rungs[0].downSize, 0.0)
-        assertEquals(6.0, rungs[1].downSize, 0.0)
+        assertEquals(6.0, rungs[0].downSize, 0.0)
+        assertEquals("60¢ · UP 12 · DOWN 6 (40¢ bid)", ChartShapes.depthReadout(rungs[0]))
         assertTrue(ChartShapes.depthRungs(emptyList(), emptyList()).isEmpty())
     }
 
