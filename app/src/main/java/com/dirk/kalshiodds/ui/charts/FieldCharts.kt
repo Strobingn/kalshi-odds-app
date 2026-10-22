@@ -475,13 +475,13 @@ fun DepthChart(rungs: List<ChartShapes.DepthRung>, modifier: Modifier = Modifier
         ChartEmptyState(modifier, 220.dp)
         return
     }
-    val maxSize = rungs.maxOf { max(it.upSize, it.downSize) }.coerceAtLeast(1.0)
     val height = max(220, rungs.size * 28).dp
     var scrub by remember(rungs) { mutableIntStateOf(-1) }
     val pick = rungs.getOrNull(scrub)
+    val span = if (rungs.isEmpty()) "" else "${rungs.first().label()} to ${rungs.last().label()}"
     Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(
-            pick?.let { "${it.cents}¢ · UP ${it.upSize.roundToInt()} · DOWN ${it.downSize.roundToInt()}" } ?: "UP green grows left · DOWN red grows right · drag a price",
+            pick?.let { ChartShapes.depthReadout(it) } ?: "UP green grows left · DOWN red grows right · drag a price",
             style = MaterialTheme.typography.labelMedium,
             color = c.textPrimary
         )
@@ -489,16 +489,21 @@ fun DepthChart(rungs: List<ChartShapes.DepthRung>, modifier: Modifier = Modifier
             Text("UP", color = c.up, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
             Text("DOWN", color = c.down, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
         }
+        Text(
+            "YES price. A DOWN bid is drawn at 100¢ minus its price.",
+            style = MaterialTheme.typography.labelSmall,
+            color = c.textSecondary
+        )
         Canvas(
             Modifier.fillMaxWidth().height(height)
-                .semantics { contentDescription = "Order book depth, UP and DOWN together, ${rungs.size} prices." }
+                .semantics { contentDescription = "Order book depth, UP and DOWN together, ${rungs.size} prices from $span." }
                 .pointerInput(rungs) {
-                    detectTapGestures { scrub = ((it.y / size.height.toFloat()) * rungs.size).toInt().coerceIn(0, rungs.lastIndex) }
+                    detectTapGestures { scrub = ChartShapes.depthRowAt(it.y, size.height.toFloat(), rungs.size) }
                 }
                 .pointerInput(rungs) {
                     detectDragGestures { change, _ ->
                         change.consume()
-                        scrub = ((change.position.y / size.height.toFloat()) * rungs.size).toInt().coerceIn(0, rungs.lastIndex)
+                        scrub = ChartShapes.depthRowAt(change.position.y, size.height.toFloat(), rungs.size)
                     }
                 }
         ) {
@@ -510,11 +515,11 @@ fun DepthChart(rungs: List<ChartShapes.DepthRung>, modifier: Modifier = Modifier
             rungs.forEachIndexed { i, rung ->
                 val cy = rowH * (i + 0.5f)
                 if (i == scrub) drawRect(c.surfaceAlt, Offset(0f, rowH * i), Size(size.width, rowH))
-                val uw = (half * (rung.upSize / maxSize)).toFloat()
-                val dw = (half * (rung.downSize / maxSize)).toFloat()
+                val uw = (half * ChartShapes.depthBarFraction(rung.upSize, rungs)).toFloat()
+                val dw = (half * ChartShapes.depthBarFraction(rung.downSize, rungs)).toFloat()
                 if (uw > 0f) drawRoundRect(c.upButton, Offset(mid - uw, cy - 7.dp.toPx()), Size(uw, 14.dp.toPx()), CornerRadius(2.dp.toPx(), 2.dp.toPx()))
                 if (dw > 0f) drawRoundRect(c.downButton, Offset(mid, cy - 7.dp.toPx()), Size(dw, 14.dp.toPx()), CornerRadius(2.dp.toPx(), 2.dp.toPx()))
-                drawContext.canvas.nativeCanvas.drawText("${rung.cents}¢", mid, cy + 4.dp.toPx(), paint)
+                drawContext.canvas.nativeCanvas.drawText(rung.label(), mid, cy + 4.dp.toPx(), paint)
             }
         }
     }

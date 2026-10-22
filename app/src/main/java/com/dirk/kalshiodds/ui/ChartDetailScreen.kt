@@ -146,7 +146,7 @@ fun ChartDetailScreen(
                         LineSeries("UP", colors.upButton, ChartShapes.bidSamples(points, true), maxGapMs = 15_000),
                         LineSeries("DOWN", colors.downButton, ChartShapes.bidSamples(points, false), maxGapMs = 15_000)
                     ),
-                    yFormat = { "${it.roundToInt()}¢" },
+                    yFormat = { ChartShapes.centLabel(it) },
                     fixedRange = 0.0 to 100.0,
                     guideY = 50.0,
                     guideLabel = "50¢",

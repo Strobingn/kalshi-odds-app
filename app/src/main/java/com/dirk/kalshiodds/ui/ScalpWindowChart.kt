@@ -134,7 +134,7 @@ internal fun ScalpWindowChart(d: ScalpAlgoDetail, onWindow: (String) -> Unit = {
                     if (tip != null && cents != null) {
                         drawCircle(color, 3.5.dp.toPx(), tip)
                         endLabel.color = color.toArgb()
-                        drawContext.canvas.nativeCanvas.drawText("${kotlin.math.round(cents).toInt()}¢", tip.x - 6.dp.toPx(), tip.y - 6.dp.toPx(), endLabel)
+                        drawContext.canvas.nativeCanvas.drawText(ChartShapes.centLabel(cents.toDouble()), tip.x - 6.dp.toPx(), tip.y - 6.dp.toPx(), endLabel)
                     }
                 }
                 drawBids(true)
