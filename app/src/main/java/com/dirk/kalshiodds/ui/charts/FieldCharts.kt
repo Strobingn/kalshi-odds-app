@@ -9,10 +9,12 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -25,6 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -40,9 +43,12 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -468,58 +474,176 @@ fun DivergingBarChart(
     }
 }
 
+private data class LadderPick(val up: Boolean, val row: Int)
+
 @Composable
-fun DepthChart(rungs: List<ChartShapes.DepthRung>, modifier: Modifier = Modifier) {
+fun DepthChart(ladder: ChartShapes.DepthLadder, modifier: Modifier = Modifier) {
     val c = DipTheme.colors
-    if (rungs.isEmpty()) {
+    if (ladder.isEmpty()) {
         ChartEmptyState(modifier, 220.dp)
         return
     }
-    val height = max(220, rungs.size * 28).dp
-    var scrub by remember(rungs) { mutableIntStateOf(-1) }
-    val pick = rungs.getOrNull(scrub)
-    val span = if (rungs.isEmpty()) "" else "${rungs.first().label()} to ${rungs.last().label()}"
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    var pick by remember(ladder) { mutableStateOf<LadderPick?>(null) }
+    val selected = pick?.let { p ->
+        val levels = if (p.up) ladder.up else ladder.down
+        levels.getOrNull(p.row)?.let { ChartShapes.depthReadout(p.up, it) }
+    }
+    val upSpan = ladder.up.firstOrNull()?.let { "${it.label()} to ${ladder.up.last().label()}" } ?: "none"
+    val downSpan = ladder.down.firstOrNull()?.let { "${it.label()} to ${ladder.down.last().label()}" } ?: "none"
+    val maxSize = ChartShapes.depthMaxSize(ladder)
+    Column(
+        modifier.fillMaxWidth().testTag("chart_ladder"),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
         Text(
-            pick?.let { ChartShapes.depthReadout(it) } ?: "UP green grows left · DOWN red grows right · drag a price",
+            selected ?: ChartShapes.DEPTH_LADDER_HINT,
             style = MaterialTheme.typography.labelMedium,
             color = c.textPrimary
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("UP", color = c.up, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-            Text("DOWN", color = c.down, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-        }
         Text(
-            "YES price. A DOWN bid is drawn at 100¢ minus its price.",
+            ChartShapes.DEPTH_LADDER_CAPTION,
             style = MaterialTheme.typography.labelSmall,
             color = c.textSecondary
         )
-        Canvas(
-            Modifier.fillMaxWidth().height(height)
-                .semantics { contentDescription = "Order book depth, UP and DOWN together, ${rungs.size} prices from $span." }
-                .pointerInput(rungs) {
-                    detectTapGestures { scrub = ChartShapes.depthRowAt(it.y, size.height.toFloat(), rungs.size) }
-                }
-                .pointerInput(rungs) {
-                    detectDragGestures { change, _ ->
-                        change.consume()
-                        scrub = ChartShapes.depthRowAt(change.position.y, size.height.toFloat(), rungs.size)
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .semantics {
+                    contentDescription = "Order book depth, UP and DOWN on their own prices. UP $upSpan. DOWN $downSpan."
+                },
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            DepthSideColumn(
+                title = "UP",
+                levels = ladder.up,
+                maxSize = maxSize,
+                barColor = c.upButton,
+                titleColor = c.up,
+                scrub = pick?.takeIf { it.up }?.row ?: -1,
+                onPick = { pick = LadderPick(true, it) },
+                modifier = Modifier.weight(1f)
+            )
+            DepthSideColumn(
+                title = "DOWN",
+                levels = ladder.down,
+                maxSize = maxSize,
+                barColor = c.downButton,
+                titleColor = c.down,
+                scrub = pick?.takeIf { !it.up }?.row ?: -1,
+                onPick = { pick = LadderPick(false, it) },
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun DepthSideColumn(
+    title: String,
+    levels: List<ChartShapes.DepthLevel>,
+    maxSize: Double,
+    barColor: Color,
+    titleColor: Color,
+    scrub: Int,
+    onPick: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val c = DipTheme.colors
+    Column(modifier) {
+        Text(title, color = titleColor, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+        if (levels.isEmpty()) {
+            Text("No bids", style = MaterialTheme.typography.labelSmall, color = c.textSecondary)
+            return@Column
+        }
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val density = LocalDensity.current
+            val measurer = rememberTextMeasurer()
+            val style = MaterialTheme.typography.labelSmall
+            val padPx = with(density) { 2.dp.toPx() }
+            fun textPx(text: String): Float {
+                if (text.isEmpty()) return 0f
+                return measurer.measure(text, style, overflow = TextOverflow.Clip, softWrap = false, maxLines = 1).size.width.toFloat()
+            }
+            val labelPx = levels.maxOf { textPx(it.label()) } + padPx
+            val measuredSize = levels.maxOf { textPx(ChartShapes.depthSizeText(it.size)) }
+            val sizePx = if (measuredSize <= 0f) 0f else measuredSize + padPx
+            val columnPx = constraints.maxWidth.toFloat().let { if (it.isFinite()) it else with(density) { 180.dp.toPx() } }
+            val gapPx = with(density) { 4.dp.toPx() }
+            val minBarPx = with(density) { 24.dp.toPx() }
+            val minVisiblePx = with(density) { 3.dp.toPx() }
+            val lanes = ChartShapes.depthColumnLayout(columnPx, labelPx, sizePx, minBarPx, gapPx)
+            val gapBeforeBar = (lanes.barLeft - lanes.labelWidth).coerceAtLeast(0f)
+            val gapBeforeSize = if (lanes.showsSize) {
+                (lanes.sizeLeft - (lanes.barLeft + lanes.barWidth)).coerceAtLeast(0f)
+            } else {
+                0f
+            }
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .pointerInput(levels) {
+                        detectTapGestures {
+                            onPick(ChartShapes.depthRowAt(it.y, size.height.toFloat(), levels.size))
+                        }
+                    }
+                    .pointerInput(levels) {
+                        detectDragGestures { change, _ ->
+                            change.consume()
+                            onPick(ChartShapes.depthRowAt(change.position.y, size.height.toFloat(), levels.size))
+                        }
+                    }
+            ) {
+                levels.forEachIndexed { i, level ->
+                    val selected = i == scrub
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(28.dp)
+                            .background(if (selected) c.surfaceAlt else Color.Transparent),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            level.label(),
+                            modifier = Modifier.width(with(density) { lanes.labelWidth.toDp() }),
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Clip,
+                            textAlign = TextAlign.End,
+                            style = style,
+                            color = if (selected) c.textPrimary else c.textSecondary
+                        )
+                        if (gapBeforeBar > 0f) Spacer(Modifier.width(with(density) { gapBeforeBar.toDp() }))
+                        Box(
+                            Modifier
+                                .width(with(density) { lanes.barWidth.toDp() })
+                                .height(12.dp)
+                        ) {
+                            val barPx = ChartShapes.depthBarPx(level.size, maxSize, lanes.barWidth, minVisiblePx)
+                            if (barPx > 0f) {
+                                Box(
+                                    Modifier
+                                        .align(Alignment.CenterStart)
+                                        .width(with(density) { barPx.toDp() })
+                                        .height(12.dp)
+                                        .background(barColor, RoundedCornerShape(2.dp))
+                                )
+                            }
+                        }
+                        if (lanes.showsSize) {
+                            if (gapBeforeSize > 0f) Spacer(Modifier.width(with(density) { gapBeforeSize.toDp() }))
+                            Text(
+                                ChartShapes.depthSizeText(level.size),
+                                modifier = Modifier.width(with(density) { lanes.sizeWidth.toDp() }),
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Clip,
+                                textAlign = TextAlign.End,
+                                style = style,
+                                color = c.textPrimary
+                            )
+                        }
                     }
                 }
-        ) {
-            val mid = size.width / 2f
-            val rowH = size.height / rungs.size
-            val half = mid - 36.dp.toPx()
-            val paint = axisPaint(c.textPrimary.toArgb(), 11.dp.toPx())
-            paint.textAlign = Paint.Align.CENTER
-            rungs.forEachIndexed { i, rung ->
-                val cy = rowH * (i + 0.5f)
-                if (i == scrub) drawRect(c.surfaceAlt, Offset(0f, rowH * i), Size(size.width, rowH))
-                val uw = (half * ChartShapes.depthBarFraction(rung.upSize, rungs)).toFloat()
-                val dw = (half * ChartShapes.depthBarFraction(rung.downSize, rungs)).toFloat()
-                if (uw > 0f) drawRoundRect(c.upButton, Offset(mid - uw, cy - 7.dp.toPx()), Size(uw, 14.dp.toPx()), CornerRadius(2.dp.toPx(), 2.dp.toPx()))
-                if (dw > 0f) drawRoundRect(c.downButton, Offset(mid, cy - 7.dp.toPx()), Size(dw, 14.dp.toPx()), CornerRadius(2.dp.toPx(), 2.dp.toPx()))
-                drawContext.canvas.nativeCanvas.drawText(rung.label(), mid, cy + 4.dp.toPx(), paint)
             }
         }
     }

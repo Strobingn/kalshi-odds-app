@@ -1,6 +1,10 @@
 package com.dirk.kalshiodds.ui.charts
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -173,7 +177,44 @@ class ChartGalleryRenderTest {
         compose.onNodeWithText("UP ask").assertExists()
         compose.onNodeWithText("DOWN bid").assertExists()
         compose.onNodeWithText("DOWN ask").assertExists()
+        compose.onNodeWithText("Each side uses its own price.", substring = true).assertExists()
         compose.onAllNodesWithText("No data yet").assertCountEquals(0)
+    }
+
+    @Test fun depthLadderDrawsEachSideAtItsQuotedPrice() {
+        val ladder = ChartShapes.depthRungs(
+            yes = listOf(0.966 to 326.0),
+            no = listOf(0.029 to 2611.0)
+        )
+        show {
+            Box(Modifier.width(480.dp)) {
+                DepthChart(ladder)
+            }
+        }
+        compose.onNodeWithTag("chart_ladder").assertExists()
+        compose.onNodeWithText(ChartShapes.DEPTH_LADDER_CAPTION).assertExists()
+        compose.onNodeWithText("96.6¢").assertExists()
+        compose.onNodeWithText("2.9¢").assertExists()
+        compose.onNodeWithText("326").assertExists()
+        compose.onNodeWithText("2,611").assertExists()
+        compose.onNodeWithText("UP").assertExists()
+        compose.onNodeWithText("DOWN").assertExists()
+        compose.onAllNodesWithText("97.1¢").assertCountEquals(0)
+        compose.onAllNodesWithText("100¢ minus", substring = true).assertCountEquals(0)
+        compose.onAllNodesWithText("YES price", substring = true).assertCountEquals(0)
+        compose.onAllNodesWithText("No data yet").assertCountEquals(0)
+    }
+
+    @Test fun cumulativeSummaryUsesQuotedBidPrices() {
+        val series = ChartGallery.cumulativeDepth(listOf(0.966 to 326.0), listOf(0.029 to 2611.0))
+        show { CumulativeDepthChart(series) }
+        compose.onNodeWithText("UP bid 96.6¢", substring = true).assertExists()
+        compose.onNodeWithText("DOWN bid 2.9¢", substring = true).assertExists()
+        compose.onNodeWithText("UP ask 97.1¢", substring = true).assertExists()
+        compose.onNodeWithText("DOWN ask 3.4¢", substring = true).assertExists()
+        compose.onAllNodesWithText("DOWN bid 97.1", substring = true).assertCountEquals(0)
+        compose.onNodeWithText("2.9¢").assertExists()
+        compose.onNodeWithText("97.1¢").assertExists()
     }
 
     @Test fun familyStackEmpty() {

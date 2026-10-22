@@ -9,7 +9,6 @@ import java.time.Instant
 import java.time.ZoneId
 import java.util.Locale
 import kotlin.math.abs
-import kotlin.math.max
 import kotlin.math.round
 import kotlin.math.roundToInt
 
@@ -25,13 +24,39 @@ object ChartShapes {
     data class HourCell(val hour: Int, val net: Double, val trades: Int)
     data class SideCount(val label: String, val up: Int, val down: Int)
     /**
-     * One row on the shared YES price axis.
-     * [cents] is the YES price (0.1¢ precision). UP bids sit at their own price.
-     * A DOWN bid at q is drawn at 100¢ − q, the YES ask that bid implies.
+     * One quoted bid on one side.
+     * [cents] is that side's own price. A DOWN bid at 2.9¢ stays 2.9, never 97.1.
      */
-    data class DepthRung(val cents: Double, val upSize: Double, val downSize: Double) {
+    data class DepthLevel(val cents: Double, val size: Double) {
         fun label(): String = ChartShapes.centLabel(cents)
     }
+
+    /**
+     * UP and DOWN ladders on one card. Each list is that side's own prices,
+     * best bid first. The sides do not share a flipped axis.
+     */
+    data class DepthLadder(val up: List<DepthLevel>, val down: List<DepthLevel>) {
+        fun isEmpty(): Boolean = up.isEmpty() && down.isEmpty()
+    }
+
+    /**
+     * Price label, bar lane, and optional contract count inside one column.
+     * The bar occupies [barLeft, barLeft + barWidth) and does not enter the label or the size.
+     */
+    data class DepthColumnLayout(
+        val labelWidth: Float,
+        val barLeft: Float,
+        val barWidth: Float,
+        val sizeLeft: Float,
+        val sizeWidth: Float
+    ) {
+        val showsSize: Boolean get() = sizeLeft >= 0f && sizeWidth > 0f
+    }
+
+    const val DEPTH_LADDER_HINT = "Green is UP, red is DOWN · each side on its own price · drag a row"
+    const val DEPTH_LADDER_CAPTION =
+        "A 2.9¢ DOWN bid is drawn at 2.9¢. A 96.1¢ DOWN bid is drawn at 96.1¢."
+
     data class FlowNode(val title: String, val detail: String)
     data class TweakMark(val label: String, val note: String, val fromCents: Int?, val toCents: Int?)
     data class WindowEvent(val atMs: Long, val kind: String, val up: Boolean, val price: Double, val label: String)
@@ -257,87 +282,93 @@ object ChartShapes {
         return if (frac == 0) "$whole¢" else "$whole.$frac¢"
     }
 
-    /** YES price opposite a DOWN bid (or the reverse), still on the 0.1¢ grid. */
-    fun complementCents(cents: Double): Double {
-        val deci = round(cents * 10.0).toInt()
-        return (1000 - deci) / 10.0
-    }
-
     /**
-     * Ladder rows around the inside market.
+     * Ladder rows around each side's own inside market.
      *
-     * Prices stay on 0.1¢ when the book has a sub-cent tick, and on whole cents
-     * when every level is a whole cent. UP and DOWN share the YES axis: a DOWN
-     * bid at 96.1¢ is the row at 3.9¢. The window is the touch, not the eight
-     * highest whole cents of each side, so a 4¢ book does not jump from 89¢ to 0¢.
+     * UP prices stay UP prices. DOWN prices stay DOWN prices: a 2.9¢ DOWN bid
+     * is the 2.9¢ row, and a 96.1¢ DOWN bid is the 96.1¢ row. Nothing is drawn
+     * at 100¢ minus the price. Rows are 0.1¢ when that side has a tenth-cent
+     * tick, and whole cents when every level on that side is a whole cent.
+     * The window is that side's best bid, so a size wall far from the touch
+     * does not swallow the ladder.
      */
     fun depthRungs(
         yes: List<Pair<Double, Double>>,
         no: List<Pair<Double, Double>>,
         maxLevels: Int = 8
-    ): List<DepthRung> {
+    ): DepthLadder {
         val up = aggregateDeci(yes)
-        val downNative = aggregateDeci(no)
-        if (up.isEmpty() && downNative.isEmpty()) return emptyList()
-        val down = HashMap<Int, Double>()
-        for ((deci, size) in downNative) {
-            val yesAsk = 1000 - deci
-            if (yesAsk !in 1..999) continue
-            down[yesAsk] = (down[yesAsk] ?: 0.0) + size
-        }
-        val occupied = up.keys + down.keys
-        val step = if (occupied.all { it % 10 == 0 }) 10 else 1
-        val bestBid = up.keys.maxOrNull()
-        val bestAsk = down.keys.minOrNull()
-        val touch = when {
-            bestBid != null && bestAsk != null -> (bestBid + bestAsk) / 2.0
-            bestBid != null -> bestBid.toDouble()
-            else -> bestAsk!!.toDouble()
-        }
-        fun dist(deci: Int) = abs(deci - touch)
-        val keep = LinkedHashSet<Int>()
-        val perSide = maxLevels.coerceAtLeast(1)
-        up.keys.sortedBy { dist(it) }.take(perSide).forEach { keep.add(it) }
-        down.keys.sortedBy { dist(it) }.take(perSide).forEach { keep.add(it) }
-        val active = keep.toMutableSet()
-        while (active.size > 1 && spanRows(active, step) > DEPTH_MAX_ROWS) {
-            active.remove(farthest(active, up, down, ::dist))
-        }
-        if (active.isEmpty()) return emptyList()
-        val lo = (active.min() / step) * step
-        val hi = ((active.max() + step - 1) / step) * step
-        val rows = ArrayList<DepthRung>((hi - lo) / step + 1)
-        var cursor = hi
-        while (cursor >= lo) {
-            rows += DepthRung(cursor / 10.0, up[cursor] ?: 0.0, down[cursor] ?: 0.0)
-            cursor -= step
-        }
-        while (rows.size > 1 && rows.first().upSize <= 0.0 && rows.first().downSize <= 0.0) rows.removeAt(0)
-        while (rows.size > 1 && rows.last().upSize <= 0.0 && rows.last().downSize <= 0.0) rows.removeAt(rows.lastIndex)
-        return rows
+        val down = aggregateDeci(no)
+        if (up.isEmpty() && down.isEmpty()) return DepthLadder(emptyList(), emptyList())
+        return DepthLadder(sideLevels(up, maxLevels), sideLevels(down, maxLevels))
     }
 
-    /** Largest size on either side. Bar widths share this so a 10k UP bid cannot hide DOWN. */
-    fun depthMaxSize(rungs: List<DepthRung>): Double =
-        rungs.maxOfOrNull { max(it.upSize, it.downSize) }?.coerceAtLeast(1.0) ?: 1.0
+    /** Largest size on either side. Both columns share it, so a 10k UP bid cannot hide DOWN. */
+    fun depthMaxSize(ladder: DepthLadder): Double =
+        (ladder.up.asSequence() + ladder.down.asSequence()).maxOfOrNull { it.size }?.coerceAtLeast(1.0) ?: 1.0
 
-    fun depthBarFraction(size: Double, rungs: List<DepthRung>): Double {
+    fun depthBarFraction(size: Double, ladder: DepthLadder): Double {
         if (!size.isFinite() || size <= 0.0) return 0.0
-        return (size / depthMaxSize(rungs)).coerceIn(0.0, 1.0)
+        return (size / depthMaxSize(ladder)).coerceIn(0.0, 1.0)
     }
 
-    /** Drag or tap y → row. The top of the ladder is the highest YES price. */
+    /**
+     * Bar width in the bar lane. A positive size is at least [minPx] and never wider than the lane.
+     * Zero size draws nothing. Widths above the floor stay proportional to [maxSize].
+     */
+    fun depthBarPx(size: Double, maxSize: Double, lanePx: Float, minPx: Float): Float {
+        if (!size.isFinite() || size <= 0.0 || !lanePx.isFinite() || lanePx <= 0f) return 0f
+        val frac = (size / maxSize.coerceAtLeast(1.0)).toFloat().coerceIn(0f, 1f)
+        val proportional = lanePx * frac
+        if (proportional >= lanePx) return lanePx
+        return proportional.coerceAtLeast(minPx.coerceIn(0f, lanePx))
+    }
+
+    /**
+     * Column lanes. The label keeps [labelPx]. The size lane is included only when a
+     * minimum bar still fits beside it. Otherwise the bar uses the space after the label.
+     */
+    fun depthColumnLayout(
+        columnPx: Float,
+        labelPx: Float,
+        sizePx: Float,
+        minBarPx: Float,
+        gapPx: Float
+    ): DepthColumnLayout {
+        val width = if (columnPx.isFinite()) columnPx.coerceAtLeast(0f) else 0f
+        val label = if (labelPx.isFinite()) labelPx.coerceAtLeast(0f) else 0f
+        val gap = if (gapPx.isFinite()) gapPx.coerceAtLeast(0f) else 0f
+        val minBar = if (minBarPx.isFinite()) minBarPx.coerceAtLeast(0f) else 0f
+        val size = if (sizePx.isFinite()) sizePx.coerceAtLeast(0f) else 0f
+        val show = size > 0f && width + 0.01f >= label + gap + minBar + gap + size && width > label + gap
+        val barLeft = (label + gap).let { if (it > width) width else it }
+        val barRight = if (show) (width - gap - size).coerceIn(barLeft, width) else width
+        val barWidth = (barRight - barLeft).coerceAtLeast(0f)
+        return if (show) {
+            val sizeLeft = (barRight + gap).coerceAtMost(width)
+            DepthColumnLayout(label, barLeft, barWidth, sizeLeft, (width - sizeLeft).coerceAtLeast(0f))
+        } else {
+            DepthColumnLayout(label, barLeft, barWidth, -1f, 0f)
+        }
+    }
+
+    /** "10,577". Empty when the row has no contracts, so a gap row stays blank. */
+    fun depthSizeText(size: Double): String {
+        if (!size.isFinite() || size <= 0.0) return ""
+        return String.format(Locale.US, "%,d", size.roundToInt().toLong())
+    }
+
+    /** Drag or tap y → row. The top of each column is that side's highest bid. */
     fun depthRowAt(y: Float, height: Float, rows: Int): Int {
         if (rows <= 0 || height <= 0f) return 0
         return ((y / height) * rows).toInt().coerceIn(0, rows - 1)
     }
 
-    fun depthReadout(rung: DepthRung): String {
-        val parts = ArrayList<String>(3)
-        parts += rung.label()
-        if (rung.upSize > 0.0) parts += "UP ${rung.upSize.roundToInt()}"
-        if (rung.downSize > 0.0) parts += "DOWN ${rung.downSize.roundToInt()} (${centLabel(complementCents(rung.cents))} bid)"
-        return parts.joinToString(" · ")
+    /** "DOWN 2.9¢ · 2,611". The price is the quoted bid, not 100¢ minus that bid. */
+    fun depthReadout(up: Boolean, level: DepthLevel): String {
+        val side = if (up) "UP" else "DOWN"
+        val qty = depthSizeText(level.size).ifEmpty { "0" }
+        return "$side ${level.label()} · $qty"
     }
 
     private const val DEPTH_MAX_ROWS = 16
@@ -359,18 +390,43 @@ object ChartShapes {
         return (hi - lo) / step + 1
     }
 
+    private fun sideLevels(levels: Map<Int, Double>, maxLevels: Int): List<DepthLevel> {
+        if (levels.isEmpty()) return emptyList()
+        val step = if (levels.keys.all { it % 10 == 0 }) 10 else 1
+        val touch = levels.keys.max().toDouble()
+        fun dist(deci: Int) = abs(deci - touch)
+        val keep = levels.keys
+            .sortedWith(compareBy<Int> { dist(it) }.thenByDescending { it })
+            .take(maxLevels.coerceAtLeast(1))
+            .toMutableSet()
+        while (keep.size > 1 && spanRows(keep, step) > DEPTH_MAX_ROWS) {
+            keep.remove(farthest(keep, levels, ::dist))
+        }
+        if (keep.isEmpty()) return emptyList()
+        val lo = (keep.min() / step) * step
+        val hi = ((keep.max() + step - 1) / step) * step
+        val rows = ArrayList<DepthLevel>((hi - lo) / step + 1)
+        var cursor = hi
+        while (cursor >= lo) {
+            rows += DepthLevel(cursor / 10.0, levels[cursor] ?: 0.0)
+            cursor -= step
+        }
+        while (rows.size > 1 && rows.first().size <= 0.0) rows.removeAt(0)
+        while (rows.size > 1 && rows.last().size <= 0.0) rows.removeAt(rows.lastIndex)
+        return rows
+    }
+
     private fun farthest(
         keys: Set<Int>,
-        up: Map<Int, Double>,
-        down: Map<Int, Double>,
+        sizes: Map<Int, Double>,
         dist: (Int) -> Double
     ): Int {
         var victim = keys.first()
         var victimDist = dist(victim)
-        var victimSize = (up[victim] ?: 0.0) + (down[victim] ?: 0.0)
+        var victimSize = sizes[victim] ?: 0.0
         for (deci in keys) {
             val d = dist(deci)
-            val size = (up[deci] ?: 0.0) + (down[deci] ?: 0.0)
+            val size = sizes[deci] ?: 0.0
             if (d > victimDist + 1e-9 || (abs(d - victimDist) <= 1e-9 && size < victimSize)) {
                 victim = deci
                 victimDist = d

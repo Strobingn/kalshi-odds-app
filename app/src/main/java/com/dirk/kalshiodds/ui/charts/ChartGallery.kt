@@ -204,12 +204,18 @@ object ChartGallery {
         return String.format(Locale.US, "%,d ct", n.roundToInt().toLong())
     }
 
-    /** Touch size is the first cumulative point. Book size is the last. */
+    /**
+     * Touch size is the first cumulative point. Book size is the last.
+     * The price is that series' own quote: a DOWN bid at 2.9¢ stays 2.9¢.
+     * An ask price is the real ask (100¢ minus the other side's bid), labeled as an ask.
+     */
     fun depthSummary(series: List<DepthSeries>): String = series.joinToString(" · ") { s ->
         val book = s.size.lastOrNull() ?: 0.0
         val touch = s.size.firstOrNull() ?: book
-        if (s.size.size <= 1 || abs(touch - book) < 0.5) "${s.name} ${contractText(book)}"
-        else "${s.name} ${contractText(touch)} at touch, ${contractText(book)} book"
+        val price = s.cents.firstOrNull()?.let { ChartShapes.centLabel(it) }
+        val head = if (price == null) s.name else "${s.name} $price"
+        if (s.size.size <= 1 || abs(touch - book) < 0.5) "$head ${contractText(book)}"
+        else "$head ${contractText(touch)} at touch, ${contractText(book)} book"
     }
 
     /** Spot minus strike, in dollars. Empty when the strike or the prints are missing. */
@@ -279,9 +285,11 @@ object ChartGallery {
     data class DepthSeries(val name: String, val up: Boolean, val bid: Boolean, val cents: List<Double>, val size: List<Double>)
 
     /**
-     * Cumulative depth. YES levels are UP bids. NO levels are DOWN bids.
-     * The other side's bids are the asks: an UP ask sits at 100¢ minus the DOWN bid.
-     * Prices stay on the 0.1¢ grid. 3.8¢ is not rounded to 4¢ or floored to 0¢.
+     * Cumulative depth. YES levels are UP bids at the quoted UP price.
+     * NO levels are DOWN bids at the quoted DOWN price. A bid is never moved to 100¢ minus its price.
+     * Asks are the other side's bids at this side's real ask: buying UP at 97.1¢ is the
+     * 2.9¢ DOWN bid, and the series is named UP ask. Prices stay on the 0.1¢ grid.
+     * 3.8¢ is not rounded to 4¢ or floored to 0¢.
      */
     fun cumulativeDepth(yes: List<Pair<Double, Double>>, no: List<Pair<Double, Double>>): List<DepthSeries> {
         val yesC = depthLevels(yes)
@@ -369,6 +377,7 @@ object ChartGallery {
         return cents to size
     }
 
+    /** Real ask on this side: 1000 − the other side's bid. The bid series themselves are not flipped. */
     private fun cumulativeAsks(otherBids: Map<Int, Double>): Pair<List<Double>, List<Double>> {
         val asks = HashMap<Int, Double>()
         for ((deci, qty) in otherBids) {
