@@ -233,116 +233,182 @@ data class SupervisorMemory(
 /** Sends one prompt with one forced tool and returns the tool call's argument JSON, or null when no provider answered. */
 fun interface LlmChat {
     fun ask(system: String, user: String, tools: JsonArray): String?
+
+    /** Why the last [ask] returned null, in the provider's words; "" when unknown. */
+    fun lastFailure(): String = ""
 }
 
-/** An OpenAI-compatible provider. Groq, Mistral and Gemini all speak this. */
+/**
+ * An OpenAI-compatible provider. Groq, Mistral and Gemini all speak this. [models] are tried in order: providers retire
+ * models (Groq dropped llama-3.3-70b-versatile for some keys), so a "model not found" moves on to the next one and the
+ * one that answered is remembered.
+ */
 class LlmProvider(
     val name: String,
     val baseUrl: String,
-    val model: String,
+    val models: List<String>,
     /** "required" forces the tool call; Gemini's compatibility layer is only documented with "auto". */
     val toolChoice: String = "required",
     val key: () -> String
 ) {
+    /** Index into [models] of the one that last worked (or the next to try). */
+    @Volatile
+    var modelIndex: Int = 0
+    val model: String get() = models[modelIndex.coerceIn(0, models.lastIndex)]
+
     companion object {
         const val GROQ_URL = "https://api.groq.com/openai/v1"
         const val MISTRAL_URL = "https://api.mistral.ai/v1"
         const val GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
-        const val GROQ_MODEL = "llama-3.3-70b-versatile"
-        const val MISTRAL_MODEL = "mistral-large-latest"
-        const val GEMINI_MODEL = "gemini-2.5-flash"
+
+        /** Checked 2026-10-22 against a free Groq key: all three make the tool call; llama-3.3-70b-versatile was gone. */
+        val GROQ_MODELS = listOf("openai/gpt-oss-120b", "qwen/qwen3.8-27b", "openai/gpt-oss-20b", "llama-3.3-70b-versatile")
+        val MISTRAL_MODELS = listOf("mistral-large-latest", "mistral-medium-latest", "mistral-small-latest")
+        val GEMINI_MODELS = listOf("gemini-2.5-flash", "gemini-flash-latest", "gemini-2.0-flash", "gemini-2.5-flash-lite")
     }
 }
 
-/** Tries each provider in order; the next one is used when one is down, rate limited or returns junk. */
+/** How one request went: the provider's own error text when it failed. */
+data class LlmAttempt(val provider: String, val model: String, val ok: Boolean, val ms: Long, val error: String = "")
+
 class HttpLlmChat(
     private val providers: List<LlmProvider>,
     private val onError: (String) -> Unit = {},
-    /** Told of every attempt: (provider, answered ok, milliseconds). Feeds the AI tab's call charts. */
-    private val onCall: (String, Boolean, Long) -> Unit = { _, _, _ -> },
+    /** Told of every attempt, for the AI tab's call charts and its error line. */
+    private val onCall: (LlmAttempt) -> Unit = {},
     private val http: OkHttpClient = OkHttpClient.Builder().callTimeout(40, TimeUnit.SECONDS).build()
 ) : LlmChat {
-    override fun ask(system: String, user: String, tools: JsonArray): String? {
+
+    /** The last failure in words ("groq openai/gpt-oss-120b: HTTP 429 Rate limit reached …"), or "" after a success. */
+    @Volatile
+    var lastError: String = ""
+        private set
+
+    override fun lastFailure(): String = lastError
+
+    /** True when at least one provider has a key saved. */
+    val hasKey: Boolean get() = providers.any { it.key().isNotBlank() }
+
+    override fun ask(system: String, user: String, tools: JsonArray): String? =
+        each { p, model ->
+            val body = buildJsonObject {
+                put("model", model)
+                put("temperature", 0.5)
+                put("max_tokens", 1024)
+                put("tool_choice", p.toolChoice)
+                put("tools", tools)
+                putJsonArray("messages") {
+                    add(buildJsonObject { put("role", "system"); put("content", system) })
+                    add(buildJsonObject { put("role", "user"); put("content", user) })
+                }
+            }
+            post(p, body) { parseArguments(it) ?: throw Failure("answered without the tool call") }
+        }
+
+    /**
+     * A plain chat turn for the chat screen: [messages] are (role, text) pairs, system first. Returns
+     * ("provider model", answer text), or null when none answered ([lastError] says why).
+     */
+    fun chat(messages: List<Pair<String, String>>): Pair<String, String>? {
+        var used = ""
+        val text = each { p, model ->
+            val body = buildJsonObject {
+                put("model", model)
+                put("temperature", 0.4)
+                put("max_tokens", 900)
+                putJsonArray("messages") {
+                    for ((role, t) in messages) add(buildJsonObject { put("role", role); put("content", t) })
+                }
+            }
+            post(p, body) { parseContent(it)?.takeIf { s -> s.isNotBlank() } ?: throw Failure("empty answer") }
+                .also { used = "${p.name} $model" }
+        } ?: return null
+        return used to text
+    }
+
+    /** One tiny tool-call request per provider, for the Keys screen's Test button. One line per provider. */
+    fun test(): List<String> = providers.map { p ->
+        if (p.key().isBlank()) return@map "${p.name}: no key saved"
+        val tools = buildJsonArray {
+            add(buildJsonObject {
+                put("type", "function")
+                putJsonObject("function") {
+                    put("name", "ping"); put("description", "Answer the ping.")
+                    putJsonObject("parameters") {
+                        put("type", "object")
+                        putJsonObject("properties") { putJsonObject("ok") { put("type", "boolean") } }
+                    }
+                }
+            })
+        }
+        val one = HttpLlmChat(listOf(p), http = http, onCall = onCall)
+        val t0 = System.currentTimeMillis()
+        val r = one.ask("Call ping with ok=true.", "ping", tools)
+        if (r != null) "${p.name}: OK · ${p.model} · ${System.currentTimeMillis() - t0} ms (tool call works)"
+        else "${p.name}: FAILED · ${one.lastError}"
+    }
+
+    private class Failure(msg: String, val wrongModel: Boolean = false) : Exception(msg)
+
+    /** Tries each provider with a key, and each of its models from the one that last worked, until [call] returns. */
+    private fun <T> each(call: (LlmProvider, String) -> T): T? {
+        var anyKey = false
         for (p in providers) {
-            val key = p.key().trim()
-            if (key.isEmpty()) continue
-            val t0 = System.currentTimeMillis()
-            try {
-                val body = buildJsonObject {
-                    put("model", p.model)
-                    put("temperature", 0.5)
-                    put("max_tokens", 1024)
-                    put("tool_choice", p.toolChoice)
-                    put("tools", tools)
-                    putJsonArray("messages") {
-                        add(buildJsonObject { put("role", "system"); put("content", system) })
-                        add(buildJsonObject { put("role", "user"); put("content", user) })
-                    }
+            if (p.key().isBlank()) continue
+            anyKey = true
+            var i = p.modelIndex.coerceIn(0, p.models.lastIndex)
+            var tried = 0
+            while (tried < p.models.size) {
+                val model = p.models[i]
+                val t0 = System.currentTimeMillis()
+                try {
+                    val out = call(p, model)
+                    p.modelIndex = i
+                    lastError = ""
+                    runCatching { onCall(LlmAttempt(p.name, model, true, System.currentTimeMillis() - t0)) }
+                    return out
+                } catch (e: Exception) {
+                    val why = (e as? Failure)?.message ?: e.javaClass.simpleName
+                    lastError = "${p.name} $model: $why"
+                    runCatching { onCall(LlmAttempt(p.name, model, false, System.currentTimeMillis() - t0, why)) }
+                    onError(lastError)
+                    if ((e as? Failure)?.wrongModel != true) break // rate limit, bad key, network: next provider
+                    i = (i + 1) % p.models.size
+                    tried += 1
                 }
-                val req = Request.Builder()
-                    .url(p.baseUrl.trimEnd('/') + "/chat/completions")
-                    .header("Authorization", "Bearer $key")
-                    .post(body.toString().toRequestBody("application/json".toMediaType()))
-                    .build()
-                val args = http.newCall(req).execute().use { r ->
-                    val text = r.body?.string().orEmpty()
-                    if (!r.isSuccessful) {
-                        onError("${p.name} HTTP ${r.code}")
-                        null
-                    } else {
-                        parseArguments(text)
-                    }
-                }
-                runCatching { onCall(p.name, args != null, System.currentTimeMillis() - t0) }
-                if (args != null) return args
-                onError("${p.name}: no tool call in the answer")
-            } catch (e: Exception) {
-                runCatching { onCall(p.name, false, System.currentTimeMillis() - t0) }
-                onError("${p.name}: ${e.javaClass.simpleName}")
             }
         }
+        if (!anyKey) lastError = "no API key saved (AI tab → Keys)"
         return null
     }
 
-    /**
-     * A plain chat turn for the chat screen: [messages] are (role, text) pairs, system first. Tries each provider in order
-     * and returns (provider name, answer text), or null when none answered. [onError] gets each failure.
-     */
-    fun chat(messages: List<Pair<String, String>>): Pair<String, String>? {
-        for (p in providers) {
-            val key = p.key().trim()
-            if (key.isEmpty()) continue
-            val t0 = System.currentTimeMillis()
-            try {
-                val body = buildJsonObject {
-                    put("model", p.model)
-                    put("temperature", 0.4)
-                    put("max_tokens", 900)
-                    putJsonArray("messages") {
-                        for ((role, text) in messages) add(buildJsonObject { put("role", role); put("content", text) })
-                    }
-                }
-                val req = Request.Builder()
-                    .url(p.baseUrl.trimEnd('/') + "/chat/completions")
-                    .header("Authorization", "Bearer $key")
-                    .post(body.toString().toRequestBody("application/json".toMediaType()))
-                    .build()
-                val text = http.newCall(req).execute().use { r ->
-                    val raw = r.body?.string().orEmpty()
-                    if (!r.isSuccessful) { onError("${p.name} HTTP ${r.code}"); null } else parseContent(raw)
-                }
-                runCatching { onCall(p.name, !text.isNullOrBlank(), System.currentTimeMillis() - t0) }
-                if (!text.isNullOrBlank()) return p.name to text
-                onError("${p.name}: empty answer")
-            } catch (e: Exception) {
-                runCatching { onCall(p.name, false, System.currentTimeMillis() - t0) }
-                onError("${p.name}: ${e.javaClass.simpleName}")
+    private fun <T> post(p: LlmProvider, body: JsonObject, read: (String) -> T): T {
+        val req = Request.Builder()
+            .url(p.baseUrl.trimEnd('/') + "/chat/completions")
+            .header("Authorization", "Bearer ${p.key().trim()}")
+            .post(body.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+        return http.newCall(req).execute().use { r ->
+            val text = r.body?.string().orEmpty()
+            if (!r.isSuccessful) {
+                val msg = errorMessage(text)
+                val wrongModel = r.code == 404 || msg.contains("model", true) &&
+                    (msg.contains("not found", true) || msg.contains("does not exist", true) || msg.contains("decommission", true) || msg.contains("not supported", true))
+                throw Failure("HTTP ${r.code} ${msg.take(160)}".trim(), wrongModel)
             }
+            read(text)
         }
-        return null
     }
 
     companion object {
+        /** The provider's error text: `error.message` (OpenAI style) or `[{"error":{"message"}}]` (Google). */
+        fun errorMessage(body: String): String = runCatching {
+            val el = Json.parseToJsonElement(body)
+            val obj = if (el is JsonArray) el[0].jsonObject else el.jsonObject
+            val e = obj["error"]
+            (if (e is JsonObject) e["message"]?.jsonPrimitive?.content else e?.jsonPrimitive?.content).orEmpty()
+        }.getOrNull().orEmpty().ifBlank { body.take(120) }
+
         /** `choices[0].message.content`, or null. */
         fun parseContent(responseText: String): String? = runCatching {
             Json.parseToJsonElement(responseText).jsonObject["choices"]!!.jsonArray[0].jsonObject["message"]!!
@@ -410,7 +476,7 @@ class LlmSupervisor(
 
     /** Show why nothing is running (no key saved, say) without calling the LLM. */
     fun idle(reason: String) {
-        _status.value = "AI supervisor · $reason"
+        _status.value = "Scalping AI · $reason"
     }
 
     /** Record one closed paper scalp with the settings it ran under. Call it from the scalper's close hook. */
@@ -442,11 +508,15 @@ class LlmSupervisor(
         val ctx = synchronized(lock) {
             tickNo += 1
             scorePending()
-            context()
+            // Free tiers cap tokens a minute (Groq: 8,000 incl. the answer), so the prompt is kept under a budget.
+            var c = context()
+            if (c.toString().length > MAX_CONTEXT_CHARS) c = context(nTrades = 10, nScored = 6)
+            if (c.toString().length > MAX_CONTEXT_CHARS) c = context(nTrades = 4, nScored = 3)
+            c
         }
         val answer = chat.ask(SYSTEM, ctx.toString(), TOOLS)
         if (answer == null) {
-            return note("no answer from the LLM (check the Groq / Mistral keys)")
+            return note("no answer: " + chat.lastFailure().ifBlank { "no provider answered" })
         }
         val obj = runCatching { Json.parseToJsonElement(answer).jsonObject }.getOrNull()
             ?: return note("answer was not JSON")
@@ -497,7 +567,7 @@ class LlmSupervisor(
 
     private fun note(text: String): String {
         val line = "tick $tickNo: $text"
-        _status.value = "AI supervisor · $line"
+        _status.value = "Scalping AI · $line"
         return line
     }
 
@@ -557,7 +627,7 @@ class LlmSupervisor(
     private fun round4(v: Double) = Math.round(v * 10_000.0) / 10_000.0
 
     /** The prompt's data. Caller holds [lock]. */
-    private fun context(): JsonObject = buildJsonObject {
+    private fun context(nTrades: Int = CONTEXT_TRADES, nScored: Int = CONTEXT_SCORED): JsonObject = buildJsonObject {
         put("tick", tickNo)
         put("feed", feed())
         val idle = ArrayList<String>()
@@ -599,7 +669,7 @@ class LlmSupervisor(
         putJsonArray("untouchedAndSilent") { idle.forEach { add(it) } }
         put("allowedParams", JsonArray(SupervisorBounds.params.map { JsonPrimitive(it) }))
         putJsonArray("lastTradesWithSettings") {
-            trades.toList().takeLast(CONTEXT_TRADES).forEach { add(json.encodeToJsonElement(LearnedTrade.serializer(), it)) }
+            trades.toList().takeLast(nTrades).forEach { add(json.encodeToJsonElement(LearnedTrade.serializer(), it)) }
         }
         putJsonArray("yourChangesAwaitingScore") {
             pending.forEach {
@@ -613,7 +683,7 @@ class LlmSupervisor(
                 )
             }
         }
-        put("yourScoredChanges", json.encodeToJsonElement(memory.scored.takeLast(CONTEXT_SCORED)))
+        put("yourScoredChanges", json.encodeToJsonElement(memory.scored.takeLast(nScored)))
         put("yourNotes", JsonArray(memory.lessons.takeLast(CONTEXT_LESSONS).map { JsonPrimitive(it) }))
     }
 
@@ -622,7 +692,9 @@ class LlmSupervisor(
     companion object {
         const val EVAL_TRADES = 4
         private const val KEEP_TRADES = 400
-        private const val CONTEXT_TRADES = 25
+        private const val CONTEXT_TRADES = 15
+        /** About 4,500 tokens: room for the system prompt, tools and a 1,024-token answer under Groq's 8,000 a minute. */
+        const val MAX_CONTEXT_CHARS = 16_000
         private const val CONTEXT_SCORED = 12
         private const val CONTEXT_LESSONS = 10
         private const val KEEP_SCORED = 40

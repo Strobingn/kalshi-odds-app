@@ -59,3 +59,11 @@ jobs:
           name: unit-test-reports-${{ github.run_number }}
           path: app/build/reports/tests/testDebugUnitTest
           if-no-files-found: ignore
+
+      - name: Upload screenshots (Paparazzi)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots-${{ github.run_number }}
+          path: app/build/reports/paparazzi
+          if-no-files-found: ignore

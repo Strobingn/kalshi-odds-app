@@ -119,7 +119,7 @@ class PaperAi(
         if (secIn > ENTRY_UNTIL_S) return note("too late to enter $ticker; waiting for the next window")
         val ctx = synchronized(lock) { context(f) }
         val answer = chat.ask(SYSTEM, ctx.toString(), TOOLS)
-            ?: return note("no answer from the LLM (check the keys); will retry next window")
+            ?: return note("no answer: " + chat.lastFailure().ifBlank { "no provider answered" })
         val obj = runCatching { Json.parseToJsonElement(answer).jsonObject }.getOrNull() ?: return note("answer was not JSON")
         (obj["lesson"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }?.let { l ->
             synchronized(lock) { lessons = (lessons + l.take(300)).takeLast(MAX_LESSONS); save() }

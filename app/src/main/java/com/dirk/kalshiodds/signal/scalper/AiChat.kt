@@ -37,7 +37,8 @@ class AiChat(
     private val context: (String) -> String,
     private val load: () -> String? = { null },
     private val save: (String) -> Unit = {},
-    private val nowMs: () -> Long = { System.currentTimeMillis() }
+    private val nowMs: () -> Long = { System.currentTimeMillis() },
+    private val lastError: () -> String = { "" }
 ) {
     private val lock = Any()
     private val json = Json { ignoreUnknownKeys = true }
@@ -85,7 +86,7 @@ class AiChat(
             val msgs = listOf("system" to system(which, context(which))) + history + ("user" to q)
             val answer = runCatching { ask(msgs) }.getOrNull()
             if (answer == null) {
-                add(ChatMsg(0, which, "error", "No answer. Check the API keys on the Data screen (Groq, Mistral, Gemini).", 0))
+                add(ChatMsg(0, which, "error", "No answer: " + lastError().ifBlank { "check your keys in AI → Keys" }, 0))
                 return
             }
             val (provider, text) = answer

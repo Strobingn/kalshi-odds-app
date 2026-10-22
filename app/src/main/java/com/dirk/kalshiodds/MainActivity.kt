@@ -48,6 +48,7 @@ class MainActivity : ComponentActivity() {
     private val settingsViewModel: SettingsViewModel by viewModels()
     private val scorecardViewModel: ScorecardViewModel by viewModels()
     private val dataViewModel: DataViewModel by viewModels()
+    private val aiViewModel: com.dirk.kalshiodds.ui.AiViewModel by viewModels()
     private val historyViewModel: com.dirk.kalshiodds.ui.HistoryViewModel by viewModels()
     private val arbViewModel: com.dirk.kalshiodds.arb.ui.ArbViewModel by viewModels()
 
@@ -153,7 +154,7 @@ class MainActivity : ComponentActivity() {
                             )
                         },
                         aiChat = {
-                            com.dirk.kalshiodds.ui.AiChatScreen(onBack = { navigator.back() }, dataViewModel = dataViewModel)
+                            com.dirk.kalshiodds.ui.AiScreen(vm = aiViewModel)
                         },
                         history = {
                             com.dirk.kalshiodds.ui.HistoryScreen(

@@ -240,12 +240,37 @@ class AppContainer(context: Context) {
         val P = com.dirk.kalshiodds.signal.scalper.LlmProvider
         return order.map { n ->
             when (n) {
-                "groq" -> com.dirk.kalshiodds.signal.scalper.LlmProvider("groq", P.GROQ_URL, P.GROQ_MODEL) { extraSecrets.groqApiKey }
-                "mistral" -> com.dirk.kalshiodds.signal.scalper.LlmProvider("mistral", P.MISTRAL_URL, P.MISTRAL_MODEL) { extraSecrets.mistralApiKey }
-                else -> com.dirk.kalshiodds.signal.scalper.LlmProvider("gemini", P.GEMINI_URL, P.GEMINI_MODEL, "auto") { extraSecrets.geminiApiKey }
+                "groq" -> com.dirk.kalshiodds.signal.scalper.LlmProvider("groq", P.GROQ_URL, P.GROQ_MODELS) { extraSecrets.groqApiKey }
+                "mistral" -> com.dirk.kalshiodds.signal.scalper.LlmProvider("mistral", P.MISTRAL_URL, P.MISTRAL_MODELS) { extraSecrets.mistralApiKey }
+                else -> com.dirk.kalshiodds.signal.scalper.LlmProvider("gemini", P.GEMINI_URL, P.GEMINI_MODELS, "auto") { extraSecrets.geminiApiKey }
             }
         }
     }
+    /** Every AI call, change, verdict and paper bet, for the AI tab's charts. Kept on the phone. */
+    val aiActivity = com.dirk.kalshiodds.signal.scalper.AiActivity(
+        load = { supervisorPrefs.getString("ai_activity", null) },
+        save = { json -> supervisorPrefs.edit().putString("ai_activity", json).apply() }
+    )
+    private fun callsOf(ai: String): (com.dirk.kalshiodds.signal.scalper.LlmAttempt) -> Unit = { a ->
+        aiActivity.record(ai, com.dirk.kalshiodds.signal.scalper.AiEvent.CALL, a.provider, a.ok, a.ms, "${a.model} | ${a.error}")
+    }
+    private fun eventsOf(ai: String): (String, kotlinx.serialization.json.JsonObject) -> Unit = { kind, body ->
+        fun f(k: String) = (body[k] as? kotlinx.serialization.json.JsonPrimitive)?.content
+        val detail = when (kind) {
+            "applied" -> "${f("strategy")} ${f("param")} ${f("old") ?: "default"} → ${f("new")}"
+            "rejected" -> "${f("strategy")} ${f("param")}: ${f("why")}"
+            "better", "worse" -> "${f("strategy")} ${f("param")} → ${f("new")}"
+            "bet" -> "${f("side")} x${f("contracts")} ${f("ticker")}"
+            "settled" -> "${f("side")} ${f("ticker")} ${f("pnlUsd")}"
+            else -> f("reason") ?: f("why") ?: ""
+        }
+        aiActivity.record(ai, kind, detail = detail)
+    }
+
+    /** Keys screen's Test button: one real tool-call request per provider. Blocks: call off the main thread. */
+    fun testLlmKeys(): List<String> =
+        com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders("groq", "mistral", "gemini"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.CHAT)).test()
+
     val anyLlmKey: Boolean
         get() = extraSecrets.groqApiKey.isNotBlank() || extraSecrets.mistralApiKey.isNotBlank() || extraSecrets.geminiApiKey.isNotBlank()
     private fun llmError(kind: String): (String) -> Unit =
@@ -254,7 +279,7 @@ class AppContainer(context: Context) {
     /** Scalping AI: tunes the scalping algorithms every 60 s. Groq, then Gemini, then Mistral. */
     val llmSupervisor = com.dirk.kalshiodds.signal.scalper.LlmSupervisor(
         tuning = scalperStore.tuning,
-        chat = com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders("groq", "gemini", "mistral"), onError = llmError("errors")),
+        chat = com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders("groq", "gemini", "mistral"), onError = llmError("errors"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.SCALPING)),
         feed = { supervisorFeed() },
         stats = { name -> scalperStore.ledger.snapshot().stats(name) },
         sink = { kind, line -> supervisorLog.append(kind, line) },
@@ -264,12 +289,13 @@ class AppContainer(context: Context) {
                 kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
                     .decodeFromString(com.dirk.kalshiodds.signal.scalper.SupervisorMemory.serializer(), it)
             }
-        }.getOrNull() ?: com.dirk.kalshiodds.signal.scalper.SupervisorMemory()
+        }.getOrNull() ?: com.dirk.kalshiodds.signal.scalper.SupervisorMemory(),
+        onEvent = eventsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.SCALPING)
     )
 
     /** Paper AI: a different AI. Decides one paper bet per window. Gemini, then Mistral, then Groq. Own memory and journal. */
     val paperAi = com.dirk.kalshiodds.signal.scalper.PaperAi(
-        chat = com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders("gemini", "mistral", "groq"), onError = llmError("paper_ai_errors")),
+        chat = com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders("gemini", "mistral", "groq"), onError = llmError("paper_ai_errors"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.PAPER)),
         feed = { supervisorFeed() },
         sink = { kind, line -> supervisorLog.append(kind, line) },
         persistMemory = { json -> supervisorPrefs.edit().putString("paper_ai_memory", json).apply() },
@@ -278,11 +304,12 @@ class AppContainer(context: Context) {
                 kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
                     .decodeFromString(com.dirk.kalshiodds.signal.scalper.PaperAiMemory.serializer(), it)
             }
-        }.getOrNull() ?: com.dirk.kalshiodds.signal.scalper.PaperAiMemory()
+        }.getOrNull() ?: com.dirk.kalshiodds.signal.scalper.PaperAiMemory(),
+        onEvent = eventsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.PAPER)
     )
 
     /** The chat screen: one thread per AI, history kept on the phone. */
-    private val chatLlm = com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders("gemini", "groq", "mistral"), onError = llmError("chat_errors"))
+    private val chatLlm = com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders("groq", "gemini", "mistral"), onError = llmError("chat_errors"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.CHAT))
     val aiChat = com.dirk.kalshiodds.signal.scalper.AiChat(
         ask = { msgs -> chatLlm.chat(msgs) },
         tuning = scalperStore.tuning,
@@ -294,8 +321,14 @@ class AppContainer(context: Context) {
             }
         },
         load = { supervisorPrefs.getString("chat_json", null) },
-        save = { json -> supervisorPrefs.edit().putString("chat_json", json).apply() }
+        save = { json -> supervisorPrefs.edit().putString("chat_json", json).apply() },
+        lastError = { chatLlm.lastError }
     )
+    private val aiKick = kotlinx.coroutines.channels.Channel<Unit>(kotlinx.coroutines.channels.Channel.CONFLATED)
+
+    /** Run both AIs now instead of waiting for the next minute (after saving keys, switching an AI on). */
+    fun kickAi() { aiKick.trySend(Unit) }
+
     private val supervisorScope = kotlinx.coroutines.CoroutineScope(
         kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO
     )
@@ -303,15 +336,18 @@ class AppContainer(context: Context) {
     init {
         scalper.onClosed = { llmSupervisor.onClosed(it) }
         supervisorScope.launch {
+            kotlinx.coroutines.delay(5_000L)
             while (true) {
-                kotlinx.coroutines.delay(60_000L)
                 if (!anyLlmKey) {
-                    if (extraSecrets.supervisorEnabled) llmSupervisor.idle("add a Groq, Mistral or Gemini key on the Data screen to start")
-                    if (extraSecrets.paperAiEnabled) paperAi.idle("add a Groq, Mistral or Gemini key on the Data screen to start")
+                    if (extraSecrets.supervisorEnabled) llmSupervisor.idle("add a Groq, Mistral or Gemini key in AI → Keys to start")
+                    if (extraSecrets.paperAiEnabled) paperAi.idle("add a Groq, Mistral or Gemini key in AI → Keys to start")
+                    kotlinx.coroutines.withTimeoutOrNull(60_000L) { aiKick.receive() }
                     continue
                 }
                 if (extraSecrets.supervisorEnabled) runCatching { llmSupervisor.tick() }
                 if (extraSecrets.paperAiEnabled) runCatching { paperAi.tick() }
+                // Next pass in 60 s, or at once after keys are saved or an AI is switched on.
+                kotlinx.coroutines.withTimeoutOrNull(60_000L) { aiKick.receive() }
             }
         }
     }
