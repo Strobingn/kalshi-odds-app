@@ -306,8 +306,87 @@ object TelemetryChartMath {
         }
     }
 
+    data class BrierSummary(
+        val n: Int,
+        val modelBrier: Double,
+        val sideBrier: Double,
+        val marketBrier: Double
+    )
+
+    fun brierSummary(
+        picks: List<ScorecardLedger.PickRow>,
+        fallbackHonest: ScorecardMetrics.Honest? = null
+    ): BrierSummary? {
+        val aiRows = picks.filter {
+            !it.noBetWouldHave &&
+                it.kind == ScorecardLedger.Kind.AI &&
+                it.aiPct != null && it.aiPct.isFinite() &&
+                it.marketPct != null && it.marketPct.isFinite()
+        }
+        if (aiRows.size >= ScorecardMetrics.MIN_BRIER_DISPLAY) {
+            val sideBriers = aiRows.map { row ->
+                val pSide = ((row.aiPct ?: 50.0) / 100.0).coerceIn(0.0, 1.0)
+                val ySide = if (row.won) 1.0 else 0.0
+                (pSide - ySide) * (pSide - ySide)
+            }
+            val modelYesBriers = aiRows.map { row ->
+                val isYes = !row.side.equals("NO", true) && !row.side.equals("DOWN", true)
+                val pSide = ((row.aiPct ?: 50.0) / 100.0).coerceIn(0.0, 1.0)
+                val pYes = if (isYes) pSide else 1.0 - pSide
+                val outcomeYes = if (isYes) row.won else !row.won
+                val yYes = if (outcomeYes) 1.0 else 0.0
+                (pYes - yYes) * (pYes - yYes)
+            }
+            val marketBriers = aiRows.map { row ->
+                val isYes = !row.side.equals("NO", true) && !row.side.equals("DOWN", true)
+                val mYes = ((row.marketPct ?: 50.0) / 100.0).coerceIn(0.0, 1.0)
+                val outcomeYes = if (isYes) row.won else !row.won
+                val yYes = if (outcomeYes) 1.0 else 0.0
+                (mYes - yYes) * (mYes - yYes)
+            }
+            return BrierSummary(
+                n = aiRows.size,
+                modelBrier = modelYesBriers.average(),
+                sideBrier = sideBriers.average(),
+                marketBrier = marketBriers.average()
+            )
+        }
+        val btcBreakdown = fallbackHonest?.perCoin?.firstOrNull { it.key == "BTC" }
+        if (btcBreakdown != null &&
+            btcBreakdown.n >= ScorecardMetrics.MIN_BRIER_DISPLAY &&
+            btcBreakdown.modelBrier != null &&
+            btcBreakdown.marketBrier != null
+        ) {
+            return BrierSummary(
+                n = btcBreakdown.n,
+                modelBrier = btcBreakdown.modelBrier,
+                sideBrier = btcBreakdown.modelBrier,
+                marketBrier = btcBreakdown.marketBrier
+            )
+        }
+        if (aiRows.isEmpty() &&
+            fallbackHonest != null &&
+            fallbackHonest.showBrier &&
+            fallbackHonest.modelBrier != null &&
+            fallbackHonest.marketBrier != null
+        ) {
+            return BrierSummary(
+                n = fallbackHonest.n,
+                modelBrier = fallbackHonest.modelBrier,
+                sideBrier = fallbackHonest.sideBrier ?: fallbackHonest.modelBrier,
+                marketBrier = fallbackHonest.marketBrier
+            )
+        }
+        return null
+    }
+
     fun calibrationCurve(picks: List<ScorecardLedger.PickRow>): List<CalibrationPoint> {
-        val valid = picks.filter { !it.noBetWouldHave && it.aiPct != null && it.aiPct.isFinite() }
+        val valid = picks.filter {
+            !it.noBetWouldHave &&
+                it.kind == ScorecardLedger.Kind.AI &&
+                it.aiPct != null &&
+                it.aiPct.isFinite()
+        }
         if (valid.isEmpty()) return emptyList()
         val bands = listOf(
             "≤55%" to (0.0..55.0),
@@ -333,8 +412,9 @@ object TelemetryChartMath {
         val edgeRegex = Regex("""edge\s+([+-−]?\d+(?:\.\d+)?)\s*pts""", RegexOption.IGNORE_CASE)
         data class Parsed(val call: String, val absEdge: Double)
         val parsed = cards.map { c ->
-            val raw = edgeRegex.find(c.modelLine)?.groupValues?.getOrNull(1)?.replace('−', '-')
-            val edge = abs(raw?.toDoubleOrNull() ?: 0.0)
+            val numeric = c.edgePts?.takeIf { it.isFinite() }
+            val fallback = edgeRegex.find(c.modelLine)?.groupValues?.getOrNull(1)?.replace('−', '-')?.toDoubleOrNull()
+            val edge = abs(numeric ?: fallback ?: 0.0)
             Parsed(c.call.uppercase(Locale.US), edge)
         }
         val bands = listOf(
@@ -356,22 +436,28 @@ object TelemetryChartMath {
 
     fun historySignalDistribution(signals: List<HistoryAssembler.SignalLine>): List<EdgeBandCount> {
         if (signals.isEmpty()) return emptyList()
+        data class ResolvedSignal(val call: String, val absEdge: Double)
+        val resolved = signals.map { s ->
+            val parsed = SignalCopy.parseAiVsMarket(s.note)
+            val modelYes = parsed?.first ?: s.fairPp
+            val marketYes = parsed?.second ?: s.marketPp
+            val res = SignalCopy.resolve(s.side, modelYes, marketYes, s.fairPp)
+            val edge = SignalCopy.displayedEdgePts(modelYes, marketYes, res.lineSide) ?: s.edgePp
+            ResolvedSignal(res.call.uppercase(Locale.US), abs(edge))
+        }
         val bands = listOf(
-            "<3 pp" to { e: Double -> e < 3.0 },
-            "3–6 pp" to { e: Double -> e >= 3.0 && e < 6.0 },
-            "6–10 pp" to { e: Double -> e >= 6.0 && e < 10.0 },
-            "10+ pp" to { e: Double -> e >= 10.0 }
+            "<3 pts" to { e: Double -> e < 3.0 },
+            "3–6 pts" to { e: Double -> e >= 3.0 && e < 6.0 },
+            "6–10 pts" to { e: Double -> e >= 6.0 && e < 10.0 },
+            "10+ pts" to { e: Double -> e >= 10.0 }
         )
         return bands.map { (label, pred) ->
-            val inBand = signals.filter { pred(abs(it.edgePp)) }
+            val inBand = resolved.filter { pred(it.absEdge) }
             EdgeBandCount(
                 label = label,
-                upCount = inBand.count { SignalCopy.callLabel(it.side) == "UP" },
-                downCount = inBand.count { SignalCopy.callLabel(it.side) == "DOWN" },
-                noBetCount = inBand.count {
-                    val c = SignalCopy.callLabel(it.side)
-                    c != "UP" && c != "DOWN"
-                }
+                upCount = inBand.count { it.call == "UP" },
+                downCount = inBand.count { it.call == "DOWN" },
+                noBetCount = inBand.count { it.call != "UP" && it.call != "DOWN" }
             )
         }
     }
@@ -527,7 +613,8 @@ fun FeatureDriversChart(
     val drivers = remember(market.featureDevs) { TelemetryChartMath.driverBars(market.featureDevs) }
     val ensemble = remember(
         market.yesProbabilityPercent, market.aiYesPercent, market.importedModelPp,
-        market.digitalFairPp, market.mlpPp, market.gbmPp, market.cnnPp, market.mmShadowPp
+        market.digitalFairPp, market.mlpPp, market.gbmPp, market.cnnPp, market.mmShadowPp,
+        market.calibrated
     ) {
         TelemetryChartMath.ensembleBars(market)
     }
@@ -1087,8 +1174,8 @@ fun CalibrationAndBrierChartCard(
     modifier: Modifier = Modifier
 ) {
     val calPoints = remember(picks) { TelemetryChartMath.calibrationCurve(picks) }
-    val brierReady = honest != null && honest.showBrier && honest.modelBrier != null && honest.marketBrier != null
-    if (calPoints.isEmpty() && !brierReady) return
+    val brier = remember(picks, honest) { TelemetryChartMath.brierSummary(picks, honest) }
+    if (calPoints.isEmpty() && brier == null) return
 
     val colors = DipTheme.colors
     Column(
@@ -1098,11 +1185,10 @@ fun CalibrationAndBrierChartCard(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        if (brierReady) {
-            val h = honest ?: return@Column
-            val modelB = h.modelBrier ?: 0.25
-            val mktB = h.marketBrier ?: 0.25
-            val sideB = h.sideBrier ?: modelB
+        if (brier != null) {
+            val modelB = brier.modelBrier
+            val mktB = brier.marketBrier
+            val sideB = brier.sideBrier
             val maxB = maxOf(modelB, mktB, sideB, 0.30)
             Text(
                 "Forecast Brier comparison (lower is better)",
@@ -1366,16 +1452,26 @@ fun BetPnlSequenceChart(
             val barW = (slotW * 0.68f).coerceAtLeast(2f)
             settled.forEachIndexed { idx, bet ->
                 val pnl = bet.pnlUsd ?: 0.0
-                val frac = (abs(pnl) / maxAbs).toFloat().coerceIn(0.05f, 1f)
-                val h = (midY - 2.dp.toPx()) * frac
                 val x = idx * slotW + (slotW - barW) / 2f
-                val top = if (pnl >= 0.0) midY - h else midY
-                drawRoundRect(
-                    color = if (pnl >= 0.0) colors.up else colors.down,
-                    topLeft = Offset(x, top),
-                    size = Size(barW, h),
-                    cornerRadius = CornerRadius(2f, 2f)
-                )
+                if (abs(pnl) <= 1e-9) {
+                    val tickH = 2.dp.toPx()
+                    drawRoundRect(
+                        color = colors.textSecondary.copy(alpha = 0.65f),
+                        topLeft = Offset(x, midY - tickH / 2f),
+                        size = Size(barW, tickH),
+                        cornerRadius = CornerRadius(1f, 1f)
+                    )
+                } else {
+                    val frac = (abs(pnl) / maxAbs).toFloat().coerceIn(0.05f, 1f)
+                    val h = (midY - 2.dp.toPx()) * frac
+                    val top = if (pnl > 0.0) midY - h else midY
+                    drawRoundRect(
+                        color = if (pnl > 0.0) colors.up else colors.down,
+                        topLeft = Offset(x, top),
+                        size = Size(barW, h),
+                        cornerRadius = CornerRadius(2f, 2f)
+                    )
+                }
             }
         }
     }
@@ -1389,7 +1485,7 @@ fun DataArchiveCompositionBars(
     stats: DataStats,
     modifier: Modifier = Modifier
 ) {
-    val coinTotal = stats.btc + stats.eth + stats.sol
+    val coinTotal = stats.btc + stats.eth + stats.sol + stats.other
     val outcomeTotal = stats.yesSettled + stats.noSettled
     if (coinTotal <= 0 && outcomeTotal <= 0) return
     val colors = DipTheme.colors
@@ -1429,15 +1525,18 @@ fun DataArchiveCompositionBars(
         if (coinTotal > 0) {
             val btcFrac = stats.btc.toFloat() / coinTotal.toFloat()
             val ethFrac = stats.eth.toFloat() / coinTotal.toFloat()
+            val solFrac = stats.sol.toFloat() / coinTotal.toFloat()
             Canvas(Modifier.fillMaxWidth().height(6.dp)) {
                 val r = size.height / 2f
                 drawRoundRect(colors.border.copy(alpha = 0.4f), size = size, cornerRadius = CornerRadius(r, r))
                 val wBtc = size.width * btcFrac
                 val wEth = size.width * ethFrac
-                val wSol = (size.width - wBtc - wEth).coerceAtLeast(0f)
+                val wSol = size.width * solFrac
+                val wOther = (size.width - wBtc - wEth - wSol).coerceAtLeast(0f)
                 if (wBtc > 0f) drawRect(colors.accentOrange, topLeft = Offset(0f, 0f), size = Size(wBtc, size.height))
                 if (wEth > 0f) drawRect(colors.accentBlue, topLeft = Offset(wBtc, 0f), size = Size(wEth, size.height))
                 if (wSol > 0f) drawRect(colors.up, topLeft = Offset(wBtc + wEth, 0f), size = Size(wSol, size.height))
+                if (wOther > 0f) drawRect(colors.textSecondary.copy(alpha = 0.55f), topLeft = Offset(wBtc + wEth + wSol, 0f), size = Size(wOther, size.height))
             }
         }
     }

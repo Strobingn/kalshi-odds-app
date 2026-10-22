@@ -86,6 +86,28 @@ class TelemetryChartMathTest {
             assertTrue(pt.predicted01 in 0.0..1.0)
             assertTrue(pt.actual01 in 0.0..1.0)
         }
+        val manualOpposite = view.ledger.picks.first().copy(
+            kind = com.dirk.kalshiodds.signal.feedback.ScorecardLedger.Kind.MANUAL,
+            aiPct = 88.0,
+            won = false
+        )
+        val calWithManual = TelemetryChartMath.calibrationCurve(listOf(manualOpposite))
+        assertTrue("manual rows must not be bucketed into AI reliability curve", calWithManual.isEmpty())
+
+        val brierPicks = (0 until 20).map { i ->
+            view.ledger.picks.first().copy(
+                kind = com.dirk.kalshiodds.signal.feedback.ScorecardLedger.Kind.AI,
+                side = "YES",
+                aiPct = 70.0,
+                marketPct = 55.0,
+                won = i < 14
+            )
+        }
+        val brier = TelemetryChartMath.brierSummary(brierPicks)
+        assertNotNull(brier)
+        assertEquals(20, brier!!.n)
+        assertTrue(brier.modelBrier < brier.marketBrier)
+
         val bars = TelemetryChartMath.bucketBars(view.bySide)
         assertTrue(bars.isNotEmpty())
         val upBar = bars.first { it.label.startsWith("UP") }
@@ -97,11 +119,20 @@ class TelemetryChartMathTest {
     fun signalEdgeDistributionsBucketSignalsByMagnitudeAndSide() {
         val cards = listOf(
             SignalCopy.card(HomeFixtures.sampleAlerts()[0]),
-            SignalCopy.card(HomeFixtures.sampleAlerts()[1])
+            SignalCopy.card(HomeFixtures.sampleAlerts()[1]),
+            SignalCopy.card(
+                ticker = "KXBTC15M-UNROUNDED",
+                side = "YES",
+                modelYes = 55.6,
+                marketYes = 50.0,
+                fairYes = 55.6
+            )
         )
         val dist = TelemetryChartMath.signalCardDistribution(cards)
         assertEquals(4, dist.size)
-        assertEquals(2, dist.sumOf { it.total })
+        assertEquals(3, dist.sumOf { it.total })
+        val band3To6 = dist.first { it.label == "3–6 pts" }
+        assertEquals("5.6 pts edge must stay in 3-6 band before rounding", 2, band3To6.upCount)
 
         val lines = listOf(
             HistoryAssembler.SignalLine(
@@ -110,9 +141,10 @@ class TelemetryChartMathTest {
                 ticker = "KXBTC15M-1",
                 side = "YES",
                 marketPp = 50.0,
-                fairPp = 58.0,
-                edgePp = 8.0,
-                settled = "yes"
+                fairPp = 62.0,
+                edgePp = 12.0,
+                settled = "yes",
+                note = "QUIET/MID · AI 55.6% vs mkt 50.0% · Δ +12.0pp"
             ),
             HistoryAssembler.SignalLine(
                 id = "2",
@@ -128,7 +160,8 @@ class TelemetryChartMathTest {
         val histDist = TelemetryChartMath.historySignalDistribution(lines)
         assertEquals(4, histDist.size)
         assertEquals(2, histDist.sumOf { it.total })
-        assertNotNull(histDist.firstOrNull { it.upCount == 1 })
-        assertNotNull(histDist.firstOrNull { it.downCount == 1 })
+        val hist3To6 = histDist.first { it.label == "3–6 pts" }
+        assertEquals("history signal uses AI vs mkt edge from note (5.6 pts), not stored 12.0pp", 1, hist3To6.upCount)
+        assertEquals(1, hist3To6.downCount)
     }
 }
