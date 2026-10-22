@@ -176,7 +176,8 @@ object Research {
             max = nx
         }
         val clip0 = contracts ?: ScalpParamSanity.builtinClip(code)
-        val clip1 = if (winner) (clip0 + step).coerceAtMost(100) else (clip0 - step).coerceAtLeast(1)
+        val clipCap = ScalpVariants.clipOf(code) ?: 100
+        val clip1 = if (winner) (clip0 + step).coerceAtMost(clipCap) else (clip0 - step).coerceAtLeast(1)
         if (clip1 != clip0) {
             contracts = clip1
             notes += "clip $clip0 → $clip1"

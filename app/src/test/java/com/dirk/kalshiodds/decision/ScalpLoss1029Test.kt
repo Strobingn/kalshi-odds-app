@@ -23,11 +23,12 @@ class ScalpLoss1029Test {
         assertNull(ScalpParamSanity.entryBlock("NO", 0.33, 10, floor, 20_000.0, 10))
         assertEquals(10, ScalpParamSanity.builtinClip("sf07-v2"))
         assertEquals(10, ScalpParamSanity.ownClip("sf07-v2", null))
-        assertEquals(16, ScalpParamSanity.ownClip("sf07-v2", 16))
+        assertEquals(10, ScalpParamSanity.ownClip("sf07-v2", 16))
+        assertEquals(4, ScalpParamSanity.ownClip("sf07-v2", 4))
         val boosted = ScalpControls(greenContracts = 200, algo = mapOf("sf07-v2" to mapOf("contracts" to 200.0)))
         assertEquals(10, StrategyAlgo.clip(boosted, "sf07-v2", 10))
         val manual = ScalpControls(strategySettings = mapOf("sf07-v2" to ScalpStrategySettings(contracts = 16)))
-        assertEquals(16, StrategyAlgo.clip(manual, "sf07-v2", 10))
+        assertEquals(10, StrategyAlgo.clip(manual, "sf07-v2", 10))
 
         val store = InMemoryScalpPersistence()
         store.seed((1..20).map { i ->

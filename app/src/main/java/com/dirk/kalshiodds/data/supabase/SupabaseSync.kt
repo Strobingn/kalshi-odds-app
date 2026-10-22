@@ -150,9 +150,12 @@ class SupabaseSync(
             val open = t.state == com.dirk.kalshiodds.decision.ScalpState.OPEN
             if (t.state != com.dirk.kalshiodds.decision.ScalpState.CLOSED && !open) return@forEach
             val at = (if (open) t.entryAtMs ?: t.signalAtMs else t.closedAtMs) ?: return@forEach
+            val clip = com.dirk.kalshiodds.decision.ScalpParamSanity.builtinClip(t.variantId)
             val payload = JSONObject()
                 .put("id", t.id).put("ticker", t.ticker).put("side", t.side)
-                .put("algo", t.algoLabel).put("variant", t.variantId).put("primary", t.isPrimary)
+                .put("algo", com.dirk.kalshiodds.decision.ScalpParamSanity.algoText(t.algoLabel, clip))
+                .put("variant", t.variantId).put("primary", t.isPrimary)
+                .put("clip", clip)
                 .put("contracts", t.contracts).putFinite("entryPrice", t.entryPrice)
                 .putFinite("exitAvg", if (t.contracts > 0) t.proceedsUsd / t.contracts else null)
                 .putFinite("feesUsd", t.entryFeeUsd + t.exitFeeUsd).putFinite("netUsd", t.netUsd)
