@@ -66,6 +66,7 @@ class KalshiWsClient(
     private val subscribedSids = java.util.concurrent.CopyOnWriteArrayList<Int>()
     /** Command ids of the 5 Hz index and account subscribes: errors answering them are ignored. */
     @Volatile private var index5hzCmdId: Int? = null
+    @Volatile private var altIndexCmdId: Int? = null
     @Volatile private var privateCmdId: Int? = null
 
     fun start(keyId: String, pem: String, channels: List<String>, marketTickers: List<String>) {
@@ -152,6 +153,14 @@ class KalshiWsClient(
             index5hzCmdId = fastId
             ws.send(KalshiWsMessages.subscribeIndices(fastId, indexIds, KalshiWsMessages.INDEX_CHANNEL_5HZ))
             onLog("subscribe id=$slowId/$fastId cfbenchmarks_value + 5hz $indexIds")
+            // The other coins' indices on a command of their own, so an id Kalshi does not know cannot touch Bitcoin's.
+            val alts = com.dirk.kalshiodds.signal.external.CfIndexBook.ALT_INDEX_IDS
+            if (alts.isNotEmpty() && indexIds === com.dirk.kalshiodds.signal.external.CfIndexBook.INDEX_IDS) {
+                val altId = msgId.getAndIncrement()
+                altIndexCmdId = altId
+                ws.send(KalshiWsMessages.subscribeIndices(altId, alts, KalshiWsMessages.INDEX_CHANNEL))
+                onLog("subscribe id=$altId cfbenchmarks_value $alts")
+            }
         }
         if (privateChannels.isNotEmpty()) {
             val pid = msgId.getAndIncrement()
@@ -256,7 +265,7 @@ class KalshiWsClient(
                     onLog("ws error ${parsed.code}: ${parsed.message} (id=${parsed.id})")
                     // A refused 5 Hz index (the 1 Hz one still runs) or account
                     // subscription is not a broken connection.
-                    if (parsed.id != null && (parsed.id == index5hzCmdId || parsed.id == privateCmdId)) return
+                    if (parsed.id != null && (parsed.id == index5hzCmdId || parsed.id == privateCmdId || parsed.id == altIndexCmdId)) return
                     if (parsed.code == 9) {
                         onState(State(connected = false, reconnecting = false, host = null, detail = "auth required"))
                     }

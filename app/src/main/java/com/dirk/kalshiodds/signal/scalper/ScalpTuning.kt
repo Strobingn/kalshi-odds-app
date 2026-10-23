@@ -219,6 +219,7 @@ object ScalpTriggers {
             Spec("Fair price at least", Unit.PERCENT, st.fav!!.fairMin * 100.0, 80.0, 99.0, 1.0)
         ScalpStrategy.OPENING_RIDE -> Spec("Lean at least", Unit.PERCENT, PaperScalper.OPEN_LEAN * 100.0, 50.0, 70.0, 1.0)
         ScalpStrategy.LATE_EDGE -> cents("Edge over the fee", st.fav!!.gap, 0.0, 10.0)
+        else -> null
     }
 
     /** A trigger value as the settings card shows it. */

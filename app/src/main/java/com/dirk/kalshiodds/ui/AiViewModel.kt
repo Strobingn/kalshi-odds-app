@@ -162,6 +162,19 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
     private val _modelReport = MutableStateFlow<ModelReport?>(null)
     val modelReport: StateFlow<ModelReport?> = _modelReport.asStateFlow()
 
+    /** The 20-scalper fleet: each scalper's record, the feeds, TimesFM and the legs open on other venues. */
+    data class FleetUi(
+        val rows: List<FleetRow> = emptyList(),
+        val feeds: List<com.dirk.kalshiodds.signal.scalper.fleet.FleetHub.FeedStatus> = emptyList(),
+        val openLegs: Int = 0
+    )
+    private val _fleet = MutableStateFlow(FleetUi())
+    val fleet: StateFlow<FleetUi> = _fleet.asStateFlow()
+    val timesFm: StateFlow<com.dirk.kalshiodds.signal.scalper.fleet.TimesFmDownload.State> = container.timesFmDownload.state
+    fun downloadTimesFm() = container.timesFmDownload.start()
+    fun cancelTimesFm() = container.timesFmDownload.cancel()
+    fun deleteTimesFm() = container.timesFmDownload.delete()
+
     init {
         viewModelScope.launch(Dispatchers.Default) {
             var last = 0.0
@@ -175,6 +188,14 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.Default) {
             while (isActive) {
                 runCatching { _modelReport.value = container.scalperStore.model?.let { modelReport(it) } }
+                runCatching {
+                    val ledger = container.scalperStore.ledger.snapshot()
+                    val rows = ScalpStrategy.values().filter { it.fleet }.map { st ->
+                        val s = ledger.stats(st.name)
+                        FleetRow(st.label, s.closed, s.pnlUsd)
+                    }
+                    _fleet.value = FleetUi(rows, container.fleetHub.status.value.values.toList(), container.fleetHub.openLegs().size)
+                }
                 delay(5_000L)
             }
         }

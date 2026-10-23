@@ -364,8 +364,14 @@ class PaperScalper(
     /** YES fair price from the live spot ([ScalpFair]) for Kashi's late favourites; null when unknown. */
     private val fairYes: (ticker: String, nowMs: Long) -> Double? = { _, _ -> null },
     /** What runs; null = [ScalpStrategy.ACTIVE]. The retired strategies open nothing unless learning mode is on; tests and the replay pass them all. */
-    private val strategies: List<ScalpStrategy>? = null
+    private val strategies: List<ScalpStrategy>? = null,
+    /** The 20-scalper fleet's outside data (index, venues, forecaster); null = the fleet does not trade. */
+    private val fleetFeed: com.dirk.kalshiodds.signal.scalper.fleet.FleetFeed? = null
 ) {
+    private val fleetTape = com.dirk.kalshiodds.signal.scalper.fleet.FleetTape()
+    /** Fleet orders resting on the book whose other-venue legs open when they fill (the perp hedge). */
+    private val pendingLegs = HashMap<Long, Pair<String, List<com.dirk.kalshiodds.signal.scalper.fleet.OffBookLeg>>>()
+
     /** What runs now: the list passed in, else [ScalpStrategy.ACTIVE] (all of them while learning mode is on). */
     private val running: List<ScalpStrategy> get() = strategies ?: ScalpStrategy.ACTIVE
 
@@ -396,9 +402,24 @@ class PaperScalper(
         for (e in events) if (e is ScalpEvent.Closed && utcDay(e.scalp.closedAtMs) == today) {
             dayPnl[e.scalp.order.strategy.ordinal] += e.scalp.pnlUsd
         }
+        if (pendingLegs.isNotEmpty()) for (e in events) {
+            when (e) {
+                is ScalpEvent.Filled -> pendingLegs.remove(e.order.id)?.let { (note, legs) ->
+                    for (leg in legs) runCatching { fleetFeed?.openOffBook(e.order.strategy, leg, note, e.atMs) }
+                }
+                is ScalpEvent.Unfilled -> pendingLegs.remove(e.order.id)
+                else -> {}
+            }
+        }
         val hook = onClosed
         if (hook != null) for (e in events) if (e is ScalpEvent.Closed) runCatching { hook(e.scalp) }
         ledger.apply(events, forcePersist)
+    }
+
+    /** A leg on another market closed (the fleet's off-book positions): booked like any other scalp. */
+    @Synchronized
+    fun bookOffBook(events: List<ScalpEvent>, nowMs: Long = System.currentTimeMillis()) {
+        book(events, forcePersist = true, nowMs = nowMs)
     }
 
     /** True once [st] lost its daily limit today. */
@@ -437,6 +458,7 @@ class PaperScalper(
             events += engine.onTrade(ticker, takerYes, p, c, nowMs) { side, price -> offerQueue(ticker, side, price) }
         }
         grid.add(nowMs, takerYes, p, c)
+        if (fleetFeed != null) fleetTape.onTrade(ticker, takerYes, c, nowMs)
         events += decide(ticker, grid, nowMs)
         book(events, nowMs = nowMs)
     }
@@ -453,6 +475,8 @@ class PaperScalper(
     @Synchronized
     fun settle(ticker: String, result: String, nowMs: Long = System.currentTimeMillis()) {
         val events = engine.settle(ticker, result, nowMs)
+        fleetTape.forget(ticker)
+        runCatching { fleetFeed?.onSettle(ticker, result) }
         grids.remove(ticker)
         lastDecision.remove(ticker)
         onceDone.remove(ticker)
@@ -540,7 +564,7 @@ class PaperScalper(
         val s = grid.secondOf(nowMs) - 1
         // The opening ride trades in the first minute, the late favourites inside the last one;
         // everything else between minute 1 and minute 13.
-        if (s < OPEN_FIRST_SECOND || s > LATE_LAST_SECOND) return emptyList()
+        if (s < 0 || s > FLEET_LAST_SECOND || (s < OPEN_FIRST_SECOND || s > LATE_LAST_SECOND) && fleetFeed == null) return emptyList()
         // Slot 0 is the last second looked at (dozens of prints share a second); then one slot per strategy.
         val last = lastDecision.getOrPut(ticker) { IntArray(ScalpStrategy.values().size + 1) { -1_000 } }
         if (last[0] == s) return emptyList()
@@ -550,7 +574,9 @@ class PaperScalper(
         val done = onceDone[ticker]
         val inWindow = { st: ScalpStrategy, t: Tuned ->
             val late = t.secondsLeft
+            val own = st.activeSeconds
             when {
+                own != null -> s in own
                 st.opening -> s <= OPEN_LAST_SECOND
                 late != null -> tte in late
                 else -> s in PrintGrid.MIN_DECISION_SECOND..PrintGrid.MAX_DECISION_SECOND
@@ -563,11 +589,13 @@ class PaperScalper(
         }
         if (due0.isEmpty()) return emptyList()
         for (st in due0) last[st.ordinal + 1] = s
+        val events = ArrayList<ScalpEvent>()
+        val fleetDue = due0.filter { it.fleet }
+        if (fleetDue.isNotEmpty()) events += decideFleet(ticker, grid, nowMs, s, fleetDue)
         // The opening ride cannot wait for a minute of prints; everything else needs one.
         val warm = grid.warm(s)
-        val due = if (warm) due0 else due0.filter { it.opening }
-        if (due.isEmpty()) return emptyList()
-        val events = ArrayList<ScalpEvent>()
+        val due = (if (warm) due0 else due0.filter { it.opening }).filter { !it.fleet && s in OPEN_FIRST_SECOND..LATE_LAST_SECOND }
+        if (due.isEmpty()) return events
         val top = topOfBook(ticker)
         val fairY = if (due.any { it.fav != null || it.opening }) {
             runCatching { fairYes(ticker, nowMs) }.getOrNull()?.takeIf { it.isFinite() }
@@ -761,6 +789,8 @@ class PaperScalper(
                             tn.contracts
                         fair != null && fair >= f.fairMin - EPS && fair - ask >= feePer + trig(f.gap) - EPS
                     }
+                    // The fleet decides in decideFleet.
+                    else -> false
                 }
                 if (fire == null) {
                     val m = model ?: continue
@@ -799,6 +829,64 @@ class PaperScalper(
         return events
     }
 
+    /** The 20-scalper fleet for this second: one view, each strategy's orders, through the same paper engine. */
+    private fun decideFleet(ticker: String, grid: PrintGrid, nowMs: Long, s: Int, due: List<ScalpStrategy>): List<ScalpEvent> {
+        val feed = fleetFeed ?: return emptyList()
+        val close = closeMs(ticker) ?: return emptyList()
+        val top = topOfBook(ticker)
+        val levels = bookLevels(ticker)
+        val fair = runCatching { fairYes(ticker, nowMs) }.getOrNull()?.takeIf { it.isFinite() }
+        val view = com.dirk.kalshiodds.signal.scalper.fleet.FleetViews.build(ticker, nowMs, close, s, grid, top, levels, fair, fleetTape, engine, feed)
+        runCatching { feed.onView(view) }
+        val events = ArrayList<ScalpEvent>()
+        val opened = ordersThisWindow.getOrPut(ticker) { IntArray(ScalpStrategy.values().size) }
+        val lastOpen = lastOrderMs.getOrPut(ticker) { LongArray(ScalpStrategy.values().size) { Long.MIN_VALUE / 2 } }
+        for (st in due) {
+            val tn = engine.tuning.tuned(st)
+            val most = tn.maxOrdersPerWindow
+            if (most != null && opened[st.ordinal] >= most) continue
+            if (tn.cooldownMs > 0 && nowMs - lastOpen[st.ordinal] < tn.cooldownMs) continue
+            for (o in com.dirk.kalshiodds.signal.scalper.fleet.Fleet.decide(st, view)) {
+                if (!tn.sideAllowed(o.side)) continue
+                val ctx = ScalpContext(
+                    bid = if (o.side == "YES") view.yesBid else view.noBid, ask = if (o.side == "YES") view.yesAsk else view.noAsk,
+                    bidQty = if (o.side == "YES") view.yesBidQty else view.noBidQty, askQty = if (o.side == "YES") view.yesAskQty else view.noAskQty,
+                    move10 = null, move30 = null, features = null
+                )
+                val edgeCents = (o.pModel - o.price) * 100.0
+                if (!o.onBook) {
+                    // The whole trade is on another market (scalper 8): only the leg.
+                    for (leg in o.offBook) runCatching { feed.openOffBook(st, leg, o.note, nowMs) }
+                    opened[st.ordinal]++
+                    lastOpen[st.ordinal] = nowMs
+                    continue
+                }
+                if (o.taker) {
+                    val bought = engine.buyNow(
+                        st, ticker, o.side, o.price, { sd, px -> offerQueue(ticker, sd, px) }, nowMs, ctx,
+                        contracts = o.contracts, targetPrice = o.exitPrice, predictionCents = edgeCents
+                    )
+                    if (bought.isNotEmpty()) {
+                        opened[st.ordinal]++
+                        lastOpen[st.ordinal] = nowMs
+                        for (leg in o.offBook) runCatching { feed.openOffBook(st, leg, o.note, nowMs) }
+                    }
+                    events += bought
+                } else {
+                    val levelsOnSide = if (o.side == "YES") view.yesLevels else view.noLevels
+                    val queue = levels?.let { levelsOnSide.firstOrNull { abs(it.first - o.price) <= ScalperEngine.TICK_EPS }?.second ?: 0.0 }
+                    engine.post(st, ticker, o.side, o.price, queue, edgeCents, edgeCents, nowMs, ctx, contracts = o.contracts, targetPrice = o.exitPrice)?.let {
+                        events += it
+                        opened[st.ordinal]++
+                        lastOpen[st.ordinal] = nowMs
+                        if (o.offBook.isNotEmpty()) pendingLegs[it.order.id] = o.note to o.offBook
+                    }
+                }
+            }
+        }
+        return events
+    }
+
     /**
      * Contracts already offered at [price] on [side]: an offer of YES at `a`
      * is a NO bid at `1 − a`, so it is the size resting there. Null when the
@@ -817,6 +905,9 @@ class PaperScalper(
 
         /** Last decision second: 5 s before the close, the end of the late-edge window. */
         const val LATE_LAST_SECOND = PrintGrid.SECONDS - 5
+
+        /** The fleet's final-minute scalpers decide up to the window's last 2 seconds. */
+        const val FLEET_LAST_SECOND = PrintGrid.SECONDS - 2
 
         /** The opening ride looks from the 2nd second to the end of the first minute. */
         const val OPEN_FIRST_SECOND = 2

@@ -47,6 +47,9 @@ enum class ExitKind { TARGET, STOP, TIMEOUT, SETTLED }
  *
  * [origin] is where the idea came from (another branch's app or study).
  */
+/** Origin tag of the 20-scalper fleet ([ScalpStrategy.fleet]). */
+const val FLEET_ORIGIN = "20-scalper plan"
+
 enum class ScalpStrategy(
     val label: String,
     val taker: Boolean,
@@ -71,7 +74,11 @@ enum class ScalpStrategy(
     /** First minute of the window it opens orders in (the "from minute" setting starts here). */
     val startMinute: Int = 0,
     /** Seconds it waits after opening an order before the next (the "wait after an order" setting starts here). */
-    val cooldownSeconds: Int = 0
+    val cooldownSeconds: Int = 0,
+    /** Seconds since the window opened when it may trade (the fleet's own windows); null = the usual minutes 1–13. */
+    val activeSeconds: IntRange? = null,
+    /** May both pay the ask and rest a bid ([fleet] scalpers choose per order). */
+    val hybrid: Boolean = false
 ) {
     /** The trained model picks calm moments. Rest in, +1¢ out. */
     ML_REST("ML scalper · resting", false, 0.01, 0.04, 120_000L, 5, 12, -2.01),
@@ -291,7 +298,75 @@ enum class ScalpStrategy(
     LATE_EDGE(
         "Late edge · settle average, buy, hold", true, 0.0, 0.0, 0L, 1, 1, null,
         hold = true, entryMin = 0.50, entryMax = 0.98, origin = "edge report", fav = FavSpec(5, 60, 0.80, 0.01)
-    );
+    ),
+
+    // ---------------------------------------------------------------- the 20-scalper fleet (plan of 2026-10-23)
+    // Rules in fleet/Fleet.kt. Every order clears P_model − (price + fee) ≥ 1¢ and is sized at quarter Kelly on a
+    // $250 paper bankroll (market-making quotes and arbitrage pairs use a fixed size).
+
+    /** 1 · The final minute's banked index prints fix most of the settlement average: sweep or bid the mispriced side. */
+    FLEET_LOCKED_IN("1 Locked-in BRTI · final minute", true, 0.0, 0.0, 0L, 1, 1, null, hold = true,
+        entryMin = 0.02, entryMax = 0.99, origin = FLEET_ORIGIN, activeSeconds = 840..898, hybrid = true),
+    /** 2 · A late index spike moves the average only (60 − k)/60 of itself: fade the market's overreaction, resting. */
+    FLEET_SPIKE_FADE("2 Late-spike fade · rest, hold", false, 0.0, 0.0, 0L, 1, 2, null, hold = true,
+        entryMin = 0.02, entryMax = 0.98, origin = FLEET_ORIGIN, activeSeconds = 840..895),
+    /** 3 · 30-second VWAP slope of venue trades, |Z| > 2, projected 30 s ahead. */
+    FLEET_VWAP_SLOPE("3 VWAP slope momentum · rest, hold", false, 0.0, 0.0, 0L, 2, 1, null, hold = true,
+        entryMin = 0.05, entryMax = 0.95, origin = FLEET_ORIGIN, activeSeconds = 810..855),
+    /** 4 · The side the average can no longer lose (> 6σ to turn): rest 99.1–99.6¢. */
+    FLEET_TAIL_HARVEST("4 Deci-cent tail · rest 99.1–99.6¢", false, 0.0, 0.0, 0L, 1, 3, null, hold = true,
+        entryMin = 0.99, entryMax = 0.999, origin = FLEET_ORIGIN, activeSeconds = 855..895),
+    /** 5 · Student-t (ν 4.2) prices the 1.8–4σ wing above a normal: rest on the cheap wing. */
+    FLEET_FAT_TAIL("5 Student-t fat tail · rest, hold", false, 0.0, 0.0, 0L, 5, 1, null, hold = true,
+        entryMin = 0.001, entryMax = 0.50, origin = FLEET_ORIGIN, activeSeconds = 60..780),
+    /** 6 · Quiet hours (ω_h < 0.65): the trailing side is overpriced by 24-hour volatility; rest on the leader. */
+    FLEET_NIGHT_THETA("6 Overnight theta · rest, hold", false, 0.0, 0.0, 0L, 10, 1, null, hold = true,
+        entryMin = 0.50, entryMax = 0.98, origin = FLEET_ORIGIN, activeSeconds = 60..780),
+    /** 7 · Implied vs realized volatility gap over 1.5σ: buy the side the realized vol favours. */
+    FLEET_RV_IV("7 RV-IV dispersion · rest, hold", false, 0.0, 0.0, 0L, 5, 1, null, hold = true,
+        entryMin = 0.03, entryMax = 0.97, origin = FLEET_ORIGIN, activeSeconds = 60..720),
+    /** 8 · BTC–alt correlation jumps (ρ > 0.85, +0.25 in 5 windows): take the lagging altcoin's 15-minute market. */
+    FLEET_CROSS_ASSET("8 Cross-asset correlation · alt market", true, 0.0, 0.0, 0L, 5, 1, null, hold = true,
+        entryMin = 0.02, entryMax = 0.98, origin = FLEET_ORIGIN, activeSeconds = 30..840),
+    /** 9 · Avellaneda–Stoikov two-sided quotes, skewed by inventory (γ 0.2, κ 1.5, 2¢ minimum spread). */
+    FLEET_AS_MAKER("9 Avellaneda-Stoikov maker", false, 0.02, 0.0, 120_000L, 5, 1, null,
+        entryMin = 0.03, entryMax = 0.97, origin = FLEET_ORIGIN, activeSeconds = 30..780),
+    /** 10 · Seven post-only rungs, 1¢ apart under the bid; each fill offers out at P + 2¢ + 0.5¢·rung. */
+    FLEET_LADDER("10 Seven-rung ladder", false, 0.02, 0.0, 180_000L, 5, 7, null,
+        entryMin = 0.03, entryMax = 0.97, origin = FLEET_ORIGIN, activeSeconds = 30..600),
+    /** 11 · Top-3 order-book imbalance over 0.65 with a 3¢+ spread: step 1¢ inside. */
+    FLEET_OBI("11 Book imbalance micro-price", false, 0.02, 0.03, 30_000L, 2, 1, null,
+        entryMin = 0.05, entryMax = 0.95, origin = FLEET_ORIGIN, activeSeconds = 30..840),
+    /** 12 · VPIN over 0.70: halts the passive makers 30 s and takes the informed side's expected move. */
+    FLEET_VPIN_FLIP("12 VPIN toxicity flip", true, 0.03, 0.03, 20_000L, 2, 1, null,
+        entryMin = 0.05, entryMax = 0.95, origin = FLEET_ORIGIN, activeSeconds = 30..840),
+    /** 13 · Lottery YES (10–25¢) under the strike wins less often than priced: rest NO bids. */
+    FLEET_NO_BIAS("13 Behavioural NO bias · rest, hold", false, 0.0, 0.0, 0L, 10, 1, null, hold = true,
+        entryMin = 0.70, entryMax = 0.92, origin = FLEET_ORIGIN, activeSeconds = 60..750),
+    /** 14 · CF-style index from four exchange books crosses the strike before the index tick does. */
+    FLEET_NOWCAST("14 Venue-book index nowcast", true, 0.03, 0.03, 30_000L, 1, 1, null,
+        entryMin = 0.03, entryMax = 0.97, origin = FLEET_ORIGIN, activeSeconds = 0..890),
+    /** 15 · Kalshi YES + Polymarket Down (or NO + Up) for under $1 after fees, gas and a basis buffer. */
+    FLEET_POLY_ARB("15 Kalshi-Polymarket pair", true, 0.0, 0.0, 0L, 2, 1, null, hold = true,
+        entryMin = 0.02, entryMax = 0.98, origin = FLEET_ORIGIN, activeSeconds = 0..840),
+    /** 16 · The binary off its Student-t fair by 2¢+: rest on it, and hedge its delta in KXBTCPERP when it fills. */
+    FLEET_PERP_HEDGE("16 Perp delta-hedged binary", false, 0.0, 0.0, 0L, 5, 1, null, hold = true,
+        entryMin = 0.05, entryMax = 0.95, origin = FLEET_ORIGIN, activeSeconds = 30..810),
+    /** 17 · The :45–:00 window and the hourly market settle on the same average: nested strikes for under $1. */
+    FLEET_HOURLY_DOMINANCE("17 15m vs hourly dominance", true, 0.0, 0.0, 0L, 2, 1, null, hold = true,
+        entryMin = 0.01, entryMax = 0.99, origin = FLEET_ORIGIN, activeSeconds = 0..880),
+    /** 18 · CPI / jobs / FOMC: a 2.5σ overshoot whose repricing stalls, with a 5¢+ spread: bid the reversion. */
+    FLEET_MACRO_REVERT("18 Macro-print reversal", false, 0.03, 0.0, 300_000L, 2, 1, null,
+        entryMin = 0.03, entryMax = 0.97, origin = FLEET_ORIGIN, activeSeconds = 0..880),
+    /** 19 · Final 3 minutes, near even, near the strike: fast two-sided quotes δ around the fair price. */
+    FLEET_PIN_GAMMA("19 Near-even pin maker", false, 0.02, 0.0, 5_000L, 1, 1, null,
+        entryMin = 0.30, entryMax = 0.70, origin = FLEET_ORIGIN, activeSeconds = 720..870),
+    /** 20 · TimesFM 2.5 forecast of the index with a slow regime gate (≥ 0.60): rest early, take late. */
+    FLEET_TIMESFM("20 TimesFM + regime gate", true, 0.0, 0.0, 0L, 5, 1, null, hold = true,
+        entryMin = 0.03, entryMax = 0.97, origin = FLEET_ORIGIN, activeSeconds = 60..810, hybrid = true);
+
+    /** One of the 20-scalper fleet ([com.dirk.kalshiodds.signal.scalper.fleet.Fleet]). */
+    val fleet: Boolean get() = origin == FLEET_ORIGIN
 
     /**
      * Kashi's late-favourite entry: [tteMin]–[tteMax] seconds left, the side's
@@ -466,10 +541,14 @@ data class ScalpOrder(
     val predictionCents: Double,
     /** [predictionCents] minus the queue penalty: what this order is expected to make where it sits. */
     val expectedCents: Double,
-    val context: ScalpContext? = null
+    val context: ScalpContext? = null,
+    /** The order's own sell-back price (fleet market makers); null = entry + the strategy's target. */
+    val targetPrice: Double? = null,
+    /** True when this order paid the ask (a hybrid strategy chooses per order). */
+    val tookAsk: Boolean = strategy.taker
 ) {
     /** Queue bucket of a resting bid; buy-now entries have no entry queue. */
-    val bucket: QueueBucket? get() = if (strategy.taker) null else QueueBucket.of(queueAhead, queueKnown)
+    val bucket: QueueBucket? get() = if (tookAsk) null else QueueBucket.of(queueAhead, queueKnown)
 
     /** ML scalper only: true when the order is expected to pay after its place in the queue is counted. */
     val queueAware: Boolean get() = strategy == ScalpStrategy.ML_REST && queueKnown && expectedCents >= 0.0
@@ -589,6 +668,18 @@ class ScalperEngine(
         byTicker[ticker].orEmpty().mapNotNull { w -> w.filledAtMs?.let { OpenPosition(w.order, it) } }
             .sortedBy { it.filledAtMs }
 
+    /** Prices [strategy] rests unfilled bids at on one side of [ticker]. */
+    fun restingPrices(strategy: ScalpStrategy, ticker: String, side: String): Set<Double> {
+        val want = if (PrintGrid.isYes(side)) "YES" else "NO"
+        return byTicker[ticker].orEmpty().filter { it.resting && it.order.strategy == strategy && it.order.side == want }
+            .mapTo(HashSet()) { it.order.price }
+    }
+
+    /** Net filled YES contracts minus NO contracts [strategy] holds on [ticker]. */
+    fun inventory(strategy: ScalpStrategy, ticker: String): Double =
+        byTicker[ticker].orEmpty().filter { !it.resting && it.order.strategy == strategy }
+            .sumOf { (if (it.order.side == "YES") 1.0 else -1.0) * it.order.contracts }
+
     /** Positions [strategy] has working on one side of [ticker] (resting bids and filled scalps). */
     fun workingFor(strategy: ScalpStrategy, ticker: String, side: String): Int {
         val want = if (PrintGrid.isYes(side)) "YES" else "NO"
@@ -609,9 +700,12 @@ class ScalperEngine(
         predictionCents: Double,
         expectedCents: Double,
         nowMs: Long,
-        context: ScalpContext? = null
+        context: ScalpContext? = null,
+        /** Size for this order (fleet sizing); null = the strategy's contracts. */
+        contracts: Int? = null,
+        targetPrice: Double? = null
     ): ScalpEvent.Posted? {
-        require(!strategy.taker) { "${strategy.name} buys at the ask: use buyNow" }
+        require(!strategy.taker || strategy.hybrid) { "${strategy.name} buys at the ask: use buyNow" }
         val t = tuning.tuned(strategy)
         if (!inBand(t, price)) return null
         val want = if (PrintGrid.isYes(side)) "YES" else "NO"
@@ -623,13 +717,15 @@ class ScalperEngine(
             ticker = ticker,
             side = want,
             price = round4(price),
-            contracts = t.contracts,
+            contracts = contracts?.takeIf { it > 0 } ?: t.contracts,
             queueAhead = if (known) queueAhead!! else config.unknownQueue,
             queueKnown = known,
             postedAtMs = nowMs,
             predictionCents = predictionCents,
             expectedCents = expectedCents,
-            context = context
+            context = context,
+            targetPrice = targetPrice?.let { round4(it) },
+            tookAsk = false
         )
         byTicker.getOrPut(ticker) { ArrayList() }.add(Working(order))
         return ScalpEvent.Posted(order)
@@ -648,32 +744,38 @@ class ScalperEngine(
         askPrice: Double,
         offerQueue: (side: String, price: Double) -> Double?,
         nowMs: Long,
-        context: ScalpContext? = null
+        context: ScalpContext? = null,
+        contracts: Int? = null,
+        targetPrice: Double? = null,
+        predictionCents: Double = 0.0
     ): List<ScalpEvent> {
-        require(strategy.taker) { "${strategy.name} rests a bid: use post" }
+        require(strategy.taker || strategy.hybrid) { "${strategy.name} rests a bid: use post" }
         val t = tuning.tuned(strategy)
         if (!inBand(t, askPrice)) return emptyList()
         val want = if (PrintGrid.isYes(side)) "YES" else "NO"
         if (workingFor(strategy, ticker, want) >= t.maxPerSide) return emptyList()
         val price = round4(askPrice)
+        val size = contracts?.takeIf { it > 0 } ?: t.contracts
         val order = ScalpOrder(
             id = nextId++,
             strategy = strategy,
             ticker = ticker,
             side = want,
             price = price,
-            contracts = t.contracts,
-            entryFeeUsd = KalshiFee.total(t.contracts, price, config.feeRate),
+            contracts = size,
+            entryFeeUsd = KalshiFee.total(size, price, config.feeRate),
             queueAhead = 0.0,
             queueKnown = true,
             postedAtMs = nowMs,
-            predictionCents = 0.0,
-            expectedCents = 0.0,
-            context = context
+            predictionCents = predictionCents,
+            expectedCents = predictionCents,
+            context = context,
+            targetPrice = targetPrice?.let { round4(it) },
+            tookAsk = true
         )
         val w = Working(order)
         w.filledAtMs = nowMs
-        w.exitPrice = round4(price + t.targetDollars)
+        w.exitPrice = order.targetPrice ?: round4(price + t.targetDollars)
         w.exitQueue = offerQueue(want, w.exitPrice)?.takeIf { q -> q.isFinite() && q >= 0.0 } ?: config.unknownQueue
         byTicker.getOrPut(ticker) { ArrayList() }.add(w)
         return listOf(ScalpEvent.Posted(order), ScalpEvent.Filled(order, nowMs))
@@ -716,7 +818,7 @@ class ScalperEngine(
                 if (through || w.traded >= o.queueAhead + o.contracts) {
                     w.filledAtMs = nowMs
                     w.makerEntryFee = makerFee(o.contracts, o.price)
-                    w.exitPrice = round4(o.price + tuning.tuned(o.strategy).targetDollars)
+                    w.exitPrice = o.targetPrice ?: round4(o.price + tuning.tuned(o.strategy).targetDollars)
                     val shown = if (o.queueKnown) exitQueue(o.side, w.exitPrice) else null
                     w.exitQueue = shown?.takeIf { q -> q.isFinite() && q >= 0.0 } ?: config.unknownQueue
                     events += ScalpEvent.Filled(o, nowMs)

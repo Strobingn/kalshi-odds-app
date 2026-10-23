@@ -153,6 +153,19 @@ class CfIndexBook {
         if (n == 0) null else (sum / n) to n
     }
 
+    /**
+     * One value a second for [seconds] seconds ending at the second of [toMs] (oldest first): the last value of each
+     * second, NaN for a second with none.
+     */
+    fun series(asset: String, toMs: Long, seconds: Int): DoubleArray = synchronized(lock) {
+        val out = DoubleArray(seconds) { Double.NaN }
+        val ring = history[asset.uppercase()] ?: return out
+        val last = toMs / 1000L
+        val first = last - seconds + 1
+        for (p in ring) if (p.first in first..last) out[(p.first - first).toInt()] = p.second
+        out
+    }
+
     /** The index's last value at or before the second of [atMs], or null. */
     fun valueAt(asset: String, atMs: Long): Double? = synchronized(lock) {
         val ring = history[asset.uppercase()] ?: return null
@@ -181,6 +194,9 @@ class CfIndexBook {
         /** Settlement indices for the BTC / ETH / SOL 15-minute series. */
         val INDEX_IDS = listOf("BRTI", "ETHUSD_RTI", "SOLUSD_RTI")
 
+        /** The other coins' 15-minute settlement indices (the fleet's cross-asset scalper), subscribed on their own. */
+        val ALT_INDEX_IDS = listOf("XRPUSD_RTI", "DOGEUSD_RTI", "BNBUSD_RTI", "HYPEUSD_RTI")
+
         /**
          * Residual noise (log units) between this feed and the settlement
          * value: it is the settlement index itself, so only rounding and
@@ -193,6 +209,10 @@ class CfIndexBook {
             "BRTI" -> "BTC"
             "ETHUSD_RTI" -> "ETH"
             "SOLUSD_RTI" -> "SOL"
+            "XRPUSD_RTI", "XRPUSDRTI" -> "XRP"
+            "DOGEUSD_RTI", "DOGEUSDRTI" -> "DOGE"
+            "BNBUSD_RTI", "BNBUSDRTI" -> "BNB"
+            "HYPEUSD_RTI", "HYPEUSDRTI" -> "HYPE"
             else -> null
         }
 

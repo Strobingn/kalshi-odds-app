@@ -95,6 +95,8 @@ fun AiScreen(vm: AiViewModel) {
     val reviews by vm.reviewList.collectAsStateWithLifecycle()
     val autoReview by vm.autoReview.collectAsStateWithLifecycle()
     val report by vm.modelReport.collectAsStateWithLifecycle()
+    val fleet by vm.fleet.collectAsStateWithLifecycle()
+    val timesFm by vm.timesFm.collectAsStateWithLifecycle()
     val pickModel = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
     ) { uri -> if (uri != null) vm.importModel(uri) }
@@ -109,6 +111,11 @@ fun AiScreen(vm: AiViewModel) {
                     Spacer(Modifier.height(12.dp))
                     ModelReportCard(it)
                 }
+                Spacer(Modifier.height(12.dp))
+                FleetCard(
+                    rows = fleet.rows, feeds = fleet.feeds, timesFm = timesFm, openLegs = fleet.openLegs,
+                    onDownload = vm::downloadTimesFm, onCancel = vm::cancelTimesFm, onDelete = vm::deleteTimesFm
+                )
             }
             1 -> AiChatContent(
                 which = which, msgs = msgs.filter { it.thread == which }, busy = busy,

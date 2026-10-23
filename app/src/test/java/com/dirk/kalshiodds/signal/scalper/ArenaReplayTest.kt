@@ -116,6 +116,9 @@ class ArenaReplayTest {
 
     private var clock = 0L
 
+    /** The replay's index (Coinbase BTC as the CF index stand-in), for the fleet's scalpers. */
+    private var replayCf: CfIndexBook? = null
+
     /**
      * Feeds every recorded day in [dir] to the scalpers [make] builds, the way the app does. [make] gets the
      * model, the shared book map and the fair-price function, and returns the runs to feed.
@@ -149,6 +152,7 @@ class ArenaReplayTest {
             .map { File(it) }.firstOrNull { it.isFile }?.let { ScalperModel.parse(it.readText()) }
         val books = HashMap<String, TopOfBook>()
         val cf = CfIndexBook()
+        replayCf = cf
         fun fair(ticker: String, now: Long): Double? {
             val close = closes[ticker] ?: TakerCost.closeEpochMs(ticker) ?: return null
             val spot = cf.fresh("BTC", now)?.value ?: return null
@@ -219,7 +223,9 @@ class ArenaReplayTest {
         val scalper = PaperScalper(
             model = model, ledger = ledger, topOfBook = { books[it] }, bookLevels = { null },
             closeMs = { closes[it] ?: TakerCost.closeEpochMs(it) },
-            engine = ScalperEngine(tuning = ScalpTuning(knobs)), fairYes = fair, strategies = strategies
+            engine = ScalperEngine(tuning = ScalpTuning(knobs)), fairYes = fair, strategies = strategies,
+            // The fleet gets the index and the recorded book; it has no venue data here, so 8, 14–17 and 20 stay idle.
+            fleetFeed = if (strategies.any { it.fleet }) com.dirk.kalshiodds.signal.scalper.fleet.IndexFeed(replayCf!!, { strikes[it] }) else null
         )
         return Run(name, strategy, scalper, trades)
     }

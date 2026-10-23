@@ -399,3 +399,58 @@ fun modelReport(m: com.dirk.kalshiodds.signal.scalper.ScalperModel): ModelReport
         )
     }.getOrNull()
 }
+
+// ---------------------------------------------------------------- the 20-scalper fleet (Dashboard tab)
+
+/** One fleet scalper's paper record, for the fleet card's chart. */
+data class FleetRow(val label: String, val trades: Int, val netUsd: Double)
+
+@Composable
+fun FleetCard(
+    rows: List<FleetRow>,
+    feeds: List<com.dirk.kalshiodds.signal.scalper.fleet.FleetHub.FeedStatus>,
+    timesFm: com.dirk.kalshiodds.signal.scalper.fleet.TimesFmDownload.State,
+    openLegs: Int,
+    onDownload: () -> Unit,
+    onCancel: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val c = DipTheme.colors
+    AiCard("20-scalper fleet", "Paper only. Every order clears its price + fee + 1¢ against the scalper's own probability; sized at quarter Kelly on $250 a scalper.") {
+        val traded = rows.filter { it.trades > 0 }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatTile("Trading", "${traded.size} / ${rows.size}", c.accentBlue, "scalpers with trades")
+            StatTile("Net", fmtSignedUsd(rows.sumOf { it.netUsd }), if (rows.sumOf { it.netUsd } >= 0) c.up else c.down, "${rows.sumOf { it.trades }} trades")
+            StatTile("Off-venue", "$openLegs", c.textPrimary, "legs open elsewhere")
+        }
+        if (rows.isNotEmpty()) {
+            Text("Net by scalper (paper, after fees)", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = c.textSecondary)
+            SignedBars(rows.sortedByDescending { it.netUsd }.map { r ->
+                SignedBar(r.label, r.netUsd, fmtSignedUsd(r.netUsd) + " · ${r.trades}", r.label)
+            }, labelWidth = 150.dp)
+        }
+        Text("TimesFM 2.5 (scalper 20)", fontWeight = FontWeight.SemiBold, color = c.textPrimary)
+        Text("Google's time-series model, 8-bit, 249 MB, runs on this phone's CPU every 10 s on the last 512 seconds of the index.", fontSize = 11.sp, color = c.textSecondary)
+        when {
+            timesFm.installed -> Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("✓ Downloaded", Modifier.weight(1f), color = c.up, fontSize = 12.sp)
+                TextButton(onClick = onDelete) { Text("Delete", color = c.down, fontSize = 11.sp) }
+            }
+            timesFm.downloading -> {
+                LinearProgressIndicator(progress = { (timesFm.bytes.toFloat() / timesFm.total).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+                Text("${timesFm.bytes / 1_000_000} of ${timesFm.total / 1_000_000} MB", fontSize = 11.sp, color = c.textSecondary)
+                OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) { Text("Stop") }
+            }
+            else -> {
+                Button(onClick = onDownload, modifier = Modifier.fillMaxWidth().testTag("TIMESFM_DOWNLOAD")) { Text("Download TimesFM (249 MB)") }
+                timesFm.error?.let { Text("Last try: $it", fontSize = 11.sp, color = c.down) }
+            }
+        }
+        Text("Feeds", fontWeight = FontWeight.SemiBold, color = c.textPrimary)
+        if (feeds.isEmpty()) Text("They start with the first live Bitcoin window (Live signals on).", fontSize = 11.sp, color = c.textSecondary)
+        for (f in feeds.sortedBy { it.name }) {
+            val age = ((System.currentTimeMillis() - f.atMs) / 1000).coerceAtLeast(0)
+            Text("${if (f.ok) "✓" else "✗"} ${f.name}: ${f.detail} · ${age}s ago", fontSize = 11.sp, color = if (f.ok) c.textPrimary else c.textSecondary)
+        }
+    }
+}

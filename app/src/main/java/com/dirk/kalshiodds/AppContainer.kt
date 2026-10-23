@@ -133,8 +133,30 @@ class AppContainer(context: Context) {
         },
         engine = com.dirk.kalshiodds.signal.scalper.ScalperEngine(tuning = scalperStore.tuning),
         onReset = { scalperStore.log.archive() },
-        fairYes = { t, now -> scalperFairYes(t, now) }
+        fairYes = { t, now -> scalperFairYes(t, now) },
+        fleetFeed = com.dirk.kalshiodds.signal.scalper.fleet.LazyFleetFeed { fleetHub }
     )
+
+    /** TimesFM 2.5 weights for the fleet's scalper 20 (downloaded on request, 249 MB). */
+    val timesFmDownload: com.dirk.kalshiodds.signal.scalper.fleet.TimesFmDownload by lazy {
+        com.dirk.kalshiodds.signal.scalper.fleet.TimesFmDownload(File(app.filesDir, "timesfm"), insightScope)
+    }
+
+    /**
+     * The 20-scalper fleet's outside data: venue pollers, off-venue paper legs, the forecaster and the regime loop
+     * (fleet/FleetHub.kt). Market data only.
+     */
+    val fleetHub: com.dirk.kalshiodds.signal.scalper.fleet.FleetHub by lazy {
+        com.dirk.kalshiodds.signal.scalper.fleet.FleetHub(
+            context = app,
+            cf = cfIndex,
+            strikeOf = { t -> scoring.book.strike(t) ?: com.dirk.kalshiodds.signal.engine.DirectionSanity.parseStrike(t) },
+            askLlm = { prompt ->
+                writerLlm.chat(listOf("system" to "You score trading conditions. Reply with JSON only.", "user" to prompt))
+            },
+            forecaster = com.dirk.kalshiodds.signal.scalper.fleet.TimesFm(timesFmDownload.file)
+        ).also { hub -> hub.onLegEvents = { ev -> scalper.bookOffBook(ev) } }
+    }
 
     /**
      * YES fair price for the arena's late favourites, from Kalshi only: the CF

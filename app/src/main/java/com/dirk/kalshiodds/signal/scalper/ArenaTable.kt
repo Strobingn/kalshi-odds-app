@@ -22,6 +22,7 @@ object ArenaTable {
         RESTING("Resting"),
         HOLD("Hold to close"),
         NEW("New"),
+        FLEET("20 fleet"),
         TRADED("Has traded")
     }
 
@@ -78,6 +79,7 @@ object ArenaTable {
     fun matches(row: Row, family: Family): Boolean = when (family) {
         Family.ALL -> true
         Family.NEW -> isNew(row.strategy)
+        Family.FLEET -> row.strategy.fleet
         Family.TRADED -> row.trades > 0
         else -> familyOf(row.strategy) == family
     }
@@ -178,13 +180,34 @@ object ArenaTable {
             "${f.tteMin}–${f.tteMax} s left, the settlement average so far plus the live Bitcoin price make the side at least " +
                 "${c(f.fairMin)} to win, and its ask is under that by the taker fee plus ${c(f.gap)}; once a window."
         }
+        ScalpStrategy.FLEET_LOCKED_IN -> "Final minute, 30+ index prints banked: the chance the 60-print average ends at or above the strike beats the ask (or a bid 1 tick up) by the fee plus 1¢."
+        ScalpStrategy.FLEET_SPIKE_FADE -> "Final minute: a 3σ one-second index jump the market priced 3¢+ beyond what (60 − k)/60 of it can move the average; rest on the other side."
+        ScalpStrategy.FLEET_VWAP_SLOPE -> "90–45 s left: the 30 s slope of the exchanges' volume-weighted price is over 2 standard errors; project it 30 s and rest on that side."
+        ScalpStrategy.FLEET_TAIL_HARVEST -> "Last 45 s: turning the average would take a 6σ move; rest a bid at 99.1–99.6¢ on the side it locks in."
+        ScalpStrategy.FLEET_FAT_TAIL -> "Bitcoin 1.8–4σ from the strike: a Student-t (ν 4.2) prices the far side above the market; rest at least 1.5¢ under it."
+        ScalpStrategy.FLEET_NIGHT_THETA -> "This hour's volatility under 65% of the day's and the price 0.15%+ from the strike: rest on the leader at the seasonal fair price."
+        ScalpStrategy.FLEET_RV_IV -> "The market's implied volatility and the 5 s realized volatility differ by 1.5σ of their gap: rest on the side realized volatility favours."
+        ScalpStrategy.FLEET_CROSS_ASSET -> "An altcoin's 15-minute correlation with Bitcoin over 0.85 and up 0.25 in 5 windows: buy its 15-minute market where Bitcoin's move says it lags (one at a time)."
+        ScalpStrategy.FLEET_AS_MAKER -> "Two-sided Avellaneda–Stoikov quotes around a reservation price skewed by inventory; out at the other quote."
+        ScalpStrategy.FLEET_LADDER -> "First 10 minutes, steady volatility: seven resting bids 1¢ apart under the best bid; each fill offers out at +2¢ + 0.5¢ a rung."
+        ScalpStrategy.FLEET_OBI -> "The top three book levels lean 0.65+ to one side with a 3¢+ spread: bid 1¢ inside on that side."
+        ScalpStrategy.FLEET_VPIN_FLIP -> "VPIN over 0.70 on 500-contract buckets: pause the makers 30 s and buy the informed side when its 20 s move beats fee plus spread."
+        ScalpStrategy.FLEET_NO_BIAS -> "YES at 10–25¢ with Bitcoin under the strike, where such YES has won 2.5¢+ less often than priced: rest NO."
+        ScalpStrategy.FLEET_NOWCAST -> "A CF-style index from Coinbase, Kraken, Bitstamp and Gemini books is across the strike before the index tick: buy that side."
+        ScalpStrategy.FLEET_POLY_ARB -> "Kalshi YES + Polymarket Down (or NO + Up) cost under $1 after both fees, gas and a basis buffer, 0.2%+ from the strike: buy both."
+        ScalpStrategy.FLEET_PERP_HEDGE -> "The binary 2¢+ off its Student-t fair: rest on it; when it fills, hedge its delta with KXBTCPERP until the close."
+        ScalpStrategy.FLEET_HOURLY_DOMINANCE -> "Windows closing on the hour: this window's side plus the hourly market's opposite side at a nested strike cost under $1 after fees: buy both."
+        ScalpStrategy.FLEET_MACRO_REVERT -> "Within 5 minutes of a CPI, jobs or FOMC release: a 2.5σ move whose repricing has stalled, spread 5¢+: bid inside on the reversion."
+        ScalpStrategy.FLEET_PIN_GAMMA -> "Last 3 minutes, near even (42–58¢) and within 0.15% of the strike: two-sided quotes δ around the fair price, flipped every few seconds."
+        ScalpStrategy.FLEET_TIMESFM -> "TimesFM 2.5's forecast of the index gives a side 1.5¢+ over its price (plus fee) while the regime score is 0.60+: rest early, take late."
     }
 
     private fun c(d: Double): String = "${Math.round(d * 100)}¢"
 
     /** How it gets in and out, built from the strategy's settings (yours where you changed one). */
     fun rules(st: ScalpStrategy, t: Tuned = Tuned(st, ScalpKnobs(), ScalpTuning.DEFAULT_CONTRACTS)): List<String> {
-        val entry = if (st.taker) "Buys at the ask the moment the signal fires (taker fee)."
+        val entry = if (st.hybrid) "Pays the ask when the edge clears the taker fee, else rests a bid (sized at quarter Kelly)."
+        else if (st.taker) "Buys at the ask the moment the signal fires (taker fee)."
         else "Rests a bid and waits up to ${t.entryWaitMs(ScalperEngine.Config().entryWaitMs) / 1000} s for sellers to reach it (no fee)."
         val exit = if (st.hold) {
             "Holds to the settlement: $1 if its side wins, $0 if not" +
