@@ -6,7 +6,8 @@ package com.dirk.kalshiodds.llm
  * Keys never reach a real-money path.
  */
 data class LlmEndpoint(val provider: String, val baseUrl: String, val model: String, val apiKey: String) {
-    val usable: Boolean get() = apiKey.isNotBlank() && model.isNotBlank() && baseUrl.startsWith("https://")
+    val usable: Boolean get() = provider == LlmProviders.BUILTIN ||
+        (apiKey.isNotBlank() && model.isNotBlank() && baseUrl.startsWith("https://"))
 }
 
 /** Free-tier ceilings the auto caller paces under. Token totals are for one model. */
@@ -28,6 +29,8 @@ object LlmProviders {
     const val GROQ = "groq"
     const val GEMINI = "gemini"
     const val OPENROUTER_FREE = "openrouter-free"
+    const val BUILTIN = "builtin"
+    const val DEFAULT_BUILTIN_MODEL = "kashi-quant-ondevice-v1"
 
     const val DEFAULT_GROQ_MODEL = "llama-3.1-8b-instant"
     const val GROQ_120 = "openai/gpt-oss-120b"
@@ -43,9 +46,9 @@ object LlmProviders {
     const val MISTRAL_3B = "ministral-3b-latest"
     val MISTRAL_CHAIN = listOf(MISTRAL_DEFAULT, MISTRAL_NEMO, MISTRAL_3B)
     /** One call per free-plan minute slot (188/min). The day cap is a hard stop, not a 30s idle gap. */
-    /** Automatic free-provider calls. Same floor as [com.dirk.kalshiodds.llm.AiLiveFeed.MIN_SPACING_MS]. */
-    const val MISTRAL_PACE_MS = 60_000L
-    const val AUTO_PACE_MS = 60_000L
+    /** Cloud automatic calls. Same floor as [com.dirk.kalshiodds.llm.AiLiveFeed.MIN_SPACING_MS]. The built-in model is not paced. */
+    const val MISTRAL_PACE_MS = 120_000L
+    const val AUTO_PACE_MS = 120_000L
     const val FREE_KEY_HINT = "Get a free key at console.mistral.ai, console.groq.com, or aistudio.google.com."
 
     data class Spec(
@@ -59,6 +62,7 @@ object LlmProviders {
     )
 
     val ALL = listOf(
+        Spec(BUILTIN, "Built-in LLM (unlimited on-device)", "builtin://local", DEFAULT_BUILTIN_MODEL, free = true),
         Spec(XAI, "xAI / Grok", "https://api.x.ai/v1", "grok-4.7"),
         Spec(OPENAI, "OpenAI", "https://api.openai.com/v1", "gpt-4.1"),
         Spec(MISTRAL, "Mistral (free)", "https://api.mistral.ai/v1", MISTRAL_DEFAULT, free = true),
@@ -75,7 +79,9 @@ object LlmProviders {
      */
     val FREE_IDS = listOf(GROQ, MISTRAL, GEMINI, OPENROUTER_FREE)
 
-    fun spec(id: String): Spec = ALL.firstOrNull { it.id == id } ?: ALL.first()
+    fun spec(id: String): Spec = ALL.firstOrNull { it.id == id } ?: ALL.first { it.id == XAI }
+
+    fun builtinEndpoint(): LlmEndpoint = resolve(BUILTIN, "", "", "")
 
     /** Blank model/base fill from the provider defaults. Custom stays blank until Dirk types them. */
     fun resolve(id: String, apiKey: String, model: String, base: String): LlmEndpoint {
@@ -111,11 +117,12 @@ object LlmProviders {
 
     /**
      * Provider ceilings before the optional daily budget.
-     * Every automatic free provider waits at least 60 seconds between calls.
+     * Cloud providers wait 120 seconds. The built-in model has no quota. Paid providers use a 120-second pace.
      * Mistral's day cap is 2,880. Groq's day cap is 1,000. Gemini's safety budget is 500.
      */
     fun baseQuota(id: String, model: String = ""): FreeQuota? {
-        if (!freeFamily(id, model)) return null
+        if (id == BUILTIN) return null
+        if (!freeFamily(id, model)) return FreeQuota(30, 720, 250_000, 50_000_000, AUTO_PACE_MS)
         return when (id) {
             MISTRAL -> FreeQuota(188, 2_880, 625_000, 900_000_000, MISTRAL_PACE_MS)
             GROQ -> FreeQuota(30, 1_000, 8_000, 200_000, AUTO_PACE_MS)
@@ -129,8 +136,9 @@ object LlmProviders {
         id == GROQ -> 1_000
         id == GEMINI -> 500
         id == MISTRAL -> 2_880
+        id == BUILTIN -> 0
         freeFamily(id, model) -> 50
-        else -> 0
+        else -> 720
     }
 
     /** The tighter of the provider ceiling and Dirk's daily auto-call budget. */

@@ -51,8 +51,17 @@ object AiAutoCalls {
         /** Today's saved calls for this provider. Combined with the pacer's session hits. */
         callsToday: (LlmEndpoint) -> Int = { 0 }
     ): Pair<LlmEndpoint, LlmClient.Reply>? {
-        if (!LlmProviders.freeFamily(selected.provider, selected.model)) return null
-        val tail = slots.asSequence()
+        if (selected.provider == LlmProviders.BUILTIN) {
+            if (!allowed(selected)) return null
+            return try {
+                selected to ask(selected, messages)
+            } catch (_: Exception) {
+                null
+            }
+        }
+        val selectedFree = LlmProviders.freeFamily(selected.provider, selected.model)
+        if (!selectedFree && (!allowed(selected) || !selected.usable)) return null
+        val tail = if (!selectedFree) emptyList() else slots.asSequence()
             .filter { it.usable && it.provider != selected.provider }
             .filter { LlmProviders.freeFamily(it.provider, it.model) && allowed(it) }
             .distinctBy { it.provider }

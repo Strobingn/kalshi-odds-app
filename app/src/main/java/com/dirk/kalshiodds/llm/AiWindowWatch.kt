@@ -343,16 +343,15 @@ class AiWindowWatcher(
         if (!cfg.followsWindow) { store.setNotice(""); return }
         // On-device freeze/bench runs every poll, before any chat-LLM wait.
         runCatching { autoBench() }
-        val epNow = runCatching { endpoint() }.getOrNull()
-        val provider = epNow?.provider.orEmpty()
-        val model = epNow?.model.orEmpty()
-        // Paid providers are never called automatically. A paused free provider still falls through inside freeFollow.
-        if (epNow == null || !LlmProviders.freeFamily(provider, model)) {
+        runCatching { localTune() }
+        val epNow = runCatching { endpoint() }.getOrNull() ?: return
+        val ep = if (epNow.provider != LlmProviders.BUILTIN && !epNow.usable) LlmProviders.builtinEndpoint() else epNow
+        if (!store.autoAllowed(ep.provider, ep.model)) {
             store.setNotice("")
             return
         }
-        if (!llmDueNow()) return
-        runCatching { freeFollow(epNow) }
+        if (ep.provider != LlmProviders.BUILTIN && !llmDueNow()) return
+        runCatching { freeFollow(ep) }
     }
 
     /** Every Kalshi odds/book tick and BTC price tick. Updates the card immediately. Wakes the chat LLM only when 60s spacing allows. */
@@ -370,7 +369,10 @@ class AiWindowWatcher(
         val cfg = store.config.value
         val ep = runCatching { endpoint() }.getOrNull()
         if (ep == null || !store.autoAllowed(ep.provider, ep.model) || !cfg.liveFeed || !cfg.followsWindow || pending == LiveTrigger.NONE) return
-        if (!LlmProviders.freeFamily(ep.provider, ep.model)) return
+        if (ep.provider == LlmProviders.BUILTIN) {
+            runCatching { onWake() }
+            return
+        }
         if (!store.monthlyRoom(ep.provider, now())) return
         val quota = LlmProviders.effectiveQuota(ep.provider, ep.model, store.dailyCap(ep.provider, ep.model)) ?: return
         if (!llmDueNow()) return

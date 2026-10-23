@@ -31,6 +31,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.dirk.kalshiodds.decision.LocalAnalyst
 import com.dirk.kalshiodds.decision.ModelFilter
 import com.dirk.kalshiodds.decision.QuantSession
 import com.dirk.kalshiodds.decision.ResearchCompanion
@@ -320,6 +321,62 @@ internal fun QuantHybridScreen(
             ) { Text("Retrain offline") }
             if (retrainNote.isNotBlank()) Text(retrainNote, color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
         }
+
+        StopPolicyCard()
+        LocalLlmCard { rev++ }
+    }
+}
+
+@Composable
+private fun StopPolicyCard() {
+    val c = DipTheme.colors
+    val win = ModelFilter.rawNetCents(0.50, 0.58)
+    val loss = ModelFilter.rawNetCents(0.50, 0.45)
+    val wr = ModelFilter.breakEvenWinRate(win, loss) * 100.0
+    val three = ModelFilter.rawNetCents(0.50, 0.53)
+    ArenaCard(Modifier.testTag("STOP_POLICY")) {
+        Text("Stop policy and fee break-even", color = c.textPrimary, fontWeight = FontWeight.SemiBold)
+        Text("Policy ${ModelFilter.POLICY_VERSION}", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+        Text("Training target: net cents per contract = 100 × (sale − cost − entry fee − exit fee) / contracts. NO flips the directional features.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+        Text("At a 50¢ entry the 49¢/50¢ book is a 1¢ spread.", color = c.textPrimary, style = MaterialTheme.typography.bodySmall)
+        Text("Strict 1% stop = ${fmt(0.50)}¢ · already inside that 1¢ spread", color = c.down, style = MaterialTheme.typography.bodySmall)
+        Text("Strict 4% stop = ${fmt(2.0)}¢ · 3¢ trail = ${fmt(3.0)}¢ · 5¢ stop = ${fmt(5.0)}¢", color = c.textPrimary, style = MaterialTheme.typography.bodySmall)
+        Text("50¢ taker, +8¢ target / −5¢ stop → win ${fmt(win)}¢ vs loss ${fmt(loss)}¢ → required win rate ${fmt(wr)}%", color = if (wr >= 50) c.spot else c.up, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("FEE_BREAKEVEN"))
+        Text("50¢ → 53¢ is ${fmt(three)}¢ net after unrounded taker fees.", color = c.down, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
+private fun LocalLlmCard(bump: () -> Unit) {
+    val c = DipTheme.colors
+    val eng = LocalAnalyst.engine()
+    ArenaCard(Modifier.testTag("LOCAL_LLM")) {
+        Text("Built-in LLM · LiteRT-LM", color = c.textPrimary, fontWeight = FontWeight.SemiBold)
+        Text(
+            if (LocalAnalyst.imported()) "Active ${LocalAnalyst.activeName()} · ${LocalAnalyst.sha256()}"
+            else "No .litertlm imported · built-in quant analyst",
+            color = c.textSecondary,
+            style = MaterialTheme.typography.bodySmall
+        )
+        LocalAnalyst.SHORTLIST.forEach { row ->
+            val speed = listOfNotNull(row.cpuTokPerSec?.let { "$it tok/s CPU" }, row.gpuTokPerSec?.let { "$it tok/s GPU" }).joinToString(" / ")
+            val on = row.name == LocalAnalyst.activeName()
+            Pill("${row.role} · ${row.name}${if (speed.isBlank()) "" else " · $speed"}", on) {
+                LocalAnalyst.setActiveName(row.name)
+                bump()
+            }
+        }
+        Text("Engine · LiteRT-LM 0.18 · maxNumTokens ${eng.maxNumTokens} · thinking off · tools off · one request", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+        Row(Modifier.horizontalScroll(rememberScrollState())) {
+            Pill("CPU", eng.backend == LocalAnalyst.Backend.CPU) { LocalAnalyst.setBackend(LocalAnalyst.Backend.CPU); bump() }
+            Pill("GPU", eng.backend == LocalAnalyst.Backend.GPU) { LocalAnalyst.setBackend(LocalAnalyst.Backend.GPU); bump() }
+            Pill("Output 256", eng.maxOutputTokens == 256) { LocalAnalyst.setMaxOutputTokens(256); bump() }
+            Pill("Output 384", eng.maxOutputTokens == 384) { LocalAnalyst.setMaxOutputTokens(384); bump() }
+        }
+        OutlinedButton(onClick = { LocalAnalyst.setPauseDuringActiveEntry(!eng.pauseDuringActiveEntry); bump() }, modifier = Modifier.fillMaxWidth()) {
+            Text(if (eng.pauseDuringActiveEntry) "Pause local model during an entry" else "Local model may run during an entry")
+        }
+        Text("SHA-256 verifies an imported .litertlm. Until that file is on the phone, Groq and the quant analyst answer.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
     }
 }
 

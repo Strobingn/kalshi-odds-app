@@ -15,18 +15,18 @@ data class AiWatchConfig(
     /** 1.0.14: AI posts and re-evaluates from the live feed. Default on. The card still shows Kalshi ticks when this is off. */
     val liveFeed: Boolean = true,
     /**
-     * 1.0.17: external LLM calls on its own. Default off.
-     * A 1.0.16 file has no key, and that upgrade stays off even when follow was on.
+     * 1.0.36: the 15-minute check runs on its own. Default on.
+     * Cloud providers wait 120 seconds. The built-in model is not paced.
      */
-    val autoCalls: Boolean = false
+    val autoCalls: Boolean = true
 ) {
     /** Blank / 0 / negative means the budget is off. A positive amount pauses the watcher once today's estimate reaches it. */
     fun budgetOrNull(): Double? = budgetUsd?.takeIf { it.isFinite() && it > 0.0 }
 
     companion object {
-        const val DEFAULT_INTERVAL_MS = 60_000L
-        /** Chat LLM follow interval cannot be shorter than the 60s automatic cap. */
-        const val MIN_INTERVAL_MS = 60_000L
+        const val DEFAULT_INTERVAL_MS = 120_000L
+        /** Cloud follow interval cannot be shorter than the 120s automatic cap. */
+        const val MIN_INTERVAL_MS = 120_000L
         const val MAX_INTERVAL_MS = 600_000L
     }
 }
@@ -39,7 +39,8 @@ class AiWatchStore(private val file: File? = null) {
     private val lock = Any()
     private var follows = true
     private var liveFeed = true
-    private var autoCalls = false
+    private var autoCalls = true
+    private var migratedPace1036 = false
     private var intervalMs = AiWatchConfig.DEFAULT_INTERVAL_MS
     private var budgetUsd: Double? = null
     /** Explicit free-tier choice per provider. Missing means the free-family default (on). */
@@ -88,12 +89,17 @@ class AiWatchStore(private val file: File? = null) {
 
     fun setLiveFeed(on: Boolean) = synchronized(lock) { liveFeed = on; publishConfig(); persist() }
 
-    /** True when this provider may place an automatic LLM call. Manual chat does not ask. A paid provider never may. */
+    /**
+     * True when this provider may place an automatic call.
+     * Built-in is unlimited. Free and paid cloud providers are allowed when auto calls are on
+     * and the provider is not in a billing pause. An explicit free-tier off stays manual.
+     */
     fun autoAllowed(provider: String, model: String, nowMs: Long = System.currentTimeMillis()): Boolean = synchronized(lock) {
         if (!autoCalls || provider.isBlank()) return@synchronized false
-        if (!LlmProviders.freeFamily(provider, model)) return@synchronized false
         if (billingPaused(provider, nowMs)) return@synchronized false
-        freeTier[provider] ?: true
+        if (provider == LlmProviders.BUILTIN) return@synchronized true
+        if (freeTier[provider] == false) return@synchronized false
+        true
     }
 
     /** The saved free-tier switch. A temporary billing pause does not turn this off. */
@@ -335,7 +341,11 @@ class AiWatchStore(private val file: File? = null) {
         synchronized(lock) {
             follows = js.optBoolean("followsWindow", true)
             liveFeed = js.optBoolean("liveFeed", true)
-            autoCalls = if (js.has("autoCalls")) js.optBoolean("autoCalls") else false
+            val paceUpgraded = js.optBoolean("migratedPace1036", false)
+            autoCalls = if (paceUpgraded) {
+                if (js.has("autoCalls")) js.optBoolean("autoCalls") else true
+            } else true
+            migratedPace1036 = true
             freeTier.clear()
             js.optJSONObject("freeTier")?.let { obj ->
                 val keys = obj.keys()
@@ -375,7 +385,8 @@ class AiWatchStore(private val file: File? = null) {
                 }
             }
             lastSwitch = js.optString("lastSwitch").takeIf { it.isNotBlank() }
-            intervalMs = js.optLong("intervalMs", AiWatchConfig.DEFAULT_INTERVAL_MS)
+            intervalMs = if (!paceUpgraded) AiWatchConfig.DEFAULT_INTERVAL_MS
+            else js.optLong("intervalMs", AiWatchConfig.DEFAULT_INTERVAL_MS)
                 .coerceIn(AiWatchConfig.MIN_INTERVAL_MS, AiWatchConfig.MAX_INTERVAL_MS)
             budgetUsd = if (js.has("budgetUsd") && !js.isNull("budgetUsd")) js.optDouble("budgetUsd").takeIf { it.isFinite() && it > 0.0 } else null
             priceTable = if (!js.has("prices") || js.isNull("prices")) null else readPrices(js.optJSONArray("prices"))
@@ -429,7 +440,7 @@ class AiWatchStore(private val file: File? = null) {
                 }
             }
             publishConfig(); publishSummary()
-            if (repairedHold) persist()
+            if (repairedHold || !paceUpgraded) persist()
             val now = System.currentTimeMillis()
             (monthlyCaps.keys + usage.map { it.provider }).forEach { publishMonthlyLocked(it, now) }
         }
@@ -441,6 +452,7 @@ class AiWatchStore(private val file: File? = null) {
             .put("followsWindow", follows)
             .put("liveFeed", liveFeed)
             .put("autoCalls", autoCalls)
+            .put("migratedPace1036", migratedPace1036)
             .put("intervalMs", intervalMs)
             .put("budgetUsd", budgetUsd ?: JSONObject.NULL)
             .put("freeTier", JSONObject().apply { freeTier.forEach { (k, v) -> put(k, v) } })

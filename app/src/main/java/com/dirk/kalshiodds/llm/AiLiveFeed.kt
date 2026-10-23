@@ -53,7 +53,7 @@ enum class LiveTrigger { WINDOW, BIG_MOVE, FILL, LIVE_TICK, NONE }
  */
 object AiLiveFeed {
     /** Automatic chat LLM calls, live posts, and odds/BTC re-checks: at most once every 60 seconds, all providers. */
-    const val MIN_SPACING_MS = 60_000L
+    const val MIN_SPACING_MS = 120_000L
     const val MATERIAL_CENTS = 2.0
     const val BIG_MOVE_CENTS = 10.0
     const val MAX_POINTS = 180

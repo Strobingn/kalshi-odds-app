@@ -31,20 +31,20 @@ class Release1035Test {
     }
 
     @Test fun automaticCallsWaitSixtySecondsEvenWhenATickIsDue() {
-        assertEquals(60_000L, AiLiveFeed.MIN_SPACING_MS)
-        assertEquals(60_000L, LlmProviders.AUTO_PACE_MS)
-        assertEquals(60_000L, LlmProviders.MISTRAL_PACE_MS)
-        assertFalse(AiLiveFeed.llmDue(1_000L, 60_999L, LiveTrigger.WINDOW, true))
-        assertTrue(AiLiveFeed.llmDue(1_000L, 61_000L, LiveTrigger.NONE, true))
+        assertEquals(120_000L, AiLiveFeed.MIN_SPACING_MS)
+        assertEquals(120_000L, LlmProviders.AUTO_PACE_MS)
+        assertEquals(120_000L, LlmProviders.MISTRAL_PACE_MS)
+        assertFalse(AiLiveFeed.llmDue(1_000L, 120_999L, LiveTrigger.WINDOW, true))
+        assertTrue(AiLiveFeed.llmDue(1_000L, 121_000L, LiveTrigger.NONE, true))
         assertTrue(AiLiveFeed.llmDue(Long.MIN_VALUE, 5_000L, LiveTrigger.NONE, true))
         val quota = LlmProviders.effectiveQuota(LlmProviders.GROQ, LlmProviders.DEFAULT_GROQ_MODEL, 1_000)!!
-        assertEquals(60_000L, quota.perModelPaceMs)
+        assertEquals(120_000L, quota.perModelPaceMs)
         val pacer = FreeCallPacer()
         val model = pacer.allow(LlmProviders.GROQ, listOf(LlmProviders.DEFAULT_GROQ_MODEL), quota, 0L, 100)
         assertEquals(LlmProviders.DEFAULT_GROQ_MODEL, model)
         pacer.record(LlmProviders.GROQ, model!!, 0L, 100)
-        assertNull(pacer.allow(LlmProviders.GROQ, listOf(model), quota, 59_000L, 100))
-        assertNotNull(pacer.allow(LlmProviders.GROQ, listOf(model), quota, 60_000L, 100))
+        assertNull(pacer.allow(LlmProviders.GROQ, listOf(model), quota, 119_000L, 100))
+        assertNotNull(pacer.allow(LlmProviders.GROQ, listOf(model), quota, 120_000L, 100))
     }
 
     @Test fun persistedMistralCapSkipsHttpAndHandsOffToGroq() {

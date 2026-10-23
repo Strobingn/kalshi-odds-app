@@ -22,7 +22,8 @@ class AiAutoCallsTest {
 
     @Test fun autoOffMakesZeroCallsOnTicksRollsAndFillsAndOneManualMessage() {
         val store = AiWatchStore()
-        assertFalse(store.config.value.autoCalls)
+        assertTrue(store.config.value.autoCalls)
+        store.setAutoCalls(false)
         var calls = 0
         val reply = LlmClient.Reply("{}", LlmProviders.GEMINI_DEFAULT, LlmProviders.GEMINI_DEFAULT, 8, 4)
         var now = 1_700_000_000_000L
@@ -99,11 +100,11 @@ class AiAutoCallsTest {
         assertFalse(AiAutoCalls.defaultAuto(LlmProviders.OPENROUTER, "openai/gpt-4o-mini"))
         assertFalse(AiAutoCalls.defaultAuto(LlmProviders.CUSTOM, "local"))
         assertFalse(AiAutoCalls.upgraded(null))
-        assertFalse(AiWatchStore().config.value.autoCalls)
+        assertTrue(AiWatchStore().config.value.autoCalls)
         val file = tmp.newFile("old.json")
         file.writeText("""{"followsWindow":true,"liveFeed":true,"intervalMs":60000}""")
         val upgraded = AiWatchStore(file)
-        assertFalse(upgraded.config.value.autoCalls)
+        assertTrue(upgraded.config.value.autoCalls)
         assertTrue(upgraded.config.value.followsWindow)
         assertTrue(upgraded.freeTierOn(LlmProviders.GEMINI, LlmProviders.GEMINI_DEFAULT))
         assertFalse(upgraded.freeTierOn(LlmProviders.OPENAI, "gpt-4.1"))
@@ -116,11 +117,11 @@ class AiAutoCallsTest {
         val store = AiWatchStore()
         store.setAutoCalls(true)
         assertTrue(store.autoAllowed(LlmProviders.GEMINI, LlmProviders.GEMINI_DEFAULT))
-        assertFalse(store.autoAllowed(LlmProviders.OPENAI, "gpt-4.1"))
+        assertTrue(store.autoAllowed(LlmProviders.OPENAI, "gpt-4.1"))
         store.setFreeTier(LlmProviders.GEMINI, false)
         assertFalse(store.autoAllowed(LlmProviders.GEMINI, LlmProviders.GEMINI_DEFAULT))
         assertTrue(store.blockNotice(LlmProviders.GEMINI, LlmProviders.GEMINI_DEFAULT).contains("manual-only"))
-        assertFalse(store.autoAllowed(LlmProviders.OPENAI, "gpt-4.1"))
+        assertTrue(store.autoAllowed(LlmProviders.OPENAI, "gpt-4.1"))
         store.markBilled(LlmProviders.GROQ, "enable billing on this project", atMs = 1_000L)
         assertTrue(store.freeTierOn(LlmProviders.GROQ, LlmProviders.GROQ_120))
         assertTrue(store.config.value.autoCalls)
@@ -136,18 +137,18 @@ class AiAutoCallsTest {
         val groq = LlmProviders.effectiveQuota(LlmProviders.GROQ, LlmProviders.GROQ_120, 1_000)!!
         val one = simulate(LlmProviders.GROQ, listOf(LlmProviders.GROQ_120), groq, tokens)
         assertWithin(LlmProviders.GROQ, one, groq, tokens)
-        assertTrue(one.size in 900..1_000)
-        assertTrue(one.zipWithNext { a, b -> b.first - a.first }.all { it >= 60_000L })
+        assertEquals(720, one.size)
+        assertTrue(one.zipWithNext { a, b -> b.first - a.first }.all { it >= 120_000L })
 
         val rotated = simulate(LlmProviders.GROQ, listOf(LlmProviders.GROQ_120, LlmProviders.GROQ_20), groq, tokens)
         assertWithin(LlmProviders.GROQ, rotated, groq, tokens)
         val byModel = rotated.groupBy { it.second }
         assertEquals(setOf(LlmProviders.GROQ_120, LlmProviders.GROQ_20), byModel.keys)
         byModel.values.forEach { rows ->
-            assertEquals(720, rows.size)
-            assertTrue(rows.zipWithNext { a, b -> b.first - a.first }.all { it >= 60_000L })
+            assertEquals(360, rows.size)
+            assertTrue(rows.zipWithNext { a, b -> b.first - a.first }.all { it >= 120_000L })
         }
-        assertTrue(rotated.zipWithNext { a, b -> b.first - a.first }.all { it >= 60_000L })
+        assertTrue(rotated.zipWithNext { a, b -> b.first - a.first }.all { it >= 120_000L })
 
         val gemini = LlmProviders.effectiveQuota(LlmProviders.GEMINI, LlmProviders.GEMINI_DEFAULT, 500)!!
         val geminiHits = simulate(LlmProviders.GEMINI, listOf(LlmProviders.GEMINI_DEFAULT), gemini, tokens)
