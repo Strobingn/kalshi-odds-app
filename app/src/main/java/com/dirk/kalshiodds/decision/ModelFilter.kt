@@ -272,8 +272,10 @@ object ModelFilter {
         val analytical = rawNetCents(ask, fair) / 100.0
         val tilt = (qScore.coerceIn(0.0, 1.0) - 0.5) * 0.08
         val blended = 0.5 * analytical + 0.5 * tilt
-        val clears = residualClears(fair, ask, spread, 1) || (analytical > 0.0 && qScore > 0.5)
-        return if (clears) maxOf(blended, analytical).coerceAtLeast(1e-4) else blended.coerceAtMost(0.0)
+        val clears = residualClears(fair, ask, spread, 1) ||
+            (analytical > -0.005 && fair >= ask + 0.015) ||
+            (fair >= ask + 0.02 && qScore >= 0.42)
+        return if (clears) maxOf(blended, analytical, 1e-4) else blended.coerceAtMost(0.0)
     }
 
     /** Net cents per contract. The training target: 100 × (proceeds − cost − entry fee − exit fee) / contracts. */
@@ -340,7 +342,7 @@ object ModelFilter {
         val eNet = if (learned) expectedNet(qScore) else coldNet(qScore, fair, ask, spread)
         val lgbm = QuantSession.predictNet(x)
         val score = if (twin.arm == Arm.LGBM) lgbm else qScore
-        val pin = x.size > 20 && x[20] >= 1.0
+        val pin = q.tauS <= 30.0 && x.size > 20 && x[20] >= 1.0
         val kelly = if (sizeMode == SizeMode.KELLY) {
             val gain = if (winN > 0) winSum / winN else 0.0
             val loss = if (lossN > 0) lossSum / lossN else 0.0
@@ -353,8 +355,13 @@ object ModelFilter {
         }
         val warm = trainedN < MIN_TRAIN
         val floor = ScalpFloors.cents(twin.parentId) / 100.0
-        val priceOk = ask + 1e-9 >= floor && ScalpRule.buyPriceOk(ask)
-        val gate = if (twin.arm == Arm.LGBM) lgbm > 0.0 else eNet > 0.0
+        val lesson = FairGapTune.lessonAllowed(q, side, ask, fair, twin.clip, variantId = twin.id)
+        val priceOk = ask + 1e-9 >= floor && (ScalpRule.buyPriceOk(ask) || lesson)
+        val gate = if (twin.arm == Arm.LGBM) {
+            lgbm > 0.0 || (lgbm > -0.005 && fair >= ask + 0.015)
+        } else {
+            eNet > 0.0 || (learned && (qScore >= threshold || eNet >= 0.01) && fair >= ask + 0.015)
+        }
         val enter = gate && priceOk && !pin
         val modelVersion = if (twin.arm == Arm.LGBM) "lgbm-${TreeEnsemble.TRAIN_TREES}x${TreeEnsemble.TRAIN_DEPTH}" else "logistic-l2"
         val reason = when {

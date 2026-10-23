@@ -85,7 +85,7 @@ data class ScalpControls(
         var count = 0; var value = 0.0; var fees = 0.0
         val lots = ArrayList<Pair<Double, Int>>()
         for ((price, size) in levels.sortedBy { it.first }) {
-            if (!ScalpRule.buyPriceOk(price) || price > limit || !size.isFinite() || size < 1) continue
+            if (!price.isFinite() || price <= 0.0 || price > 0.99 || price > limit + 1e-9 || !size.isFinite() || size < 1) continue
             var lo = 0
             var hi = minOf(wanted - count, kotlin.math.floor(size).coerceAtMost(Int.MAX_VALUE.toDouble()).toInt()).coerceAtLeast(0)
             while (lo < hi) {

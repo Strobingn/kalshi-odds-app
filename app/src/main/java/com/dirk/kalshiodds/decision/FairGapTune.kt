@@ -157,6 +157,8 @@ object FairGapTune {
      * High-conviction 56¢–85¢ paper entries. Does not change the 55¢ constant.
      * False when the price is already inside that ceiling; callers check [ScalpRule.buyPriceOk] first.
      */
+    const val HARD_CAP = 0.85
+
     fun lessonAllowed(
         q: ScalpRule.Quote,
         side: String,
@@ -168,41 +170,53 @@ object FairGapTune {
         variantId: String? = null,
         open: List<ScalpTrade> = emptyList()
     ): Boolean {
+        if (ask <= ScalpRule.ENTRY_HI || ask > HARD_CAP + 1e-9) return false
         val spot = q.spot ?: return false
         val strike = q.strike ?: return false
         if (spot <= 0.0 || strike <= 0.0 || !ask.isFinite() || !fair.isFinite()) return false
         if (stackingBlocked(variantId, q, side, ask, open)) return false
+        val scale = (strike / 100_000.0).coerceIn(0.0005, 1.0)
         val buf = signedBuffer(side, spot, strike)
         val fee = ScalpRule.feePerContract(clip.coerceAtLeast(1), ask)
         val net = fair - ask - fee
-        val aligned = momentumAligned(side, moveBp, vwapZ, buf)
-        if (q.tauS in 240.0..870.0 && ask in 0.56..0.82 && buf >= 35.0 && aligned && net >= 0.04) return true
-        if (q.tauS > 90.0 && ask in 0.82..0.85 && buf >= 180.0 && fair >= 0.96 && fair - ask >= 0.11) return true
-        if (q.tauS in 20.0..180.0 && ask <= 0.85 && buf >= 13.0 && fair - ask >= 0.12) return true
+        val up = side.equals("YES", true)
+        val aligned = (moveBp == null || (if (up) moveBp >= -8.0 else moveBp <= 8.0)) &&
+            (vwapZ == null || (if (up) vwapZ >= -0.5 else vwapZ <= 0.5))
+        if (q.tauS in 15.0..895.0 && ask in 0.56..HARD_CAP && buf > 0.0 && aligned &&
+            (net >= 0.015 || (fair >= ask && buf >= 8.0 * scale))
+        ) return true
+        if (q.tauS in 240.0..870.0 && ask in 0.56..0.82 && buf >= 35.0 * scale && net >= 0.04) return true
+        if (q.tauS > 90.0 && ask in 0.82..0.85 && buf >= 180.0 * scale && fair >= 0.96 && fair - ask >= 0.11) return true
+        if (q.tauS in 20.0..180.0 && ask <= 0.85 && buf >= 13.0 * scale && fair - ask >= 0.12) return true
         return false
     }
 
-    /** Spot within $15 of the strike, 4–10 minutes left, ask still at or under 55¢. */
+    /** Active 15-minute window (60s–885s left), ask within the normal or high-conviction ceiling. */
     fun nearStrikeChop(q: ScalpRule.Quote, ask: Double): Boolean {
         val spot = q.spot ?: return false
         val strike = q.strike ?: return false
-        return kotlin.math.abs(spot - strike) <= 15.0 && q.tauS in 240.0..600.0 && ask <= ScalpRule.ENTRY_HI + 1e-9
+        if (spot <= 0.0 || strike <= 0.0) return false
+        return q.tauS in 60.0..885.0 && ask <= HARD_CAP + 1e-9
     }
 
     fun chopFamilies(code: String?): Boolean =
         code == KeptScalpers.FAIR_ID || code == KeptScalpers.V2_FAIR_ID || code == KeptScalpers.V2_FAIR_BASE ||
-            code == "dos-mm" || code == "mrla-cs" || code == "fair" || code == "v2-fair"
+            code == "dos-mm" || code == "mrla-cs" || code == "fair" || code == "v2-fair" ||
+            (code != null && ScalpVariants.of(code)?.let { it.kind == ScalpVariants.Kind.FAIR || it.kind == ScalpVariants.Kind.V2_FAIR } == true)
 
-    /** Rule E: 4¢ net of the taker fee is enough for fair-gap, DOS-MM, and MRLA-CS in a tight chop. */
+    /** Rule E: 1.5¢ net of the taker fee is enough for fair-gap, its variants, DOS-MM, and MRLA-CS across the active window. */
     fun chopDiscount(code: String?, q: ScalpRule.Quote, ask: Double, fair: Double, clip: Int = ScalpRule.CONTRACTS): Boolean {
         if (!chopFamilies(code) || !nearStrikeChop(q, ask)) return false
-        return fair - ask - ScalpRule.feePerContract(clip.coerceAtLeast(1), ask) >= 0.04
+        return fair - ask - ScalpRule.feePerContract(clip.coerceAtLeast(1), ask) >= 0.015
     }
 
-    /** Rule F: do not buy a dip when spot is already $30 against that side and fair is below the ask. */
+    /** Rule F: block true falling knives while letting normal UP and DOWN dips near the strike enter freely. */
     fun fallingKnife(side: String, spot: Double?, strike: Double?, fair: Double?, ask: Double): Boolean {
         if (spot == null || strike == null || fair == null || spot <= 0.0 || strike <= 0.0) return false
-        return signedBuffer(side, spot, strike) <= -30.0 && fair < ask - 0.02
+        val buf = signedBuffer(side, spot, strike)
+        val scale = (strike / 100_000.0).coerceIn(0.0005, 1.0)
+        if (buf <= -20.0 * scale && fair <= 0.25 && ask <= 0.35 && fair < ask - 0.02) return true
+        return fair + 0.18 < ask && buf <= -25.0 * scale
     }
 
     data class Band(val lo: Double, val hi: Double)

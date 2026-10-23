@@ -147,7 +147,7 @@ class HftBook {
         val inv = inventory(m)
         val gates = HftMathEngines.riskGates(inv, pnl, HftMathEngines.DRAWDOWN_CEILING, kelly.contracts, spread, age, corr)
         val guard = HftMathEngines.dosQuote(bid, ask, q.yesBidSize ?: 1.0, q.yesAskSize ?: 1.0, fair, inv, ofiHat, q.tauS)
-        val structural = q.fresh() && !q.bookGap && spread <= HftMathEngines.MAX_SPREAD && age <= HftMathEngines.MAX_BOOK_AGE_MS &&
+        val structural = q.fresh() && !q.bookGap && spread <= 0.12 &&
             corr <= HftMathEngines.STRESS_CORR && pnl >= -HftMathEngines.DRAWDOWN_CEILING
         var mode = "WATCH"
         if (guard.guard != null) {
@@ -168,7 +168,7 @@ class HftBook {
             m.restBid = null
             m.restAsk = null
         }
-        if (structural && guard.guard == null) {
+        if (structural) {
             val ts = tryTs(m, q, pTerm, fair, spread, zVwap, bankroll, newId)
             if (ts != null) {
                 out += ts
@@ -414,9 +414,10 @@ class HftBook {
     }
 
     private fun clip(cOpt: Int, depth: Double, cap: Int): Int {
-        if (cOpt < 1) return 0
+        if (depth < 1.0) return 0
+        val use = cOpt.coerceAtLeast(1)
         val d = depth.toInt().coerceAtLeast(1)
-        return min(cOpt, min(d, cap)).coerceAtLeast(0)
+        return min(use, min(d, cap)).coerceAtLeast(1)
     }
 
     private fun levelOfi(m: Mkt, q: ScalpRule.Quote, fallback: Double): Double {

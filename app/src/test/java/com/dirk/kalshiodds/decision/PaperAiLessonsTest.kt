@@ -115,4 +115,41 @@ class PaperAiLessonsTest {
         assertTrue(filled.first().entryPrice!! in 0.69..0.78)
         assertNull(filled.first().note.let { if (it.contains("55¢")) it else null })
     }
+
+    @Test fun windowOpenMinUnlatchedTriggersAndWalkBuyAboveFiftyFive() {
+        for (code in listOf("sf04", "sf41", "sf42")) {
+            val openMin = ShockFav.entryOpenMin(ShockFav.v(code), ScalpV2.sfOpenMin(code))
+            assertTrue("$code $openMin", openMin >= 14.5)
+        }
+        assertTrue(ScalpV2.entryOpenMin(ScalpV2.spec("v2-sf41")) >= 14.5)
+        assertEquals(ScalpV2.sfOpenMin("sf51"), ShockFav.entryOpenMin(ShockFav.v("sf51"), ScalpV2.sfOpenMin("sf51")), 0.0)
+
+        val (walkN, walkUsd, walkFee) = ScalpControls().walkBuy(listOf(0.68 to 4.0, 0.72 to 6.0), 8, 0.75)
+        assertEquals(8, walkN)
+        assertEquals(4 * 0.68 + 4 * 0.72, walkUsd, 1e-9)
+        assertTrue(walkFee > 0.0)
+
+        // Closing a trade unlatches triggerOn so the same scalper can re-enter on the next tick.
+        val book = ScalpBook(bankrollUsd = { 50_000.0 })
+        val close = ScalpTicker.closeMs(ticker)!!
+        val t0 = close - 500_000L
+        val enterQuote = ScalpRule.Quote(
+            ticker, t0, close, t0,
+            yesBid = 0.34, yesBidSize = 100.0, yesAsk = 0.35, yesAskSize = 100.0,
+            spot = 101_000.0, strike = 100_000.0, sigmaPerSec = 3e-5
+        )
+        book.onQuote(enterQuote, true)
+        book.onQuote(enterQuote.copy(nowMs = t0 + 3_000L, bookAtMs = t0 + 3_000L), true)
+        val firstOpen = book.snapshot().first { it.variantId == KeptScalpers.FAIR_ID && it.state == ScalpState.OPEN }
+        assertEquals("YES", firstOpen.side)
+        // Rally hits profit target while spot stays bullish so the fair-gap signal never went quiet.
+        val exitSignalQuote = enterQuote.copy(nowMs = t0 + 6_000L, bookAtMs = t0 + 6_000L, yesBid = 0.48, yesAsk = 0.49, spot = 102_000.0)
+        book.onQuote(exitSignalQuote, true)
+        val exitFillAndReenter = enterQuote.copy(nowMs = t0 + 9_000L, bookAtMs = t0 + 9_000L, yesBid = 0.34, yesAsk = 0.35, spot = 101_000.0)
+        book.onQuote(exitFillAndReenter, true)
+        val nextTick = enterQuote.copy(nowMs = t0 + 12_000L, bookAtMs = t0 + 12_000L, yesBid = 0.34, yesAsk = 0.35, spot = 101_000.0)
+        book.onQuote(nextTick, true)
+        val allFair = book.snapshot().filter { it.variantId == KeptScalpers.FAIR_ID && it.state != ScalpState.NO_FILL }
+        assertTrue(allFair.toString(), allFair.size >= 2)
+    }
 }
