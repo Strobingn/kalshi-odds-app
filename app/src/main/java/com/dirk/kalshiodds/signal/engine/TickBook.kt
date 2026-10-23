@@ -41,7 +41,7 @@ class TickBook(private val maxPoints: Int = 80) {
     private val sigmaBySeries = HashMap<String, Double>()
     private val lastFairByTicker = HashMap<String, Double>()
     private val maxBidPoints = 240
-    private val maxSpotPoints = 180
+    private val maxSpotPoints = 780
 
     data class BidSample(
         val tMs: Long,
@@ -245,6 +245,25 @@ class TickBook(private val maxPoints: Int = 80) {
         }
         q.addLast(SpotSample(nowMs, px))
         while (q.size > maxSpotPoints) q.removeFirst()
+    }
+
+    /**
+     * Live spot return over the last [windowMs] from the in-memory
+     * 1 Hz CF / Coinbase spot ring. Returns null until the ring actually
+     * covers the requested [windowMs] horizon.
+     */
+    @Synchronized
+    fun spotReturn(ticker: String, nowMs: Long, windowMs: Long = 60_000L): Double? {
+        if (windowMs <= 0L) return null
+        val q = spotsByTicker[ticker] ?: return null
+        if (q.size < 2) return null
+        val cur = q.last()
+        if (nowMs - cur.tMs > 15_000L || cur.spotUsd <= 0.0) return null
+        val target = cur.tMs - windowMs
+        val ref = q.lastOrNull { it.tMs <= target } ?: return null
+        if (ref.spotUsd <= 0.0) return null
+        val ret = (cur.spotUsd - ref.spotUsd) / ref.spotUsd
+        return ret.takeIf { it.isFinite() }
     }
 
     @Synchronized

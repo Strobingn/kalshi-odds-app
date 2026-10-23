@@ -29,6 +29,7 @@ class CoinEvalConflator(
     private class Lane {
         val dirty = LinkedHashMap<String, Long>()
         var job: Job? = null
+        var lastEvalDoneNanos: Long = Long.MIN_VALUE
     }
 
     private val lock = Any()
@@ -69,7 +70,16 @@ class CoinEvalConflator(
         }
         try {
             while (true) {
-                delay(minGapMs)
+                val waitMs = synchronized(lock) {
+                    val last = lane.lastEvalDoneNanos
+                    if (last == Long.MIN_VALUE) {
+                        minGapMs
+                    } else {
+                        val elapsedMs = (nowNanos() - last) / 1_000_000L
+                        (minGapMs - elapsedMs).coerceIn(0L, minGapMs)
+                    }
+                }
+                if (waitMs > 0L) delay(waitMs)
                 val batch = synchronized(lock) {
                     if (lane.dirty.isEmpty()) { lane.job = null; null }
                     else LinkedHashMap(lane.dirty).also { lane.dirty.clear() }
@@ -81,9 +91,18 @@ class CoinEvalConflator(
                 } catch (t: Throwable) {
                     errors++
                 }
-                val lat = (nowNanos() - batch.values.min()) / 1_000_000.0
+                val doneNanos = nowNanos()
+                synchronized(lock) { lane.lastEvalDoneNanos = doneNanos }
+                val lat = (doneNanos - batch.values.min()) / 1_000_000.0
                 evals++
                 avgLatencyMs = if (evals == 1L) lat else avgLatencyMs * 0.9 + lat * 0.1
+                val more = synchronized(lock) {
+                    if (lane.dirty.isEmpty()) {
+                        lane.job = null
+                        false
+                    } else true
+                }
+                if (!more) return
             }
         } finally {
             val me = kotlin.coroutines.coroutineContext[Job]
@@ -98,7 +117,7 @@ class CoinEvalConflator(
     fun activeJobs(): Int = synchronized(lock) { lanes.values.count { it.job?.isActive == true } }
 
     companion object {
-        const val MIN_GAP_MS = 150L
+        const val MIN_GAP_MS = 60L
         /** BTC/ETH/SOL have a handful of live markets each; cap anyway so no burst can grow memory. */
         const val MAX_DIRTY_PER_COIN = 64
     }
