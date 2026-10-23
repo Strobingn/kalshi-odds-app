@@ -81,14 +81,45 @@ class TreeEnsemble private constructor(
         private const val GT: Byte = 3
         private const val EQ: Byte = 4
 
-        /** One shallow stump: a positive residual (feature 16) pays, a non-positive residual does not. */
+        /**
+         * Cold-start payoff forest. A fee-adjusted edge (feature 16), Student-t fair (19),
+         * and time left (0) can sum to +0.02…+0.04. Pin risk (20) cancels that. No edge stays negative.
+         */
         fun priorPayoff(features: Int = ModelFilter.FEATURES): TreeEnsemble {
+            if (features <= 20) {
+                val specs = listOf(
+                    Spec(0, 0, 0, 0.0, "BRANCH_LEQ", 1, 2, 0.0),
+                    Spec(0, 1, 0, 0.0, "LEAF", 0, 0, -0.02),
+                    Spec(0, 2, 0, 0.0, "LEAF", 0, 0, 0.02)
+                )
+                return build(intArrayOf(1, features), specs, logistic = false, base = 0.0)
+            }
             val specs = listOf(
                 Spec(0, 0, 16, 0.0, "BRANCH_LEQ", 1, 2, 0.0),
                 Spec(0, 1, 0, 0.0, "LEAF", 0, 0, -0.02),
-                Spec(0, 2, 0, 0.0, "LEAF", 0, 0, 0.02)
+                Spec(0, 2, 0, 0.0, "LEAF", 0, 0, 0.02),
+                Spec(1, 0, 19, 0.55, "BRANCH_LEQ", 1, 2, 0.0),
+                Spec(1, 1, 0, 0.0, "LEAF", 0, 0, 0.0),
+                Spec(1, 2, 0, 0.0, "LEAF", 0, 0, 0.01),
+                Spec(2, 0, 0, 0.05, "BRANCH_LEQ", 1, 2, 0.0),
+                Spec(2, 1, 0, 0.0, "LEAF", 0, 0, -0.01),
+                Spec(2, 2, 0, 0.0, "LEAF", 0, 0, 0.01),
+                Spec(3, 0, 20, 0.5, "BRANCH_LEQ", 1, 2, 0.0),
+                Spec(3, 1, 0, 0.0, "LEAF", 0, 0, 0.0),
+                Spec(3, 2, 0, 0.0, "LEAF", 0, 0, -0.08)
             )
             return build(intArrayOf(1, features), specs, logistic = false, base = 0.0)
+        }
+
+        /** Same residual stump, scored as a probability so a cold classifier is not stuck at 0.5. */
+        fun priorClassifier(features: Int = ModelFilter.FEATURES): TreeEnsemble {
+            val split = if (features > 16) 16 else 0
+            val specs = listOf(
+                Spec(0, 0, split, 0.0, "BRANCH_LEQ", 1, 2, 0.0),
+                Spec(0, 1, 0, 0.0, "LEAF", 0, 0, -0.8),
+                Spec(0, 2, 0, 0.0, "LEAF", 0, 0, 0.8)
+            )
+            return build(intArrayOf(1, features), specs, logistic = true, base = 0.0)
         }
 
         val EMPTY = TreeEnsemble(

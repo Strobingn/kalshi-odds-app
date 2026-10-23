@@ -74,6 +74,15 @@ object KeptScalpers {
     }
 
     val IDS: Set<String> = ALL.map { it.id }.toSet()
+
+    /** Paper HFT engines. Not part of the twelve kept winners. */
+    val HFT: List<Spec> = listOf(
+        Spec("dos-mm", "DOS-MM", "HJB bounded binary market maker. Paper only.", Kind.FAIR, "dos-mm"),
+        Spec("ts-arb", "TS-Arb", "Settlement average and one-over-sqrt-three variance. Paper only.", Kind.FAIR, "ts-arb"),
+        Spec("mrla-cs", "MRLA-CS", "Five-level OFI and transient impact. Paper only.", Kind.FAIR, "mrla-cs"),
+        Spec("iv-smile", "IV smile", "Options smile versus the Kalshi book. Paper only.", Kind.FAIR, "iv-smile")
+    )
+    val HFT_IDS: Set<String> = HFT.map { it.id }.toSet()
     private val BY_ID: Map<String, Spec> = ALL.associateBy { it.id }
 
     /** ShockFav family codes allowed to open a new paper trade. */

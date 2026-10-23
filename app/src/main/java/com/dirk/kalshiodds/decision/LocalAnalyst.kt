@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.decision
 
+import org.json.JSONObject
 import java.io.File
 import java.security.MessageDigest
 import java.util.Locale
@@ -47,6 +48,7 @@ object LocalAnalyst {
     private var modelFile: File? = null
     private var sha256: String? = null
     private var activeName: String = SHORTLIST.first().name
+    private var prefsFile: File? = null
 
     fun engine(): Engine = synchronized(lock) { engine }
     fun modelPath(): String? = synchronized(lock) { modelFile?.absolutePath }
@@ -54,15 +56,53 @@ object LocalAnalyst {
     fun activeName(): String = synchronized(lock) { activeName }
     fun imported(): Boolean = synchronized(lock) { modelFile?.isFile == true && !sha256.isNullOrBlank() }
 
-    fun setBackend(backend: Backend) = synchronized(lock) { engine = engine.copy(backend = backend) }
+    /** Remember the built-in model pick across screen switches and process restarts. */
+    fun bind(filesDir: File) = synchronized(lock) {
+        prefsFile = File(filesDir, "local-analyst.json")
+        loadLocked()
+    }
+
+    fun setBackend(backend: Backend) = synchronized(lock) {
+        engine = engine.copy(backend = backend)
+        saveLocked()
+    }
     fun setMaxOutputTokens(tokens: Int) = synchronized(lock) {
         engine = engine.copy(maxOutputTokens = tokens.coerceIn(256, 384))
+        saveLocked()
     }
     fun setPauseDuringActiveEntry(on: Boolean) = synchronized(lock) {
         engine = engine.copy(pauseDuringActiveEntry = on)
+        saveLocked()
     }
     fun setActiveName(name: String) = synchronized(lock) {
         if (SHORTLIST.any { it.name == name }) activeName = name
+        saveLocked()
+    }
+
+    private fun saveLocked() {
+        val file = prefsFile ?: return
+        val o = JSONObject()
+            .put("activeName", activeName)
+            .put("backend", engine.backend.name)
+            .put("maxOutputTokens", engine.maxOutputTokens)
+            .put("pauseDuringActiveEntry", engine.pauseDuringActiveEntry)
+        runCatching { file.writeText(o.toString()) }
+    }
+
+    private fun loadLocked() {
+        val file = prefsFile ?: return
+        if (!file.isFile) return
+        val o = runCatching { JSONObject(file.readText()) }.getOrNull() ?: return
+        val name = o.optString("activeName")
+        if (SHORTLIST.any { it.name == name }) activeName = name
+        val backend = runCatching { Backend.valueOf(o.optString("backend")) }.getOrNull()
+        if (backend != null) engine = engine.copy(backend = backend)
+        if (o.has("maxOutputTokens")) {
+            engine = engine.copy(maxOutputTokens = o.optInt("maxOutputTokens", engine.maxOutputTokens).coerceIn(256, 384))
+        }
+        if (o.has("pauseDuringActiveEntry")) {
+            engine = engine.copy(pauseDuringActiveEntry = o.optBoolean("pauseDuringActiveEntry", engine.pauseDuringActiveEntry))
+        }
     }
 
     /** Hash a `.litertlm` file and keep it as the active local model. Missing files stay on the quant analyst. */
@@ -83,6 +123,7 @@ object LocalAnalyst {
         modelFile = null
         sha256 = null
         activeName = SHORTLIST.first().name
+        prefsFile = null
     }
 }
 

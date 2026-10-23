@@ -230,18 +230,21 @@ object ScalpRule {
         val cands = sides.mapNotNull { side ->
             val ask = q.ask(side) ?: return@mapNotNull null
             val fair = q.fair(side) ?: return@mapNotNull null
-            if (ask < ENTRY_LO - 1e-9 || !buyPriceOk(if (p.maker) q.bid(side) else ask)) return@mapNotNull null
+            val px = if (p.maker) q.bid(side) else ask
+            val lesson = !p.maker && FairGapTune.lessonAllowed(q, side, ask, fair, CONTRACTS)
+            if (ask < ENTRY_LO - 1e-9 || px == null || (!buyPriceOk(px) && !lesson)) return@mapNotNull null
             Entry(side, ask, fair, fair - ask - feePerContract(CONTRACTS, ask))
         }
         val best = SidePick.onlyMaxBy(cands) { it.gapAfterFee }
             ?: return null to if (cands.isEmpty()) "no spot fair value" else "exact tie"
-        if (best.gapAfterFee + 1e-9 < p.minGap) {
+        val chop = p.strategy == ScalpStrategy.FAIR_GAP && FairGapTune.chopDiscount(p.id, q, best.ask, best.fair, CONTRACTS)
+        if (!chop && best.gapAfterFee + 1e-9 < p.minGap) {
             return null to String.format(Locale.US, "gap %.1f¢ under %.0f¢", best.gapAfterFee * 100, p.minGap * 100)
         }
         // 0.3.40: expected move (fair − ask) must beat spread + entry fee + exit fee.
         val move = best.fair - best.ask
         val cost = spread + feePerContract(CONTRACTS, best.ask) + feePerContract(CONTRACTS, best.fair.coerceIn(0.01, 0.99))
-        if (move <= cost + 1e-9) {
+        if (!chop && move <= cost + 1e-9) {
             return null to String.format(Locale.US, "expected move %.1f¢ ≤ spread + both fees %.1f¢", move * 100, cost * 100)
         }
         return best to "enter"
@@ -489,6 +492,7 @@ class ScalpBook(
         runCatching { ModelFilter.retrainFrom(store.loadScalps(), System.currentTimeMillis()) }
     }
     private val lock = Any()
+    private val hft = HftBook()
     private val gates = ScalpGateLog()
     /** Close time last seen on a quote. Wins over the ticker stamp when a test pins closeMs. */
     private val closeSeen = HashMap<String, Long>()
@@ -614,7 +618,7 @@ class ScalpBook(
         // 1.0.2: Dirk's manual sliders on original strategies (stop % below fill, take profit after fees, max hold).
         val overlay = settingsExits(mineAll, q); changed += overlay.values
         val mineCur = if (overlay.isEmpty()) mineAll else mineAll.map { overlay[it.id] ?: it }
-        mineCur.filter { isActive(it) && !ForecastScalp.isForecast(it) && !ScalpV2.isV2(it.variantId) && !Research.isResearch(it.variantId) && !ModelFilter.isTwin(it.variantId) }.forEach { t ->
+        mineCur.filter { isActive(it) && !ForecastScalp.isForecast(it) && !ScalpV2.isV2(it.variantId) && !Research.isResearch(it.variantId) && !ModelFilter.isTwin(it.variantId) && !HftMathEngines.isHft(it.variantId) }.forEach { t ->
             // 0.3.69 fix: sf rows have their own lane (entries + TP/stop/60 s exits). They used to also fall through here with
             // the generic primary params, whose profit-target / fair take-profit / turn-down exits fired first, so the sf
             // take-profit never decided (sf41≡sf42, sf43≡sf44). Here they now only get the adverse-selection marks.
@@ -643,7 +647,7 @@ class ScalpBook(
                 val free = listOf("YES", "NO")
                 val (sig, skip) = ScalpRule.strategySignal(q, tuned(p, ScalpModels.modelOf(p).code), free, recent)
                 if (sig == null) { clearTrigger(p.id, q.ticker); gates.block(modelCode, window, skip) }
-                if (sig != null && ScalpRule.buyPriceOk(if (p.maker) q.bid(sig.side) else sig.ask)) {
+                if (sig != null && (ScalpRule.buyPriceOk(if (p.maker) q.bid(sig.side) else sig.ask) || FairGapTune.lessonAllowed(q, sig.side, sig.ask, sig.fair, ScalpRule.CONTRACTS, variantId = p.id, open = _all.value))) {
                     val role = if (p.id in primaryIds) "P" else "S"
                     if (!triggerIsNew(p.id, q.ticker, sig.side)) {
                         gates.block(modelCode, window, "same trigger still on")
@@ -697,6 +701,13 @@ class ScalpBook(
             if (liveExtras && coin == ShockFav.TRADE_COIN) enterKeptV2(q, recent)
             if (liveExtras && coin == ShockFav.TRADE_COIN) changed += enterModelFair(q, recent)
         }
+        if (liveExtras) {
+            val hftCoin = ScalpParams.coinOf(q.ticker)
+            if (hftCoin == "BTC" || hftCoin == "ETH" || hftCoin == "SOL") {
+                changed += hft.onQuote(q, bankrollUsd(), idFactory)
+                DosMmEngine.publish(hft.telemetry())
+            }
+        }
         changed.forEach { save(it) }
         if (changed.any { it.state == ScalpState.CLOSED }) maybeTune(q.nowMs)
         changed.filter { it.isPrimary }
@@ -716,9 +727,16 @@ class ScalpBook(
             } else p0
             val (sig, skip) = if (p.strategy == ScalpStrategy.FAIR_GAP) ScalpRule.entrySignal(q, p) else ScalpRule.strategySignal(q, p, listOf("YES", "NO"), recent)
             if (sig == null) { clearTrigger(spec.id, q.ticker); gates.block(spec.id, window, skip); continue }
+            if (spec.kind == ScalpVariants.Kind.V2_DIP && FairGapTune.fallingKnife(sig.side, q.spot, q.strike, q.fair(sig.side), sig.ask)) {
+                gates.block(spec.id, window, "lesson guard: falling knife")
+                continue
+            }
             val px = if (p.maker) q.bid(sig.side) else sig.ask
             if (px == null) { gates.block(spec.id, window, "no bid"); continue }
-            if (!ScalpRule.buyPriceOk(px)) { gates.block(spec.id, window, "ask above 55¢ ceiling"); continue }
+            if (!ScalpRule.buyPriceOk(px) && !FairGapTune.lessonAllowed(q, sig.side, sig.ask, sig.fair, spec.clip, variantId = spec.id, open = _all.value)) {
+                gates.block(spec.id, window, "ask above 55¢ ceiling")
+                continue
+            }
             val n = spec.clip
             val cost = px * n + ScalpRule.orderFee(n, px)
             if (openCost + cost > bankroll + 1e-9) { gates.block(spec.id, window, "paper cash spent"); continue }
@@ -757,8 +775,9 @@ class ScalpBook(
             val sig = if (signalParams.strategy == ScalpStrategy.FAIR_GAP) ScalpRule.entrySignal(q, signalParams).first
                 else ScalpRule.strategySignal(q, signalParams, listOf("YES", "NO"), recent).first
             if (sig == null) continue
+            if (v2Id == KeptScalpers.V2_DIP_ID && FairGapTune.fallingKnife(sig.side, q.spot, q.strike, q.fair(sig.side), sig.ask)) continue
             val px = if (raw.maker) q.bid(sig.side) ?: continue else sig.ask
-            if (!ScalpRule.buyPriceOk(px)) continue
+            if (!ScalpRule.buyPriceOk(px) && !FairGapTune.lessonAllowed(q, sig.side, sig.ask, sig.fair, ScalpV2.CLIP, variantId = v2Id, open = _all.value)) continue
             spawnV2(ScalpTrade(
                 id = "v2src-$v2Id", ticker = q.ticker.uppercase(), side = sig.side, state = ScalpState.PENDING_ENTRY,
                 signalAtMs = q.nowMs, signalAsk = px, fairAtSignal = sig.fair, note = "kept v2 source ${raw.id}",
@@ -825,7 +844,9 @@ class ScalpBook(
             val side = ForecastScalp.sideOf(f)
             val ask = side?.let { q.ask(it) }
             val band = ForecastScalp.entryBand(KeptScalpers.FADE_ID, entryView(ForecastScalp.FADE_PREFIX) ?: explicit(ForecastScalp.FADE_PREFIX))
-            if (side != null && ask != null && ForecastScalp.wantsEntry(mid, ya - yb, ask, kotlin.math.abs(f), q.tauS, cfg.marginUsd, band.first, band.second)) {
+            val fadeKnife = side != null && ask != null && FairGapTune.fallingKnife(side, q.spot, q.strike, q.fair(side), ask)
+            if (fadeKnife) gates.block(KeptScalpers.FADE_ID, fadeWindow, "lesson guard: falling knife")
+            else if (side != null && ask != null && ForecastScalp.wantsEntry(mid, ya - yb, ask, kotlin.math.abs(f), q.tauS, cfg.marginUsd, band.first, band.second)) {
                 val vid = ForecastScalp.variantId(false, KeptScalpers.FADE_HORIZON_S)
                 val cost = ask * ScalpRule.CONTRACTS + ScalpRule.orderFee(ScalpRule.CONTRACTS, ask)
                 if (vid == KeptScalpers.FADE_ID && openCostUsd() + cost <= bankrollUsd() + 1e-9) {
@@ -849,7 +870,9 @@ class ScalpBook(
             val fv = -predV
             val sideV = ForecastScalp.sideOf(fv)
             val askV = sideV?.let { q.ask(it) }
-            if (sideV != null && askV != null && ForecastScalp.wantsEntry(mid, ya - yb, askV, kotlin.math.abs(fv), q.tauS, cfg.marginUsd, spec.fadeLo, spec.fadeHi)) {
+            val fadeKnifeV = sideV != null && askV != null && FairGapTune.fallingKnife(sideV, q.spot, q.strike, q.fair(sideV), askV)
+            if (fadeKnifeV) gates.block(spec.id, fadeWindow, "lesson guard: falling knife")
+            else if (sideV != null && askV != null && ForecastScalp.wantsEntry(mid, ya - yb, askV, kotlin.math.abs(fv), q.tauS, cfg.marginUsd, spec.fadeLo, spec.fadeHi)) {
                 val costV = askV * spec.clip + ScalpRule.orderFee(spec.clip, askV)
                 if (openCostUsd() + costV <= bankrollUsd() + 1e-9) {
                     changed += ScalpTrade(
@@ -992,7 +1015,10 @@ class ScalpBook(
         if (h.isEmpty() || q.nowMs - h.first().first < ShockFav.SIMPLE_MIN_HISTORY_MS || q.tauS < 120.0) return null
         val avgY = h.sumOf { it.second } / h.size
         val avgN = h.sumOf { it.third } / h.size
-        return ShockFav.simpleDipSide(p, q.ask("YES"), avgY, q.ask("NO"), avgN)
+        val side = ShockFav.simpleDipSide(p, q.ask("YES"), avgY, q.ask("NO"), avgN) ?: return null
+        val ask = q.ask(side) ?: return null
+        if (FairGapTune.fallingKnife(side, q.spot, q.strike, q.fair(side), ask)) return null
+        return side
     }
 
     fun onShockFavQuote(q: ScalpRule.Quote, enabled: Boolean): List<ScalpTrade> = synchronized(lock) {
@@ -1096,7 +1122,9 @@ class ScalpBook(
             }
             val ask = q.ask(t.side) ?: continue
             val code = ScalpModels.modelOf(t)?.code ?: t.variantId
-            if (!FairGapTune.askAllowed(pk?.code, ask, ShockFav.isFavLeg(t.variantId))) { changed += cappedEntry(t, q.nowMs); continue }
+            val fillFair = q.fair(t.side) ?: t.fairAtSignal
+            val moveBp = ShockFav.moveBp(ring, sec, 5)
+            if (!FairGapTune.askAllowed(pk?.code, ask, ShockFav.isFavLeg(t.variantId), q, t.side, fillFair, t.contracts.coerceAtLeast(1), moveBp, null, t.variantId, emptyList())) { changed += cappedEntry(t, q.nowMs); continue }
             if (greenOf(t)) {
                 val admitted = admitSize(t, ask, greenClip) ?: continue
                 val maxPx = if (ScalpFloors.isFavorite(code)) 0.99 else ScalpRule.ENTRY_HI
@@ -1240,7 +1268,7 @@ class ScalpBook(
                     }
                     val ask = q.ask(side) ?: continue
                     val f = if (side == "YES") fairYes else 1.0 - fairYes
-                    sfEnter(q, p, p.shockId, side, ask, f, openCost, bankroll, p.kind.name.lowercase().replace('_', ' '))?.let { changed += it; if (!shadowEntry(it)) openCost += it.entryCostUsd }
+                    sfEnter(q, p, p.shockId, side, ask, f, openCost, bankroll, p.kind.name.lowercase().replace('_', ' '), ShockFav.moveBp(ring, sec, 5))?.let { changed += it; if (!shadowEntry(it)) openCost += it.entryCostUsd }
                     continue
                 }
                 if (p.shock) {
@@ -1249,7 +1277,7 @@ class ScalpBook(
                         val sideFair = if (side == "YES") fairYes else 1.0 - fairYes
                         val ask = q.ask(side)
                         if (ask != null && ShockFav.shockEntryOk(p, sideFair, ask))
-                            sfEnter(q, p, p.shockId, side, ask, sideFair, openCost, bankroll, "shock")?.let { changed += it; if (!shadowEntry(it)) openCost += it.entryCostUsd }
+                            sfEnter(q, p, p.shockId, side, ask, sideFair, openCost, bankroll, "shock", ShockFav.moveBp(ring, sec, p.yS))?.let { changed += it; if (!shadowEntry(it)) openCost += it.entryCostUsd }
                         else {
                             clearTrigger(p.shockId, q.ticker)
                             gates.block(p.code, ScalpModels.windowKeyOf(q.ticker), "shock lag or ask band not met")
@@ -1544,8 +1572,12 @@ class ScalpBook(
             val side = simpleDipSide(key, p, q)
             val sig = side?.let { sd ->
                 val ask = q.ask(sd) ?: return@let null
-                val fair = if (sd == "YES") fairYes else 1.0 - fairYes
-                ScalpRule.Entry(sd, ask, fair, fair - ask)
+                val sideFair = if (sd == "YES") fairYes else 1.0 - fairYes
+                val reboundFair = maxOf(
+                    sideFair,
+                    (ask + p.dipTarget + ScalpV2.feeClearingDipGap(ask, twin.clip)).coerceAtMost(0.95)
+                )
+                ScalpRule.Entry(sd, ask, reboundFair, reboundFair - ask)
             }
             val row = modelEntry(q, twin, sig, if (side == null) "dip trigger not met" else "enter") ?: continue
             out += row
@@ -1573,7 +1605,12 @@ class ScalpBook(
         val n = ModelFilter.sized(twin.clip, d.scalar, twin.clip)
         val floor = ScalpFloors.cents(twin.parentId) / 100.0
         val blocked = ScalpParamSanity.entryBlock(sig.side, sig.ask, n, floor, bankrollUsd(), twin.clip)
-        if (blocked != null || !ScalpRule.buyPriceOk(sig.ask)) {
+        val lesson = FairGapTune.lessonAllowed(q, sig.side, sig.ask, sig.fair, n, variantId = twin.id, open = _all.value)
+        if (FairGapTune.stackingBlocked(twin.id, q, sig.side, sig.ask, _all.value)) {
+            gates.block(twin.id, window, FairGapTune.STACK_GUARD)
+            return null
+        }
+        if (blocked != null || (!ScalpRule.buyPriceOk(sig.ask) && !lesson)) {
             gates.block(twin.id, window, blocked ?: "ask above 55¢ ceiling")
             return null
         }
@@ -1593,10 +1630,19 @@ class ScalpBook(
 
     /** Taker paper entry at the displayed ask, capped at displayed size; skipped when shared free cash can't cover it. */
     private fun sfEnter(q: ScalpRule.Quote, p: ShockFav.Params, vid: String, side: String, ask: Double, fair: Double,
-                        openCost: Double, bankroll: Double, what: String): ScalpTrade? {
+                        openCost: Double, bankroll: Double, what: String, moveBp: Double? = null): ScalpTrade? {
         val window = ScalpModels.windowKeyOf(q.ticker)
+        if (p.kind == ShockFav.Kind.SIMPLE_DIP && FairGapTune.fallingKnife(side, q.spot, q.strike, fair, ask)) {
+            gates.block(vid, window, "lesson guard: falling knife")
+            return null
+        }
+        if (FairGapTune.stackingBlocked(vid, q, side, ask, _all.value)) {
+            gates.block(vid, window, FairGapTune.STACK_GUARD)
+            return null
+        }
         // Fade makers choose their purchase bid after the delay; the post/fill paths enforce the ceiling.
-        if (p.kind != ShockFav.Kind.FADE_MAKER && !FairGapTune.askAllowed(p.code, if (p.o50 == ShockFav.O50.MAKER) ShockFav.O50_MAKER_PX else ask, ShockFav.isFavLeg(vid))) {
+        val clip = ScalpVariants.clipOf(vid) ?: ShockFav.CLIP
+        if (p.kind != ShockFav.Kind.FADE_MAKER && !FairGapTune.askAllowed(p.code, if (p.o50 == ShockFav.O50.MAKER) ShockFav.O50_MAKER_PX else ask, ShockFav.isFavLeg(vid), q, side, fair, clip, moveBp, null, vid, _all.value)) {
             gates.block(vid, window, "ask above this scalper's price band")
             return null
         }
@@ -2349,7 +2395,7 @@ class ScalpBook(
     private fun settingsExits(mine: List<ScalpTrade>, q: ScalpRule.Quote): Map<String, ScalpTrade> {
         val out = HashMap<String, ScalpTrade>()
         for (t in mine) {
-            if (t.state != ScalpState.OPEN || ScalpV2.isV2(t.variantId) || Research.isResearch(t.variantId) || ForecastScalp.isForecast(t)) continue
+            if (t.state != ScalpState.OPEN || ScalpV2.isV2(t.variantId) || Research.isResearch(t.variantId) || ForecastScalp.isForecast(t) || HftMathEngines.isHft(t.variantId)) continue
             val s = entryView(codeOf(t)) ?: continue
             val bid = q.bid(t.side)?.takeIf { it > 0 } ?: continue
             val entry = t.entryPrice ?: continue
