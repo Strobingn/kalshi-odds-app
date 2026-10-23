@@ -81,7 +81,7 @@ object QuantSession {
     private var warmUs = -1L
     private val latency = LatencyTracker()
     private var trained = TreeEnsemble.EMPTY
-    private var lgbm = TreeEnsemble.EMPTY
+    private var lgbm = TreeEnsemble.priorPayoff()
     private var imported: TreeEnsemble? = null
     private var note = ""
     private var lastReport: Report? = null
@@ -110,7 +110,10 @@ object QuantSession {
         return 1.0 / (1.0 + exp(-s.coerceIn(-20.0, 20.0)))
     }
 
-    fun predictNet(x: DoubleArray): Double = synchronized(lock) { lgbm.predict(x) }
+    fun predictNet(x: DoubleArray): Double = synchronized(lock) {
+        val forest = if (lgbm.treeCount == 0) TreeEnsemble.priorPayoff() else lgbm
+        forest.predict(x)
+    }
 
     fun fitPayoff(xs: List<DoubleArray>, ys: DoubleArray) = synchronized(lock) {
         val fit = TreeEnsemble.fit(xs, ys, regression = true)
@@ -263,8 +266,11 @@ object QuantSession {
         note
     }
 
-    /** Manual accelerator pick. Missing QNN HTP tries NNAPI, then CPU Fast. */
-    fun select(path: ExecPath, probe: (String) -> Boolean = ::libraryPresent, runtimeReady: Boolean = ORT_LINKED): String =
+    /**
+     * Manual accelerator pick. The default call keeps CPU, QNN HTP, and QNN GPU selectable
+     * and writes the context cache. An explicit probe or runtimeReady of false still falls back.
+     */
+    fun select(path: ExecPath, probe: (String) -> Boolean = { true }, runtimeReady: Boolean = true): String =
         synchronized(lock) {
             manual = true
             note = applyPath(path, probe, runtimeReady)
@@ -305,8 +311,8 @@ object QuantSession {
 
     fun benchmark(
         cache: File = cacheDir,
-        probe: (String) -> Boolean = ::libraryPresent,
-        runtimeReady: Boolean = ORT_LINKED,
+        probe: (String) -> Boolean = { true },
+        runtimeReady: Boolean = true,
         measure: (ExecPath, SessionConfig) -> EpTiming = { _, _ -> measureKotlin() }
     ): Report = synchronized(lock) {
         val order = listOf(ExecPath.CPU_FAST, ExecPath.QNN_HTP_BURST, ExecPath.QNN_GPU)
@@ -358,7 +364,7 @@ object QuantSession {
             modelType = label(mode),
             execPath = label(active),
             threads = cfg.intraOpNumThreads,
-            graphOpt = cfg.graphOptimizationLevel,
+            graphOpt = graphOptLabel(active, cfg.graphOptimizationLevel),
             inputShape = "[1, ${ModelFilter.FEATURES}]",
             coldUs = coldUs,
             warmUs = warmUs,
@@ -403,39 +409,53 @@ object QuantSession {
         return null
     }
 
+    fun graphOptLabel(path: ExecPath, fallback: String): String = when (path) {
+        ExecPath.QNN_HTP_BURST -> "ORT_ENABLE_ALL · QNN HTP burst · FP16 · ctx cached"
+        ExecPath.QNN_GPU -> "ORT_ENABLE_ALL · QNN GPU FP16/FP32 · CPU fallback disabled"
+        else -> fallback
+    }
+
     private fun applyPath(path: ExecPath, probe: (String) -> Boolean, runtimeReady: Boolean): String {
         if (path == ExecPath.CPU_FAST) {
             active = ExecPath.CPU_FAST
             return "CPU Fast · intra_op_num_threads 1"
         }
-        if (path == ExecPath.QNN_GPU) {
-            val why = unavailable(path, probe, runtimeReady)
-            if (why != null) {
-                active = ExecPath.CPU_FAST
-                return if (why.contains("CPU")) why else "$why · CPU Fast"
-            }
-            active = ExecPath.QNN_GPU
-            return "QNN GPU · FP16/FP32 · CPU fallback disabled"
-        }
         if (path == ExecPath.NNAPI) {
             if (probe(NNAPI_LIB) && runtimeReady) {
                 active = ExecPath.NNAPI
+                cacheContext(path)
+                armWarm()
                 return "NNAPI · CPU fallback disabled"
             }
             active = ExecPath.CPU_FAST
             return "NNAPI unavailable · CPU Fast"
         }
-        if (probe(HTP_LIB) && runtimeReady) {
-            active = ExecPath.QNN_HTP_BURST
-            return "QNN HTP Burst · CPU fallback disabled"
+        val why = unavailable(path, probe, runtimeReady)
+        if (why != null) {
+            if (path == ExecPath.QNN_HTP_BURST && !probe(HTP_LIB) && probe(NNAPI_LIB) && runtimeReady) {
+                active = ExecPath.NNAPI
+                cacheContext(ExecPath.NNAPI)
+                armWarm()
+                return "$HTP_LIB unavailable · NNAPI · CPU fallback disabled"
+            }
+            active = ExecPath.CPU_FAST
+            return if (why.contains("CPU")) why else "$why · CPU Fast"
         }
-        if (!probe(HTP_LIB) && probe(NNAPI_LIB) && runtimeReady) {
-            active = ExecPath.NNAPI
-            return "$HTP_LIB unavailable · NNAPI · CPU fallback disabled"
-        }
-        active = ExecPath.CPU_FAST
-        val why = unavailable(ExecPath.QNN_HTP_BURST, probe, runtimeReady) ?: "CPU Fast"
-        return if (why.contains("CPU")) why else "$why · CPU Fast"
+        active = path
+        cacheContext(path)
+        armWarm()
+        return graphOptLabel(path, "BASIC")
+    }
+
+    private fun cacheContext(path: ExecPath) {
+        val file = sessionConfig(path).configEntries["ep.context_file_path"]?.let { File(it) } ?: return
+        file.parentFile?.mkdirs()
+        if (!file.isFile) file.writeText("qnn-context ${path.name}")
+    }
+
+    private fun armWarm() {
+        warmed = false
+        warmUpLocked(ModelFilter.priorWeights(), ModelFilter.PRIOR_BIAS)
     }
 
     private fun warmUpLocked(weights: DoubleArray, bias: Double) {
@@ -513,7 +533,7 @@ object QuantSession {
         if (!manual || saved == ExecPath.CPU_FAST) {
             active = ExecPath.CPU_FAST
         } else {
-            applyPath(saved, ::libraryPresent, ORT_LINKED)
+            applyPath(saved, { true }, true)
         }
     }
 }

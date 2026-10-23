@@ -86,6 +86,11 @@ class AppContainer(context: Context) {
     /** 1.0.12: usage, prices, budget, and the AI-adjustments log. API keys stay in [llmSettings]. */
     val aiWatch = com.dirk.kalshiodds.llm.AiWatchStore(File(app.filesDir, "ai-watch.json"))
     val llmSettings by lazy { com.dirk.kalshiodds.llm.LlmSettings(app) }
+    private fun cloudOrBuiltin(): com.dirk.kalshiodds.llm.LlmEndpoint {
+        val ep = llmSettings.chatEndpoint()
+        return if (ep.provider == com.dirk.kalshiodds.llm.LlmProviders.BUILTIN || ep.usable) ep
+        else com.dirk.kalshiodds.llm.LlmProviders.builtinEndpoint()
+    }
     val llmClient by lazy { com.dirk.kalshiodds.llm.LlmClient(llmSettings) }
     /** Shared by the window watcher and the paper strategy so free-tier quotas are one budget. */
     val freePacer = com.dirk.kalshiodds.llm.FreeCallPacer()
@@ -98,7 +103,7 @@ class AppContainer(context: Context) {
                 recordLlm(com.dirk.kalshiodds.llm.LlmSources.STRATEGY, ep.provider, reply.model.ifBlank { ep.model }, reply.promptTokens, reply.completionTokens)
             },
             autoCalls = { aiWatch.autoAllowed(llmSettings.providerId, llmSettings.chatEndpoint().model) },
-            endpoint = { llmSettings.chatEndpoint() },
+            endpoint = { cloudOrBuiltin() },
             pacer = freePacer,
             alternates = { freeSlots() },
             quotaOf = { ep -> com.dirk.kalshiodds.llm.LlmProviders.effectiveQuota(ep.provider, ep.model, aiWatch.dailyCap(ep.provider, ep.model)) },
@@ -117,7 +122,7 @@ class AppContainer(context: Context) {
             store = aiWatch,
             snapshot = { watchSnapshot() },
             ask = { ep, msgs -> llmClient.chatReply(msgs, 1200, ep, automatic = true) },
-            endpoint = { llmSettings.chatEndpoint() },
+            endpoint = { cloudOrBuiltin() },
             scalpersRunning = { scalpServiceRunning() },
             now = { clock.nowMs() },
             paper = { scalpInsights.tapes(scalp.stats.value) },

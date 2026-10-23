@@ -46,7 +46,10 @@ class LlmPaperStrategy(
         place = { q, side, conf -> book.llmEntry(q, side, conf) },
         onUsage = onUsage,
         onCall = { id, dir, conf -> onCall?.invoke(id, dir, conf) },
-        freeProvider = { LlmProviders.freeFamily(endpoint().provider, endpoint().model) },
+        freeProvider = {
+            val ep = endpoint()
+            ep.provider == LlmProviders.BUILTIN || ep.usable
+        },
         onPaceMiss = { paceStatus }
     )
     @Volatile private var sleepMs: Long = CYCLE_MS
@@ -58,15 +61,16 @@ class LlmPaperStrategy(
             runCatching { loop.tick()?.let { _status.value = it } }
                 .onFailure { _status.value = "error (${settings.model}, no fallback model): ${it.message?.take(120)}" }
             // Kalshi conflator cycle. The pacer, not this delay, keeps the call inside the free quota.
-            delay(sleepMs.coerceIn(CYCLE_MS, 60_000L))
+            delay(sleepMs.coerceIn(CYCLE_MS, AiLiveFeed.MIN_SPACING_MS))
         }
     }
 
     private fun perform(messages: List<Pair<String, String>>): Pair<LlmEndpoint, LlmClient.Reply>? {
         val ep = endpoint()
-        if (!LlmProviders.freeFamily(ep.provider, ep.model)) return null
+        val builtin = ep.provider == LlmProviders.BUILTIN
+        if (!builtin && !ep.usable) return null
         val nowMs = System.currentTimeMillis()
-        if (lastAutoAt != Long.MIN_VALUE && nowMs - lastAutoAt < AiLiveFeed.MIN_SPACING_MS) {
+        if (!builtin && lastAutoAt != Long.MIN_VALUE && nowMs - lastAutoAt < AiLiveFeed.MIN_SPACING_MS) {
             sleepMs = (AiLiveFeed.MIN_SPACING_MS - (nowMs - lastAutoAt)).coerceIn(CYCLE_MS, AiLiveFeed.MIN_SPACING_MS)
             paceStatus = "waiting for the free-tier pace"
             return null
@@ -107,7 +111,7 @@ class LlmPaperStrategy(
             },
             allowed = { this.allowed(it) }
         )
-        sleepMs = ((wait?.resumeAtMs ?: nowMs) - nowMs).coerceIn(CYCLE_MS, 60_000L)
+        sleepMs = ((wait?.resumeAtMs ?: nowMs) - nowMs).coerceIn(CYCLE_MS, AiLiveFeed.MIN_SPACING_MS)
         paceStatus = AiAutoCalls.paceStatus(wait, nowMs).ifBlank { "" }
         return null
     }

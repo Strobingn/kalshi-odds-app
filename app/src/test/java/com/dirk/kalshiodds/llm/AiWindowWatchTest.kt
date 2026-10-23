@@ -146,10 +146,10 @@ class AiWindowWatchTest {
         nowMs += 5_000
         snap = snap.copy(windowKey = "W2", fingerprint = "fp-next")
         w.tick()
-        assertEquals(3, calls) // 60s floor blocks the 5s poll and a window roll
-        nowMs += 60_000
+        assertEquals(2, calls) // 120s floor blocks the 5s poll and a window roll
+        nowMs += 120_000
         w.tick()
-        assertEquals(4, calls)
+        assertEquals(3, calls)
     }
 
     @Test fun atMostThreeChangesPerScalperPerWindow() {
@@ -177,7 +177,7 @@ class AiWindowWatchTest {
         val w = watcher(MemoryScalpControls()) { ep, _ -> seen += ep; reply("""{"adjustments":[]}""") }
         w.tick()
         provider = LlmProviders.GROQ
-        nowMs += 60_000
+        nowMs += 120_000
         snap = snap.copy(windowKey = "W2", fingerprint = "fp-2")
         w.tick()
         assertEquals(listOf(LlmProviders.MISTRAL, LlmProviders.GROQ), seen.map { it.provider })
@@ -202,8 +202,8 @@ class AiWindowWatchTest {
         snap = snap.copy(fingerprint = "pace-open")
         w.tick()
         assertEquals(1, calls)
-        nowMs += 60_000
-        snap = snap.copy(fingerprint = "pace-60s")
+        nowMs += 120_000
+        snap = snap.copy(fingerprint = "pace-120s")
         w.tick()
         assertEquals(2, calls)
     }
@@ -215,11 +215,16 @@ class AiWindowWatchTest {
         assertEquals(listOf(LlmProviders.MISTRAL), seen)
         for (id in listOf(LlmProviders.OPENAI, LlmProviders.OPENROUTER, LlmProviders.CUSTOM, LlmProviders.XAI)) {
             provider = id
-            nowMs += 60_000
+            nowMs += 20_000
             snap = snap.copy(windowKey = "W-$id", fingerprint = "fp-$id")
             w.tick()
         }
         assertEquals(listOf(LlmProviders.MISTRAL), seen)
+        provider = LlmProviders.OPENAI
+        nowMs += 120_000
+        snap = snap.copy(windowKey = "W-paid", fingerprint = "fp-paid")
+        w.tick()
+        assertEquals(listOf(LlmProviders.MISTRAL, LlmProviders.OPENAI), seen)
     }
 
     @Test fun onDeviceFreezeRunsWhileTheChatLlmWaits() {

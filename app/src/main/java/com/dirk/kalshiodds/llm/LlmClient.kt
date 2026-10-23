@@ -55,6 +55,7 @@ class LlmClient(private val settings: LlmSettings, private val flight: LlmFlight
         automatic: Boolean = false
     ): Reply {
         val ep = endpoint ?: LlmEndpoint(LlmProviders.XAI, settings.baseUrl, settings.model, settings.apiKey)
+        if (ep.provider == LlmProviders.BUILTIN) return builtinReply(ep, messages)
         require(ep.apiKey.isNotBlank()) { "needs key" }
         if (!flight.enter(automatic)) throw LlmSkipped(if (automatic) "overlap" else "busy")
         val started = System.nanoTime()
@@ -68,6 +69,13 @@ class LlmClient(private val settings: LlmSettings, private val flight: LlmFlight
         } finally {
             flight.exit()
         }
+    }
+
+    private fun builtinReply(ep: LlmEndpoint, messages: List<Pair<String, String>>): Reply {
+        val started = System.nanoTime()
+        val text = com.dirk.kalshiodds.decision.QuantCompanion.reply(messages)
+        val latency = ((System.nanoTime() - started) / 1_000_000L).coerceAtMost(2L)
+        return Reply(text, ep.model, LlmProviders.DEFAULT_BUILTIN_MODEL, 0, 0, latencyMs = latency)
     }
 
     private fun gemini(ep: LlmEndpoint, messages: List<Pair<String, String>>, maxTokens: Int): Reply =
