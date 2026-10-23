@@ -603,7 +603,7 @@ class ScalpBook(
         val fairKept = if (coin == ShockFav.TRADE_COIN) ScalpParams.byId(KeptScalpers.FAIR_ID) else null
         // A variant list that includes the tuned primary (fill tests) keeps that primary. The app passes none.
         val pinned = paramsFor(coin).takeIf { p -> variants.any { it.id == p.id } }
-        val primaries = listOfNotNull(fairKept, pinned).distinctBy { it.id }
+        val primaries = listOfNotNull(pinned ?: fairKept)
         val primaryIds = primaries.map { it.id }.toSet()
         val key = q.ticker.uppercase()
         val recent = recordHistory(q)
@@ -704,7 +704,7 @@ class ScalpBook(
         if (liveExtras) {
             val hftCoin = ScalpParams.coinOf(q.ticker)
             if (hftCoin == "BTC" || hftCoin == "ETH" || hftCoin == "SOL") {
-                changed += hft.onQuote(q, bankrollUsd(), idFactory)
+                changed += hft.onQuote(q, bankrollUsd(), _all.value, idFactory)
                 DosMmEngine.publish(hft.telemetry())
             }
         }
@@ -832,8 +832,13 @@ class ScalpBook(
         val openFc = _all.value.filter { it.ticker == key && ForecastScalp.isForecast(it) && isActive(it) }
         for (active in openFc) {
             val ride = active.variantId.startsWith(ForecastScalp.RIDE_PREFIX)
-            val f = if (ride) pred else -pred
-            fcStep(active, q, f, h54)?.let { changed += it }
+            val tradeHorizon = ScalpVariants.of(active.variantId)?.fadeHorizonS
+                ?: active.variantId.substringAfterLast("-h", "").let { if (it == "close") -1 else it.toIntOrNull() }
+                ?: h54
+            val tradePred = if (tradeHorizon == h54) pred
+                else x54?.let { LeadForecaster.predict(coin, tradeHorizon, it) } ?: Double.NaN
+            val f = if (ride) tradePred else -tradePred
+            fcStep(active, q, f, tradeHorizon)?.let { changed += it }
         }
         // Kept fade is horizon 600 only. Forecast ride does not open.
         val predFade = x54?.let { LeadForecaster.predict(coin, KeptScalpers.FADE_HORIZON_S, it) }
@@ -843,12 +848,13 @@ class ScalpBook(
             val f = -predFade
             val side = ForecastScalp.sideOf(f)
             val ask = side?.let { q.ask(it) }
+            val clip = StrategyAlgo.clip(controls.state.value, KeptScalpers.FADE_ID, ScalpRule.CONTRACTS)
             val band = ForecastScalp.entryBand(KeptScalpers.FADE_ID, entryView(ForecastScalp.FADE_PREFIX) ?: explicit(ForecastScalp.FADE_PREFIX))
             val fadeKnife = side != null && ask != null && FairGapTune.fallingKnife(side, q.spot, q.strike, q.fair(side), ask)
             if (fadeKnife) gates.block(KeptScalpers.FADE_ID, fadeWindow, "lesson guard: falling knife")
-            else if (side != null && ask != null && ForecastScalp.wantsEntry(mid, ya - yb, ask, kotlin.math.abs(f), q.tauS, cfg.marginUsd, band.first, band.second)) {
+            else if (side != null && ask != null && ForecastScalp.wantsEntry(mid, ya - yb, ask, kotlin.math.abs(f), q.tauS, cfg.marginUsd, band.first, band.second, clip)) {
                 val vid = ForecastScalp.variantId(false, KeptScalpers.FADE_HORIZON_S)
-                val cost = ask * ScalpRule.CONTRACTS + ScalpRule.orderFee(ScalpRule.CONTRACTS, ask)
+                val cost = ask * clip + ScalpRule.orderFee(clip, ask)
                 if (vid == KeptScalpers.FADE_ID && openCostUsd() + cost <= bankrollUsd() + 1e-9) {
                     changed += ScalpTrade(
                         id = idFactory(), ticker = key, side = side, state = ScalpState.PENDING_ENTRY, signalAtMs = q.nowMs,
@@ -870,10 +876,11 @@ class ScalpBook(
             val fv = -predV
             val sideV = ForecastScalp.sideOf(fv)
             val askV = sideV?.let { q.ask(it) }
+            val clipV = StrategyAlgo.clip(controls.state.value, spec.id, spec.clip)
             val fadeKnifeV = sideV != null && askV != null && FairGapTune.fallingKnife(sideV, q.spot, q.strike, q.fair(sideV), askV)
             if (fadeKnifeV) gates.block(spec.id, fadeWindow, "lesson guard: falling knife")
-            else if (sideV != null && askV != null && ForecastScalp.wantsEntry(mid, ya - yb, askV, kotlin.math.abs(fv), q.tauS, cfg.marginUsd, spec.fadeLo, spec.fadeHi)) {
-                val costV = askV * spec.clip + ScalpRule.orderFee(spec.clip, askV)
+            else if (sideV != null && askV != null && ForecastScalp.wantsEntry(mid, ya - yb, askV, kotlin.math.abs(fv), q.tauS, cfg.marginUsd, spec.fadeLo, spec.fadeHi, clipV)) {
+                val costV = askV * clipV + ScalpRule.orderFee(clipV, askV)
                 if (openCostUsd() + costV <= bankrollUsd() + 1e-9) {
                     changed += ScalpTrade(
                         id = idFactory(), ticker = key, side = sideV, state = ScalpState.PENDING_ENTRY, signalAtMs = q.nowMs,
@@ -897,17 +904,34 @@ class ScalpBook(
                 if (!ScalpRule.buyPriceOk(limit)) return cappedEntry(t, q.nowMs)
                 if (q.nowMs - t.signalAtMs > ForecastScalp.ENTRY_LIMIT_TTL_MS || q.nowMs >= q.closeMs)
                     return t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; limit cancelled unfilled")
+                if (!q.fresh() || q.bookGap) return null
                 val n = com.dirk.kalshiodds.signal.paper.PaperLimitFill.touchFillQty(limit, q.ask(t.side), q.askSize(t.side),
                     StrategyAlgo.clip(controls.state.value, codeOf(t), ScalpVariants.clipOf(codeOf(t)) ?: ScalpRule.CONTRACTS), buy = true)
-                if (n <= 0) null else t.copy(state = ScalpState.OPEN, contracts = n, entryPrice = limit, entryFeeUsd = ScalpRule.orderFee(n, limit),
-                    entryAtMs = q.nowMs, restingLimit = null, note = "${t.note}; filled $n @ ${com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(limit)}")
+                if (n <= 0) return null
+                val bid = q.bid(t.side) ?: return null
+                val spread = (limit - bid).coerceAtLeast(0.0)
+                val code = codeOf(t)
+                val spec = ScalpVariants.of(code)
+                val band = if (spec?.kind == ScalpVariants.Kind.FADE) spec.fadeLo to spec.fadeHi
+                    else ForecastScalp.entryBand(code, entryView(code) ?: explicit(code))
+                val mid = ((q.yesBid ?: return null) + (q.yesAsk ?: return null)) / 2.0
+                if (!ForecastScalp.wantsEntry(mid, spread, limit, sideF, q.tauS,
+                        LeadForecaster.configFor(t.coin).marginUsd, band.first, band.second, n)) {
+                    return t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs,
+                        note = "${t.note}; forecast no longer clears fill costs")
+                }
+                val stopFloor = ForecastScalp.minimumStopDistance(limit, spread, n)
+                t.copy(state = ScalpState.OPEN, contracts = n, entryPrice = limit, entryFeeUsd = ScalpRule.orderFee(n, limit),
+                    entryAtMs = q.nowMs, restingLimit = null, note = String.format(Locale.US,
+                        "%s; filled %d @ %s; fcStopMin=%.4f", t.note, n,
+                        com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(limit), stopFloor))
             }
             ScalpState.OPEN, ScalpState.PENDING_EXIT -> {
                 if (q.nowMs >= q.closeMs || !q.fresh()) return null
                 val bid = q.bid(t.side)?.takeIf { it > 0.0 } ?: return null
                 val fcEntry = t.entryPrice ?: 0.0
                 val fcCode = codeOf(t)
-                if (t.isPrimary && FairGapTune.isTweaked(fcCode)) {
+                if (t.isPrimary && FairGapTune.fairGapHoldExit(fcCode)) {
                     // 1.0.3: fair-gap hold (no stop, no forecast-turn exit).
                     val r = t.exitReason.takeIf { t.state == ScalpState.PENDING_EXIT } ?: FairGapTune.exit((q.nowMs - (t.entryAtMs ?: q.nowMs)) / 1000.0, entryView(fcCode) ?: explicit(fcCode)) ?: return null
                     val n = minOf(t.remaining, kotlin.math.floor((q.bidSize(t.side) ?: 0.0) + 1e-9).toInt())
@@ -916,13 +940,15 @@ class ScalpBook(
                     val next = ScalpFills.sell(base, q.nowMs, n, n * bid, ScalpRule.orderFee(n, bid))
                     return if (next.remaining <= 0) close(next, q.nowMs, r) else next
                 }
-                val stopC = StrategyAlgo.storedInt(controls.state.value, fcCode, "stopCents", ForecastScalp.STOP_C)
+                val fcSettings = StrategyAlgo.view(controls.state.value, fcCode)
+                val stopC = fcSettings.stopCents ?: ForecastScalp.STOP_C
+                val stopDistance = ForecastScalp.stopDistance(t, stopC / 100.0)
                 val heldS = (q.nowMs - (t.entryAtMs ?: q.nowMs)) / 1000.0
-                val maxHold = StrategyAlgo.storedInt(controls.state.value, fcCode, "maxHoldSeconds", 0)
-                val stopHit = t.state == ScalpState.OPEN && bid <= fcEntry - stopC / 100.0 + 1e-9
+                val maxHold = fcSettings.maxHoldSeconds ?: 0
+                val stopHit = t.state == ScalpState.OPEN && bid <= fcEntry - stopDistance + 1e-9
                 if (stopHit && t.isPrimary) addShadow(t, sf = false) { qq, _, b, _ -> b >= ForecastScalp.TAKE_PROFIT - 1e-9 || qq.tauS < ForecastScalp.EXIT_BEFORE_CLOSE_S }
                 val reason = t.exitReason.takeIf { t.state == ScalpState.PENDING_EXIT }
-                    ?: (if (stopHit) "stop −${stopC}¢" else null)
+                    ?: (if (stopHit) String.format(Locale.US, "stop −%.1f¢", stopDistance * 100.0) else null)
                     ?: (if (maxHold > 0 && heldS >= maxHold) "max hold ${maxHold}s" else null)
                     ?: ForecastScalp.wantsExit(sideF, bid, heldS, horizon, q.tauS) ?: return null
                 val n = minOf(t.remaining, kotlin.math.floor((q.bidSize(t.side) ?: 0.0) + 1e-9).toInt())

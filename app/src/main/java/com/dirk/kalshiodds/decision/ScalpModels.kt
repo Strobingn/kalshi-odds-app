@@ -361,7 +361,7 @@ object ScalpModels {
             Model.MOMO_NOTP -> "stop ${Math.round(ScalpParams.QUEUED_COPIES[2].stop * 100)}¢"
             Model.FAIR_T1 -> "stop ${Math.round(ScalpParams.FAIR_TWEAKS[0].stop * 100)}¢"
             Model.FAIR_T2 -> "stop ${Math.round(ScalpParams.FAIR_TWEAKS[1].stop * 100)}¢"
-            Model.DOS_MM, Model.TS_ARB, Model.MRLA_CS, Model.IV_SMILE -> "5-gate · paper"
+            Model.DOS_MM, Model.TS_ARB, Model.MRLA_CS, Model.IV_SMILE -> "stop 5-gate · paper"
             else -> ScalpModels.legacyStop(m)
         }
     }
@@ -633,6 +633,9 @@ object ForecastScalp {
     const val HARD_FLIP = -0.03
     const val ENTRY_LIMIT_TTL_MS = 2_000L
     const val SAFETY = 0.005
+    const val REVERSAL_DEADBAND_USD = 0.01
+    const val MIN_STOP_USD = 0.03
+    private val STOP_FLOOR_RX = Regex("fcStopMin=([0-9]+\\.[0-9]+)")
     /** 0.3.61 per-bet stop (¢ below entry at the bid). Not studied in bt61 → widest level. */
     const val STOP_C = 25
 
@@ -646,7 +649,7 @@ object ForecastScalp {
         else -> null
     }
 
-    /** Entry: band, spread, edge > spread + entry fee + exit fee (1-ct rounded) + 0.5¢. */
+    /** Entry: band, spread, and a move that clears both fees at the executable size plus the margin. */
     /** 0.3.54: predicted move must beat the full round trip (spread + entry fee + exit fee) by [marginUsd]. */
     /** Default band for [code]. Fade is 40–49¢. Ride stays 40–60¢. A price slider replaces either edge. */
     fun entryBand(code: String, s: ScalpStrategySettings?): Pair<Double, Double> {
@@ -656,16 +659,27 @@ object ForecastScalp {
         return lo to maxOf(lo, hi)
     }
 
-    fun wantsEntry(mid: Double, spread: Double, ask: Double, move: Double, tauS: Double, marginUsd: Double = SAFETY, bandLo: Double = BAND_LO, bandHi: Double = BAND_HI): Boolean =
-        ScalpRule.buyPriceOk(ask) && mid in bandLo..bandHi && spread <= MAX_SPREAD + 1e-9 && tauS >= MIN_TAU_ENTRY_S &&
-            move > spread + 2 * ScalpRule.orderFee(1, ask) + marginUsd
+    fun wantsEntry(mid: Double, spread: Double, ask: Double, move: Double, tauS: Double, marginUsd: Double = SAFETY, bandLo: Double = BAND_LO, bandHi: Double = BAND_HI, contracts: Int = ScalpRule.CONTRACTS): Boolean =
+        contracts > 0 && spread.isFinite() && spread >= 0.0 && move.isFinite() && marginUsd.isFinite() &&
+            ScalpRule.buyPriceOk(ask) && mid in bandLo..bandHi && spread <= MAX_SPREAD + 1e-9 && tauS >= MIN_TAU_ENTRY_S &&
+            move > ScalpRule.roundTripCost(ask, spread, contracts) + marginUsd.coerceAtLeast(0.0) + 1e-9
 
-    /** Exit when the forecast for the held side turns (below one exit fee), flips hard, TP, horizon reached, or close. */
+    /** Capture once at the fill, so later spread widening cannot move the stop away. */
+    fun minimumStopDistance(entry: Double, spread: Double, contracts: Int): Double =
+        maxOf(MIN_STOP_USD, spread.coerceAtLeast(0.0) + ScalpRule.feePerContract(contracts, entry) + 0.01)
+
+    fun stopDistance(t: ScalpTrade, configuredUsd: Double): Double {
+        val saved = STOP_FLOOR_RX.find(t.note)?.groupValues?.get(1)?.toDoubleOrNull()?.takeIf { it.isFinite() }
+        val floor = saved ?: minimumStopDistance(t.entryPrice ?: t.signalAsk, 0.0, t.contracts)
+        return maxOf(configuredUsd, MIN_STOP_USD, floor)
+    }
+
+    /** Exit on a material adverse forecast, hard flip, TP, horizon, or close. Ignore sub-cent forecast noise. */
     /** [sideForecast] NaN = no fresh forecast: forecast-based exits are skipped (hold until fresh data). */
     fun wantsExit(sideForecast: Double, bid: Double, heldS: Double, horizonS: Int, tauS: Double): String? = when {
         bid >= TAKE_PROFIT - 1e-9 -> "take profit ≥ 90¢"
         !sideForecast.isNaN() && sideForecast < HARD_FLIP -> "forecast flipped hard"
-        !sideForecast.isNaN() && sideForecast < ScalpRule.orderFee(1, bid) -> "forecast turned (move < exit fee)"
+        sideForecast.isFinite() && sideForecast <= -REVERSAL_DEADBAND_USD -> "forecast reversed ≥ 1¢"
         !sideForecast.isNaN() && horizonS > 0 && heldS >= horizonS -> "horizon reached"
         tauS < EXIT_BEFORE_CLOSE_S -> "exit before close"
         else -> null

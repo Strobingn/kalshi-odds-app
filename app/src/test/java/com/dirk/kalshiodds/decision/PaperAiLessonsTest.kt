@@ -61,7 +61,38 @@ class PaperAiLessonsTest {
         )
         assertTrue(FairGapTune.stackingBlocked("sf04", q, "NO", 0.74, listOf(open)))
         assertFalse(FairGapTune.lessonAllowed(q, "NO", 0.74, 0.90, 10, moveBp = -20.0, variantId = "sf04", open = listOf(open)))
-        assertEquals(FairGapTune.STACK_GUARD, "lesson guard: no stacking 64–82¢ under $150 buffer")
+        assertEquals(FairGapTune.STACK_GUARD, "lesson guard: no expensive same-side stacking near strike")
+    }
+
+    @Test fun lateExpensiveStackingIsBlockedAcrossDifferentStrategies() {
+        val q = downQuote(askNo = 0.81, spot = 99_960.0, tauS = 240.0)
+        val open = ScalpTrade(
+            id = "late", ticker = ticker, side = "NO", state = ScalpState.OPEN,
+            signalAtMs = q.nowMs - 5_000L, signalAsk = 0.81, fairAtSignal = 0.91,
+            contracts = 10, entryPrice = 0.81, entryAtMs = q.nowMs - 4_000L,
+            ruleVersion = "${ScalpRule.VERSION}|sf04|P"
+        )
+        assertTrue(FairGapTune.lessonAllowed(q, "NO", 0.81, 0.94, 10, variantId = "sf07"))
+        assertTrue(FairGapTune.stackingBlocked("sf07", q, "NO", 0.81, listOf(open)))
+        assertFalse(FairGapTune.lessonAllowed(q, "NO", 0.81, 0.94, 10, variantId = "sf07", open = listOf(open)))
+        assertFalse(FairGapTune.stackingBlocked("sf07", q.copy(spot = 99_800.0), "NO", 0.81, listOf(open)))
+        assertFalse(FairGapTune.stackingBlocked("sf07", q, "YES", 0.81, listOf(open)))
+        assertFalse(FairGapTune.stackingBlocked("sf07", q, "NO", 0.79, listOf(open)))
+        assertFalse(FairGapTune.stackingBlocked("sf07", q, "NO", 0.81, listOf(open.copy(state = ScalpState.CLOSED))))
+    }
+
+    @Test fun hftAlsoSeesTheExistingKeptStrategyExposure() {
+        val q = downQuote(askNo = 0.81, spot = 99_960.0, tauS = 40.0, fairSigma = 1e-6)
+        val first = HftBook().onQuote(q, 20_000.0) { "first" }
+        assertTrue(first.toString(), first.any { it.variantId == "ts-arb" && it.side == "NO" })
+        val existing = ScalpTrade(
+            id = "kept", ticker = ticker, side = "NO", state = ScalpState.OPEN,
+            signalAtMs = q.nowMs - 5_000L, signalAsk = 0.81, fairAtSignal = 0.91,
+            contracts = 10, entryPrice = 0.81, entryAtMs = q.nowMs - 4_000L,
+            ruleVersion = "${ScalpRule.VERSION}|sf04|P"
+        )
+        val blocked = HftBook().onQuote(q, 20_000.0, listOf(existing)) { "blocked" }
+        assertTrue(blocked.toString(), blocked.none { it.side == "NO" && it.state == ScalpState.OPEN })
     }
 
     @Test fun overwhelmingBufferAndLateDiscount() {

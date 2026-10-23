@@ -197,9 +197,40 @@ object HftMathEngines {
             prevAsk = ask
             prevAskSz = askSz
             val norm = (e / max(1e-9, bidSz + askSz)).coerceIn(-5.0, 5.0)
-            ring.addLast(norm)
+            return add(norm)
+        }
+
+        fun add(normalizedFlow: Double): Double {
+            ring.addLast(normalizedFlow.takeIf { it.isFinite() }?.coerceIn(-5.0, 5.0) ?: 0.0)
             while (ring.size > 20) ring.removeFirst()
             return ring.sum()
+        }
+    }
+
+    /** Compare each of the five price/size levels with the preceding snapshot before normalizing once. */
+    class DepthOfi {
+        private var previousBids: List<Pair<Double, Double>>? = null
+        private var previousAsks: List<Pair<Double, Double>>? = null
+
+        fun update(bids: List<Pair<Double, Double>>, asks: List<Pair<Double, Double>>): Double {
+            val currentBids = bids.take(5)
+            val currentAsks = asks.take(5)
+            val oldBids = previousBids
+            val oldAsks = previousAsks
+            previousBids = currentBids
+            previousAsks = currentAsks
+            if (oldBids == null || oldAsks == null) return 0.0
+            val n = maxOf(currentBids.size, currentAsks.size, oldBids.size, oldAsks.size)
+            val levels = (0 until n).map { i ->
+                val b = currentBids.getOrNull(i) ?: (0.0 to 0.0)
+                val a = currentAsks.getOrNull(i) ?: (1.0 to 0.0)
+                val pb = oldBids.getOrNull(i) ?: (0.0 to 0.0)
+                val pa = oldAsks.getOrNull(i) ?: (1.0 to 0.0)
+                val flow = HftSignals.ofi(pb.first, pb.second, pa.first, pa.second, b.first, b.second, a.first, a.second)
+                val depth = (b.second + a.second).takeIf { it > 0.0 } ?: (pb.second + pa.second)
+                OfLevel(flow, 0.0, depth / 2.0)
+            }
+            return ofiWeighted(levels)
         }
     }
 
@@ -306,11 +337,12 @@ object HftMathEngines {
         if (yes > EV_MIN && yesAsk <= ASK_CAP) return "TAKER_ARB_BUY_YES"
         if (no > EV_MIN && noAsk <= ASK_CAP) return "TAKER_ARB_BUY_NO"
         val gap = kotlin.math.abs(pTerm - pSpot)
-        val cost = fee(20, yesAsk, TAKER) + spread
-        if (gap > cost && kotlin.math.abs(zVwap) > 2.0) {
+        if (kotlin.math.abs(zVwap) > 2.0) {
             return when {
-                pTerm >= pSpot && yesAsk <= ASK_CAP -> "TAKER_ARB_BUY_YES"
-                pTerm < pSpot && noAsk <= ASK_CAP -> "TAKER_ARB_BUY_NO"
+                pTerm >= pSpot && yesAsk <= ASK_CAP && gap > fee(20, yesAsk, TAKER) + spread &&
+                    yes > fee(20, yesAsk, TAKER) + spread -> "TAKER_ARB_BUY_YES"
+                pTerm < pSpot && noAsk <= ASK_CAP && gap > fee(20, noAsk, TAKER) + spread &&
+                    no > fee(20, noAsk, TAKER) + spread -> "TAKER_ARB_BUY_NO"
                 else -> null
             }
         }

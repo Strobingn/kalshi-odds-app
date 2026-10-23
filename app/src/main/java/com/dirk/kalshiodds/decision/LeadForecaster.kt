@@ -14,7 +14,7 @@ import kotlin.math.sqrt
  * windows and is ready the moment a window opens.
  */
 object LeadForecaster {
-    const val VERSION = "fc54-v1"
+    const val VERSION = "fc54-v2-twap"
     val HORIZONS_S = listOf(30, 60, 120, 180, 300, 600, -1)
     data class Config(val horizonS: Int, val marginUsd: Double)
 
@@ -61,9 +61,12 @@ object LeadForecaster {
     /** leadAt(k) = lead price k seconds ago (null if unknown → that lag term is 0). */
     fun features(mid: Double, mid60Ago: Double?, imb: Double, lead: Double, strike: Double, sigmaPerSec: Double,
                  tauS: Double, leadAt: (Int) -> Double?): DoubleArray? {
+        if (!lead.isFinite() || !strike.isFinite() || !sigmaPerSec.isFinite() || !tauS.isFinite()) return null
         if (!(lead > 0 && strike > 0 && sigmaPerSec > 0)) return null
         val tau = tauS.coerceAtLeast(1.0)
-        val z = sigmaPerSec * sqrt(tau)
+        // Settlement averages the final minute. Use the same diffusion time as ScalpRule.fairYes;
+        // keep wall-clock tau in x[6], since that is the feature the fitted weights expect.
+        val z = sigmaPerSec * sqrt(ScalpRule.effectiveTauSeconds(tauS))
         val d = (ln(lead / strike) / z).coerceIn(-4.0, 4.0)
         val fair = phiCdf(d)
         val phi = exp(-d * d / 2) / sqrt(2 * Math.PI)

@@ -83,6 +83,7 @@ class HftBook {
 
     private class Mkt {
         val ofi = HftMathEngines.OfiBuffer()
+        val depthOfi = HftMathEngines.DepthOfi()
         val mids = ArrayDeque<Sample>()
         val spots = ArrayDeque<Sample>()
         val rets = ArrayDeque<Double>()
@@ -101,10 +102,14 @@ class HftBook {
     private var pnl = 0.0
     private val scores = DosMmEngine.emptyScores().toMutableList()
     private var snap = DosMmEngine.Telemetry()
+    private var externalPositions: List<ScalpTrade> = emptyList()
 
     fun telemetry(): DosMmEngine.Telemetry = snap
 
-    fun onQuote(q: ScalpRule.Quote, bankroll: Double, newId: () -> String): List<ScalpTrade> {
+    fun onQuote(q: ScalpRule.Quote, bankroll: Double, openTrades: List<ScalpTrade> = emptyList(), newId: () -> String): List<ScalpTrade> {
+        externalPositions = openTrades.filter { it.ticker.equals(q.ticker, true) &&
+            (it.state == ScalpState.PENDING_ENTRY || it.state == ScalpState.OPEN || it.state == ScalpState.PENDING_EXIT) &&
+            !HftMathEngines.isHft(it.variantId) }
         val coin = ScalpParams.coinOf(q.ticker)
         if (coin != "BTC" && coin != "ETH" && coin != "SOL") return emptyList()
         val bid = q.yesBid
@@ -119,8 +124,11 @@ class HftBook {
         noteCoin(coin, q.nowMs, spot)
         push(m.mids, q.nowMs, (bid + ask) / 2.0, (q.yesBidSize ?: 0.0) + (q.yesAskSize ?: 0.0), 40_000L)
         if (spot > 0.0) push(m.spots, q.nowMs, spot, 1.0, 40_000L)
-        val ofiHat = m.ofi.update(bid, q.yesBidSize ?: 0.0, ask, q.yesAskSize ?: 0.0)
-        val ofi5 = levelOfi(m, q, ofiHat)
+        val ofi5 = m.depthOfi.update(
+            q.yesBidsDesc.ifEmpty { listOf(bid to (q.yesBidSize ?: 0.0)) },
+            q.noBidsDesc.map { (px, sz) -> (1.0 - px) to sz }.ifEmpty { listOf(ask to (q.yesAskSize ?: 0.0)) }
+        )
+        val ofiHat = m.ofi.add(ofi5)
         val dMid = delta(m.mids, q.nowMs, 10_000L)
         val dLn = logDelta(m.spots, q.nowMs, 10_000L)
         val sig10 = HftMathEngines.sigma10s(m.rets.toList(), vol15)
@@ -149,6 +157,14 @@ class HftBook {
         val guard = HftMathEngines.dosQuote(bid, ask, q.yesBidSize ?: 1.0, q.yesAskSize ?: 1.0, fair, inv, ofiHat, q.tauS)
         val structural = q.fresh() && !q.bookGap && spread <= HftMathEngines.MAX_SPREAD && age <= HftMathEngines.MAX_BOOK_AGE_MS &&
             corr <= HftMathEngines.STRESS_CORR && pnl >= -HftMathEngines.DRAWDOWN_CEILING
+        val usableExitBook = q.fresh() && !q.bookGap
+        val heldAtStart = m.pos.keys.toSet()
+        // Spread, drawdown, correlation, and toxicity gates control new risk. Existing positions still get exits.
+        if (usableExitBook) {
+            if ("dos-mm" in heldAtStart && guard.guard == null) manageDos(m, q, guard, kelly.contracts, newId)?.let { out += it }
+            if ("mrla-cs" in heldAtStart) tryMrla(m, q, prop, dLn, spot, newId)?.let { out += it }
+            if ("iv-smile" in heldAtStart) trySmile(m, q, fair, sig, ofiHat, dLn, sig10, bankroll, newId)?.let { out += it }
+        }
         var mode = "WATCH"
         if (guard.guard != null) {
             mode = guard.guard
@@ -157,12 +173,12 @@ class HftBook {
             m.mrlaSide = null
             m.pos["dos-mm"]?.let { pos ->
                 val exitPx = q.bid(pos.trade.side)
-                if (exitPx != null && exitPx > 0.01 && exitPx < 0.99) {
+                if (usableExitBook && exitPx != null && exitPx > 0.01 && exitPx < 0.99) {
                     out += close(m, "dos-mm", exitPx, HftMathEngines.TAKER, guard.guard, q.nowMs)
                 }
             }
         } else if (structural) {
-            manageDos(m, q, guard, kelly.contracts, newId)?.let { out += it }
+            if ("dos-mm" !in heldAtStart) manageDos(m, q, guard, kelly.contracts, newId)?.let { out += it }
             if (m.pos["dos-mm"] == null && m.restBid != null) mode = "MAKER_QUOTE"
         } else {
             m.restBid = null
@@ -174,18 +190,18 @@ class HftBook {
                 out += ts
                 mode = if (ts.side == "YES") "TAKER_ARB_BUY_YES" else "TAKER_ARB_BUY_NO"
             }
-            val mr = tryMrla(m, q, prop, dLn, spot, newId)
+            val mr = if ("mrla-cs" !in heldAtStart) tryMrla(m, q, prop, dLn, spot, newId) else null
             if (mr != null) {
                 out += mr
                 if (mode == "WATCH" || mode == "MAKER_QUOTE") mode = "MRLA_CONTRARIAN"
             }
-            val iv = trySmile(m, q, fair, sig, ofiHat, dLn, sig10, bankroll, newId)
+            val iv = if ("iv-smile" !in heldAtStart) trySmile(m, q, fair, sig, ofiHat, dLn, sig10, bankroll, newId) else null
             if (iv != null) {
                 out += iv
                 if (mode == "WATCH" || mode == "MAKER_QUOTE") mode = "IV_SMILE"
             }
         }
-        exitTimed(m, q, out)
+        if (usableExitBook) exitTimed(m, q, out)
         snap = DosMmEngine.Telemetry(
             ready = g != null,
             ticker = q.ticker.uppercase(),
@@ -280,6 +296,7 @@ class HftBook {
         val depth = if (buyYes) q.yesAskSize ?: 0.0 else q.askSize("NO") ?: 0.0
         val n = clip(k.contracts, depth, 20)
         if (n < 1 || ask > HftMathEngines.ASK_CAP) return null
+        if (p - ask <= ScalpRule.roundTripCost(ask, spread, n) + 1e-9) return null
         return open(m, "ts-arb", if (buyYes) "YES" else "NO", ask, n, HftMathEngines.TAKER, q, p, newId, sideName)
     }
 
@@ -344,6 +361,8 @@ class HftBook {
         val depth = q.askSize(side) ?: 0.0
         val n = clip(k.contracts, depth, 10)
         if (n < 1) return null
+        val spread = ask - (q.bid(side) ?: return null)
+        if (p - ask <= ScalpRule.roundTripCost(ask, spread, n) + HftMathEngines.SMILE_EDGE + 1e-9) return null
         val limit = if (side == "YES") HftMathEngines.smileExit(smile) else HftMathEngines.smileExit(1.0 - smile)
         val t = open(m, "iv-smile", side, ask, n, HftMathEngines.TAKER, q, p, newId, "IV smile") ?: return null
         m.pos["iv-smile"] = Pos(t, q.nowMs, ask, p, limit, 0.0, spot)
@@ -362,6 +381,8 @@ class HftBook {
         m: Mkt, id: String, side: String, px: Double, n: Int, mFee: Double, q: ScalpRule.Quote, fair: Double, newId: () -> String, note: String
     ): ScalpTrade? {
         if (m.pos[id] != null || n < 1 || px <= 0.01 || px >= 0.99) return null
+        val held = externalPositions + m.pos.values.map { it.trade }
+        if (FairGapTune.stackingBlocked(id, q, side, px, held)) return null
         val feeTotal = HftMathEngines.fee(n, px, mFee) * n
         val t = ScalpTrade(
             id = newId(),
@@ -415,29 +436,9 @@ class HftBook {
 
     private fun clip(cOpt: Int, depth: Double, cap: Int): Int {
         if (cOpt < 1) return 0
-        val d = depth.toInt().coerceAtLeast(1)
+        if (!depth.isFinite()) return 0
+        val d = kotlin.math.floor(depth).toInt().coerceAtLeast(0)
         return min(cOpt, min(d, cap)).coerceAtLeast(0)
-    }
-
-    private fun levelOfi(m: Mkt, q: ScalpRule.Quote, fallback: Double): Double {
-        val bids = q.yesBidsDesc
-        val asks = q.noBidsDesc
-        if (bids.size < 2 && asks.size < 2) return fallback
-        val n = min(5, maxOf(bids.size, asks.size))
-        if (n < 2) return fallback
-        val levels = ArrayList<HftMathEngines.OfLevel>(n)
-        for (i in 0 until n) {
-            val b = bids.getOrNull(i)
-            val a = asks.getOrNull(i)
-            val bidPx = b?.first ?: q.yesBid ?: 0.0
-            val bidSz = b?.second ?: 0.0
-            val askPx = a?.let { 1.0 - it.first } ?: q.yesAsk ?: 0.0
-            val askSz = a?.second ?: 0.0
-            val e = if (i == 0) fallback else 0.0
-            levels += HftMathEngines.OfLevel(e, 0.0, maxOf(1e-6, (bidSz + askSz) / 2.0))
-            if (bidPx < 0 || askPx < 0) continue
-        }
-        return if (levels.size >= 2) HftMathEngines.ofiWeighted(levels) else fallback
     }
 
     private fun noteCoin(coin: String, t: Long, spot: Double) {

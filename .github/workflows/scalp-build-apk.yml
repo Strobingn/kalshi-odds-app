@@ -6,7 +6,7 @@ on:
   push:
     branches: [kashi-next-dev]
   pull_request:
-    branches: [kashi-next-dev]
+    branches: [kashi-next-dev, Cursor/scalp-1037-hft-engines-f139]
   workflow_dispatch:
 
 permissions:
