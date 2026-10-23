@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.decision
 
+import org.json.JSONObject
 import java.io.File
 import java.security.MessageDigest
 import java.util.Locale
@@ -47,6 +48,7 @@ object LocalAnalyst {
     private var modelFile: File? = null
     private var sha256: String? = null
     private var activeName: String = SHORTLIST.first().name
+    private var prefsFile: File? = null
 
     fun engine(): Engine = synchronized(lock) { engine }
     fun modelPath(): String? = synchronized(lock) { modelFile?.absolutePath }
@@ -54,15 +56,53 @@ object LocalAnalyst {
     fun activeName(): String = synchronized(lock) { activeName }
     fun imported(): Boolean = synchronized(lock) { modelFile?.isFile == true && !sha256.isNullOrBlank() }
 
-    fun setBackend(backend: Backend) = synchronized(lock) { engine = engine.copy(backend = backend) }
+    /** Remember the built-in model pick across screen switches and process restarts. */
+    fun bind(filesDir: File) = synchronized(lock) {
+        prefsFile = File(filesDir, "local-analyst.json")
+        loadLocked()
+    }
+
+    fun setBackend(backend: Backend) = synchronized(lock) {
+        engine = engine.copy(backend = backend)
+        saveLocked()
+    }
     fun setMaxOutputTokens(tokens: Int) = synchronized(lock) {
         engine = engine.copy(maxOutputTokens = tokens.coerceIn(256, 384))
+        saveLocked()
     }
     fun setPauseDuringActiveEntry(on: Boolean) = synchronized(lock) {
         engine = engine.copy(pauseDuringActiveEntry = on)
+        saveLocked()
     }
     fun setActiveName(name: String) = synchronized(lock) {
         if (SHORTLIST.any { it.name == name }) activeName = name
+        saveLocked()
+    }
+
+    private fun saveLocked() {
+        val file = prefsFile ?: return
+        val o = JSONObject()
+            .put("activeName", activeName)
+            .put("backend", engine.backend.name)
+            .put("maxOutputTokens", engine.maxOutputTokens)
+            .put("pauseDuringActiveEntry", engine.pauseDuringActiveEntry)
+        runCatching { file.writeText(o.toString()) }
+    }
+
+    private fun loadLocked() {
+        val file = prefsFile ?: return
+        if (!file.isFile) return
+        val o = runCatching { JSONObject(file.readText()) }.getOrNull() ?: return
+        val name = o.optString("activeName")
+        if (SHORTLIST.any { it.name == name }) activeName = name
+        val backend = runCatching { Backend.valueOf(o.optString("backend")) }.getOrNull()
+        if (backend != null) engine = engine.copy(backend = backend)
+        if (o.has("maxOutputTokens")) {
+            engine = engine.copy(maxOutputTokens = o.optInt("maxOutputTokens", engine.maxOutputTokens).coerceIn(256, 384))
+        }
+        if (o.has("pauseDuringActiveEntry")) {
+            engine = engine.copy(pauseDuringActiveEntry = o.optBoolean("pauseDuringActiveEntry", engine.pauseDuringActiveEntry))
+        }
     }
 
     /** Hash a `.litertlm` file and keep it as the active local model. Missing files stay on the quant analyst. */
@@ -83,11 +123,24 @@ object LocalAnalyst {
         modelFile = null
         sha256 = null
         activeName = SHORTLIST.first().name
+        prefsFile = null
     }
 }
 
 object ModelImport {
-    fun sha256(file: File): String = sha256(file.readBytes())
+    /** Stream the digest. A 2.59 GB `.litertlm` must not be loaded into one byte array. */
+    fun sha256(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().buffered().use { input ->
+            val buf = ByteArray(64 * 1024)
+            while (true) {
+                val n = input.read(buf)
+                if (n < 0) break
+                digest.update(buf, 0, n)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
 
     fun sha256(bytes: ByteArray): String {
         val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
@@ -131,6 +184,7 @@ object QuantCompanion {
         val strike = num(prompt, "Strike\\s+([0-9.]+)")
         val spot = num(prompt, "BTC spot\\s+([0-9.]+)")
         val minutes = num(prompt, "minutes left\\s+([0-9.]+)")
+        val yesBid = num(prompt, "YES bid/ask\\s+([0-9.]+)/")
         val yesAsk = num(prompt, "YES bid/ask\\s+[^/\\s]+/([0-9.]+)")
         val fairText = num(prompt, "Model fair YES\\s+([0-9.]+)")
         val tau = (minutes ?: 5.0) * 60.0
@@ -138,7 +192,7 @@ object QuantCompanion {
         val fair = p ?: fairText
         if (fair == null || yesAsk == null) return "SKIP"
         if (yesAsk <= 0.55 && fair - yesAsk > 0.03) return "YES ${fmt(fair.coerceIn(0.05, 0.95))}"
-        val noAsk = (1.0 - yesAsk).coerceIn(0.01, 0.99)
+        val noAsk = (1.0 - (yesBid ?: yesAsk)).coerceIn(0.01, 0.99)
         val noFair = 1.0 - fair
         if (noAsk <= 0.55 && noFair - noAsk > 0.03) return "NO ${fmt(noFair.coerceIn(0.05, 0.95))}"
         return "SKIP"

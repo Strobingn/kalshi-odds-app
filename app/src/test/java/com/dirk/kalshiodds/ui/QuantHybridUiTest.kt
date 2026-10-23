@@ -14,7 +14,9 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.dirk.kalshiodds.decision.LocalAnalyst
 import com.dirk.kalshiodds.decision.ModelFilter
+import com.dirk.kalshiodds.decision.QuantSession
 import com.dirk.kalshiodds.llm.ChatMessage
 import com.dirk.kalshiodds.ui.theme.KalshiOddsTheme
 import org.junit.After
@@ -32,8 +34,16 @@ import org.robolectric.annotation.Config
 class QuantHybridUiTest {
     @get:Rule val compose = createComposeRule()
 
-    @Before fun resetBefore() { ModelFilter.resetForTest() }
-    @After fun resetAfter() { ModelFilter.resetForTest() }
+    @Before fun resetBefore() {
+        ModelFilter.resetForTest()
+        LocalAnalyst.resetForTest()
+        QuantSession.resetForTest()
+    }
+    @After fun resetAfter() {
+        ModelFilter.resetForTest()
+        LocalAnalyst.resetForTest()
+        QuantSession.resetForTest()
+    }
 
     @Test fun quantSitsAfterStrategiesAndTheOverviewBannerOpensIt() {
         val order = KashiArenaTab.values().map { it.name }
@@ -73,6 +83,38 @@ class QuantHybridUiTest {
         compose.waitForIdle()
         compose.onNodeWithText("Three paper arms").assertExists()
         compose.onNodeWithTag("BENCHMARK_EPS").assertExists()
+    }
+
+    @Test fun llmAndOnnxPillsUpdateImmediately() {
+        compose.setContent {
+            KalshiOddsTheme(darkTheme = true) {
+                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                    QuantHybridScreen()
+                }
+            }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithTag("LLM_GEMMA_3N").performScrollTo().performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("LLM_STATUS").assertExists()
+        compose.onNodeWithText("Selected: Gemma 3n E2B", substring = true).assertExists()
+        compose.onNodeWithTag("LLM_GPU").performScrollTo().performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Gemma 3n E2B · GPU", substring = true).assertExists()
+        compose.onNodeWithTag("LLM_OUTPUT_256").performScrollTo().performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("maxOutputTokens 256", substring = true).assertExists()
+        compose.onNodeWithTag("LLM_PAUSE").performScrollTo().performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Local model may run during an entry").assertExists()
+        compose.onNodeWithTag("MODEL_ONNX").performScrollTo().performClick()
+        compose.waitForIdle()
+        assertEquals(QuantSession.ModelMode.ONNX, QuantSession.mode())
+        compose.onNodeWithTag("MODEL_RUNTIME").assertExists()
+        compose.onNodeWithText("ONNX", substring = true).assertExists()
+        compose.onNodeWithTag("KELLY_MODE").performScrollTo().performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Kelly sizing on").assertExists()
     }
 
     @Test fun decisionPickerSelectsARowAndAsksGroq() {

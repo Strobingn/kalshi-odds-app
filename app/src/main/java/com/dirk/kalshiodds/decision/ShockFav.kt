@@ -77,6 +77,8 @@ object ShockFav {
         val oos: String = ""
     ) {
         val shockId: String get() = code
+        /** Take-profit of a simple dip, used as the rebound target for the model filter. */
+        val dipTarget: Double get() = tp
         val favId: String get() = code + "f"
         fun summary(): String = when (kind) {
             Kind.LAGGARD -> String.format(java.util.Locale.US, "BTC lags: ETH+SOL move ≥%.0fbp/%ds same way, BTC < half → buy BTC that way; +%.0f¢ TP, hold ≤%ds", xBp, yS, tp * 100, maxHoldS)

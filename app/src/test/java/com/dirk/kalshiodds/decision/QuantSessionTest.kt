@@ -97,7 +97,8 @@ class QuantSessionTest {
         "ORTM".toByteArray(Charsets.ISO_8859_1).copyInto(ort, 4)
         val msg = QuantSession.importBytes("book.ort", ort)
         assertTrue(msg, msg.contains("context"))
-        assertEquals(QuantSession.ModelMode.LOGISTIC, QuantSession.mode())
+        assertTrue(msg, msg.startsWith("ONNX"))
+        assertEquals(QuantSession.ModelMode.ONNX, QuantSession.mode())
         assertTrue(File(System.getProperty("java.io.tmpdir"), "scalp-qnn/qnn/imported.ort").isFile)
     }
 
@@ -148,9 +149,9 @@ class QuantSessionTest {
         assertEquals(sigmoid(2.0), logistic, 1e-9)
         assertEquals("Logistic", QuantSession.telemetry().modelType)
         QuantSession.fitForest(listOf(x, DoubleArray(ModelFilter.FEATURES)), doubleArrayOf(1.0, 0.0))
-        // Neutral until a real forest exists; a two-row fit stays empty and the score stays 0.5.
+        val prior = TreeEnsemble.priorPayoff().probability(x)
         QuantSession.setMode(QuantSession.ModelMode.TREE_ENSEMBLE)
-        assertEquals(0.5, QuantSession.score(w, 0.0, x), 1e-9)
+        assertEquals(prior, QuantSession.score(w, 0.0, x), 1e-9)
         assertEquals("TreeEnsemble", QuantSession.telemetry().modelType)
         val msg = QuantSession.importBytes("stump.onnx", OnnxGraph.export(stump()))
         assertTrue(msg, msg.startsWith("ONNX"))
@@ -159,9 +160,8 @@ class QuantSessionTest {
         assertEquals(sigmoid(-1.0), onnx, 1e-5)
         QuantSession.setMode(QuantSession.ModelMode.ENSEMBLE)
         val ensemble = QuantSession.score(w, 0.0, x)
-        val tree = 0.5
         val residual = sigmoid(0.0)
-        assertEquals((sigmoid(2.0) + tree + residual) / 3.0, ensemble, 1e-9)
+        assertEquals((sigmoid(2.0) + prior + residual) / 3.0, ensemble, 1e-9)
         assertEquals("Ensemble", QuantSession.telemetry().modelType)
         QuantSession.setMode(QuantSession.ModelMode.ONNX)
         assertEquals(sigmoid(-1.0), QuantSession.score(w, 0.0, x), 1e-5)
@@ -258,6 +258,43 @@ class QuantSessionTest {
     @Test fun proguardKeepsOnnxRuntime() {
         val file = listOf(File("proguard-rules.pro"), File("app/proguard-rules.pro")).first { it.isFile }
         assertTrue(file.readText().contains("-keep class ai.onnxruntime.** { *; }"))
+    }
+
+    @Test fun onnxModeWithoutAnImportBuildsTheGraph() {
+        val note = QuantSession.setMode(QuantSession.ModelMode.ONNX)
+        assertEquals(QuantSession.ModelMode.ONNX, QuantSession.mode())
+        assertTrue(note, note.startsWith("ONNX"))
+        assertTrue(note, note.contains("[1, ${ModelFilter.FEATURES}]"))
+        val file = File(System.getProperty("java.io.tmpdir"), "scalp-qnn/qnn/scalp-quant.onnx")
+        assertTrue(file.isFile)
+        val parsed = OnnxGraph.parse(file.readBytes())
+        assertEquals(ModelFilter.FEATURES, parsed.features)
+        assertEquals(1, parsed.inputShape[0])
+        assertTrue(parsed.treeCount > 0)
+        val x = DoubleArray(ModelFilter.FEATURES) { 0.02 }
+        val score = QuantSession.score(DoubleArray(ModelFilter.FEATURES), ModelFilter.PRIOR_BIAS, x)
+        assertTrue(score.isFinite())
+        assertTrue(score in 0.0..1.0)
+    }
+
+    @Test fun savedOnnxModeReloadsInsteadOfFallingBack() {
+        val dir = File(System.getProperty("java.io.tmpdir"), "scalp-onnx-prefs")
+        dir.mkdirs()
+        QuantSession.prepare(dir, File(dir, "cache"))
+        QuantSession.setMode(QuantSession.ModelMode.ONNX)
+        QuantSession.resetForTest()
+        QuantSession.prepare(dir, File(dir, "cache"))
+        assertEquals(QuantSession.ModelMode.ONNX, QuantSession.mode())
+    }
+
+    @Test fun badOnnxImportDoesNotBlockOnnxMode() {
+        val bad = OnnxGraph.exportGraph(intArrayOf(1, ModelFilter.FEATURES), listOf("TreeEnsembleClassifier"), dynamicAxis = true)
+        val msg = QuantSession.importBytes("bad.onnx", bad)
+        assertFalse(msg, msg.startsWith("ONNX"))
+        assertEquals(QuantSession.ModelMode.LOGISTIC, QuantSession.mode())
+        val note = QuantSession.setMode(QuantSession.ModelMode.ONNX)
+        assertEquals(QuantSession.ModelMode.ONNX, QuantSession.mode())
+        assertTrue(note.startsWith("ONNX"))
     }
 
     private fun stump(): TreeEnsemble {

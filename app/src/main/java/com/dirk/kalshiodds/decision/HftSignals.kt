@@ -192,6 +192,13 @@ object HftSignals {
         return (star.coerceAtLeast(0.0) * scale).coerceIn(0.0, 1.0)
     }
 
+    /** Student-t density. Same ν as [studentTCdf]. */
+    fun studentTPdf(z: Double, nu: Double = NU): Double {
+        if (!z.isFinite()) return 0.0
+        val logC = lnGamma((nu + 1.0) / 2.0) - lnGamma(nu / 2.0) - 0.5 * ln(nu * Math.PI)
+        return exp(logC - ((nu + 1.0) / 2.0) * ln(1.0 + z * z / nu))
+    }
+
     fun studentTCdf(t: Double, nu: Double = NU): Double {
         if (!t.isFinite()) return if (t > 0.0) 1.0 else 0.0
         if (t == 0.0) return 0.5

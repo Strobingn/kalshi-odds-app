@@ -18,6 +18,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -31,6 +32,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.dirk.kalshiodds.decision.DosMmEngine
+import com.dirk.kalshiodds.decision.HftMathEngines
 import com.dirk.kalshiodds.decision.LocalAnalyst
 import com.dirk.kalshiodds.decision.ModelFilter
 import com.dirk.kalshiodds.decision.QuantSession
@@ -85,6 +88,8 @@ internal fun QuantHybridScreen(
     val c = DipTheme.colors
     var rev by remember { mutableIntStateOf(0) }
     val tel = remember(rev) { ModelFilter.telemetry() }
+    val sizeMode = remember(rev) { ModelFilter.sizeMode() }
+    val exitSec = remember(rev) { ModelFilter.exitBeforeSeconds() }
     val boards = remember(rev) { ModelFilter.scorecards() }
     val sourceKey = decisions?.joinToString(",") { "${it.id}:${it.atMs}:${it.score}:${it.entered}:${it.outcomeUsd}" } ?: "live:$rev"
     val fullLog = remember(sourceKey) { decisions ?: ModelFilter.researchLog() }
@@ -132,8 +137,9 @@ internal fun QuantHybridScreen(
                     QuantSession.ModelMode.ENSEMBLE to "Ensemble",
                     QuantSession.ModelMode.ONNX to "ONNX"
                 ).forEach { (mode, label) ->
-                    val selected = tel.modelType.equals(label, true) || (mode == QuantSession.ModelMode.TREE_ENSEMBLE && tel.modelType == "TreeEnsemble")
-                    Pill(label, selected) { ModelFilter.setMode(mode); rev++ }
+                    val selected = QuantSession.mode() == mode
+                    val tag = if (mode == QuantSession.ModelMode.ONNX) "MODEL_ONNX" else null
+                    Pill(label, selected, tag) { ModelFilter.setMode(mode); rev++ }
                 }
             }
             Text("Execution", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
@@ -180,20 +186,20 @@ internal fun QuantHybridScreen(
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(
-                    onClick = { ModelFilter.setSizeExperiment(ModelFilter.sizeMode() != ModelFilter.SizeMode.SCALAR); rev++ },
-                    modifier = Modifier.weight(1f)
-                ) { Text(if (ModelFilter.sizeMode() == ModelFilter.SizeMode.SCALAR) "Size 0–1.5× on" else "Size 1.0×", textAlign = TextAlign.Center) }
+                    onClick = { ModelFilter.setSizeExperiment(sizeMode != ModelFilter.SizeMode.SCALAR); rev++ },
+                    modifier = Modifier.weight(1f).testTag("SIZE_MODE")
+                ) { Text(if (sizeMode == ModelFilter.SizeMode.SCALAR) "Size 0–1.5× on" else "Size 1.0×", textAlign = TextAlign.Center) }
                 OutlinedButton(onClick = {
-                    ModelFilter.setSizeMode(if (ModelFilter.sizeMode() == ModelFilter.SizeMode.KELLY) ModelFilter.SizeMode.FIXED else ModelFilter.SizeMode.KELLY)
+                    ModelFilter.setSizeMode(if (sizeMode == ModelFilter.SizeMode.KELLY) ModelFilter.SizeMode.FIXED else ModelFilter.SizeMode.KELLY)
                     rev++
-                }, modifier = Modifier.weight(1f)) {
-                    Text(if (ModelFilter.sizeMode() == ModelFilter.SizeMode.KELLY) "Kelly sizing on" else "Kelly sizing off", textAlign = TextAlign.Center)
+                }, modifier = Modifier.weight(1f).testTag("KELLY_MODE")) {
+                    Text(if (sizeMode == ModelFilter.SizeMode.KELLY) "Kelly sizing on" else "Kelly sizing off", textAlign = TextAlign.Center)
                 }
             }
             Text("Forced exit", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(60.0 to "60s", 75.0 to "75s", 90.0 to "90s").forEach { (sec, label) ->
-                    Pill("Exit $label", ModelFilter.exitBeforeSeconds() == sec) { ModelFilter.setExitBeforeSeconds(sec); rev++ }
+                    Pill("Exit $label", exitSec == sec, "EXIT_${label.uppercase()}") { ModelFilter.setExitBeforeSeconds(sec); rev++ }
                 }
             }
         }
@@ -323,7 +329,8 @@ internal fun QuantHybridScreen(
         }
 
         StopPolicyCard()
-        LocalLlmCard { rev++ }
+        HftEnginesCard()
+        LocalLlmCard(rev) { rev++ }
     }
 }
 
@@ -347,38 +354,88 @@ private fun StopPolicyCard() {
 }
 
 @Composable
-private fun LocalLlmCard(bump: () -> Unit) {
+private fun LocalLlmCard(rev: Int, bump: () -> Unit) {
     val c = DipTheme.colors
-    val eng = LocalAnalyst.engine()
+    var localRev by remember { mutableIntStateOf(0) }
+    val eng = remember(rev, localRev) { LocalAnalyst.engine() }
+    val name = remember(rev, localRev) { LocalAnalyst.activeName() }
+    val imported = remember(rev, localRev) { LocalAnalyst.imported() }
+    val hash = remember(rev, localRev) { LocalAnalyst.sha256() }
+    fun tap(block: () -> Unit) {
+        block()
+        localRev++
+        bump()
+    }
     ArenaCard(Modifier.testTag("LOCAL_LLM")) {
         Text("Built-in LLM · LiteRT-LM", color = c.textPrimary, fontWeight = FontWeight.SemiBold)
         Text(
-            if (LocalAnalyst.imported()) "Active ${LocalAnalyst.activeName()} · ${LocalAnalyst.sha256()}"
-            else "No .litertlm imported · built-in quant analyst",
-            color = c.textSecondary,
-            style = MaterialTheme.typography.bodySmall
+            "Selected: $name · ${eng.backend} · maxOutputTokens ${eng.maxOutputTokens} · ${if (imported) hash ?: "" else "Built-in quant analyst active"}",
+            color = c.textPrimary,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.testTag("LLM_STATUS")
         )
         LocalAnalyst.SHORTLIST.forEach { row ->
             val speed = listOfNotNull(row.cpuTokPerSec?.let { "$it tok/s CPU" }, row.gpuTokPerSec?.let { "$it tok/s GPU" }).joinToString(" / ")
-            val on = row.name == LocalAnalyst.activeName()
-            Pill("${row.role} · ${row.name}${if (speed.isBlank()) "" else " · $speed"}", on) {
-                LocalAnalyst.setActiveName(row.name)
-                bump()
+            val on = row.name == name
+            val tag = if (row.name == "Gemma 3n E2B") "LLM_GEMMA_3N" else "LLM_${row.name.replace(' ', '_')}"
+            Pill("${row.role} · ${row.name}${if (speed.isBlank()) "" else " · $speed"}", on, tag) {
+                tap { LocalAnalyst.setActiveName(row.name) }
             }
         }
         Text("Engine · LiteRT-LM 0.18 · maxNumTokens ${eng.maxNumTokens} · thinking off · tools off · one request", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
-        Row(Modifier.horizontalScroll(rememberScrollState())) {
-            Pill("CPU", eng.backend == LocalAnalyst.Backend.CPU) { LocalAnalyst.setBackend(LocalAnalyst.Backend.CPU); bump() }
-            Pill("GPU", eng.backend == LocalAnalyst.Backend.GPU) { LocalAnalyst.setBackend(LocalAnalyst.Backend.GPU); bump() }
-            Pill("Output 256", eng.maxOutputTokens == 256) { LocalAnalyst.setMaxOutputTokens(256); bump() }
-            Pill("Output 384", eng.maxOutputTokens == 384) { LocalAnalyst.setMaxOutputTokens(384); bump() }
-        }
-        OutlinedButton(onClick = { LocalAnalyst.setPauseDuringActiveEntry(!eng.pauseDuringActiveEntry); bump() }, modifier = Modifier.fillMaxWidth()) {
+        Pill("CPU", eng.backend == LocalAnalyst.Backend.CPU, "LLM_CPU") { tap { LocalAnalyst.setBackend(LocalAnalyst.Backend.CPU) } }
+        Pill("GPU", eng.backend == LocalAnalyst.Backend.GPU, "LLM_GPU") { tap { LocalAnalyst.setBackend(LocalAnalyst.Backend.GPU) } }
+        Pill("Output 256", eng.maxOutputTokens == 256, "LLM_OUTPUT_256") { tap { LocalAnalyst.setMaxOutputTokens(256) } }
+        Pill("Output 384", eng.maxOutputTokens == 384, "LLM_OUTPUT_384") { tap { LocalAnalyst.setMaxOutputTokens(384) } }
+        OutlinedButton(onClick = { tap { LocalAnalyst.setPauseDuringActiveEntry(!eng.pauseDuringActiveEntry) } }, modifier = Modifier.fillMaxWidth().testTag("LLM_PAUSE")) {
             Text(if (eng.pauseDuringActiveEntry) "Pause local model during an entry" else "Local model may run during an entry")
         }
         Text("SHA-256 verifies an imported .litertlm. Until that file is on the phone, Groq and the quant analyst answer.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
     }
 }
+
+@Composable
+private fun HftEnginesCard() {
+    val c = DipTheme.colors
+    val live by DosMmEngine.latest.collectAsState()
+    val maker = HftMathEngines.makerMaker()
+    val takerStop = HftMathEngines.makerInTakerStop()
+    val taker = HftMathEngines.takerTaker()
+    ArenaCard(Modifier.testTag("HFT_ENGINES")) {
+        Text("5-Engine HFT Microstructure & Calculus Telemetry", color = c.textPrimary, fontWeight = FontWeight.SemiBold)
+        Text(if (live.ready) live.ticker.ifBlank { "live" } else "waiting for a BTC, ETH, or SOL quote", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+        Text("Student-t ν=4.2", color = c.spot, style = MaterialTheme.typography.labelMedium)
+        Text("z ${n4(live.z)} · fair ${n4(live.fair)} · Δ ${n4(live.delta)} · Γ ${n4(live.gamma)} · Θ ${n4(live.theta)} · σP ${n4(live.sigmaP)}", color = c.textPrimary, style = MaterialTheme.typography.bodySmall)
+        Text("HJB DOS-MM", color = c.spot, style = MaterialTheme.typography.labelMedium)
+        Text("VAMP ${n4(live.vamp)} · r ${n4(live.reservation)} · δ ${n4(live.halfSpread)} · bid ${n4(live.myBid)} · ask ${n4(live.myAsk)} · q ${n4(live.inventory)} · ${live.guard}", color = c.textPrimary, style = MaterialTheme.typography.bodySmall)
+        Text("MRLA-CS", color = c.spot, style = MaterialTheme.typography.labelMedium)
+        Text("OFI5 ${n4(live.ofi5)} · OFI ${n4(live.ofiHat)} · ΔPrev ${n4(live.bounce)} · CMDR ${n4(live.cmdr)}", color = c.textPrimary, style = MaterialTheme.typography.bodySmall)
+        Text("TS-Arb final 60s", color = c.spot, style = MaterialTheme.typography.labelMedium)
+        Text("α ${n4(live.alpha)} · locked ${n4(live.locked)} · Ŝ ${n4(live.sHat)} · Keff ${n4(live.kEff)} · zTerm ${n4(live.zTerm)} · Pterm ${n4(live.pTerm)} · Zvwap ${n4(live.zVwap)}", color = c.textPrimary, style = MaterialTheme.typography.bodySmall)
+        Text("Kelly and 5 gates", color = c.spot, style = MaterialTheme.typography.labelMedium)
+        Text(
+            "W ${n4(takerStop.winNet)} · L ${n4(takerStop.lossNet)} · Taker/Taker ${HftMathEngines.percentLabel(taker.pMin)} · Maker/Maker ${HftMathEngines.percentLabel(maker.pMin)} · Maker-In/Taker-Stop ${HftMathEngines.percentLabel(takerStop.pMin)}",
+            color = c.textPrimary,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.testTag("HFT_PMIN")
+        )
+        Text("f* ${n4(live.fStar)} · Copt ${live.cOpt} · mode ${live.mode}", color = c.textPrimary, style = MaterialTheme.typography.bodySmall)
+        if (live.gates.isEmpty()) {
+            Text("MaxPositionLimit · DailyDrawdownCeiling · QuarterKellyPinDamper · SpreadWidthGuard · SnapshotLatencyAndCorrRegime", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+        } else {
+            live.gates.forEach { gate ->
+                Text("${gate.name} ${if (gate.pass) "pass" else "fail"}", color = if (gate.pass) c.up else c.down, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        live.scores.forEach { s ->
+            Text("${s.label} ${money(s.netUsd)} · ${s.wins}/${s.trades}", color = if (s.netUsd >= 0) c.up else c.down, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("HFT_SCORE_${s.id.uppercase()}"))
+        }
+        Text(HftMathEngines.referenceDos(), color = c.up, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("HFT_BENCH"))
+        Text(HftMathEngines.referenceNaive(), color = c.down, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+private fun n4(v: Double): String = if (!v.isFinite()) "—" else String.format(Locale.US, "%.4f", v)
 
 @Composable
 internal fun researchQuotas(): List<ProviderQuota> {

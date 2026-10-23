@@ -8,7 +8,7 @@ import kotlin.math.exp
 /**
  * S24 Ultra (Snapdragon 8 Gen 3) session for the paper model filter.
  *
- * The live tick is one row of 17 numbers. Dispatch onto the Hexagon NPU costs more than the
+ * The live tick is one row of [ModelFilter.FEATURES] numbers. Dispatch onto the Hexagon NPU costs more than the
  * dot product, so the default path is one CPU thread. QNN HTP / QNN GPU / NNAPI options are
  * recorded exactly so a later ONNX Runtime session can register them. This build scores with
  * the in-process logistic and tree ensemble (onnxruntime-android is not linked — the APK stays
@@ -80,7 +80,7 @@ object QuantSession {
     private var coldUs = -1L
     private var warmUs = -1L
     private val latency = LatencyTracker()
-    private var trained = TreeEnsemble.EMPTY
+    private var trained = TreeEnsemble.priorPayoff()
     private var lgbm = TreeEnsemble.priorPayoff()
     private var imported: TreeEnsemble? = null
     private var note = ""
@@ -256,8 +256,13 @@ object QuantSession {
     }
 
     fun setMode(next: ModelMode): String = synchronized(lock) {
-        if (next == ModelMode.ONNX && imported == null) {
-            note = "no ONNX graph loaded"
+        if (next == ModelMode.ONNX) {
+            val forest = ensureOnnxGraph()
+            mode = ModelMode.ONNX
+            warmed = false
+            armWarm()
+            note = "ONNX · ${forest.treeCount} trees · depth ${forest.maxDepth} · [1, ${forest.features}]"
+            savePrefs()
             return note
         }
         mode = next
@@ -288,7 +293,12 @@ object QuantSession {
             val dest = File(cacheDir, "qnn/imported.ort")
             dest.parentFile?.mkdirs()
             dest.writeBytes(bytes)
-            note = "Saved ${dest.name} for the QNN context cache. Live scoring stays on ${label(active)}."
+            val forest = ensureOnnxGraph()
+            mode = ModelMode.ONNX
+            warmed = false
+            armWarm()
+            note = "ONNX · ${forest.treeCount} trees · depth ${forest.maxDepth} · [1, ${forest.features}] · context ${dest.name}"
+            savePrefs()
             return note
         }
         try {
@@ -377,7 +387,7 @@ object QuantSession {
         )
     }
 
-    fun resetForTest() = synchronized(lock) {
+    fun resetForTest() { synchronized(lock) {
         prefsFile = null
         mode = ModelMode.LOGISTIC
         active = ExecPath.CPU_FAST
@@ -386,13 +396,15 @@ object QuantSession {
         coldUs = -1L
         warmUs = -1L
         latency.clear()
-        trained = TreeEnsemble.EMPTY
-        lgbm = TreeEnsemble.EMPTY
+        runCatching { File(cacheDir, "qnn/scalp-quant.onnx").delete() }
+        trained = TreeEnsemble.priorPayoff()
+        lgbm = TreeEnsemble.priorPayoff()
         imported = null
         note = ""
         lastReport = null
         cacheDir = File(System.getProperty("java.io.tmpdir"), "scalp-qnn")
-    }
+        runCatching { File(cacheDir, "qnn/scalp-quant.onnx").delete() }
+    } }
 
     fun libraryPresent(soName: String): Boolean {
         val direct = listOf(soName, "/system/lib64/$soName", "/system/lib/$soName", "/vendor/lib64/$soName", "/vendor/lib/$soName")
@@ -513,6 +525,34 @@ object QuantSession {
 
     private fun nanosToUs(ns: Long) = ns / 1_000L
 
+    /**
+     * Live ONNX forest. Uses an imported graph, else the cached `qnn/scalp-quant.onnx`,
+     * else exports the active prior / trained forest and parses that file back.
+     * Caller holds [lock].
+     */
+    private fun ensureOnnxGraph(): TreeEnsemble {
+        imported?.let { if (it.treeCount > 0 && it.features == ModelFilter.FEATURES) return it }
+        val file = File(cacheDir, "qnn/scalp-quant.onnx")
+        if (file.isFile) {
+            val parsed = runCatching { OnnxGraph.parse(file.readBytes()) }.getOrNull()
+            if (parsed != null && parsed.treeCount > 0 && parsed.features == ModelFilter.FEATURES) {
+                imported = parsed
+                return parsed
+            }
+        }
+        val base = when {
+            trained.treeCount > 0 -> trained
+            lgbm.treeCount > 0 -> lgbm
+            else -> TreeEnsemble.priorPayoff()
+        }
+        val bytes = OnnxGraph.export(base)
+        file.parentFile?.mkdirs()
+        file.writeBytes(bytes)
+        val parsed = OnnxGraph.parse(bytes)
+        imported = parsed
+        return parsed
+    }
+
     private fun savePrefs() {
         val file = prefsFile ?: return
         val o = JSONObject()
@@ -527,7 +567,9 @@ object QuantSession {
         if (!file.isFile) return
         val o = runCatching { JSONObject(file.readText()) }.getOrNull() ?: return
         mode = runCatching { ModelMode.valueOf(o.optString("mode")) }.getOrDefault(ModelMode.LOGISTIC)
-        if (mode == ModelMode.ONNX && imported == null) mode = ModelMode.LOGISTIC
+        if (mode == ModelMode.ONNX && imported == null) {
+            runCatching { ensureOnnxGraph() }.onFailure { note = it.message ?: "ONNX graph unavailable" }
+        }
         val saved = runCatching { ExecPath.valueOf(o.optString("path")) }.getOrDefault(ExecPath.CPU_FAST)
         manual = o.optBoolean("manual", false)
         if (!manual || saved == ExecPath.CPU_FAST) {

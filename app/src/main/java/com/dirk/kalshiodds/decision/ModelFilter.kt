@@ -20,7 +20,7 @@ object ModelFilter {
     const val EMBARGO_MS = 900_000L
     const val DEFAULT_THRESHOLD = 0.55
     const val DEFAULT_EXIT_S = 90.0
-    const val PRIOR_BIAS = -0.10
+    const val PRIOR_BIAS = 0.15
     private const val TICK_KEEP_MS = 30 * 60_000L
 
     enum class Kind { SIMPLE_DIP, FAIR, V2_FAIR, V2_DIP }
@@ -187,6 +187,8 @@ object ModelFilter {
     private var recentN = 0
     private var trainDay = ""
     private var treeFitN = 0
+    private val lastPrint = HashMap<String, String>()
+    private val lastDecision = HashMap<String, Decision>()
 
     private data class Tick(val atMs: Long, val spot: Double, val mid: Double, val spread: Double, val bidSz: Double, val askSz: Double)
 
@@ -268,7 +270,8 @@ object ModelFilter {
         val analytical = rawNetCents(ask, fair) / 100.0
         val tilt = (qScore.coerceIn(0.0, 1.0) - 0.5) * 0.08
         val blended = 0.5 * analytical + 0.5 * tilt
-        return if (residualClears(fair, ask, spread, 1)) blended.coerceAtLeast(1e-4) else blended.coerceAtMost(0.0)
+        val clears = residualClears(fair, ask, spread, 1) || (analytical > 0.0 && qScore > 0.5)
+        return if (clears) maxOf(blended, analytical).coerceAtLeast(1e-4) else blended.coerceAtMost(0.0)
     }
 
     /** Net cents per contract. The training target: 100 × (proceeds − cost − entry fee − exit fee) / contracts. */
@@ -363,6 +366,10 @@ object ModelFilter {
         why[twin.id] = reason
         lastScore[twin.id] = score
         val d = Decision(twin.id, q.nowMs, score, scalar, enter, reason, warm, x, fair, ask, side, bookAge, benchAge, POLICY_VERSION, modelVersion, if (twin.arm == Arm.LGBM) lgbm else eNet)
+        val print = "$side|${fmt4(ask)}|${fmt4(fair)}|${fmt4(score)}|$enter|$reason"
+        if (lastPrint[twin.id] == print) return lastDecision[twin.id] ?: d
+        lastPrint[twin.id] = print
+        lastDecision[twin.id] = d
         decisions.addLast(d)
         while (decisions.size > 200) {
             val old = decisions.removeFirst()
@@ -407,7 +414,10 @@ object ModelFilter {
     }
 
     fun retrainFrom(trades: List<ScalpTrade>, nowMs: Long) = synchronized(lock) {
-        for (t in trades) {
+        // loadScalps() is newest-first. Keep the newest 2,000 closed rows, then walk them oldest-first.
+        val closed = trades.filter { it.netUsd != null && it.entryPrice != null && it.closedAtMs != null }
+        val newest = if (closed.size > 2_000) closed.take(2_000) else closed
+        for (t in newest.asReversed()) {
             val net = t.netUsd ?: continue
             val entry = t.entryPrice ?: continue
             val at = t.entryAtMs ?: t.signalAtMs
@@ -476,6 +486,7 @@ object ModelFilter {
     fun syncField(variantId: String): String? = if (isTwin(variantId)) variantId else null
 
     fun bind(filesDir: java.io.File, cacheDir: java.io.File, assetOnnx: ByteArray? = null) {
+        LocalAnalyst.bind(filesDir)
         QuantSession.prepare(filesDir, cacheDir)
         if (assetOnnx != null && assetOnnx.isNotEmpty()) importModel("scalp_quant.onnx", assetOnnx)
         val dir = java.io.File(filesDir, "models")
@@ -524,6 +535,8 @@ object ModelFilter {
         recentN = 0
         trainDay = ""
         treeFitN = 0
+        lastPrint.clear()
+        lastDecision.clear()
         outcomes.clear()
         lastEnter.clear()
         lastEntryScore.clear()
@@ -652,8 +665,8 @@ object ModelFilter {
         val train = samples.filter { it.closeMs < cutoff }
         trainedN = train.size
         if (train.size < MIN_TRAIN) {
-            weights = DoubleArray(FEATURES)
-            bias = 0.0
+            weights = priorWeights()
+            bias = PRIOR_BIAS
             return
         }
         val fit = fit(train)
@@ -796,16 +809,22 @@ object ModelFilter {
 
     fun priorWeights(): DoubleArray {
         val w = DoubleArray(FEATURES)
-        w[16] = 0.15
-        w[19] = 0.40
-        w[22] = 0.20
-        w[23] = 0.10
-        w[13] = -1.0
+        w[0] = 0.25
+        w[1] = 0.04
+        w[2] = 0.35
+        w[3] = 0.05
+        w[13] = -0.80
+        w[14] = 0.30
+        w[16] = 0.25
+        w[19] = 0.60
         w[20] = -2.0
+        w[22] = 0.25
+        w[23] = 0.15
         return w
     }
 
     private fun dot(w: DoubleArray, x: DoubleArray) = (0 until FEATURES).sumOf { w[it] * x[it] }
     private fun sigmoid(z: Double) = 1.0 / (1.0 + exp(-z.coerceIn(-20.0, 20.0)))
     private fun fmt(v: Double) = String.format(java.util.Locale.US, "%.2f", v)
+    private fun fmt4(v: Double) = String.format(java.util.Locale.US, "%.4f", v)
 }

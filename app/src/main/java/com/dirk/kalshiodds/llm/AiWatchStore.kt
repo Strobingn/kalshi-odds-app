@@ -342,9 +342,7 @@ class AiWatchStore(private val file: File? = null) {
             follows = js.optBoolean("followsWindow", true)
             liveFeed = js.optBoolean("liveFeed", true)
             val paceUpgraded = js.optBoolean("migratedPace1036", false)
-            autoCalls = if (paceUpgraded) {
-                if (js.has("autoCalls")) js.optBoolean("autoCalls") else true
-            } else true
+            autoCalls = if (js.has("autoCalls")) js.optBoolean("autoCalls") else true
             migratedPace1036 = true
             freeTier.clear()
             js.optJSONObject("freeTier")?.let { obj ->

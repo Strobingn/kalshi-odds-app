@@ -66,7 +66,7 @@ object FairGapTune {
     fun exempt(code: String?): Boolean {
         if (code == null) return false
         if (code in KEEP || code in FAMILY || ownsRules(code)) return true
-        if (code in KeptScalpers.IDS || ScalpVariants.isLive(code) || ModelFilter.isTwin(code)) return true
+        if (code in KeptScalpers.IDS || code in KeptScalpers.HFT_IDS || ScalpVariants.isLive(code) || ModelFilter.isTwin(code)) return true
         return false
     }
 
@@ -104,12 +104,105 @@ object FairGapTune {
 
     /**
      * Own-rule late-favourite legs buy up to their own ask cap (about 95–97¢).
-     * Every other entry stays under the 55¢ hard ceiling.
+     * Every other entry stays under the 55¢ ceiling unless [lessonAllowed] grants a high-conviction exception.
+     * [ScalpRule.ENTRY_HI] itself is unchanged.
      */
-    fun askAllowed(code: String?, ask: Double, favLeg: Boolean): Boolean {
+    fun askAllowed(
+        code: String?,
+        ask: Double,
+        favLeg: Boolean,
+        q: ScalpRule.Quote? = null,
+        side: String? = null,
+        fair: Double? = null,
+        clip: Int = ScalpRule.CONTRACTS,
+        moveBp: Double? = null,
+        vwapZ: Double? = null,
+        variantId: String? = null,
+        open: List<ScalpTrade> = emptyList()
+    ): Boolean {
         if (!ask.isFinite() || ask <= 0.0 || ask > 0.99) return false
+        if (q != null && side != null && stackingBlocked(variantId, q, side, ask, open)) return false
         if (favLeg && ownsRules(code)) return true
-        return ScalpRule.buyPriceOk(ask)
+        if (ScalpRule.buyPriceOk(ask)) return true
+        return q != null && side != null && fair != null &&
+            lessonAllowed(q, side, ask, fair, clip, moveBp, vwapZ, variantId, open)
+    }
+
+    fun signedBuffer(side: String, spot: Double, strike: Double): Double =
+        if (side == "YES") spot - strike else strike - spot
+
+    /** UP/DOWN is aligned when the short move or the VWAP slope has that sign. A $35+ lead stands in when neither series is present. */
+    fun momentumAligned(side: String, moveBp: Double?, vwapZ: Double?, buffer: Double): Boolean {
+        val up = side == "YES"
+        if (moveBp != null && (if (up) moveBp >= 0.0 else moveBp <= 0.0)) return true
+        if (vwapZ != null && (if (up) vwapZ >= 0.0 else vwapZ <= 0.0)) return true
+        return moveBp == null && vwapZ == null && buffer >= 35.0
+    }
+
+    const val STACK_GUARD = "lesson guard: no stacking 64–82¢ under $150 buffer"
+
+    fun stackingBlocked(variantId: String?, q: ScalpRule.Quote, side: String, ask: Double, open: List<ScalpTrade>): Boolean {
+        val spot = q.spot ?: return false
+        val strike = q.strike ?: return false
+        if (variantId == null || ask !in 0.64..0.82 || q.tauS !in 420.0..780.0) return false
+        if (signedBuffer(side, spot, strike) >= 150.0) return false
+        return open.any { t ->
+            t.variantId == variantId && t.ticker.equals(q.ticker, true) && t.side == side &&
+                (t.state == ScalpState.OPEN || t.state == ScalpState.PENDING_ENTRY) &&
+                (t.entryPrice ?: t.signalAsk) in 0.64..0.82
+        }
+    }
+
+    /**
+     * High-conviction 56¢–85¢ paper entries. Does not change the 55¢ constant.
+     * False when the price is already inside that ceiling; callers check [ScalpRule.buyPriceOk] first.
+     */
+    fun lessonAllowed(
+        q: ScalpRule.Quote,
+        side: String,
+        ask: Double,
+        fair: Double,
+        clip: Int = ScalpRule.CONTRACTS,
+        moveBp: Double? = null,
+        vwapZ: Double? = null,
+        variantId: String? = null,
+        open: List<ScalpTrade> = emptyList()
+    ): Boolean {
+        val spot = q.spot ?: return false
+        val strike = q.strike ?: return false
+        if (spot <= 0.0 || strike <= 0.0 || !ask.isFinite() || !fair.isFinite()) return false
+        if (stackingBlocked(variantId, q, side, ask, open)) return false
+        val buf = signedBuffer(side, spot, strike)
+        val fee = ScalpRule.feePerContract(clip.coerceAtLeast(1), ask)
+        val net = fair - ask - fee
+        val aligned = momentumAligned(side, moveBp, vwapZ, buf)
+        if (q.tauS in 240.0..870.0 && ask in 0.56..0.82 && buf >= 35.0 && aligned && net >= 0.04) return true
+        if (q.tauS > 90.0 && ask in 0.82..0.85 && buf >= 180.0 && fair >= 0.96 && fair - ask >= 0.11) return true
+        if (q.tauS in 20.0..180.0 && ask <= 0.85 && buf >= 13.0 && fair - ask >= 0.12) return true
+        return false
+    }
+
+    /** Spot within $15 of the strike, 4–10 minutes left, ask still at or under 55¢. */
+    fun nearStrikeChop(q: ScalpRule.Quote, ask: Double): Boolean {
+        val spot = q.spot ?: return false
+        val strike = q.strike ?: return false
+        return kotlin.math.abs(spot - strike) <= 15.0 && q.tauS in 240.0..600.0 && ask <= ScalpRule.ENTRY_HI + 1e-9
+    }
+
+    fun chopFamilies(code: String?): Boolean =
+        code == KeptScalpers.FAIR_ID || code == KeptScalpers.V2_FAIR_ID || code == KeptScalpers.V2_FAIR_BASE ||
+            code == "dos-mm" || code == "mrla-cs" || code == "fair" || code == "v2-fair"
+
+    /** Rule E: 4¢ net of the taker fee is enough for fair-gap, DOS-MM, and MRLA-CS in a tight chop. */
+    fun chopDiscount(code: String?, q: ScalpRule.Quote, ask: Double, fair: Double, clip: Int = ScalpRule.CONTRACTS): Boolean {
+        if (!chopFamilies(code) || !nearStrikeChop(q, ask)) return false
+        return fair - ask - ScalpRule.feePerContract(clip.coerceAtLeast(1), ask) >= 0.04
+    }
+
+    /** Rule F: do not buy a dip when spot is already $30 against that side and fair is below the ask. */
+    fun fallingKnife(side: String, spot: Double?, strike: Double?, fair: Double?, ask: Double): Boolean {
+        if (spot == null || strike == null || fair == null || spot <= 0.0 || strike <= 0.0) return false
+        return signedBuffer(side, spot, strike) <= -30.0 && fair < ask - 0.02
     }
 
     data class Band(val lo: Double, val hi: Double)

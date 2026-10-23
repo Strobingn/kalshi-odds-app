@@ -9,6 +9,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.io.File
+import kotlin.math.abs
 
 class ModelFilterTest {
     @Before fun reset() = ModelFilter.resetForTest()
@@ -64,6 +66,48 @@ class ModelFilterTest {
         val rich = ModelFilter.decide(ModelFilter.TWINS.first(), quote(ask = 0.90, bid = 0.88), "YES", 0.90, 0.95)
         assertFalse(rich.enter)
         assertTrue(rich.reason, rich.reason.contains("55"))
+    }
+
+    @Test fun observeKeepsPriorsAndDipTwinsEnter() {
+        val q = quote(tauS = 600.0, bid = 0.39, ask = 0.40, spot = 100_200.0, strike = 100_000.0)
+        ModelFilter.observe(q)
+        val (w, b) = ModelFilter.weightCopy()
+        assertEquals(ModelFilter.PRIOR_BIAS, b, 1e-9)
+        assertEquals(0.25, w[0], 1e-9)
+        assertEquals(0.04, w[1], 1e-9)
+        assertFalse(w.all { it == 0.0 })
+        for (id in listOf("sf41-logistic", "sf41-lgbm", "sf42-logistic", "sf42-lgbm")) {
+            val twin = ModelFilter.twin(id)!!
+            val d = ModelFilter.decide(twin, q, "YES", 0.40, 0.48)
+            if (twin.arm == ModelFilter.Arm.LOGISTIC) assertTrue("$id ${d.score}", abs(d.score - 0.5) > 1e-4)
+            assertTrue(d.reason, d.enter)
+            ModelFilter.decide(twin, q, "YES", 0.40, 0.48)
+            assertEquals(id, 1, ModelFilter.researchLog().count { it.twinId == id })
+        }
+        val row = ModelFilter.researchLog().last { it.twinId == "sf41-logistic" }
+        val push = QuantSession.attributeLogistic(w, b, row.features)
+        val time = ModelFilter.FEATURE_NAMES.indexOf("timeLeft")
+        val dist = ModelFilter.FEATURE_NAMES.indexOf("distStrikeBps")
+        assertTrue("timeLeft ${push[time]}", abs(push[time]) > 1e-6)
+        assertTrue("distStrikeBps ${push[dist]}", abs(push[dist]) > 1e-6)
+    }
+
+    @Test fun localAnalystSelectionSurvivesRestart() {
+        val dir = File(System.getProperty("java.io.tmpdir"), "local-analyst-test")
+        dir.mkdirs()
+        File(dir, "local-analyst.json").delete()
+        LocalAnalyst.bind(dir)
+        LocalAnalyst.setActiveName("Gemma 3n E2B")
+        LocalAnalyst.setBackend(LocalAnalyst.Backend.GPU)
+        LocalAnalyst.setMaxOutputTokens(256)
+        LocalAnalyst.setPauseDuringActiveEntry(false)
+        LocalAnalyst.resetForTest()
+        LocalAnalyst.bind(dir)
+        assertEquals("Gemma 3n E2B", LocalAnalyst.activeName())
+        assertEquals(LocalAnalyst.Backend.GPU, LocalAnalyst.engine().backend)
+        assertEquals(256, LocalAnalyst.engine().maxOutputTokens)
+        assertFalse(LocalAnalyst.engine().pauseDuringActiveEntry)
+        LocalAnalyst.resetForTest()
     }
 
     @Test fun warmupEntersOnNeutralWeightsWhenTheResidualClears() {
