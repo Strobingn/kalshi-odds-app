@@ -35,7 +35,7 @@ internal enum class KashiArenaTab(val label: String) { OVERVIEW("Overview"), STR
 internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) -> Unit = {}, onSettings: () -> Unit = {},
     onHistory: () -> Unit = {}, onLadder: () -> Unit = {}, initialTab: KashiArenaTab = KashiArenaTab.OVERVIEW,
     aiPanel: AiWatchPanelModel? = null, onAiFollows: (Boolean) -> Unit = {}, extras: LiveWindowExtras = LiveWindowExtras(),
-    onResetBankroll: () -> Unit = {}) {
+    onResetBankroll: () -> Unit = {}, onAskResearch: (String, (String) -> Unit) -> Unit = { _, done -> done("The drivers above are the explanation. AI chat is not connected on this screen.") }) {
     val c = DipTheme.colors
     val openAi = LocalOpenAiTab.current
     var tabName by rememberSaveable { mutableStateOf(initialTab.name) }
@@ -100,6 +100,7 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
         when (tab) {
             KashiArenaTab.OVERVIEW -> {
                 item(key = "hero") { ArenaSummary(rows, st.algoToday.values.filter { it.model in models }, active.size) }
+                item(key = "model-filter") { ModelFilterCard(onAskAi = onAskResearch) }
                 item(key = "curve") { ArenaCard {
                     Text("Running profit", color = c.textPrimary, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Text("Net after fees · recent completed windows", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)

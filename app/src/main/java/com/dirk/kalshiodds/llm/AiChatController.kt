@@ -161,6 +161,17 @@ class AiChatController(
             .onFailure { replace(m.copy(status = "rejected"), gen); add(ChatMessage.ERROR, "Could not apply $key = $new: ${it.message}", gen = gen) }
     }
 
+    /** One research note dropped into the thread. No follow-up call is scheduled. */
+    fun postResearch(question: String, answer: String) {
+        val q = question.trim()
+        val a = answer.trim()
+        if (q.isEmpty() && a.isEmpty()) return
+        scope.launch {
+            if (q.isNotEmpty()) add(ChatMessage.USER, q)
+            if (a.isNotEmpty()) add(ChatMessage.AI, a)
+        }
+    }
+
     /** A live-feed post. Does not wait on the user and does not place an order. */
     fun postLive(text: String) {
         val line = text.trim()

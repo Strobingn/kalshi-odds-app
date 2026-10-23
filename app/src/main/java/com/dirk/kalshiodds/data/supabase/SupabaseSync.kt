@@ -47,7 +47,9 @@ class SupabaseSync(
         /** 0.3.65: the scalp batch landed (or there was none) — safe to advance the scalp ack watermark. */
         val scalpsOk: Boolean = false,
         /** The scalp_reset marker batch landed (or there was none). False when sync did not run. */
-        val scalpResetsOk: Boolean = false
+        val scalpResetsOk: Boolean = false,
+        /** Model-filter decision rows landed (or there were none). */
+        val modelDecisionsOk: Boolean = false
     )
 
     data class PushOutcome(
@@ -71,7 +73,9 @@ class SupabaseSync(
         /** Per-scalper block counts for the current windows. Uploaded every sync. */
         val scalpGates: List<com.dirk.kalshiodds.decision.ScalpGateLog.SyncRow> = emptyList(),
         /** Push-only split points. Never a delete of scalp rows. */
-        val scalpResets: List<com.dirk.kalshiodds.decision.ScalpResetMarker> = emptyList()
+        val scalpResets: List<com.dirk.kalshiodds.decision.ScalpResetMarker> = emptyList(),
+        /** Paper model-filter decisions. Push-only. Never a delete. */
+        val modelDecisions: List<com.dirk.kalshiodds.decision.ModelFilter.SyncRow> = emptyList()
     )
 
     fun pull(settings: DataHubSettings): List<SyncMerge.Record> {
@@ -174,7 +178,21 @@ class SupabaseSync(
                 .put("state", t.state.name)
                 .put("note", t.note.take(2_000))
                 .put("executionNotes", com.dirk.kalshiodds.decision.ScalpFills.executionNotes(t.note))
+                .put("model", com.dirk.kalshiodds.decision.ModelFilter.syncField(t.variantId) ?: JSONObject.NULL)
             out.add(rec("scalp:${t.id}", "scalp", at, payload))
+        }
+        bundle.modelDecisions.forEach { d ->
+            val payload = JSONObject()
+                .put("id", d.id)
+                .put("atMs", d.atMs)
+                .put("twin", d.twinId)
+                .put("score", d.score)
+                .put("scalar", d.scalar)
+                .put("entered", d.entered)
+                .put("reason", d.reason)
+                .put("outcomeUsd", d.outcomeUsd ?: JSONObject.NULL)
+                .put("model", d.twinId)
+            out.add(rec("model:${d.id}", "model_decision", d.atMs, payload))
         }
         bundle.scalpResets.forEach { r ->
             val payload = JSONObject()
@@ -327,7 +345,8 @@ class SupabaseSync(
                 acknowledgePaper = pushed.paperOk,
                 snapshotsOk = "snapshot" !in pushed.failedKinds,
                 scalpsOk = "scalp" !in pushed.failedKinds,
-                scalpResetsOk = "scalp_reset" !in pushed.failedKinds
+                scalpResetsOk = "scalp_reset" !in pushed.failedKinds,
+                modelDecisionsOk = "model_decision" !in pushed.failedKinds
             )
         } catch (t: Throwable) {
             Status(ok = false, message = t.message?.takeIf { it.isNotBlank() } ?: "Sync failed")

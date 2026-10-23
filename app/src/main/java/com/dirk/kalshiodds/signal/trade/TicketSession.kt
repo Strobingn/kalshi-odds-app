@@ -22,7 +22,7 @@ import kotlinx.coroutines.sync.withLock
 class TicketSession(
     private val placeOrder: suspend (ticket: TradeTicket, clientOrderId: String) -> Result<PlacedOrder>,
     private val cancelOrder: suspend (order: PlacedOrder) -> Result<PlacedOrder> = { Result.success(it) },
-    private val idFactory: () -> String = { java.util.UUID.randomUUID().toString() },
+    private val idFactory: () -> String = { com.dirk.kalshiodds.signal.trade.ClientOrderIds.next() },
     private val onAttempt: ((com.dirk.kalshiodds.data.local.results.TicketAttemptRow) -> Unit)? = null,
     private val nowMs: () -> Long = { System.currentTimeMillis() },
     private val voidHoldMs: Long = VOID_HOLD_MS,
