@@ -44,7 +44,21 @@ Package: `com.dirk.kalshiodds` · version **0.3.15**
   hour, and the ML scalper's predicted against made cents; "Day by day" charts every reviewed day. The AI writes
   four short paragraphs from those numbers (`DailyReview`), kept for 90 days in `reviews.json`.
 - **ML scalper model: calibrated chance, depth ≤ 5, the 25 money makers** (`train_calibrated.py`, now the
-  retrain workflow's trainer). The retrained file and its test-day results follow in the next commit.
+  retrain workflow's trainer). Retrained on 30 days of
+  KXBTC15M trades (train 2026-09-23 … 10-11, tuned 10-12 … 10-15, tested once on 10-16 … 10-22):
+  - 171 trees of depth 5 (was 146 trees up to 17 deep). It now outputs the **calibrated chance** that a resting
+    scalp makes money (isotonic calibration on the validation days); test-day calibration error 0.45%, each
+    decile's chance within a point of its real win rate. The chance is mapped to expected cents through a curve
+    measured on the validation days, so the cut and the queue penalty stay in cents.
+  - **The 25 money makers**, kept from 51 candidates by dropping, round by round, the features whose shuffling
+    cost the least after-fee profit on the validation days: distance of the mid from 50¢, spread, mid below its
+    window high, 30 s volatility, hour of day, price changes in 120 s, mid above its window low, price changes
+    in 60 s, bid, 300 s volatility, and 15 more (`report.money_makers` in the file).
+  - Test days, front of the queue: its picks made **+0.314¢ an order** (79,465 orders, 95% by day
+    [+0.27, +0.36], up 7 of 7 days) against +0.260¢ for the old model's picks on the same days and +0.058¢ for
+    every order. Gate: promote. Full report: `docs/scalper-model-retrain.md`.
+  - It uses whole-window features (high, low, first quote), so it acts only in windows the app watched from the
+    open.
   The AI tab's dashboard has a new "ML scalper model" card: test-day calibration (chance it gave against the share
   that made money), expected against made cents, the money makers, splitting gain and the selection steps.
   - `PrintGrid` rebuilds every candidate by name (51 of them, `CANDIDATE_LOOKBACK`) and refuses a decision when
