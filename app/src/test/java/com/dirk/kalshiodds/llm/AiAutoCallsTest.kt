@@ -137,17 +137,17 @@ class AiAutoCallsTest {
         val one = simulate(LlmProviders.GROQ, listOf(LlmProviders.GROQ_120), groq, tokens)
         assertWithin(LlmProviders.GROQ, one, groq, tokens)
         assertTrue(one.size in 900..1_000)
-        assertTrue(one.zipWithNext { a, b -> b.first - a.first }.all { it >= 2_000L })
+        assertTrue(one.zipWithNext { a, b -> b.first - a.first }.all { it >= 60_000L })
 
         val rotated = simulate(LlmProviders.GROQ, listOf(LlmProviders.GROQ_120, LlmProviders.GROQ_20), groq, tokens)
         assertWithin(LlmProviders.GROQ, rotated, groq, tokens)
         val byModel = rotated.groupBy { it.second }
         assertEquals(setOf(LlmProviders.GROQ_120, LlmProviders.GROQ_20), byModel.keys)
         byModel.values.forEach { rows ->
-            assertTrue(rows.size in 900..1_000)
-            assertTrue(rows.zipWithNext { a, b -> b.first - a.first }.all { it >= 2_000L })
+            assertEquals(720, rows.size)
+            assertTrue(rows.zipWithNext { a, b -> b.first - a.first }.all { it >= 60_000L })
         }
-        assertTrue(rotated.zipWithNext { a, b -> b.first - a.first }.all { it >= 1_000L })
+        assertTrue(rotated.zipWithNext { a, b -> b.first - a.first }.all { it >= 60_000L })
 
         val gemini = LlmProviders.effectiveQuota(LlmProviders.GEMINI, LlmProviders.GEMINI_DEFAULT, 500)!!
         val geminiHits = simulate(LlmProviders.GEMINI, listOf(LlmProviders.GEMINI_DEFAULT), gemini, tokens)
@@ -276,7 +276,7 @@ class AiAutoCallsTest {
         assertTrue(src.contains(LlmProviders.FREE_KEY_HINT))
         val groqEp = LlmProviders.resolve(LlmProviders.GROQ, "k", "", "")
         assertEquals("https://api.groq.com/openai/v1", groqEp.baseUrl)
-        assertEquals(LlmProviders.GROQ_120, groqEp.model)
+        assertEquals(LlmProviders.DEFAULT_GROQ_MODEL, groqEp.model)
         assertTrue(LlmProviders.resolve(LlmProviders.OPENROUTER_FREE, "k", "", "").model.endsWith(":free"))
     }
 

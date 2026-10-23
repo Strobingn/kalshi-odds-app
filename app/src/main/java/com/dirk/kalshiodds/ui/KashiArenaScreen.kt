@@ -28,7 +28,9 @@ import com.dirk.kalshiodds.ui.charts.PnlSparkline
 import com.dirk.kalshiodds.ui.charts.RankedNetBars
 import com.dirk.kalshiodds.ui.theme.DipTheme
 
-internal enum class KashiArenaTab(val label: String) { OVERVIEW("Overview"), STRATEGIES("Strategies"), ANALYSIS("Analysis"), TRADES("Trades"), CHAT("AI chat") }
+internal enum class KashiArenaTab(val label: String) {
+    OVERVIEW("Overview"), STRATEGIES("Strategies"), QUANT("Quant"), ANALYSIS("Analysis"), TRADES("Trades"), CHAT("AI chat")
+}
 
 /** Claude's Arena layout, backed by Kashi's existing primary strategy ledger. */
 @Composable
@@ -100,7 +102,7 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
         when (tab) {
             KashiArenaTab.OVERVIEW -> {
                 item(key = "hero") { ArenaSummary(rows, st.algoToday.values.filter { it.model in models }, active.size) }
-                item(key = "model-filter") { ModelFilterCard(onAskAi = onAskResearch) }
+                item(key = "model-filter") { ModelFilterCard(onOpenQuant = { tabName = KashiArenaTab.QUANT.name }) }
                 item(key = "curve") { ArenaCard {
                     Text("Running profit", color = c.textPrimary, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Text("Net after fees · recent completed windows", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
@@ -133,6 +135,7 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
                 }
                 items(rows, key = { "strategy-${it.model.code}" }) { r -> ArenaStrategyRow(r, st) { onOpen(r.model) } }
             }
+            KashiArenaTab.QUANT -> item(key = "quant") { QuantHybridScreen(onAskAi = onAskResearch, quotas = researchQuotas()) }
             KashiArenaTab.ANALYSIS -> {
                 val history = chartHistory ?: com.dirk.kalshiodds.decision.ScalpChartFeed.Snapshot()
                 val galleryTrades = run {

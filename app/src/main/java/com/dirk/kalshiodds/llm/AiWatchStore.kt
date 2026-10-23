@@ -182,7 +182,12 @@ class AiWatchStore(private val file: File? = null) {
 
     fun callsFor(provider: String, model: String, nowMs: Long): Int = synchronized(lock) {
         val day = LlmPrices.dayKey(nowMs)
-        usage.filter { it.day == day && it.provider == provider && (model.isEmpty() || it.model == model) }.sumOf { it.calls }
+        val want = LlmProviders.chartProvider(provider, model)
+        usage.filter { bucket ->
+            bucket.day == day &&
+                LlmProviders.chartProvider(bucket.provider, bucket.model) == want &&
+                (model.isEmpty() || bucket.model == model)
+        }.sumOf { it.calls }
     }
 
     private fun bump() { _safety.value = _safety.value + 1 }

@@ -146,10 +146,10 @@ class AiWindowWatchTest {
         nowMs += 5_000
         snap = snap.copy(windowKey = "W2", fingerprint = "fp-next")
         w.tick()
-        assertEquals(4, calls) // free pace is open, so a window roll calls again
+        assertEquals(3, calls) // 60s floor blocks the 5s poll and a window roll
         nowMs += 60_000
         w.tick()
-        assertEquals(5, calls)
+        assertEquals(4, calls)
     }
 
     @Test fun atMostThreeChangesPerScalperPerWindow() {
@@ -177,7 +177,7 @@ class AiWindowWatchTest {
         val w = watcher(MemoryScalpControls()) { ep, _ -> seen += ep; reply("""{"adjustments":[]}""") }
         w.tick()
         provider = LlmProviders.GROQ
-        nowMs += 1_000
+        nowMs += 60_000
         snap = snap.copy(windowKey = "W2", fingerprint = "fp-2")
         w.tick()
         assertEquals(listOf(LlmProviders.MISTRAL, LlmProviders.GROQ), seen.map { it.provider })
@@ -200,6 +200,10 @@ class AiWindowWatchTest {
         assertEquals(1, calls)
         nowMs += 5_000
         snap = snap.copy(fingerprint = "pace-open")
+        w.tick()
+        assertEquals(1, calls)
+        nowMs += 60_000
+        snap = snap.copy(fingerprint = "pace-60s")
         w.tick()
         assertEquals(2, calls)
     }
