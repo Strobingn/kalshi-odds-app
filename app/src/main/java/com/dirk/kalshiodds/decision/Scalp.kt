@@ -935,10 +935,11 @@ class ScalpBook(
                     val next = ScalpFills.sell(base, q.nowMs, n, n * bid, ScalpRule.orderFee(n, bid))
                     return if (next.remaining <= 0) close(next, q.nowMs, r) else next
                 }
-                val stopC = StrategyAlgo.storedInt(controls.state.value, fcCode, "stopCents", ForecastScalp.STOP_C)
+                val fcSettings = StrategyAlgo.view(controls.state.value, fcCode)
+                val stopC = fcSettings.stopCents ?: ForecastScalp.STOP_C
                 val stopDistance = ForecastScalp.stopDistance(t, stopC / 100.0)
                 val heldS = (q.nowMs - (t.entryAtMs ?: q.nowMs)) / 1000.0
-                val maxHold = StrategyAlgo.storedInt(controls.state.value, fcCode, "maxHoldSeconds", 0)
+                val maxHold = fcSettings.maxHoldSeconds ?: 0
                 val stopHit = t.state == ScalpState.OPEN && bid <= fcEntry - stopDistance + 1e-9
                 if (stopHit && t.isPrimary) addShadow(t, sf = false) { qq, _, b, _ -> b >= ForecastScalp.TAKE_PROFIT - 1e-9 || qq.tauS < ForecastScalp.EXIT_BEFORE_CLOSE_S }
                 val reason = t.exitReason.takeIf { t.state == ScalpState.PENDING_EXIT }

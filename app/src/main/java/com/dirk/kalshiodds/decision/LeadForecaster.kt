@@ -66,7 +66,7 @@ object LeadForecaster {
         val tau = tauS.coerceAtLeast(1.0)
         // Settlement averages the final minute. Use the same diffusion time as ScalpRule.fairYes;
         // keep wall-clock tau in x[6], since that is the feature the fitted weights expect.
-        val z = sigmaPerSec * sqrt(ScalpRule.effectiveTauSeconds(tau))
+        val z = sigmaPerSec * sqrt(ScalpRule.effectiveTauSeconds(tauS))
         val d = (ln(lead / strike) / z).coerceIn(-4.0, 4.0)
         val fair = phiCdf(d)
         val phi = exp(-d * d / 2) / sqrt(2 * Math.PI)

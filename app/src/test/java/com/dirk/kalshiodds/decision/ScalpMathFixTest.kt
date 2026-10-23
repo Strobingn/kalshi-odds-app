@@ -45,12 +45,12 @@ class ScalpMathFixTest {
         val spot = 100_100.0
         val strike = 100_000.0
         val sig = 3e-5
-        for (tau in listOf(30.0, 60.0, 90.0, 450.0, 900.0)) {
+        for (tau in listOf(0.5, 30.0, 60.0, 90.0, 450.0, 900.0)) {
             val x = LeadForecaster.features(0.5, 0.5, 0.0, spot, strike, sig, tau) { spot }!!
             val d = (ln(spot / strike) / (sig * sqrt(ScalpRule.effectiveTauSeconds(tau)))).coerceIn(-4.0, 4.0)
             assertEquals(d / 4.0, x[5], 1e-12)
             assertEquals(ScalpRule.normCdf(d) - 0.5, x[4], 1e-12)
-            assertEquals(tau / 900.0, x[6], 1e-12)
+            assertEquals(tau.coerceAtLeast(1.0) / 900.0, x[6], 1e-12)
         }
     }
 
