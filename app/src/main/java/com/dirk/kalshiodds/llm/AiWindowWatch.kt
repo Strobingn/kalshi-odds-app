@@ -310,6 +310,7 @@ class AiWindowWatcher(
     private var lastCallAt = Long.MIN_VALUE
     private var lastCalledWindow = ""
     private var lastFingerprint = ""
+    private var lastTuneSig = ""
 
     /** Service lifecycle: keep following until the coroutine is cancelled. */
     suspend fun followWindows() {
@@ -488,6 +489,14 @@ class AiWindowWatcher(
     /** On-device tuner. No network. Never benches. Owner edits that are still locked are skipped. */
     private fun localTune(): List<AiAdjustment> {
         val tapes = runCatching { paper() }.getOrDefault(emptyList())
+        if (tapes.isEmpty()) return emptyList()
+        val wKey = liveSnap?.windowKey?.ifBlank { null } ?: runCatching { snapshot().windowKey }.getOrDefault("")
+        val fillKey = liveSnap?.fillNote.orEmpty()
+        val sig = "$wKey|$fillKey|" + tapes.sortedBy { it.code }.joinToString(";") {
+            "${it.code}:${it.trades}:${it.wins}:${(it.netUsd * 100).roundToInt()}"
+        }
+        if (sig == lastTuneSig) return emptyList()
+        lastTuneSig = sig
         val at = now()
         val proposals = com.dirk.kalshiodds.decision.PaperSettingTuner.propose(controls.state.value, tapes) { key ->
             store.manualBlocks(key, at)

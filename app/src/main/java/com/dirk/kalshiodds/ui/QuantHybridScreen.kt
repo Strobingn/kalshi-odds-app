@@ -6,6 +6,8 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -79,6 +81,7 @@ internal fun ModelFilterCard(onOpenQuant: () -> Unit = {}) {
 }
 
 /** FieldOps Quant tab: live engine, three paper arms, and the on-demand journal. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun QuantHybridScreen(
     onAskAi: (String, (String) -> Unit) -> Unit = { _, done -> done("The drivers above are the explanation. AI chat is not connected on this screen.") },
@@ -130,7 +133,7 @@ internal fun QuantHybridScreen(
             }
             Text(if (tel.auto) "Auto-select: ${tel.execPath}" else "Pinned: ${tel.execPath}", color = c.textSecondary, modifier = Modifier.testTag("MODEL_AUTO"))
             Text("Model", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
-            Row(Modifier.horizontalScroll(rememberScrollState())) {
+            FlowRow(Modifier.fillMaxWidth()) {
                 listOf(
                     QuantSession.ModelMode.LOGISTIC to "Logistic",
                     QuantSession.ModelMode.TREE_ENSEMBLE to "LightGBM ${TreeEnsemble.TRAIN_TREES}t·d${TreeEnsemble.TRAIN_DEPTH}",
@@ -143,7 +146,7 @@ internal fun QuantHybridScreen(
                 }
             }
             Text("Execution", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
-            Row(Modifier.horizontalScroll(rememberScrollState())) {
+            FlowRow(Modifier.fillMaxWidth()) {
                 listOf(
                     QuantSession.ExecPath.CPU_FAST to "CPU Fast 1-Thread",
                     QuantSession.ExecPath.QNN_HTP_BURST to "QNN HTP Burst",

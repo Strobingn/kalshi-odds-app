@@ -603,7 +603,7 @@ class ScalpBook(
         val fairKept = if (coin == ShockFav.TRADE_COIN) ScalpParams.byId(KeptScalpers.FAIR_ID) else null
         // A variant list that includes the tuned primary (fill tests) keeps that primary. The app passes none.
         val pinned = paramsFor(coin).takeIf { p -> variants.any { it.id == p.id } }
-        val primaries = listOfNotNull(fairKept, pinned).distinctBy { it.id }
+        val primaries = listOfNotNull(pinned ?: fairKept)
         val primaryIds = primaries.map { it.id }.toSet()
         val key = q.ticker.uppercase()
         val recent = recordHistory(q)
