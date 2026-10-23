@@ -492,7 +492,13 @@ object ModelFilter {
 
     fun scorecards(): List<Scorecard> = synchronized(lock) {
         val tel = QuantSession.telemetry()
-        Arm.entries.map { arm ->
+        val control = Scorecard(
+            arm = "control", netUsd = controlNet, centsPerFill = 0.0, drawdownUsd = 0.0,
+            fillRate = 0.0, partialRate = 0.0, incrementalUsd = 0.0, trades = 0, rejected = 0,
+            yesNet = 0.0, noNet = 0.0, takerN = 0, makerN = 0, freshnessMs = -1L,
+            p50Us = tel.p50Us, p95Us = tel.p95Us, p99Us = tel.p99Us
+        )
+        val arms = Arm.entries.map { arm ->
             val rows = decisions.filter { twin(it.twinId)?.arm == arm }
             val closed = rows.mapNotNull { d ->
                 val id = decisionId(d.twinId, d.atMs, d.side)
@@ -536,6 +542,7 @@ object ModelFilter {
                 p99Us = tel.p99Us
             )
         }
+        listOf(control) + arms
     }
 
     /** Copied for the research path. The live tick does not call this. */

@@ -3,7 +3,10 @@ package com.dirk.kalshiodds.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -16,6 +19,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
@@ -71,6 +75,11 @@ fun AiChatScreen(viewModel: OddsViewModel) {
     val endpoint = settings?.chatEndpoint()
     val live = container?.aiWatch?.live?.collectAsStateWithLifecycle()?.value
     val liveOn = container?.aiWatch?.config?.collectAsStateWithLifecycle()?.value?.liveFeed ?: true
+    val watch = container?.aiWatch
+    val quotas = watch?.let { store ->
+        val now = System.currentTimeMillis()
+        companionQuotas({ store.callsFor(it, "", now) }, { store.dailyCap(it, "") })
+    }
     AiChatContent(
         messages = messages, busy = busy, strategyStatus = status, hasKey = ready, providerLabel = providerLabel,
         initialKey = endpoint?.apiKey.orEmpty(), initialModel = endpoint?.model.orEmpty(), initialBase = endpoint?.baseUrl.orEmpty(),
@@ -78,7 +87,9 @@ fun AiChatScreen(viewModel: OddsViewModel) {
         onSend = onSend,
         onApply = { chat?.applyProposal(it) }, onCancel = { chat?.cancelProposal(it) }, onClear = { chat?.clear() },
         unavailable = chat == null,
-        live = live, liveOn = liveOn, onLiveFeed = { on -> container?.aiWatch?.setLiveFeed(on) }
+        live = live, liveOn = liveOn, onLiveFeed = { on -> container?.aiWatch?.setLiveFeed(on) },
+        onAskResearch = { prompt, done -> viewModel.askModelResearch(prompt, done) },
+        quotas = quotas
     )
 }
 
@@ -90,12 +101,15 @@ fun AiChatContent(
     providerLabel: String = "",
     onSaveKey: (String, String, String) -> Unit = { _, _, _ -> }, onSend: (String) -> Unit = {},
     onApply: (Long) -> Unit = {}, onCancel: (Long) -> Unit = {}, onClear: () -> Unit = {}, unavailable: Boolean = false,
-    live: com.dirk.kalshiodds.llm.AiLiveSnapshot? = null, liveOn: Boolean = true, onLiveFeed: (Boolean) -> Unit = {}
+    live: com.dirk.kalshiodds.llm.AiLiveSnapshot? = null, liveOn: Boolean = true, onLiveFeed: (Boolean) -> Unit = {},
+    onAskResearch: (String, (String) -> Unit) -> Unit = { _, done -> done("The drivers above are the explanation. AI chat is not connected on this screen.") },
+    quotas: List<ProviderQuota>? = null
 ) {
     val c = DipTheme.colors
     var input by remember { mutableStateOf("") }
     var confirmClear by remember { mutableStateOf(false) }
     var showKey by remember { mutableStateOf(!hasKey) }
+    var hybrid by remember { mutableStateOf(false) }
     val list = rememberLazyListState()
     val itemCount = messages.size + if (busy) 1 else 0
     LaunchedEffect(itemCount) { if (itemCount > 0) list.animateScrollToItem(itemCount - 1) }
@@ -120,6 +134,21 @@ fun AiChatContent(
                 Icon(Icons.Outlined.DeleteSweep, "Clear chat history", tint = if (messages.isNotEmpty()) c.down else c.textSecondary)
             }
         }
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).clip(RoundedCornerShape(99.dp)).background(c.surface).padding(4.dp)
+        ) {
+            AiModePill("AI Chat", !hybrid, "AI_MODE_CHAT", Modifier.weight(1f)) { hybrid = false }
+            AiModePill("Hybrid Quant & Journal", hybrid, "AI_MODE_HYBRID", Modifier.weight(1f)) { hybrid = true }
+        }
+        if (hybrid) {
+            Column(
+                Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                if (quotas == null) QuantHybridScreen(onAskAi = onAskResearch)
+                else QuantHybridScreen(onAskAi = onAskResearch, quotas = quotas)
+            }
+        } else {
         TextButton(onClick = { statusOpen = !statusOpen }, modifier = Modifier.padding(horizontal = 8.dp)) {
             Text(if (statusOpen) "Hide status" else "Paper strategy: $strategyStatus")
         }
@@ -157,6 +186,31 @@ fun AiChatContent(
                 }
             }
         }
+        }
+    }
+}
+
+@Composable
+private fun AiModePill(label: String, on: Boolean, tag: String, modifier: Modifier, onClick: () -> Unit) {
+    val c = DipTheme.colors
+    Box(
+        modifier
+            .heightIn(min = 40.dp)
+            .clip(RoundedCornerShape(99.dp))
+            .background(if (on) c.accentBlue else Color.Transparent)
+            .clickable(onClick = onClick)
+            .testTag(tag)
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            label,
+            color = if (on) c.onAccentBlue else c.textSecondary,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            maxLines = 2
+        )
     }
 }
 

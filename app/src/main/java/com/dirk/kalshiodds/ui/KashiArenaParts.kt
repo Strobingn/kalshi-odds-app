@@ -144,13 +144,14 @@ internal fun HeroCard(caption: String, netUsd: Double?, sub: String, kpis: List<
     }
 }
 
-/** Equal-width pills: the page's few top-level choices. */
+/** Top-level choices. They scroll sideways so a sixth tab still shows its label. */
 @Composable
 internal fun <T> PillTabs(options: List<T>, selected: T, label: (T) -> String, tag: (T) -> String, onSelect: (T) -> Unit) {
     val colors = DipTheme.colors
     Row(
         Modifier
             .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
             .clip(RoundedCornerShape(50))
             .background(colors.surface)
             .padding(4.dp),
@@ -160,8 +161,8 @@ internal fun <T> PillTabs(options: List<T>, selected: T, label: (T) -> String, t
             val on = o == selected
             Box(
                 Modifier
-                    .weight(1f)
                     .heightIn(min = 40.dp)
+                    .padding(horizontal = 2.dp)
                     .clip(RoundedCornerShape(50))
                     .background(if (on) colors.accentBlue.copy(alpha = 0.18f) else Color.Transparent)
                     .clickable { onSelect(o) }
@@ -173,7 +174,8 @@ internal fun <T> PillTabs(options: List<T>, selected: T, label: (T) -> String, t
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
                     color = if (on) colors.accentBlue else colors.textSecondary,
-                    maxLines = 1
+                    maxLines = 1,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
                 )
             }
         }
