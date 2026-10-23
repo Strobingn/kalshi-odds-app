@@ -442,7 +442,7 @@ class ScalpContext(
     /** The side's price move over the last 10 s / 30 s, dollars. */
     val move10: Double?,
     val move30: Double?,
-    /** The model's inputs in [PrintGrid.FEATURES] order (ML scalper only). */
+    /** The model's inputs in [ScalperModel.features] order (ML scalper only). */
     val features: FloatArray? = null
 )
 

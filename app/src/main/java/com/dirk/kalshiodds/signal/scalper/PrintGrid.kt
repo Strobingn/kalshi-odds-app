@@ -203,32 +203,97 @@ class PrintGrid(val openMs: Long) {
     /** True once the grid has prints from at least [WARM_SECONDS] before [s]. */
     fun warm(s: Int): Boolean = firstSecond in 0..(s - WARM_SECONDS)
 
+    /** The model's feature row for [side] at the end of second [s] in the 23-feature [FEATURES] order (older files). */
+    fun features(side: String, s: Int): FloatArray? = features(side, s, FEATURES)
+
     /**
-     * The model's feature row for [side] at the end of second [s], in
-     * [FEATURES] order, or null when the grid is not warm or the side is not
-     * quotable. Values are rounded to float like the training data; missing
-     * history is 0, as in training.
+     * The model's feature row for [side] at the end of second [s], one value per name in [names] (any of
+     * [CANDIDATES], as `build_ml.py` computes them), or null when the side is not quotable, [s] is outside the
+     * decision seconds, or the grid has not watched the market long enough for the longest lookback in [names]
+     * ([warmFor]). Values are rounded to float like the training data; missing history is 0, as in training.
      */
-    fun features(side: String, s: Int): FloatArray? {
+    fun features(side: String, s: Int, names: List<String>): FloatArray? {
         if (s < MIN_DECISION_SECOND || s > MAX_DECISION_SECOND) return null
-        if (!warm(s) || !quotable(side, s)) return null
+        if (!warmFor(s, lookback(names)) || !quotable(side, s)) return null
         val yes = isYes(side)
-        val out = FloatArray(FEATURES.size)
         val b = bid(side, s)
         val a = ask(side, s)
         val m = (b + a) / 2.0
-        var k = 0
-        out[k++] = m.toFloat()
-        out[k++] = (a - b).toFloat()
-        out[k++] = (SECONDS - s).toFloat()
-        for (lag in LAGS) {
-            out[k++] = clean(m - mid(yes, s - lag))
+        val buy = if (yes) volYes else volNo
+        val sell = if (yes) volNo else volYes
+        val out = FloatArray(names.size)
+        for ((k, name) in names.withIndex()) {
+            out[k] = when {
+                name == "mid" -> m.toFloat()
+                name == "ask" -> a.toFloat()
+                name == "bid" -> b.toFloat()
+                name == "spread" -> (a - b).toFloat()
+                name == "tte" -> (SECONDS - s).toFloat()
+                name == "dist50" -> kotlin.math.abs(m - 0.5).toFloat()
+                name == "from_hi" -> clean(m - extremeMid(yes, s, s + 1, high = true))
+                name == "from_lo" -> clean(m - extremeMid(yes, s, s + 1, high = false))
+                name == "from_first" -> clean(m - firstMid(yes, s))
+                name == "hi60" -> clean(m - extremeMid(yes, s, 60, high = true))
+                name == "lo60" -> clean(m - extremeMid(yes, s, 60, high = false))
+                name == "stale_bid" -> since(if (yes) bidPrint else askPrint, s).toFloat()
+                name == "stale_ask" -> since(if (yes) askPrint else bidPrint, s).toFloat()
+                name == "imb_all" -> imbalance(sum(buy, s, s + 1), sum(sell, s, s + 1))
+                name == "lvol_all" -> ln1p(sum(buy, s, s + 1) + sum(sell, s, s + 1)).toFloat()
+                name == "hour" -> openHourUtc.toFloat()
+                name == "weekend" -> (if (openWeekend) 1f else 0f)
+                name.startsWith("dm") -> clean(m - mid(yes, s - suffix(name, "dm")))
+                name.startsWith("vol") -> changes(yes, s, suffix(name, "vol")).first.toFloat()
+                name.startsWith("nchg") -> changes(yes, s, suffix(name, "nchg")).second.toFloat()
+                name.startsWith("imb") -> suffix(name, "imb").let { w -> imbalance(sum(buy, s, w), sum(sell, s, w)) }
+                name.startsWith("lvol") -> suffix(name, "lvol").let { w -> ln1p(sum(buy, s, w) + sum(sell, s, w)).toFloat() }
+                name.startsWith("lcnt") -> ln1p(sum(count, s, suffix(name, "lcnt"))).toFloat()
+                name.startsWith("lmaxbuy") -> ln1p(maxOver(if (yes) maxYes else maxNo, s, suffix(name, "lmaxbuy"))).toFloat()
+                name.startsWith("lmaxsell") -> ln1p(maxOver(if (yes) maxNo else maxYes, s, suffix(name, "lmaxsell"))).toFloat()
+                else -> throw IllegalArgumentException("unknown feature $name")
+            }
         }
-        // 60 s of one-second mid changes (a change next to a missing quote counts as 0).
+        return out
+    }
+
+    /**
+     * True when the grid has watched the window for [lookbackS] seconds before [s] (from the open when that reaches
+     * before it, give or take [WARM_FLOOR_S]): the app builds the grid from the live trade stream, so a window it
+     * joined late lacks the history a long lookback needs. [ALL_HISTORY] means from the open.
+     */
+    fun warmFor(s: Int, lookbackS: Int): Boolean {
+        if (firstSecond < 0) return false
+        val need = if (lookbackS >= ALL_HISTORY) WARM_FLOOR_S else max(s - max(lookbackS, MIN_GRID_SECONDS), WARM_FLOOR_S)
+        return firstSecond <= need
+    }
+
+    private val openHourUtc: Int = java.time.Instant.ofEpochMilli(openMs).atZone(java.time.ZoneOffset.UTC).hour
+    private val openWeekend: Boolean =
+        java.time.Instant.ofEpochMilli(openMs).atZone(java.time.ZoneOffset.UTC).dayOfWeek.value >= 6
+
+    private fun suffix(name: String, prefix: String): Int = name.substring(prefix.length).toInt()
+
+    private fun imbalance(by: Double, bn: Double): Float {
+        val tot = by + bn
+        return (if (tot > 0.0) (by - bn) / max(tot, 1e-9) else 0.0).toFloat()
+    }
+
+    private fun firstMid(yes: Boolean, s: Int): Double {
+        for (i in 0..minOf(s, SECONDS - 1)) {
+            val v = mid(yes, i)
+            if (!v.isNaN()) return v
+        }
+        return Double.NaN
+    }
+
+    /**
+     * Over the [w] seconds ending at [s]: the std of one-second mid changes (a change next to a missing quote counts
+     * as 0, the first second of the window as 0) and how many of them were not 0, as `build_ml.py`'s `vol` / `nchg`.
+     */
+    private fun changes(yes: Boolean, s: Int, w: Int): Pair<Double, Double> {
         var s1 = 0.0
         var s2 = 0.0
-        var changes = 0.0
-        val from = max(s - 59, 0)
+        var n = 0.0
+        val from = max(s - w + 1, 0)
         var prev = mid(yes, from - 1)
         for (i in from..s) {
             val cur = mid(yes, i)
@@ -236,27 +301,11 @@ class PrintGrid(val openMs: Long) {
             if (d.isNaN()) d = 0.0
             s1 += d
             s2 += d * d
-            if (d != 0.0) changes += 1.0
+            if (d != 0.0) n += 1.0
             prev = cur
         }
-        out[k++] = sqrt(max(s2 / 60.0 - (s1 / 60.0) * (s1 / 60.0), 0.0)).toFloat()
-        out[k++] = changes.toFloat()
-        val buy = if (yes) volYes else volNo
-        val sell = if (yes) volNo else volYes
-        for (w in WINDOWS) {
-            val by = sum(buy, s, w)
-            val bn = sum(sell, s, w)
-            val tot = by + bn
-            out[k++] = (if (tot > 0.0) (by - bn) / max(tot, 1e-9) else 0.0).toFloat()
-            out[k++] = ln1p(tot).toFloat()
-        }
-        out[k++] = ln1p(sum(count, s, 30)).toFloat()
-        out[k++] = ln1p(maxOver(if (yes) maxYes else maxNo, s, 30)).toFloat()
-        out[k++] = ln1p(maxOver(if (yes) maxNo else maxYes, s, 30)).toFloat()
-        // The side's bid comes from prints of takers selling it: taker-NO prints for YES, taker-YES prints for NO.
-        out[k++] = since(if (yes) bidPrint else askPrint, s).toFloat()
-        out[k] = since(if (yes) askPrint else bidPrint, s).toFloat()
-        return out
+        val ww = w.toDouble()
+        return sqrt(max(s2 / ww - (s1 / ww) * (s1 / ww), 0.0)) to n
     }
 
     private fun clean(v: Double): Float = if (v.isNaN()) 0f else v.toFloat()
@@ -291,10 +340,44 @@ class PrintGrid(val openMs: Long) {
         const val MIN_PRICE = 0.10
         const val MAX_PRICE = 0.90
         private const val EPS = 1e-9
-        private val LAGS = intArrayOf(5, 10, 20, 30, 60)
-        private val WINDOWS = intArrayOf(5, 10, 30, 60)
+        /** Seconds the grid must hold before any decision (the shortest model needs 60 s of prints). */
+        const val MIN_GRID_SECONDS = 60
 
-        /** Same names and order as `train_compact.py`; the model file repeats them and is checked on load. */
+        /**
+         * Slack, in seconds after the open, for "watched from the open": the first print of a window can come a few
+         * seconds in even when the app was already listening.
+         */
+        const val WARM_FLOOR_S = 15
+
+        /** A lookback that needs the window from its open (cumulative features). */
+        const val ALL_HISTORY = SECONDS
+
+        /**
+         * Every feature the app can rebuild from the prints (`build_ml.py` names), with the seconds of history it
+         * needs before the decision. The spot features of the study (Coinbase closes) are left out on purpose: the
+         * app prices from Kalshi only.
+         */
+        val CANDIDATE_LOOKBACK: Map<String, Int> = linkedMapOf<String, Int>().apply {
+            for (n in listOf("ask", "bid", "mid", "spread", "tte", "dist50", "hour", "weekend")) put(n, 0)
+            for (k in listOf(5, 10, 20, 30, 60, 120, 180, 300)) put("dm$k", k)
+            for (n in listOf("from_hi", "from_lo", "from_first", "imb_all", "lvol_all")) put(n, ALL_HISTORY)
+            put("hi60", 60); put("lo60", 60)
+            for (w in listOf(30, 60, 120, 300)) put("vol$w", w)
+            for (w in listOf(30, 60, 120)) put("nchg$w", w)
+            for (w in listOf(5, 10, 30, 60, 120, 300)) { put("imb$w", w); put("lvol$w", w) }
+            for (w in listOf(30, 60, 120)) put("lcnt$w", w)
+            for (w in listOf(30, 120)) { put("lmaxbuy$w", w); put("lmaxsell$w", w) }
+            // Seconds since a print: as the older model, held to the minute of history every decision has.
+            put("stale_bid", 60); put("stale_ask", 60)
+        }
+
+        val CANDIDATES: Set<String> get() = CANDIDATE_LOOKBACK.keys
+
+        /** The longest lookback among [names], at least [MIN_GRID_SECONDS]. */
+        fun lookback(names: List<String>): Int =
+            max(MIN_GRID_SECONDS, names.maxOfOrNull { CANDIDATE_LOOKBACK[it] ?: throw IllegalArgumentException("unknown feature $it") } ?: 0)
+
+        /** The 23 features of the older regression file (`train_compact.py`), in its order. */
         val FEATURES: List<String> = listOf(
             "mid", "spread", "tte", "dm5", "dm10", "dm20", "dm30", "dm60", "vol60", "nchg60",
             "imb5", "lvol5", "imb10", "lvol10", "imb30", "lvol30", "imb60", "lvol60",

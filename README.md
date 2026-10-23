@@ -19,6 +19,44 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.17.0 (Claude branch): on-phone AI, Explain this trade, daily reviews, a calibrated ML scalper
+
+- **On-phone AI (AI → Keys → On-phone AI).** A small LLM that runs on the phone's CPU: llama.cpp (release
+  `b11829`, built from source by `app/src/main/cpp/CMakeLists.txt`) behind a thin JNI layer
+  (`llama_jni.cpp`, C API only). Any GGUF model works: one tap downloads Qwen2.5 0.5B or 1.5B Instruct (Q4_K_M;
+  resumes after a break, checked against Hugging Face's SHA-256 before use), or add a `.gguf` file from the
+  phone (checked for the GGUF magic). It is loaded only while it writes and freed 90 s after, so it never sits
+  next to the live scalper. llama.cpp is built for every ARM CPU level (`GGML_CPU_ALL_VARIANTS`) and picks the
+  best one the phone has at start-up. The card shows the model, its state, tokens a second (with a chart) and a
+  Test button. "Use the on-phone model first" (on by default) makes Explain and the daily review use it, with
+  the Groq / Mistral keys as the fallback (`AiWriter`). Nothing is sent anywhere by the on-phone model.
+  Checked on this release with the real Qwen2.5 0.5B on a desktop build (load 0.35 s, streaming, early stop,
+  emoji and accents both ways, a too-long prompt refused) and cross-compiled for arm64 with NDK 27.
+- **Explain this trade.** Every trade card in the arena has an Explain button. The dialog shows the trade (net,
+  ¢ a contract, hold, minute of the window), the book it saw (from the order file), and for the ML scalper the
+  model's chance, its expected cents against its cut and what it made, and bars of what each input pushed
+  (the path through every tree, `ScalperModel.contributions`, which add up exactly to the model's score). Then
+  the AI's explanation streams in, written only from those numbers (`TradeExplainer`); Copy puts the text and the
+  facts on the clipboard.
+- **Daily review (AI → Reviews).** Once a UTC day is over the app writes it up by itself (switchable), or tap
+  "Review today so far" / "Review yesterday". Each review keeps its numbers and draws them: the day's running net,
+  exits (donut and bars), best and worst strategies, win rates, net by minute of the window, by entry price and by
+  hour, and the ML scalper's predicted against made cents; "Day by day" charts every reviewed day. The AI writes
+  four short paragraphs from those numbers (`DailyReview`), kept for 90 days in `reviews.json`.
+- **ML scalper model: calibrated chance, depth ≤ 5, the 25 money makers** (`train_calibrated.py`, now the
+  retrain workflow's trainer). The retrained file and its test-day results follow in the next commit.
+  The AI tab's dashboard has a new "ML scalper model" card: test-day calibration (chance it gave against the share
+  that made money), expected against made cents, the money makers, splitting gain and the selection steps.
+  - `PrintGrid` rebuilds every candidate by name (51 of them, `CANDIDATE_LOOKBACK`) and refuses a decision when
+    the app has not watched the window long enough for the model's longest lookback (it builds the grid from the
+    live stream, so a window it joined late lacks the history). Every candidate is checked against `build_ml.py`
+    on the recorded window (`ScalperParityTest`).
+  - The model file now says what kind it is; the older 23-feature regression file still loads. The gate scores
+    each model on its own features.
+  - The ML scalper (`ML_REST`) is still on the arena's retired list (a big loser in the 11-day replay), so it
+    places no paper orders unless it is taken off that list.
+- Native libraries ship for 64-bit phones and the x86_64 emulator only (the on-phone AI for phones only).
+
 ## 1.16.2 (Claude branch): the ML scalper runs on ONNX Runtime; Paper AI tops out at 85¢
 
 - **ONNX Runtime.** The ML scalper's 146 trees now run on ONNX Runtime Mobile 1.31.0 (CPU, one thread, full

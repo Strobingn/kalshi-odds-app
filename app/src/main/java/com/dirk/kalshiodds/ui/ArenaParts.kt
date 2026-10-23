@@ -262,7 +262,7 @@ internal fun StrategyListRow(row: ArenaTable.Row, curve: ArenaCharts.Curve?, ext
 
 /** One closed trade: the strategy as a tinted pill, the side, the prices and why it closed; its net on the right. */
 @Composable
-internal fun TradeCard(t: ScalpTrade) {
+internal fun TradeCard(t: ScalpTrade, onExplain: ((ScalpTrade) -> Unit)? = null) {
     val colors = DipTheme.colors
     val net = pnlColor(t.pnlUsd)
     Row(
@@ -298,11 +298,20 @@ internal fun TradeCard(t: ScalpTrade) {
             )
             Text(ScalperResults.timeLabel(t.closedAtMs), style = MaterialTheme.typography.labelSmall, color = colors.textSecondary)
         }
-        Text(
-            ScalperResults.money(t.pnlUsd),
-            style = ArenaUi.mono(MaterialTheme.typography.titleMedium),
-            fontWeight = FontWeight.Bold,
-            color = net
-        )
+        Column(horizontalAlignment = Alignment.End) {
+            Text(
+                ScalperResults.money(t.pnlUsd),
+                style = ArenaUi.mono(MaterialTheme.typography.titleMedium),
+                fontWeight = FontWeight.Bold,
+                color = net
+            )
+            if (onExplain != null) {
+                androidx.compose.material3.TextButton(
+                    onClick = { onExplain(t) },
+                    modifier = Modifier.testTag("EXPLAIN_${t.run}_${t.id}"),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                ) { Text("Explain", style = MaterialTheme.typography.labelMedium, color = colors.accentBlue) }
+            }
+        }
     }
 }

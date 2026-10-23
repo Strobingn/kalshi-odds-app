@@ -22,7 +22,29 @@ MIN_PICKS = 500
 
 
 def predict(model, X):
-    """The app's evaluator (ScalperModel.predict), vectorised: float32 features compared as doubles, `<=` goes left."""
+    """The app's evaluator (ScalperModel.predict), vectorised: expected cents a contract. A regression file's trees
+    give the cents directly; a classifier's trees give log-odds, turned into the calibrated chance and then cents
+    through the file's two curves (np.interp, as ScalperModel.Curve)."""
+    m = margin(model, X)
+    if model.get("kind") != "classifier":
+        return m
+    return cents_of_margin(model, m)
+
+
+def chance_of_margin(model, m):
+    raw = 1.0 / (1.0 + np.exp(-np.asarray(m, dtype=np.float64)))
+    cal = model.get("calibration")
+    p = np.interp(raw, cal["x"], cal["y"]) if cal else raw
+    return np.clip(p, 0.0, 1.0)
+
+
+def cents_of_margin(model, m):
+    c = model["cents_by_chance"]
+    return np.interp(chance_of_margin(model, m), c["x"], c["y"])
+
+
+def margin(model, X):
+    """The trees' sum: float32 features compared as doubles, `<=` goes left."""
     X = np.asarray(X, dtype=np.float32).astype(np.float64)
     out = np.zeros(len(X))
     rows = np.arange(len(X))
@@ -91,17 +113,20 @@ def main(data, new_path, old_path, md_out, json_out):
     feats_all = [str(f) for f in d["feats"]]
     new = json.load(open(new_path))
     old = json.load(open(old_path))
-    assert new["features"] == old["features"], "the two models use different features"
-    X = np.nan_to_num(d["X"][:, [feats_all.index(f) for f in new["features"]]].astype(np.float32), nan=0.0)
+
+    def cols(model):
+        return np.nan_to_num(d["X"][:, [feats_all.index(f) for f in model["features"]]].astype(np.float32), nan=0.0)
+
+    X_new, X_old = cols(new), cols(old)
     Y = d["Y"].astype(np.float64)[:, 4] * 100.0
     mkt = d["mkt"].astype(int)
     day = d["mday"][mkt]
     days = sorted(set(d["mday"]))
     _, _, TE = split(days)
     c = np.isin(day, list(TE)) & ~np.isnan(Y)
-    Xt, yt, dt = X[c], Y[c], day[c]
-    p_new = predict(new, Xt)
-    p_old = predict(old, Xt)
+    yt, dt = Y[c], day[c]
+    p_new = predict(new, X_new[c])
+    p_old = predict(old, X_old[c])
     pick_new = p_new >= new["theta_cents"]
     pick_old = p_old >= old["theta_cents"]
     r_new = day_ci(yt[pick_new], dt[pick_new])

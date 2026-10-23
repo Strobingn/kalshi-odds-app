@@ -337,6 +337,60 @@ class AppContainer(context: Context) {
         save = { json -> supervisorPrefs.edit().putString("chat_json", json).apply() },
         lastError = { chatLlm.lastError }
     )
+    /** Background work of the on-phone LLM, Explain and the daily review (never the live scalper's thread). */
+    private val insightScope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO
+    )
+    private val localLlmPrefs = app.getSharedPreferences("bitcoin_claude_local_llm", Context.MODE_PRIVATE)
+
+    /** The on-phone LLM (llama.cpp, a GGUF model in filesDir/llm). Loaded only while Explain or a review runs. */
+    val localLlm = com.dirk.kalshiodds.llm.LocalLlm(
+        dir = File(app.filesDir, "llm"),
+        engine = com.dirk.kalshiodds.llm.NativeEngine(app.applicationInfo.nativeLibraryDir),
+        scope = insightScope,
+        prefs = object : com.dirk.kalshiodds.llm.LocalLlm.Prefs {
+            override var selected: String?
+                get() = localLlmPrefs.getString("selected", null)
+                set(v) { localLlmPrefs.edit().putString("selected", v).apply() }
+            override var preferLocal: Boolean
+                get() = localLlmPrefs.getBoolean("prefer_local", true)
+                set(v) { localLlmPrefs.edit().putBoolean("prefer_local", v).apply() }
+        }
+    )
+
+    /** Cloud fallback for Explain and the daily review: the same Groq / Mistral keys and rotation as the chat. */
+    private val writerLlm = com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders("groq", "mistral"), onError = llmError("writer_errors"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.CHAT), rotation = llmRotation)
+
+    val aiWriter = com.dirk.kalshiodds.llm.AiWriter(
+        local = localLlm,
+        cloud = { msgs -> writerLlm.chat(msgs) },
+        cloudError = { writerLlm.lastError },
+        hasCloudKey = { writerLlm.hasKey }
+    )
+
+    /** "Explain this trade" on the arena's trade cards. */
+    val explain = com.dirk.kalshiodds.llm.ExplainSession(
+        scope = insightScope,
+        writer = aiWriter,
+        log = scalperStore.log,
+        model = { scalperStore.model },
+        tuned = { st -> runCatching { scalperStore.tuning.tuned(st) }.getOrNull() }
+    )
+
+    /** Write the daily review by itself once a day (AI → Reviews switch). */
+    var autoReview: Boolean
+        get() = localLlmPrefs.getBoolean("auto_review", true)
+        set(v) { localLlmPrefs.edit().putBoolean("auto_review", v).apply() }
+
+    /** The daily review of the arena, kept in filesDir/reviews.json. */
+    val reviews = com.dirk.kalshiodds.llm.ReviewRunner(
+        scope = insightScope,
+        writer = aiWriter,
+        log = scalperStore.log,
+        store = com.dirk.kalshiodds.signal.scalper.DailyReview.Store(File(app.filesDir, "reviews.json")),
+        autoOn = { autoReview }
+    ).also { it.startAuto() }
+
     private val aiKick = kotlinx.coroutines.channels.Channel<Unit>(kotlinx.coroutines.channels.Channel.CONFLATED)
 
     /** Run both AIs now instead of waiting for the next minute (after saving keys, switching an AI on). */

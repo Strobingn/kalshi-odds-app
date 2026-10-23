@@ -764,7 +764,7 @@ class PaperScalper(
                 }
                 if (fire == null) {
                     val m = model ?: continue
-                    val x = grid.features(side, s) ?: continue
+                    val x = grid.features(side, s, m.features) ?: continue
                     val pred = m.predict(x)
                     // The model's own cut, unless you set another (in cents, as the model speaks).
                     if (pred < tn.trigger(m.thetaCents)) continue

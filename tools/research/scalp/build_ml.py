@@ -3,7 +3,7 @@ import json, os, sys, math, datetime as dt
 import numpy as np
 import scalp_b as B
 DEC=B.DEC; NAN=np.nan
-LAGS=(5,10,20,30,60,120,300); WINS=(5,10,30,60,120,300)
+LAGS=(5,10,20,30,60,120,180,300); WINS=(5,10,30,60,120,300)
 cb=dict((int(a),b) for a,b in json.load(open('cb_btc.json')))
 _sig={}
 def sigma_at(m_end):
@@ -42,17 +42,27 @@ def frame_rows(g,ex,res,sign,op,K):
     f['from_hi']=mid[DEC]-hi[DEC]; f['from_lo']=mid[DEC]-lo[DEC]
     first=mid[~np.isnan(mid)][0] if (~np.isnan(mid)).any() else NAN
     f['from_first']=mid[DEC]-first
+    f['dist50']=np.abs(mid[DEC]-0.5)
+    # mid against its own high / low of the last 60 s (NaN seconds left out), as PrintGrid.highMid / lowMid
+    pad=np.concatenate([np.full(59,NAN),mid]); win=np.lib.stride_tricks.sliding_window_view(pad,60)[DEC]
+    with np.errstate(all='ignore'):
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore',RuntimeWarning)
+            f['hi60']=mid[DEC]-np.nanmax(win,axis=1); f['lo60']=mid[DEC]-np.nanmin(win,axis=1)
     d1=np.diff(mid,prepend=mid[0]); d1=np.where(np.isnan(d1),0.0,d1)
-    for w in (60,300):
+    for w in (30,60,120,300):
         s1=rollsum(d1,w); s2=rollsum(d1*d1,w); f[f'vol{w}']=np.sqrt(np.maximum(s2/w-(s1/w)**2,0.0))[DEC]
-    f['nchg60']=rollsum((d1!=0).astype(float),60)[DEC]
+    for w in (30,60,120):
+        f[f'nchg{w}']=rollsum((d1!=0).astype(float),w)[DEC]
     vy=g['vy']; vn=g['vn']
     for w in WINS:
         by=rollsum(vy,w)[DEC]; bn=rollsum(vn,w)[DEC]; tot=by+bn
         f[f'imb{w}']=np.where(tot>0,(by-bn)/np.maximum(tot,1e-9),0.0); f[f'lvol{w}']=np.log1p(tot)
     cy=np.cumsum(vy)[DEC]; cn=np.cumsum(vn)[DEC]; ct=cy+cn
     f['imb_all']=np.where(ct>0,(cy-cn)/np.maximum(ct,1e-9),0.0); f['lvol_all']=np.log1p(ct)
-    f['lcnt30']=np.log1p(rollsum(cnt,30)[DEC])
+    for w in (30,60,120):
+        f[f'lcnt{w}']=np.log1p(rollsum(cnt,w)[DEC])
     for w in (30,120):
         f[f'lmaxbuy{w}']=np.log1p(rollmax(my,w)[DEC]); f[f'lmaxsell{w}']=np.log1p(rollmax(mn,w)[DEC])
     f['stale_bid']=sb[DEC]; f['stale_ask']=sa[DEC]

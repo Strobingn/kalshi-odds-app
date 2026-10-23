@@ -1,6 +1,6 @@
 name: Train scalper model (Claude)
 
-# Retrains the ML scalper the app ships (app/src/main/assets/scalper_model.json) on the newest public trade
+# Retrains the ML scalper the app ships (app/src/main/assets/scalper_model.json, train_calibrated.py) on the newest public trade
 # tape: the archived tape in the "scalper-data" release plus every settled KXBTC15M window Kalshi still lists.
 # The split rolls with the data (tools/research/scalp/splits.py): the newest SCALP_TEST_DAYS days are the test,
 # the 4 before them tune the threshold, everything older trains. gate_scalper.py then scores the new model and
@@ -23,6 +23,7 @@ on:
       - "tools/research/scalp/splits.py"
       - "tools/research/scalp/gate_scalper.py"
       - "tools/research/scalp/train_compact.py"
+      - "tools/research/scalp/train_calibrated.py"
       - "tools/research/scalp/queue_ml.py"
       - "tools/research/scalp/export_app_model.py"
       - "tools/research/scalp/export_onnx.py"
@@ -54,7 +55,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install
-        run: pip install -q numpy pandas lightgbm scipy
+        run: pip install -q numpy pandas lightgbm scipy scikit-learn
 
       - name: Gate checks
         run: python3 tools/research/scalp/test_gate_scalper.py
@@ -102,7 +103,8 @@ jobs:
 
       - name: Train
         working-directory: work
-        run: python3 -m train_compact | tee train.log
+        # Depth-capped classifier with a calibrated chance, on the 25 features that add the most after-fee profit.
+        run: python3 -m train_calibrated | tee train.log
 
       - name: Queue penalty
         working-directory: work

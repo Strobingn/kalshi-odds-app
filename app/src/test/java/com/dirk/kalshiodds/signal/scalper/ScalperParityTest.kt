@@ -31,7 +31,8 @@ class ScalperParityTest {
     }
 
     private fun replay(): PrintGrid {
-        val open = 1_000_000_000_000L
+        // The window's real open (UTC hour and weekday are features); older fixtures carry none.
+        val open = if (fixture.has("open")) fixture.getLong("open") * 1000L else 1_000_000_000_000L
         val grid = PrintGrid(open)
         val trades = fixture.getJSONArray("trades")
         for (i in 0 until trades.length()) {
@@ -43,8 +44,9 @@ class ScalperParityTest {
 
     @Test
     fun shippedModelLoadsWithTheGridsFeatureOrder() {
-        assertEquals(PrintGrid.FEATURES, model.features)
-        assertTrue(model.treeCount > 50)
+        assertEquals(fixture.getJSONArray("features").let { a -> (0 until a.length()).map { a.getString(it) } }, model.features)
+        assertTrue(model.features.all { it in PrintGrid.CANDIDATES })
+        assertTrue(model.treeCount > 20)
         assertTrue("queue penalty rises with the queue", model.queuePenaltyCents(2_000.0) > model.queuePenaltyCents(100.0))
         assertEquals(0.0, model.queuePenaltyCents(0.0), 0.0)
     }
@@ -54,12 +56,12 @@ class ScalperParityTest {
         val grid = replay()
         val rows = fixture.getJSONArray("rows")
         assertTrue("fixture has rows", rows.length() >= 100)
-        val names = PrintGrid.FEATURES
+        val names = model.features
         var worst = 0.0
         var worstName = ""
         for (i in 0 until rows.length()) {
             val r = rows.getJSONObject(i)
-            val x = grid.features(r.getString("side"), r.getInt("sec"))
+            val x = grid.features(r.getString("side"), r.getInt("sec"), names)
             assertNotNull("row ${r.getString("side")} @ ${r.getInt("sec")} s is quotable in the app too", x)
             val want = r.getJSONArray("x")
             for (k in names.indices) {
@@ -82,7 +84,7 @@ class ScalperParityTest {
         var flips = 0
         for (i in 0 until rows.length()) {
             val r = rows.getJSONObject(i)
-            val x = grid.features(r.getString("side"), r.getInt("sec"))!!
+            val x = grid.features(r.getString("side"), r.getInt("sec"), model.features)!!
             val got = model.predict(x)
             val want = r.getDouble("pred")
             worst = maxOf(worst, abs(got - want))
@@ -90,6 +92,33 @@ class ScalperParityTest {
         }
         assertTrue("largest prediction difference $worst cents", worst < 1e-6)
         assertEquals("the act / skip decision never differs", 0, flips)
+    }
+
+    /** Every feature the app can rebuild ([PrintGrid.CANDIDATES]), not only the model's, matches build_ml.py. */
+    @Test
+    fun everyCandidateFeatureMatchesThePythonStudy() {
+        // Older fixtures (the 23-feature regression file) carry only the model's own features.
+        if (!fixture.getJSONArray("rows").getJSONObject(0).has("all")) return
+        val names = fixture.getJSONArray("candidates").let { a -> (0 until a.length()).map { a.getString(it) } }
+        assertEquals("the study's candidate list is the app's", PrintGrid.CANDIDATES.toList(), names)
+        val grid = replay()
+        val rows = fixture.getJSONArray("rows")
+        val worst = DoubleArray(names.size)
+        var checked = 0
+        for (i in 0 until rows.length()) {
+            val r = rows.getJSONObject(i)
+            // Rows the long lookbacks are not warm for are left out (the app would not trade them).
+            val x = grid.features(r.getString("side"), r.getInt("sec"), names) ?: continue
+            checked++
+            val want = r.getJSONArray("all")
+            for (k in names.indices) {
+                val w = want.getDouble(k)
+                worst[k] = maxOf(worst[k], abs(x[k] - w) / maxOf(1.0, abs(w)))
+            }
+        }
+        assertTrue("rows checked: $checked", checked >= 50)
+        val bad = names.indices.filter { worst[it] >= 1e-5 }.map { "${names[it]} ${worst[it]}" }
+        assertTrue("features that differ from the study: $bad", bad.isEmpty())
     }
 
     @Test

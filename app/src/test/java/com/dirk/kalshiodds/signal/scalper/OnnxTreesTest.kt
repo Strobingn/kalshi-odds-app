@@ -30,7 +30,8 @@ class OnnxTreesTest {
         return (0 until rows.length()).map { i ->
             val r = rows.getJSONObject(i)
             val x = r.getJSONArray("x")
-            FloatArray(x.length()) { x.getDouble(it).toFloat() } to r.getDouble("pred")
+            // ONNX gives the trees' sum: the margin (a classifier's log-odds), or the cents of an older regression file.
+            FloatArray(x.length()) { x.getDouble(it).toFloat() } to (if (r.has("margin")) r.getDouble("margin") else r.getDouble("pred"))
         }
     }
 
@@ -40,9 +41,9 @@ class OnnxTreesTest {
         OnnxTrees.open(onnxBytes, jsonBytes, m.features).use { onnx ->
             var worst = 0.0
             for ((x, study) in recordedRows()) {
-                worst = maxOf(worst, abs(onnx.predict(x) - study), abs(onnx.predict(x) - m.predictTrees(x)))
+                worst = maxOf(worst, abs(onnx.predict(x) - study), abs(onnx.predict(x) - m.marginTrees(x)))
             }
-            for (x in m.probeRows(400)) worst = maxOf(worst, abs(onnx.predict(x) - m.predictTrees(x)))
+            for (x in m.probeRows(400)) worst = maxOf(worst, abs(onnx.predict(x) - m.marginTrees(x)))
             assertTrue("worst difference $worst cents", worst < ScalperModel.PARITY_TOLERANCE_CENTS)
         }
     }
@@ -54,7 +55,8 @@ class OnnxTreesTest {
             assertNull(m.attachOnnx(onnx::predict))
             assertEquals("ONNX Runtime (CPU)", m.engine)
             val (x, study) = recordedRows().first()
-            assertEquals(study, m.predict(x), ScalperModel.PARITY_TOLERANCE_CENTS)
+            assertEquals(study, m.margin(x), ScalperModel.PARITY_TOLERANCE_CENTS)
+            assertEquals(m.predictTrees(x), m.predict(x), 1e-3)
         }
     }
 
@@ -72,23 +74,24 @@ class OnnxTreesTest {
 
     @Test
     fun aWrongOrBrokenEngineLeavesTheKotlinTrees() {
-        val (x, study) = recordedRows().first()
+        val (x, _) = recordedRows().first()
+        val want = model().predictTrees(x)
 
         val off = model()
-        assertTrue(off.attachOnnx({ off.predictTrees(it) + 0.5 }) != null)
+        assertTrue(off.attachOnnx({ off.marginTrees(it) + 0.5 }) != null)
         assertTrue(off.engine.startsWith("Kotlin trees"))
-        assertEquals(study, off.predict(x), 1e-9)
+        assertEquals(want, off.predict(x), 1e-9)
 
         val throws = model()
         assertTrue(throws.attachOnnx({ error("no native library") }) != null)
-        assertEquals(study, throws.predict(x), 1e-9)
+        assertEquals(want, throws.predict(x), 1e-9)
 
         // Matches at first, then stops answering: predict falls back for good.
         val later = model()
         var broken = false
-        assertNull(later.attachOnnx({ if (broken) error("session closed") else later.predictTrees(it) }))
+        assertNull(later.attachOnnx({ if (broken) error("session closed") else later.marginTrees(it) }))
         broken = true
-        assertEquals(study, later.predict(x), 1e-9)
+        assertEquals(want, later.predict(x), 1e-9)
         assertTrue(later.engine.contains("stopped answering"))
     }
 }

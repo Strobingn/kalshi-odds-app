@@ -77,8 +77,24 @@ def test_day_ci_and_decide():
     assert G.theta_text(-1e9) == "takes every order" and G.theta_text(0.25) == "θ +0.250¢"
 
 
+def test_classifier_predict_goes_through_both_curves():
+    model = dict(kind="classifier", features=["a"], theta_cents=0.0,
+                 calibration=dict(x=[0.0, 0.5, 1.0], y=[0.0, 0.4, 1.0]),
+                 cents_by_chance=dict(x=[0.0, 1.0], y=[-4.0, 1.0]),
+                 trees=[dict(f=[0, -1, -1], t=[0.5, 0, 0], l=[1, -1, -1], r=[2, -1, -1], v=[0, -0.4, 0.6])])
+    X = np.array([[0.4], [0.6]], dtype=np.float32)
+    m = G.margin(model, X)
+    assert np.allclose(m, [-0.4, 0.6])
+    raw = 1 / (1 + np.exp(-m))
+    cal = np.interp(raw, [0.0, 0.5, 1.0], [0.0, 0.4, 1.0])
+    assert np.allclose(G.predict(model, X), -4.0 + 5.0 * cal)
+    reg = dict(model, kind="regression")
+    assert np.allclose(G.predict(reg, X), m)
+
+
 if __name__ == "__main__":
     test_split()
     test_predict_matches_the_app_evaluator()
     test_day_ci_and_decide()
+    test_classifier_predict_goes_through_both_curves()
     print("ok gate_scalper")

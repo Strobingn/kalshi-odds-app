@@ -102,6 +102,35 @@ data class ScalpTrade(
     }
 }
 
+/** One order-file row: what the scalper saw when it sent the order ([ScalpTradeLog.ORDER_HEADER]). */
+data class OrderDetail(
+    val bid: Double?,
+    val ask: Double?,
+    val bidQty: Double?,
+    val askQty: Double?,
+    val move10: Double?,
+    val move30: Double?,
+    /** The model's inputs (ML scalper only), in the order of the model that ran then. */
+    val features: FloatArray?
+) {
+    companion object {
+        /** Parses a row written by [ScalpTradeLog.orderRow]; null when it has too few columns. */
+        fun parse(line: String): OrderDetail? {
+            val p = line.trim().split(',')
+            if (p.size < 26) return null
+            fun d(i: Int): Double? = p[i].toDoubleOrNull()
+            val feats = p[25].takeIf { it.isNotBlank() }?.split(';')?.map { it.toFloatOrNull() ?: Float.NaN }?.toFloatArray()
+            return OrderDetail(d(19), d(20), d(21), d(22), d(23), d(24), feats)
+        }
+    }
+
+    override fun equals(other: Any?): Boolean = other is OrderDetail && bid == other.bid && ask == other.ask &&
+        bidQty == other.bidQty && askQty == other.askQty && move10 == other.move10 && move30 == other.move30 &&
+        (features?.contentEquals(other.features) ?: (other.features == null))
+
+    override fun hashCode(): Int = listOf(bid, ask, bidQty, askQty, move10, move30).hashCode() * 31 + (features?.contentHashCode() ?: 0)
+}
+
 /**
  * Every paper order the scalper sent, on disk, kept until deleted.
  *
@@ -232,6 +261,29 @@ class ScalpTradeLog(
             }
         }
         return out
+    }
+
+    /** Every closed scalp of the UTC [day] ("2026-10-22"), oldest first, rows still queued included. */
+    fun day(day: String): List<ScalpTrade> {
+        val queued = synchronized(lock) { pendingTrades.filter { utcDay(it.closedAtMs) == day } }
+        val saved = synchronized(fileLock) { readDayLocked(day) }.asReversed()
+        val seen = saved.mapTo(HashSet()) { it.run to it.id }
+        return (saved + queued.filter { (it.run to it.id) !in seen }).sortedBy { it.closedAtMs }
+    }
+
+    /**
+     * The order-file row of [trade] (the book it saw, its moves and the model's inputs), or null when it is not
+     * on disk (still queued, or the files were reset). Reads that day's gzip file.
+     */
+    fun orderFor(trade: ScalpTrade): OrderDetail? {
+        flushNow()
+        val f = synchronized(fileLock) { File(dir, orderFile(utcDay(trade.closedAtMs))).takeIf { it.isFile } } ?: return null
+        val prefix = ",${trade.run},${trade.id},${trade.strategy},"
+        return runCatching {
+            java.util.zip.GZIPInputStream(f.inputStream().buffered()).bufferedReader(Charsets.UTF_8).useLines { lines ->
+                lines.firstOrNull { line -> line.indexOf(prefix).let { it in 1..20 } && line.substringBefore(',').toLongOrNull() != null }
+            }?.let { OrderDetail.parse(it) }
+        }.getOrNull()
     }
 
     /** Zip every file (archive included) into [out]. Returns the number of files written. */

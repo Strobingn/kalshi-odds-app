@@ -16,8 +16,8 @@ android {
         applicationId = "com.dirk.kalshiodds.claude"
         minSdk = 26
         targetSdk = 35
-        versionCode = 71
-        versionName = "1.16.2"
+        versionCode = 72
+        versionName = "1.17.0"
         // In-app update check (ui/AppUpdate.kt): the Build APK run that made
         // this APK. 0 / "local" when built outside GitHub Actions.
         buildConfigField(
@@ -31,6 +31,31 @@ android {
             "\"" + (System.getenv("GITHUB_SHA") ?: "local").filter { it.isLetterOrDigit() }.take(7) + "\""
         )
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // 64-bit phones (and the x86_64 emulator) only: every native library the app ships (ONNX Runtime, TensorFlow
+        // Lite, the on-phone LLM) is packaged for these two.
+        ndk {
+            abiFilters += listOf("arm64-v8a", "x86_64")
+        }
+        externalNativeBuild {
+            cmake {
+                // llama.cpp is optimised even in debug builds (a -O0 LLM is unusably slow); one shared C++ runtime.
+                arguments += listOf("-DCMAKE_BUILD_TYPE=Release", "-DANDROID_STL=c++_shared")
+                // Offline / local builds: -PllamaCppDir=/path/to/llama.cpp uses that checkout instead of fetching the pinned tag.
+                (findProperty("llamaCppDir") as String?)?.let { arguments += "-DFETCHCONTENT_SOURCE_DIR_LLAMA_CPP=$it" }
+                // The on-phone LLM is built for phones only; on the emulator it reports itself as unavailable.
+                abiFilters("arm64-v8a")
+            }
+        }
+    }
+
+    ndkVersion = "27.0.12077973"
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     signingConfigs {
@@ -79,6 +104,10 @@ android {
     }
 
     packaging {
+        // llama.cpp picks its CPU backend by opening the variant files in nativeLibraryDir, so they must be extracted.
+        jniLibs {
+            useLegacyPackaging = true
+        }
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             excludes += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"

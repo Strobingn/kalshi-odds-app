@@ -82,7 +82,8 @@ def main():
     # 1. The recorded window the Kotlin parity test uses: the study's own predictions.
     fx = json.load(open(PARITY))
     x = np.array([r["x"] for r in fx["rows"]], dtype=np.float32)
-    want = np.array([r["pred"] for r in fx["rows"]])
+    # ONNX gives the trees' sum: a classifier's log-odds ("margin"), or an older regression file's cents ("pred").
+    want = np.array([r.get("margin", r["pred"]) for r in fx["rows"]])
     got = run(sess, x)
     worst = np.max(np.abs(got - want))
     assert worst < TOL, f"recorded rows: worst {worst}"

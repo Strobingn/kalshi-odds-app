@@ -87,6 +87,17 @@ fun AiScreen(vm: AiViewModel) {
     val busy by vm.busy.collectAsStateWithLifecycle()
     var section by rememberSaveable { mutableIntStateOf(if (dash.keys.any { it.second } || keys.saved.any { it.second }) 0 else 2) }
     var which by rememberSaveable { mutableStateOf(AiChat.SCALPING) }
+    val llm by vm.localLlm.collectAsStateWithLifecycle()
+    val llmTest by vm.llmTest.collectAsStateWithLifecycle()
+    val llmTesting by vm.llmTesting.collectAsStateWithLifecycle()
+    val speeds by vm.speeds.collectAsStateWithLifecycle()
+    val review by vm.review.collectAsStateWithLifecycle()
+    val reviews by vm.reviewList.collectAsStateWithLifecycle()
+    val autoReview by vm.autoReview.collectAsStateWithLifecycle()
+    val report by vm.modelReport.collectAsStateWithLifecycle()
+    val pickModel = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+    ) { uri -> if (uri != null) vm.importModel(uri) }
 
     Column(Modifier.fillMaxSize().background(c.bg)) {
         AiHeader(onRunNow = vm::runNow)
@@ -94,16 +105,34 @@ fun AiScreen(vm: AiViewModel) {
         when (section) {
             0 -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
                 AiDashboardContent(dash, onOpenKeys = { section = 2 })
+                report?.let {
+                    Spacer(Modifier.height(12.dp))
+                    ModelReportCard(it)
+                }
             }
             1 -> AiChatContent(
                 which = which, msgs = msgs.filter { it.thread == which }, busy = busy,
                 onWhich = { which = it }, onSend = { vm.send(which, it) },
                 onApply = vm::apply, onCancel = vm::cancel, onClear = { vm.clear(which) }
             )
-            else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
+            2 -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
                 AiKeysContent(
                     keys, onDraft = vm::setDraft, onSave = vm::saveKeys, onTest = vm::testKeys, onClear = vm::clearKey,
                     onScalping = vm::setScalpingOn, onPaper = vm::setPaperOn, onLearning = vm::setLearning
+                )
+                Spacer(Modifier.height(12.dp))
+                OnPhoneModelCard(
+                    llm, llmTest, llmTesting,
+                    onDownload = vm::downloadModel,
+                    onPickFile = { pickModel.launch(arrayOf("application/octet-stream", "*/*")) },
+                    onCancel = vm::cancelTransfer, onSelect = vm::selectModel, onDelete = vm::deleteModel,
+                    onPreferLocal = vm::setPreferLocal, onTest = vm::testLocal, speeds = speeds
+                )
+            }
+            else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
+                AiReviewsContent(
+                    review, reviews, autoReview, onAuto = vm::setAutoReview, onRunToday = vm::reviewToday,
+                    onRunDay = vm::reviewDay, onCancel = vm::cancelReview, yesterday = vm.yesterday()
                 )
             }
         }
@@ -137,7 +166,7 @@ fun AiSectionTabs(selected: Int, onSelect: (Int) -> Unit) {
         contentColor = c.textPrimary,
         indicator = { pos -> TabRowDefaults.SecondaryIndicator(Modifier.tabIndicatorOffset(pos[selected]), color = c.accentBlue) }
     ) {
-        listOf("Dashboard", "Chat", "Keys").forEachIndexed { i, t ->
+        listOf("Dashboard", "Chat", "Keys", "Reviews").forEachIndexed { i, t ->
             Tab(
                 selected = selected == i, onClick = { onSelect(i) },
                 text = { Text(t, fontWeight = if (selected == i) FontWeight.Bold else FontWeight.Normal, color = if (selected == i) c.textPrimary else c.textSecondary) }

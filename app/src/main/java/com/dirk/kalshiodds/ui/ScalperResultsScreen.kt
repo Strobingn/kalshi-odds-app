@@ -178,6 +178,7 @@ fun ScalperResultsRoute(onBack: (() -> Unit)?, onOpenSettings: () -> Unit = {}) 
         tuning = container?.scalper?.engine?.tuning,
         modelTheta = store?.model?.thetaCents,
         modelEngine = store?.model?.engine,
+        onExplain = container?.explain?.let { ex -> { t: ScalpTrade -> ex.explain(t) } },
         checks = checks,
         onResetPaper = container?.scalper?.let { sc ->
             {
@@ -193,6 +194,11 @@ fun ScalperResultsRoute(onBack: (() -> Unit)?, onOpenSettings: () -> Unit = {}) 
             }
         }
     )
+    val explained by produceState<com.dirk.kalshiodds.llm.ExplainUi?>(null, container) {
+        val ex = container?.explain ?: return@produceState
+        ex.state.collect { value = it }
+    }
+    explained?.let { ExplainDialog(it) { container?.explain?.close() } }
 }
 
 /** The Arena's top-level tabs. */
@@ -283,7 +289,9 @@ fun ScalperResultsScreen(
     /** Clears the paper record (after a confirm); null hides the button. */
     onResetPaper: (() -> Unit)? = null,
     /** The contract checks' lines ([com.dirk.kalshiodds.signal.scalper.ContractChecks.lines]); null hides the card. */
-    checks: List<String>? = null
+    checks: List<String>? = null,
+    /** "Explain this trade" on every trade card; null hides the button (screenshots). */
+    onExplain: ((ScalpTrade) -> Unit)? = null
 ) {
     var openName by rememberSaveable { mutableStateOf(initialOpen?.name) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
@@ -294,7 +302,7 @@ fun ScalperResultsScreen(
         if (hasBack) BackHandler { openName = null }
         // Each strategy's page opens at its top, not where the last one was left.
         val pageState = remember(open) { if (open == initialOpen) pageListState else LazyListState() }
-        StrategyPage(open, state, chartTrades, pageState, tuning, modelTheta, modelEngine) { openName = null }
+        StrategyPage(open, state, chartTrades, pageState, tuning, modelTheta, modelEngine, onExplain) { openName = null }
         return
     }
     if (settingsOpen && tuning != null) {
@@ -778,7 +786,7 @@ fun ScalperResultsScreen(
                             if (trades.isEmpty()) Muted("Nothing here yet. Every closed trade is listed, newest first.")
                         }
                     }
-                    items(trades, key = { "${it.run}-${it.id}" }) { t -> TradeCard(t) }
+                    items(trades, key = { "${it.run}-${it.id}" }) { t -> TradeCard(t, onExplain) }
                     if (trades.size < h.closed && trades.isNotEmpty()) {
                         item(key = "more") {
                             OutlinedButton(onClick = onShowMore, modifier = Modifier.fillMaxWidth().height(48.dp)) {
@@ -832,7 +840,7 @@ private fun Breakdown(title: String, rows: List<ScalperResults.Row>) {
 
 /** One closed trade (kept for callers of the old row). */
 @Composable
-internal fun TradeRow(t: ScalpTrade) = TradeCard(t)
+internal fun TradeRow(t: ScalpTrade, onExplain: ((ScalpTrade) -> Unit)? = null) = TradeCard(t, onExplain)
 
 /**
  * One strategy's own page: its result, its running profit, its rules in
@@ -849,6 +857,7 @@ internal fun StrategyPage(
     tuning: com.dirk.kalshiodds.signal.scalper.ScalpTuning? = null,
     modelTheta: Double? = null,
     modelEngine: String? = null,
+    onExplain: ((ScalpTrade) -> Unit)? = null,
     onBack: () -> Unit
 ) {
     val colors = DipTheme.colors
@@ -971,7 +980,7 @@ internal fun StrategyPage(
             item(key = "trades_head") {
                 ArenaSectionHeader(if (detail.recent.isEmpty()) "Its trades · none yet" else "Its last ${detail.recent.size} trades")
             }
-            items(detail.recent, key = { "st-${it.run}-${it.id}" }) { t -> TradeCard(t) }
+            items(detail.recent, key = { "st-${it.run}-${it.id}" }) { t -> TradeCard(t, onExplain) }
         }
     }
 }
