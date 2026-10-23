@@ -40,6 +40,12 @@ object FairGapTune {
         "fcfade", KeptScalpers.FADE_ID
     )
 
+    /**
+     * Family codes the card id collapses to. These keep their own entry and stop.
+     * The 24–42¢ gate must not see them, or a live sf41d / twin save is cancelled.
+     */
+    val FAMILY: Set<String> = setOf("sf41", "sf42", "sf04", "v2-dip", "v2-fair", "fair", "fcfade")
+
     /** Hold-to-settlement entries need at least this many seconds left. Own-rule late favourites keep their shorter window. */
     const val SETTLE_MIN_S = 180.0
 
@@ -56,8 +62,15 @@ object FairGapTune {
      * The gate was cancelling sf16f / sf41 / sf04 at save time because the card id is not the
      * bare family code in [OWN_RULES]. Exits still use [isTweaked].
      */
-    fun entryGated(code: String?): Boolean = isTweaked(code) && !ownsRules(code) &&
-        code !in KeptScalpers.IDS && !ScalpVariants.isLive(code)
+    /** True when this id keeps its own entry and its own stop. The fair-gap gate must leave it alone. */
+    fun exempt(code: String?): Boolean {
+        if (code == null) return false
+        if (code in KEEP || code in FAMILY || ownsRules(code)) return true
+        if (code in KeptScalpers.IDS || ScalpVariants.isLive(code) || ModelFilter.isTwin(code)) return true
+        return false
+    }
+
+    fun entryGated(code: String?): Boolean = code != null && !exempt(code)
 
     /**
      * 1.0.3 hold-instead-of-stop applies only to removed losers.

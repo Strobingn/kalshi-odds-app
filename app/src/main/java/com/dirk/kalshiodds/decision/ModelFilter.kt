@@ -20,6 +20,7 @@ object ModelFilter {
     const val EMBARGO_MS = 900_000L
     const val DEFAULT_THRESHOLD = 0.55
     const val DEFAULT_EXIT_S = 90.0
+    const val PRIOR_BIAS = -0.10
     private const val TICK_KEEP_MS = 30 * 60_000L
 
     enum class Kind { SIMPLE_DIP, FAIR, V2_FAIR, V2_DIP }
@@ -146,8 +147,8 @@ object ModelFilter {
     )
 
     private val lock = Any()
-    private var weights = DoubleArray(FEATURES)
-    private var bias = 0.0
+    private var weights = priorWeights()
+    private var bias = PRIOR_BIAS
     private var trainedN = 0
     private var lastTrainMs = 0L
     private var threshold = DEFAULT_THRESHOLD
@@ -173,6 +174,15 @@ object ModelFilter {
     private var partials = 0
     private var unfilled = 0
     private var controlNet = 0.0
+    private var controlTrades = 0
+    private var controlRejected = 0
+    private var controlCents = 0.0
+    private var controlEquity = 0.0
+    private var controlPeak = 0.0
+    private var controlDrawdown = 0.0
+    private var controlYes = 0.0
+    private var controlNo = 0.0
+    private var controlFresh = -1L
     private var recentNet = 0.0
     private var recentN = 0
     private var trainDay = ""
@@ -241,15 +251,46 @@ object ModelFilter {
     fun makerExpected(fillProbability: Double, netGivenFill: Double): Double =
         fillProbability.coerceIn(0.0, 1.0) * netGivenFill
 
-    /** q·E[gain|win] − (1−q)·E[loss|loss]. Loss magnitude is positive. Zero until both sides have a close. */
+    /**
+     * Empirical q·E[gain] − (1−q)·E[loss] after both a win and a loss exist.
+     * Before that, [coldNet] is the fee-aware payoff so the first clip is not stuck at 0.
+     */
     fun expectedNet(q: Double): Double = synchronized(lock) {
-        if (winN <= 0 || lossN <= 0) return@synchronized 0.0
+        if (winN <= 0 || lossN <= 0 || trainedN < MIN_TRAIN) return@synchronized 0.0
         q.coerceIn(0.0, 1.0) * (winSum / winN) - (1.0 - q.coerceIn(0.0, 1.0)) * (lossSum / lossN)
     }
 
-    /** True at most once per ticker per [ENTRY_CADENCE_MS]. Exits do not call this. */
-    fun dueForEntry(ticker: String, nowMs: Long): Boolean = synchronized(lock) {
-        val key = ticker.uppercase()
+    /**
+     * Unrounded round-trip payoff in dollars per contract, blended with the score tilt.
+     * Positive when [residualClears]. At or below zero when the edge does not clear fees.
+     */
+    fun coldNet(qScore: Double, fair: Double, ask: Double, spread: Double): Double {
+        val analytical = rawNetCents(ask, fair) / 100.0
+        val tilt = (qScore.coerceIn(0.0, 1.0) - 0.5) * 0.08
+        val blended = 0.5 * analytical + 0.5 * tilt
+        return if (residualClears(fair, ask, spread, 1)) blended.coerceAtLeast(1e-4) else blended.coerceAtMost(0.0)
+    }
+
+    /** Net cents per contract. The training target: 100 × (proceeds − cost − entry fee − exit fee) / contracts. */
+    fun netCentsPerContract(saleProceeds: Double, purchaseCost: Double, entryFees: Double, exitFees: Double, contractsPurchased: Int): Double {
+        if (contractsPurchased <= 0) return 0.0
+        return 100.0 * (saleProceeds - purchaseCost - entryFees - exitFees) / contractsPurchased
+    }
+
+    fun netCentsPerContract(netUsd: Double, contracts: Int): Double =
+        if (contracts <= 0 || !netUsd.isFinite()) 0.0 else netUsd * 100.0 / contracts
+
+    /** Win rate that pays for a positive win and a negative loss, both already net of unrounded taker fees. */
+    fun breakEvenWinRate(winCents: Double, lossCents: Double): Double {
+        val loss = kotlin.math.abs(lossCents)
+        val den = winCents + loss
+        if (den <= 1e-12) return 1.0
+        return (loss / den).coerceIn(0.0, 1.0)
+    }
+
+    /** True at most once per ticker per lane per [ENTRY_CADENCE_MS]. Fair and dip do not share the clock. */
+    fun dueForEntry(ticker: String, nowMs: Long, lane: String = ""): Boolean = synchronized(lock) {
+        val key = "$lane|${ticker.uppercase()}"
         val prev = lastEntryScore[key]
         if (prev != null && nowMs - prev < ENTRY_CADENCE_MS) return@synchronized false
         lastEntryScore[key] = nowMs
@@ -289,8 +330,10 @@ object ModelFilter {
         val bookAge = (q.nowMs - q.bookAtMs).coerceAtLeast(0L)
         val benchAge = q.cfAgeMs ?: -1L
         val qScore = QuantSession.logisticScore(weights, bias, x)
+        val spread = if (x.size > 13) x[13] else 0.0
+        val learned = winN > 0 && lossN > 0 && trainedN >= MIN_TRAIN
+        val eNet = if (learned) expectedNet(qScore) else coldNet(qScore, fair, ask, spread)
         val lgbm = QuantSession.predictNet(x)
-        val eNet = expectedNet(qScore)
         val score = if (twin.arm == Arm.LGBM) lgbm else qScore
         val pin = x.size > 20 && x[20] >= 1.0
         val kelly = if (sizeMode == SizeMode.KELLY) {
@@ -314,7 +357,6 @@ object ModelFilter {
             !priceOk -> "ask above 55¢ ceiling"
             pin -> "pin risk · taker off"
             twin.arm == Arm.LGBM && !gate -> "lgbm net ${fmt(lgbm)} ≤ 0"
-            twin.arm == Arm.LOGISTIC && (winN <= 0 || lossN <= 0) -> "expected net not identified yet"
             twin.arm == Arm.LOGISTIC && !gate -> "expected net ${fmt(eNet)} ≤ 0"
             else -> "enter · ${twin.arm.name.lowercase()} · E[net] ${fmt(if (twin.arm == Arm.LGBM) lgbm else eNet)} · size ${fmt(scalar)}×"
         }
@@ -350,10 +392,18 @@ object ModelFilter {
 
     fun noteUnfilled(twinId: String) = synchronized(lock) { if (isTwin(twinId)) unfilled += 1 }
 
-    fun noteControl(variantId: String, netUsd: Double) = synchronized(lock) {
+    fun noteControl(variantId: String, netUsd: Double, side: String = "YES", freshnessMs: Long = -1L) = synchronized(lock) {
         if (!netUsd.isFinite() || isTwin(variantId)) return@synchronized
         if (TWINS.none { it.parentId == variantId }) return@synchronized
         controlNet += netUsd
+        controlTrades += 1
+        controlCents += netUsd * 100.0
+        controlEquity += netUsd
+        if (controlEquity > controlPeak) controlPeak = controlEquity
+        val drop = controlPeak - controlEquity
+        if (drop > controlDrawdown) controlDrawdown = drop
+        if (side == "NO") controlNo += netUsd else controlYes += netUsd
+        if (freshnessMs >= 0) controlFresh = freshnessMs
     }
 
     fun retrainFrom(trades: List<ScalpTrade>, nowMs: Long) = synchronized(lock) {
@@ -455,8 +505,8 @@ object ModelFilter {
     fun telemetry(): QuantSession.Telemetry = QuantSession.telemetry()
 
     fun resetForTest() = synchronized(lock) {
-        weights = DoubleArray(FEATURES)
-        bias = 0.0
+        weights = priorWeights()
+        bias = PRIOR_BIAS
         trainedN = 0
         lastTrainMs = 0L
         threshold = DEFAULT_THRESHOLD
@@ -487,15 +537,36 @@ object ModelFilter {
         partials = 0
         unfilled = 0
         controlNet = 0.0
+        controlTrades = 0
+        controlRejected = 0
+        controlCents = 0.0
+        controlEquity = 0.0
+        controlPeak = 0.0
+        controlDrawdown = 0.0
+        controlYes = 0.0
+        controlNo = 0.0
+        controlFresh = -1L
         QuantSession.resetForTest()
     }
 
     fun scorecards(): List<Scorecard> = synchronized(lock) {
         val tel = QuantSession.telemetry()
+        val controlN = controlTrades
         val control = Scorecard(
-            arm = "control", netUsd = controlNet, centsPerFill = 0.0, drawdownUsd = 0.0,
-            fillRate = 0.0, partialRate = 0.0, incrementalUsd = 0.0, trades = 0, rejected = 0,
-            yesNet = 0.0, noNet = 0.0, takerN = 0, makerN = 0, freshnessMs = -1L,
+            arm = "control",
+            netUsd = controlNet,
+            centsPerFill = if (controlN == 0) 0.0 else controlCents / controlN,
+            drawdownUsd = controlDrawdown,
+            fillRate = if (controlN + controlRejected == 0) 0.0 else controlN.toDouble() / (controlN + controlRejected),
+            partialRate = if (fills == 0) 0.0 else partials.toDouble() / fills,
+            incrementalUsd = 0.0,
+            trades = controlN,
+            rejected = controlRejected,
+            yesNet = controlYes,
+            noNet = controlNo,
+            takerN = controlN,
+            makerN = 0,
+            freshnessMs = controlFresh,
             p50Us = tel.p50Us, p95Us = tel.p95Us, p99Us = tel.p99Us
         )
         val arms = Arm.entries.map { arm ->
@@ -570,7 +641,7 @@ object ModelFilter {
         val ys = DoubleArray(train.size)
         for (i in train.indices) {
             xs += train[i].x
-            ys[i] = train[i].netUsd / train[i].contracts.coerceAtLeast(1)
+            ys[i] = netCentsPerContract(train[i].netUsd, train[i].contracts)
         }
         QuantSession.fitPayoff(xs, ys)
         treeFitN = train.size
@@ -675,6 +746,9 @@ object ModelFilter {
         x[23] = HftSignals.vwapZ(window.map { it.mid }, window.map { (it.bidSz + it.askSz).coerceAtLeast(1.0) })
         x[24] = HftSignals.crossCorr()
         x[25] = HftSignals.settleDivergenceBps(mark, q.settleAvg, q.tauS)
+        if (side == "NO") {
+            for (i in intArrayOf(3, 4, 5, 6, 21, 22, 23)) x[i] = -x[i]
+        }
         for (i in x.indices) if (!x[i].isFinite()) x[i] = 0.0
         return x
     }
@@ -718,6 +792,17 @@ object ModelFilter {
         tauS >= 600.0 -> "10+ min"
         tauS >= 300.0 -> "5–10 min"
         else -> "<5 min"
+    }
+
+    fun priorWeights(): DoubleArray {
+        val w = DoubleArray(FEATURES)
+        w[16] = 0.15
+        w[19] = 0.40
+        w[22] = 0.20
+        w[23] = 0.10
+        w[13] = -1.0
+        w[20] = -2.0
+        return w
     }
 
     private fun dot(w: DoubleArray, x: DoubleArray) = (0 until FEATURES).sumOf { w[it] * x[it] }

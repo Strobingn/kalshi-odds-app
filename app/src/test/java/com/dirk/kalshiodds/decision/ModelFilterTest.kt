@@ -68,8 +68,8 @@ class ModelFilterTest {
 
     @Test fun warmupEntersOnNeutralWeightsWhenTheResidualClears() {
         val d = ModelFilter.decide(ModelFilter.TWINS.first(), quote(), "YES", 0.20, 0.55)
-        assertFalse(d.enter)
-        assertTrue(d.reason, d.reason.contains("expected net"))
+        assertTrue(d.reason, d.enter)
+        assertTrue(d.reason, d.reason.contains("enter"))
         assertEquals(1.0, d.scalar, 0.0)
         assertTrue(d.policyVersion.contains("fee=quadratic-0.07"))
         assertTrue(d.score in 0.0..1.0)
@@ -163,8 +163,8 @@ class ModelFilterTest {
     @Test fun lgbmGateIsPredictedNetPayoff() {
         val twin = ModelFilter.TWINS.first { it.arm == ModelFilter.Arm.LGBM }
         val d = ModelFilter.decide(twin, quote(), "YES", 0.20, 0.55)
-        assertFalse(d.enter)
-        assertTrue(d.reason, d.reason.contains("lgbm net"))
+        assertTrue(d.reason, d.enter)
+        assertTrue(d.reason, d.reason.contains("lgbm"))
         assertTrue(d.modelVersion.startsWith("lgbm-"))
     }
 

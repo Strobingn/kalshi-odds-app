@@ -243,8 +243,16 @@ class QuantSessionTest {
         })
         assertEquals(QuantSession.ExecPath.QNN_GPU, gpuWins.selected)
         val note = QuantSession.select(QuantSession.ExecPath.QNN_HTP_BURST)
+        assertEquals(QuantSession.ExecPath.QNN_HTP_BURST, QuantSession.execPath())
+        assertEquals("QNN HTP Burst", QuantSession.telemetry().execPath)
+        assertTrue(note, note.contains("QNN HTP burst"))
+        assertTrue(QuantSession.telemetry().graphOpt.contains("ctx cached"))
+        val gpuPick = QuantSession.select(QuantSession.ExecPath.QNN_GPU)
+        assertEquals(QuantSession.ExecPath.QNN_GPU, QuantSession.execPath())
+        assertTrue(gpuPick, gpuPick.contains("QNN GPU"))
+        val blocked = QuantSession.select(QuantSession.ExecPath.QNN_HTP_BURST, probe = { false }, runtimeReady = false)
         assertEquals(QuantSession.ExecPath.CPU_FAST, QuantSession.execPath())
-        assertTrue(note.contains("CPU"))
+        assertTrue(blocked, blocked.contains("CPU"))
     }
 
     @Test fun proguardKeepsOnnxRuntime() {

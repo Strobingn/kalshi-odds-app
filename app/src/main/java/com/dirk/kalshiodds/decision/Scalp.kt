@@ -485,6 +485,9 @@ class ScalpBook(
     private val controls: ScalpControlsRepository = MemoryScalpControls(),
     private val idFactory: () -> String = { UUID.randomUUID().toString() }
 ) {
+    init {
+        runCatching { ModelFilter.retrainFrom(store.loadScalps(), System.currentTimeMillis()) }
+    }
     private val lock = Any()
     private val gates = ScalpGateLog()
     /** Close time last seen on a quote. Wins over the ticker stamp when a test pins closeMs. */
@@ -1511,7 +1514,7 @@ class ScalpBook(
 
     private fun enterModelFair(q: ScalpRule.Quote, recent: List<ScalpRule.Snap>): List<ScalpTrade> {
         ModelFilter.observe(q)
-        if (!ModelFilter.dueForEntry(q.ticker, q.nowMs)) return emptyList()
+        if (!ModelFilter.dueForEntry(q.ticker, q.nowMs, "fair")) return emptyList()
         val out = ArrayList<ScalpTrade>()
         for (twin in ModelFilter.TWINS) {
             if (twin.kind == ModelFilter.Kind.SIMPLE_DIP) continue
@@ -1533,7 +1536,7 @@ class ScalpBook(
 
     private fun enterModelDip(q: ScalpRule.Quote, key: String, fairYes: Double): List<ScalpTrade> {
         ModelFilter.observe(q)
-        if (!ModelFilter.dueForEntry(q.ticker, q.nowMs)) return emptyList()
+        if (!ModelFilter.dueForEntry(q.ticker, q.nowMs, "dip")) return emptyList()
         val out = ArrayList<ScalpTrade>()
         for (twin in ModelFilter.TWINS) {
             if (twin.kind != ModelFilter.Kind.SIMPLE_DIP) continue
@@ -1889,7 +1892,7 @@ class ScalpBook(
         while (o50Peak.size > 500) o50Peak.remove(o50Peak.keys.first())
         val net = t.proceedsUsd - t.exitFeeUsd - t.entryCostUsd
         val closed = t.copy(state = ScalpState.CLOSED, closedAtMs = atMs, netUsd = net, exitReason = reason)
-        ModelFilter.noteControl(closed.variantId, net)
+        ModelFilter.noteControl(closed.variantId, net, closed.side)
         return closed
     }
 
@@ -2258,9 +2261,34 @@ class ScalpBook(
      * Kalshi Scalper LLM paper strategy entry. The loop may propose again through the window
      * (not the last 60 seconds). This card is removed, so the call does not queue a trade. PAPER ONLY.
      */
-    /** The v2-llm paper card is removed. AI chat and the on-device forecast do not use this. */
-    fun llmEntry(@Suppress("UNUSED_PARAMETER") q: ScalpRule.Quote, @Suppress("UNUSED_PARAMETER") side: String, @Suppress("UNUSED_PARAMETER") conf: Double): String? =
-        KeptScalpers.REMOVED_LABEL
+    /**
+     * Queue one paper clip for the built-in / cloud LLM strategy. No Kalshi order.
+     * A second clip on the same ticker and side waits until the first is closed.
+     */
+    fun llmEntry(q: ScalpRule.Quote, side: String, conf: Double): String? {
+        if (!q.fresh()) return "quote is stale"
+        if (q.tauS <= 60.0) return "last 60 seconds"
+        val want = side.trim().uppercase()
+        if (want != "YES" && want != "NO") return "side must be YES or NO"
+        val ask = q.ask(want) ?: return "no ask"
+        if (!ScalpRule.buyPriceOk(ask)) return "ask above 55¢"
+        val ticker = q.ticker.uppercase()
+        val open = _all.value.any { it.variantId == "v2-llm" && it.ticker.equals(ticker, true) && it.side == want && isActive(it) }
+        if (open) return "already open on this ticker"
+        save(ScalpTrade(
+            id = idFactory(),
+            ticker = ticker,
+            side = want,
+            state = ScalpState.PENDING_ENTRY,
+            signalAtMs = q.nowMs,
+            signalAsk = ask,
+            fairAtSignal = q.fair(want) ?: conf.coerceIn(0.0, 1.0),
+            contracts = ScalpRule.CONTRACTS,
+            note = "v2-llm paper",
+            ruleVersion = "${ScalpRule.VERSION}|v2-llm|P"
+        ))
+        return "paper entry queued"
+    }
 
     // ---------------- Kalshi Scalper 1.0.2: Research lane + per-strategy sliders for every strategy ----------------
     private val _researchStatus = MutableStateFlow("Research: waiting for a BTC quote")
@@ -2307,8 +2335,9 @@ class ScalpBook(
     /** 1.0.3: losing strategies must also pass the winning fair-gap rule (see [FairGapTune]); winners are untouched. */
     private fun fairGapEntryFilter(t: ScalpTrade): ScalpTrade {
         if (t.state != ScalpState.PENDING_ENTRY || !t.isPrimary) return t
+        if (FairGapTune.exempt(t.variantId)) return t
         val code = codeOf(t)
-        if (!FairGapTune.entryGated(code)) return t
+        if (FairGapTune.exempt(code) || !FairGapTune.entryGated(code)) return t
         val other = if (t.side == "YES") "NO" else "YES"
         val taken = _all.value.any { it.isPrimary && it.ticker.equals(t.ticker, true) && it.side == other && it.state != ScalpState.NO_FILL && codeOf(it) == code }
         val n = if (t.contracts > 0) t.contracts else ScalpRule.CONTRACTS

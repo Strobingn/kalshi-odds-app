@@ -81,6 +81,16 @@ class TreeEnsemble private constructor(
         private const val GT: Byte = 3
         private const val EQ: Byte = 4
 
+        /** One shallow stump: a positive residual (feature 16) pays, a non-positive residual does not. */
+        fun priorPayoff(features: Int = ModelFilter.FEATURES): TreeEnsemble {
+            val specs = listOf(
+                Spec(0, 0, 16, 0.0, "BRANCH_LEQ", 1, 2, 0.0),
+                Spec(0, 1, 0, 0.0, "LEAF", 0, 0, -0.02),
+                Spec(0, 2, 0, 0.0, "LEAF", 0, 0, 0.02)
+            )
+            return build(intArrayOf(1, features), specs, logistic = false, base = 0.0)
+        }
+
         val EMPTY = TreeEnsemble(
             inputShape = intArrayOf(1, ModelFilter.FEATURES),
             treeCount = 0,
