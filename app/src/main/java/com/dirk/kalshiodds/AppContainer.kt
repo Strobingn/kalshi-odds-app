@@ -346,7 +346,8 @@ class AppContainer(context: Context) {
     /** The on-phone LLM (llama.cpp, a GGUF model in filesDir/llm). Loaded only while Explain or a review runs. */
     val localLlm = com.dirk.kalshiodds.llm.LocalLlm(
         dir = File(app.filesDir, "llm"),
-        engine = com.dirk.kalshiodds.llm.NativeEngine(app.applicationInfo.nativeLibraryDir),
+        // Null under Robolectric: llama.cpp then searches its default paths (and reports itself unavailable there).
+        engine = com.dirk.kalshiodds.llm.NativeEngine(app.applicationInfo?.nativeLibraryDir.orEmpty()),
         scope = insightScope,
         prefs = object : com.dirk.kalshiodds.llm.LocalLlm.Prefs {
             override var selected: String?
