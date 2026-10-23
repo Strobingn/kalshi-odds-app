@@ -189,6 +189,8 @@ object ModelFilter {
     private var treeFitN = 0
     private val lastPrint = HashMap<String, String>()
     private val lastDecision = HashMap<String, Decision>()
+    private val closedLog = ArrayDeque<LogRow>()
+    private val syncedTradeIds = HashSet<String>()
 
     private data class Tick(val atMs: Long, val spot: Double, val mid: Double, val spread: Double, val bidSz: Double, val askSz: Double)
 
@@ -384,7 +386,15 @@ object ModelFilter {
 
     fun onClosed(twinId: String, netUsd: Double, tauS: Double, closeMs: Long, x: DoubleArray?, contracts: Int = 1, sold: Int = contracts) = synchronized(lock) {
         if (!netUsd.isFinite()) return@synchronized
-        lastEnter[twinId]?.let { outcomes[it] = netUsd }
+        lastEnter[twinId]?.let { hitId ->
+            outcomes[hitId] = netUsd
+            decisions.firstOrNull { decisionId(it.twinId, it.atMs, it.side) == hitId }?.let { d ->
+                val row = LogRow(hitId, d.twinId, d.atMs, d.score, d.scalar, d.enter, d.reason, d.features.copyOf(), netUsd, d.side, d.freshnessMs, d.benchmarkAgeMs, d.policyVersion, d.modelVersion, d.expectedNet)
+                closedLog.removeAll { it.id == hitId }
+                closedLog.addLast(row)
+                while (closedLog.size > 200) closedLog.removeFirst()
+            }
+        }
         val n = contracts.coerceAtLeast(1)
         if (x != null && x.size == FEATURES) samples += Sample(x, netUsd, closeMs, tauS, twinId, n)
         while (samples.size > 4_000) samples.removeAt(0)
@@ -413,26 +423,79 @@ object ModelFilter {
         if (freshnessMs >= 0) controlFresh = freshnessMs
     }
 
+    fun recordClosedScalp(trade: ScalpTrade): Boolean = synchronized(lock) {
+        recordClosedScalpLocked(trade)
+    }
+
+    fun syncClosedScalps(trades: List<ScalpTrade>): Int = synchronized(lock) {
+        syncClosedScalpsLocked(trades)
+    }
+
     fun retrainFrom(trades: List<ScalpTrade>, nowMs: Long) = synchronized(lock) {
         // loadScalps() is newest-first. Keep the newest 2,000 closed rows, then walk them oldest-first.
+        syncClosedScalpsLocked(trades)
+        retrainLocked(nowMs)
+    }
+
+    private fun syncClosedScalpsLocked(trades: List<ScalpTrade>): Int {
         val closed = trades.filter { it.netUsd != null && it.entryPrice != null && it.closedAtMs != null }
         val newest = if (closed.size > 2_000) closed.take(2_000) else closed
+        var added = 0
         for (t in newest.asReversed()) {
-            val net = t.netUsd ?: continue
-            val entry = t.entryPrice ?: continue
-            val at = t.entryAtMs ?: t.signalAtMs
-            val close = t.closedAtMs ?: continue
-            val tau = ((ScalpTicker.closeMs(t.ticker) ?: close) - at) / 1000.0
-            val fair = t.fairAtSignal
-            val x = DoubleArray(FEATURES)
-            x[0] = (tau / 900.0).coerceIn(0.0, 1.5)
-            x[10] = entry
-            x[11] = entry - 0.5
-            x[16] = (fair - entry) * 100.0
-            samples += Sample(x, net, close, tau, t.variantId, t.contracts.coerceAtLeast(1))
+            if (recordClosedScalpLocked(t)) added++
         }
+        return added
+    }
+
+    private fun recordClosedScalpLocked(t: ScalpTrade): Boolean {
+        val net = t.netUsd ?: return false
+        val entry = t.entryPrice ?: return false
+        val close = t.closedAtMs ?: return false
+        if (!net.isFinite() || !entry.isFinite() || entry <= 0.0) return false
+        if (!syncedTradeIds.add(t.id)) return false
+        val at = t.entryAtMs ?: t.signalAtMs
+        val windowClose = ScalpTicker.closeMs(t.ticker) ?: maxOf(close, at + 60_000L)
+        val tau = ((windowClose - at) / 1000.0).coerceAtLeast(1.0)
+        val fair = t.fairAtSignal.takeIf { it.isFinite() && it > 0.0 } ?: (entry + 0.04).coerceAtMost(0.95)
+        val n = t.contracts.coerceAtLeast(1)
+        val x = DoubleArray(FEATURES)
+        x[0] = (tau / 900.0).coerceIn(0.0, 1.5)
+        x[1] = (fair - 0.5) * 100.0
+        x[2] = (fair - 0.5) * 4.0
+        x[7] = 2.0
+        x[10] = entry
+        x[11] = entry - 0.5
+        x[13] = 0.01
+        x[16] = (fair - entry) * 100.0
+        x[19] = fair.coerceIn(0.01, 0.99)
+        samples += Sample(x, net, close, tau, t.variantId, n)
         while (samples.size > 4_000) samples.removeAt(0)
-        retrainLocked(nowMs)
+        val bucket = bucketOf(tau)
+        bucketNet[bucket] = (bucketNet[bucket] ?: 0.0) + net
+        bucketN[bucket] = (bucketN[bucket] ?: 0) + 1
+        val per = net / n
+        if (per > 0.0) { winSum += per; winN += 1 } else if (per < 0.0) { lossSum += -per; lossN += 1 }
+        val score = sigmoid(bias + dot(weights, x))
+        val eNet = coldNet(score, fair, entry, 0.01)
+        val twinLabel = if (isTwin(t.variantId)) t.variantId else "${t.variantId}-logistic"
+        val reason = t.exitReason?.ifBlank { null } ?: "closed ${if (net >= 0.0) "+" else ""}${fmt(net)}"
+        closedLog.addLast(
+            LogRow(
+                id = "scalp:${t.id}",
+                twinId = twinLabel,
+                atMs = close,
+                score = score,
+                scalar = 1.0,
+                entered = true,
+                reason = reason,
+                features = x,
+                outcomeUsd = net,
+                side = t.side,
+                expectedNet = eNet
+            )
+        )
+        while (closedLog.size > 200) closedLog.removeFirst()
+        return true
     }
 
     /**
@@ -537,6 +600,8 @@ object ModelFilter {
         treeFitN = 0
         lastPrint.clear()
         lastDecision.clear()
+        closedLog.clear()
+        syncedTradeIds.clear()
         outcomes.clear()
         lastEnter.clear()
         lastEntryScore.clear()
@@ -631,10 +696,13 @@ object ModelFilter {
 
     /** Copied for the research path. The live tick does not call this. */
     fun researchLog(): List<LogRow> = synchronized(lock) {
-        decisions.map { d ->
+        val live = decisions.map { d ->
             val id = decisionId(d.twinId, d.atMs, d.side)
             LogRow(id, d.twinId, d.atMs, d.score, d.scalar, d.enter, d.reason, d.features.copyOf(), outcomes[id], d.side, d.freshnessMs, d.benchmarkAgeMs, d.policyVersion, d.modelVersion, d.expectedNet)
         }
+        val liveIds = live.mapTo(HashSet()) { it.id }
+        val keptClosed = closedLog.filter { it.id !in liveIds }
+        (keptClosed + live).sortedBy { it.atMs }
     }
 
     fun weightCopy(): Pair<DoubleArray, Double> = synchronized(lock) { weights.copyOf() to bias }

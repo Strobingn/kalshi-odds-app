@@ -278,6 +278,12 @@ class FreeCallPacer {
 
     fun hits(): List<Pair<Long, String>> = hits.map { it.at to it.model }
 
+    /** True when [provider]/[model] is inside an active HTTP 429 or zero-remaining backoff window. */
+    fun cooling(provider: String, model: String, now: Long): Boolean {
+        val key = "$provider|$model"
+        return now < (backoffUntil[key] ?: Long.MIN_VALUE) || now < (adaptiveUntil[key] ?: Long.MIN_VALUE)
+    }
+
     private fun pick(provider: String, models: List<String>, quota: FreeQuota, now: Long, tokens: Int, advance: Boolean): String? {
         if (models.isEmpty() || tokens <= 0 || quota.requestsPerMinute <= 0 || quota.requestsPerDay <= 0) return null
         prune(now)

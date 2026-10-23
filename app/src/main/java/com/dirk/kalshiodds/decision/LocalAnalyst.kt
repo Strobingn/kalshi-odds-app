@@ -164,7 +164,85 @@ object QuantCompanion {
         if (blob.contains("adjustments") || blob.contains("\"changes\"") || blob.contains("Paper tuner")) {
             return """{"changes":[]}"""
         }
+        if (blob.contains("Top feature drivers") || blob.contains("Paper session journal")) {
+            return explainResearch(user.ifBlank { blob })
+        }
         return answer(user.ifBlank { blob }, entryActive)
+    }
+
+    /**
+     * Two-paragraph on-device quant explanation for a trade decision or session journal.
+     * Used when no cloud free provider is configured or when cloud free providers are rate-limited.
+     */
+    fun explainResearch(prompt: String): String {
+        val text = prompt.trim()
+        if (text.contains("Paper session journal", ignoreCase = true)) {
+            val closed = Regex("Closed\\s+(\\d+)", RegexOption.IGNORE_CASE).find(text)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
+            val bodyLines = text.lines().drop(1).map { it.trim() }.filter {
+                it.isNotEmpty() && !it.startsWith("Two short paragraphs", ignoreCase = true)
+            }
+            val regimes = bodyLines.filter { it.contains(":") && it.contains("/") }
+            val tips = bodyLines.filterNot { it.contains(":") && it.contains("/") }
+            val p1 = if (closed > 0) {
+                val regText = if (regimes.isNotEmpty()) "Regime breakdown: ${regimes.joinToString("; ")}. " else ""
+                "Built-in Quant Analyst · Session summary across $closed closed paper trades. ${regText}Across these windows, the top feature drivers (fairResidualCents, mid, timeLeft, distStrikeBps, and spread) separate positive-EV entries from high-fee chop."
+            } else {
+                val regText = if (regimes.isNotEmpty()) "Live scored ticks: ${regimes.joinToString("; ")}. " else "The live filter is scoring incoming ticks against the fee-adjusted EV gate. "
+                "Built-in Quant Analyst · Session summary (0 closed model trades so far). ${regText}The feature drivers (mid, timeLeft, fairResidualCents, and distStrikeBps) are tracking each tick's edge while open and skipped scores accumulate."
+            }
+            val tipText = if (tips.isNotEmpty()) tips.joinToString(" ") else "Leave the threshold at ${fmt(ModelFilter.threshold())} while more paper trades complete."
+            val retrainAdvice = if (closed >= ModelFilter.MIN_TRAIN) {
+                "With $closed closed trades (≥ ${ModelFilter.MIN_TRAIN} minimum), you can tap Retrain offline now to refit the L2 logistic weights and LightGBM payoff trees outside the 15-minute embargo."
+            } else {
+                "Offline retraining requires ${ModelFilter.MIN_TRAIN} closed paper trades outside the 15-minute embargo ($closed/${ModelFilter.MIN_TRAIN} collected so far); keep the prior feature drivers active until the sample clears ${ModelFilter.MIN_TRAIN}."
+            }
+            return "$p1\n\n$tipText $retrainAdvice Paper only — no orders."
+        }
+
+        val modelType = Regex("Paper\\s+([^.\\n]+)\\s+filter").find(text)?.groupValues?.getOrNull(1)?.trim() ?: "Quant"
+        val title = Regex("filter\\.\\s*([^.\\n]+(?:\\.[0-9]+)?)\\.\\s*Reason:").find(text)?.groupValues?.getOrNull(1)?.trim() ?: "model decision"
+        val reason = Regex("Reason:\\s*(.+?)\\.\\s*Outcome:").find(text)?.groupValues?.getOrNull(1)?.trim() ?: "gate check"
+        val outcome = Regex("Outcome:\\s*([^.\\n]+(?:\\.[0-9]+)?)\\.").find(text)?.groupValues?.getOrNull(1)?.trim() ?: "still open"
+        val driverMatches = Regex("^\\s*([A-Za-z0-9_]+)\\s+([+-]?[0-9.]+)\\s*\\(value\\s+([+-]?[0-9.]+)\\)", RegexOption.MULTILINE)
+            .findAll(text)
+            .map { Triple(it.groupValues[1], it.groupValues[2].toDoubleOrNull() ?: 0.0, it.groupValues[3]) }
+            .toList()
+        val pos = driverMatches.filter { it.second > 0.0 }.map { "${it.first} (${String.format(Locale.US, "%+.2f", it.second)}, value ${it.third})" }
+        val neg = driverMatches.filter { it.second < 0.0 }.map { "${it.first} (${String.format(Locale.US, "%+.2f", it.second)}, value ${it.third})" }
+        val flat = driverMatches.filter { it.second == 0.0 }.map { "${it.first} (+0.00, value ${it.third})" }
+        val entered = title.contains("entered", ignoreCase = true) || reason.startsWith("enter", ignoreCase = true)
+        val driverSummary = buildString {
+            if (pos.isNotEmpty()) append("Positive feature drivers lifting the score: ${pos.joinToString(", ")}. ")
+            if (neg.isNotEmpty()) append("Negative feature drivers pulling the score down: ${neg.joinToString(", ")}. ")
+            if (flat.isNotEmpty()) append("Neutral feature drivers near zero push: ${flat.joinToString(", ")}. ")
+            if (pos.isEmpty() && neg.isEmpty() && flat.isEmpty()) append("The top feature drivers shaped the linear-logit and tree-ensemble edge estimate. ")
+        }.trim()
+        val p1 = "Built-in Quant Analyst ($modelType) · $title (Reason: $reason; Outcome: $outcome). $driverSummary " +
+            if (entered) "Because the combined score and expected net payoff cleared the fee-adjusted gate, the paper twin accepted the entry."
+            else "Because the combined feature drivers left expected net payoff at or below the fee-and-spread hurdle, the paper twin skipped this tick."
+
+        val names = driverMatches.map { it.first }.toSet()
+        val notes = ArrayList<String>()
+        if ("mid" in names || "dist50" in names) {
+            notes += "mid / dist50 measures where the contract sits relative to the 50¢ maximum-variance zone where Kalshi's quadratic taker fee 0.07·P·(1−P) peaks at 1.75¢ per leg"
+        }
+        if ("timeLeft" in names || "pinRisk" in names) {
+            notes += "timeLeft tracks the remaining 15-minute window before the ${ModelFilter.exitBeforeSeconds().toInt()}s exit cutoff"
+        }
+        if ("fairResidualCents" in names || "studentT" in names) {
+            notes += "fairResidualCents captures the net cents gap between Student-t (ν=4.2) fair value and the ask after deducting spread and taker fee"
+        }
+        if ("distStrikeBps" in names || "distSigma" in names) {
+            notes += "distStrikeBps / distSigma measures BTC spot distance from the strike in basis points and volatility units"
+        }
+        if (notes.isEmpty()) {
+            notes += "the feature drivers weigh order-book spread, flow imbalance, and fair-value residual against round-trip taker fees"
+        }
+        val p2 = "Microstructure & fee context: ${notes.joinToString("; ")}. " +
+            (if (entered) "Hold while the fair-value residual stays positive and exit before the final ${ModelFilter.exitBeforeSeconds().toInt()}s cutoff."
+            else "A wider fairResidualCents edge or tighter bid-ask spread is needed on the next tick to clear round-trip fees.") +
+            " Paper only — no orders."
+        return "$p1\n\n$p2"
     }
 
     fun answer(prompt: String, entryActive: Boolean = false): String {

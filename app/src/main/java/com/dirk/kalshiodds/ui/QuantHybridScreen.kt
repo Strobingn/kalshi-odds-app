@@ -84,7 +84,7 @@ internal fun ModelFilterCard(onOpenQuant: () -> Unit = {}) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun QuantHybridScreen(
-    onAskAi: (String, (String) -> Unit) -> Unit = { _, done -> done("The drivers above are the explanation. AI chat is not connected on this screen.") },
+    onAskAi: (String, (String) -> Unit) -> Unit = { prompt, done -> done(com.dirk.kalshiodds.decision.QuantCompanion.explainResearch(prompt)) },
     quotas: List<ProviderQuota> = defaultQuotas(),
     decisions: List<ModelFilter.LogRow>? = null
 ) {
@@ -94,8 +94,17 @@ internal fun QuantHybridScreen(
     val sizeMode = remember(rev) { ModelFilter.sizeMode() }
     val exitSec = remember(rev) { ModelFilter.exitBeforeSeconds() }
     val boards = remember(rev) { ModelFilter.scorecards() }
+    val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as? com.dirk.kalshiodds.KalshiOddsApp
+    fun syncFromStore() {
+        if (decisions == null) {
+            runCatching { app?.container?.scalp?.loadScalps()?.let { ModelFilter.syncClosedScalps(it) } }
+        }
+    }
     val sourceKey = decisions?.joinToString(",") { "${it.id}:${it.atMs}:${it.score}:${it.entered}:${it.outcomeUsd}" } ?: "live:$rev"
-    val fullLog = remember(sourceKey) { decisions ?: ModelFilter.researchLog() }
+    val fullLog = remember(sourceKey) {
+        if (decisions == null && ModelFilter.researchLog().none { it.outcomeUsd != null }) syncFromStore()
+        decisions ?: ModelFilter.researchLog()
+    }
     val log = remember(sourceKey) { fullLog.takeLast(12).asReversed() }
     var picked by remember { mutableStateOf<String?>(null) }
     val row = log.firstOrNull { it.id == picked } ?: log.firstOrNull()
@@ -105,7 +114,10 @@ internal fun QuantHybridScreen(
     var retrainNote by remember { mutableStateOf("") }
     var journal by remember { mutableStateOf<ResearchCompanion.Journal?>(null) }
     val cards = remember(rev) { ModelFilter.cards() }
-    fun sessionJournal() = if (decisions != null) ResearchCompanion.journalOf(decisions, ModelFilter.threshold()) else ResearchCompanion.journal()
+    fun sessionJournal(): ResearchCompanion.Journal {
+        syncFromStore()
+        return if (decisions != null) ResearchCompanion.journalOf(decisions, ModelFilter.threshold()) else ResearchCompanion.journal()
+    }
 
     Column(Modifier.fillMaxWidth().testTag("MODEL_FILTER"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         SectionLabel("Path 1 · Live on-device · under 2 ms · no LLM")
@@ -306,9 +318,9 @@ internal fun QuantHybridScreen(
 
         ArenaCard {
             Text("Session journal", color = c.textPrimary, fontWeight = FontWeight.SemiBold)
-            OutlinedButton(onClick = { journal = sessionJournal() }, modifier = Modifier.testTag("SESSION_JOURNAL")) { Text("Session journal & patterns") }
+            OutlinedButton(onClick = { journal = sessionJournal(); rev++ }, modifier = Modifier.testTag("SESSION_JOURNAL")) { Text("Session journal & patterns") }
             journal?.let { page ->
-                Text(if (page.closed == 0) "No closed model trades yet." else "${page.closed} closed", color = c.textSecondary)
+                Text(if (page.closed == 0) "0 closed · ${fullLog.size} scored" else "${page.closed} closed", color = c.textSecondary)
                 page.regimes.forEach { r ->
                     Text("${r.group} · ${r.name}: ${r.wins}/${r.n} · ${money(r.netUsd)}", color = if (r.netUsd >= 0) c.up else c.down, style = MaterialTheme.typography.bodySmall)
                 }
@@ -316,8 +328,8 @@ internal fun QuantHybridScreen(
             }
             Button(
                 onClick = {
-                    val page = journal ?: sessionJournal().also { journal = it }
-                    journalNote = "Asking Groq…"
+                    val page = sessionJournal().also { journal = it }
+                    journalNote = "Asking AI…"
                     onAskAi(journalPrompt(page)) { journalNote = it }
                 },
                 modifier = Modifier.fillMaxWidth().testTag("RESEARCH_JOURNAL_ASK"),
@@ -325,7 +337,12 @@ internal fun QuantHybridScreen(
             ) { Text("Ask AI for Session Summary & Retrain Advice") }
             if (journalNote.isNotBlank()) Text(journalNote, color = c.textPrimary, style = MaterialTheme.typography.bodyMedium)
             OutlinedButton(
-                onClick = { retrainNote = ResearchCompanion.retrain(System.currentTimeMillis()); rev++ },
+                onClick = {
+                    syncFromStore()
+                    retrainNote = ResearchCompanion.retrain(System.currentTimeMillis())
+                    if (journal != null) journal = sessionJournal()
+                    rev++
+                },
                 modifier = Modifier.testTag("RESEARCH_RETRAIN")
             ) { Text("Retrain offline") }
             if (retrainNote.isNotBlank()) Text(retrainNote, color = c.textSecondary, style = MaterialTheme.typography.bodySmall)

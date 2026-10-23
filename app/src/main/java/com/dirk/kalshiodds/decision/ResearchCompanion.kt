@@ -63,13 +63,38 @@ object ResearchCompanion {
     fun journalOf(rows: List<ModelFilter.LogRow>, threshold: Double, retrainNote: String = ""): Journal {
         val closed = rows.filter { it.outcomeUsd != null }
         if (closed.isEmpty()) {
-            return Journal(0, emptyList(), listOf("No closed model trades yet. The log still has skips and open scores."), retrainNote)
+            if (rows.isEmpty()) {
+                return Journal(0, emptyList(), listOf("No closed model trades yet. The log still has skips and open scores."), retrainNote)
+            }
+            val liveRegimes = ArrayList<Regime>()
+            liveRegimes += groupLive(rows, "Live action") { if (it.entered) "entered (open)" else "skipped" }
+            liveRegimes += groupLive(rows, "Live score") { scoreBand(it.score) }
+            val enteredN = rows.count { it.entered }
+            val avgScore = rows.sumOf { it.score } / rows.size
+            val tips = listOf(
+                "No closed model trades yet. The log still has skips and open scores.",
+                "Scored ${rows.size} live ticks ($enteredN entered, ${rows.size - enteredN} skipped) · mean score ${fmt(avgScore)} vs gate ${fmt(threshold)}."
+            )
+            return Journal(0, liveRegimes, tips, retrainNote)
         }
         val regimes = ArrayList<Regime>()
         regimes += group(closed, "Time left") { ModelFilter.bucketOf(it.features.getOrElse(0) { 0.0 } * 900.0) }
         regimes += group(closed, "Vol") { volRegime(it.features.getOrElse(7) { 0.0 }) }
         regimes += group(closed, "Score") { scoreBand(it.score) }
         return Journal(closed.size, regimes, suggestions(closed, regimes, threshold), retrainNote)
+    }
+
+    private fun groupLive(rows: List<ModelFilter.LogRow>, group: String, key: (ModelFilter.LogRow) -> String): List<Regime> {
+        val out = LinkedHashMap<String, Regime>()
+        for (row in rows) {
+            val name = key(row)
+            val prev = out[name]
+            val win = if (row.entered) 1 else 0
+            val ev = row.expectedNet
+            out[name] = if (prev == null) Regime(group, name, 1, win, ev)
+            else prev.copy(n = prev.n + 1, wins = prev.wins + win, netUsd = prev.netUsd + ev)
+        }
+        return out.values.toList()
     }
 
     fun retrain(nowMs: Long): String = ModelFilter.retrainOffline(nowMs)

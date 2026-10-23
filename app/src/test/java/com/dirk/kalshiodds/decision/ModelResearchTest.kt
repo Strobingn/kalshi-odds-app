@@ -153,6 +153,137 @@ class ModelResearchTest {
         assertFalse(scoreFn.contains("Research"))
     }
 
+    @Test fun manualResearchAskBypassesAutoPaceAndHandlesBackToBackTaps() {
+        val pacer = FreeCallPacer()
+        val now = 1_700_000_000_000L
+        // Simulate a background window-watcher call 5s ago so the 120s auto-pace timer is active.
+        pacer.record(LlmProviders.GROQ, LlmProviders.DEFAULT_GROQ_MODEL, now - 5_000L, 180)
+        val groq = LlmEndpoint(LlmProviders.GROQ, "https://api.groq.com/openai/v1", LlmProviders.GROQ_120, "gsk_test")
+        val calls = ArrayList<String>()
+        val first = ModelResearchAsk.ask(
+            prompt = "Explain why sf41-logistic skipped this tick.",
+            local = LlmProviders.builtinEndpoint(),
+            slots = listOf(groq),
+            nowMs = now,
+            pacer = pacer,
+            quotaOf = { LlmProviders.baseQuota(it.provider, it.model) },
+            allowed = { true },
+            ask = { ep, _ ->
+                calls += "${ep.provider}:${ep.model}"
+                // Simulate gpt-oss-120b failing so candidateModels falls back to llama-3.1-8b-instant
+                if (ep.model == LlmProviders.GROQ_120) error("model unavailable")
+                LlmClient.Reply("Groq explained the trade.", ep.model, ep.model)
+            },
+            onBilling = { _, _ -> }
+        )
+        assertEquals("Groq explained the trade.", first)
+        assertEquals(listOf("groq:${LlmProviders.GROQ_120}", "groq:${LlmProviders.DEFAULT_GROQ_MODEL}"), calls)
+
+        // Second manual tap 1 second later (Session Summary button) must also succeed without waiting 120s.
+        val second = ModelResearchAsk.ask(
+            prompt = "Paper session journal. Closed 5.",
+            local = LlmProviders.builtinEndpoint(),
+            slots = listOf(groq.copy(model = LlmProviders.DEFAULT_GROQ_MODEL)),
+            nowMs = now + 1_000L,
+            pacer = pacer,
+            quotaOf = { LlmProviders.baseQuota(it.provider, it.model) },
+            allowed = { true },
+            ask = { ep, _ ->
+                calls += "${ep.provider}:${ep.model}"
+                LlmClient.Reply("Groq summarized the session.", ep.model, ep.model)
+            },
+            onBilling = { _, _ -> }
+        )
+        assertEquals("Groq summarized the session.", second)
+        assertEquals(3, calls.size)
+    }
+
+    @Test fun researchAskFallsBackToBuiltinQuantExplanationWhenCloudFailsOrMissing() {
+        val x = DoubleArray(ModelFilter.FEATURES)
+        x[0] = 0.30
+        x[10] = 0.67
+        x[16] = -1.80
+        val row = ModelFilter.LogRow(
+            id = "r1",
+            twinId = "sf41-logistic",
+            atMs = 1L,
+            score = 0.50,
+            scalar = 1.0,
+            entered = false,
+            reason = "expected net -0.02 ≤ 0",
+            features = x,
+            outcomeUsd = null,
+            side = "YES",
+            expectedNet = -0.018
+        )
+        val explain = ResearchCompanion.explain(row)
+        val groq = LlmEndpoint(LlmProviders.GROQ, "https://api.groq.com/openai/v1", LlmProviders.DEFAULT_GROQ_MODEL, "gsk_test")
+        val tradeReply = ModelResearchAsk.ask(
+            prompt = explain.prompt,
+            local = LlmProviders.builtinEndpoint(),
+            slots = listOf(groq),
+            nowMs = 10_000L,
+            pacer = FreeCallPacer(),
+            quotaOf = { LlmProviders.baseQuota(it.provider, it.model) },
+            allowed = { true },
+            ask = { _, _ -> throw com.dirk.kalshiodds.llm.LlmRateLimited(60_000L, "rate limited") },
+            onBilling = { _, _ -> }
+        )
+        assertFalse(tradeReply.contains("Free providers did not answer"))
+        assertTrue(tradeReply.contains("Built-in Quant Analyst"))
+        assertTrue(tradeReply.contains("feature drivers"))
+        assertEquals(2, tradeReply.split("\n\n").size)
+
+        val journalPrompt = "Paper session journal. Closed 8.\nTime left 5–10 min: 6/8 net +1.20\nTwo short paragraphs: what regime is working, and whether to retrain. No orders."
+        val journalReply = ModelResearchAsk.ask(
+            prompt = journalPrompt,
+            local = LlmProviders.builtinEndpoint(),
+            slots = emptyList(),
+            nowMs = 20_000L,
+            pacer = FreeCallPacer(),
+            quotaOf = { null },
+            allowed = { true },
+            ask = { _, _ -> error("no cloud") },
+            onBilling = { _, _ -> }
+        )
+        assertFalse(journalReply.contains("Free providers did not answer"))
+        assertTrue(journalReply.contains("Built-in Quant Analyst"))
+        assertTrue(journalReply.contains("feature drivers"))
+        assertEquals(2, journalReply.split("\n\n").size)
+    }
+
+    @Test fun syncClosedScalpsPopulatesSessionJournalAndRetrainFromStore() {
+        val base = 1_700_000_000_000L
+        val trades = List(42) { i ->
+            ScalpTrade(
+                id = "closed-$i",
+                ticker = "KXBTC15M-26OCT221200-00",
+                side = if (i % 2 == 0) "YES" else "NO",
+                state = ScalpState.CLOSED,
+                signalAtMs = base + i * 5_000L,
+                signalAsk = 0.38,
+                fairAtSignal = 0.52,
+                contracts = 10,
+                entryPrice = 0.38,
+                entryAtMs = base + i * 5_000L + 1_000L,
+                closedAtMs = base + i * 5_000L + 60_000L,
+                netUsd = if (i % 3 == 0) -0.25 else 0.45,
+                exitReason = "take profit",
+                ruleVersion = "${ScalpRule.VERSION}|sf41|P"
+            )
+        }
+        val added = ModelFilter.syncClosedScalps(trades)
+        assertEquals(42, added)
+        assertEquals(0, ModelFilter.syncClosedScalps(trades))
+        val journal = ResearchCompanion.journal()
+        assertEquals(42, journal.closed)
+        assertTrue(journal.regimes.any { it.group == "Time left" })
+        assertTrue(journal.regimes.any { it.group == "Vol" })
+        assertTrue(journal.regimes.any { it.group == "Score" })
+        val retrain = ResearchCompanion.retrain(base + 42 * 5_000L + ModelFilter.EMBARGO_MS + 120_000L)
+        assertTrue(retrain, retrain.contains("Retrained offline on 42 samples"))
+    }
+
     private fun log(id: String, score: Double, features: DoubleArray, outcome: Double?) = ModelFilter.LogRow(
         id, "sf41-model", 1L, score, score * 1.5, true, "enter", features, outcome, "YES"
     )

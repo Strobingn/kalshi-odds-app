@@ -1939,6 +1939,9 @@ class ScalpBook(
         val net = t.proceedsUsd - t.exitFeeUsd - t.entryCostUsd
         val closed = t.copy(state = ScalpState.CLOSED, closedAtMs = atMs, netUsd = net, exitReason = reason)
         ModelFilter.noteControl(closed.variantId, net, closed.side)
+        if (liveExtras && !ModelFilter.isTwin(closed.variantId)) {
+            ModelFilter.recordClosedScalp(closed)
+        }
         return closed
     }
 
@@ -2201,6 +2204,7 @@ class ScalpBook(
         }
     }
     /** 0.3.68 aggregate reads (≈ hundreds of rows, indexed). Call off Main. */
+    fun loadScalps(): List<ScalpTrade> = store.loadScalps()
     fun loadExits() = store.loadExits()
     fun loadWindows(limitWindows: Int = 48) = store.loadWindows(limitWindows)
     fun loadDaily(dayEt: String) = store.loadDaily(dayEt)

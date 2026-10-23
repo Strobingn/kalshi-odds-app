@@ -274,9 +274,11 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     fun askModelResearch(prompt: String, done: (String) -> Unit) {
         vmScope.launch(Dispatchers.IO) {
             val text = try {
+                runCatching { com.dirk.kalshiodds.decision.ModelFilter.syncClosedScalps(container.scalp.loadScalps()) }
                 val settings = container.llmSettings
                 val custom = settings.readSlot(com.dirk.kalshiodds.llm.LlmProviders.CUSTOM)
                 val local = custom.takeIf { com.dirk.kalshiodds.llm.ModelResearchAsk.isLoopback(it.baseUrl) }
+                    ?: com.dirk.kalshiodds.llm.LlmProviders.builtinEndpoint()
                 val slots = com.dirk.kalshiodds.llm.LlmProviders.FREE_IDS.map { settings.readSlot(it) }
                 val now = container.clock.nowMs()
                 com.dirk.kalshiodds.llm.ModelResearchAsk.ask(
@@ -292,12 +294,29 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                     },
                     allowed = { ep -> container.aiWatch.blockNotice(ep.provider, ep.model, now).isEmpty() },
                     ask = { ep, msgs -> container.llmClient.chatReply(msgs, 400, ep, automatic = false) },
-                    onBilling = { provider, detail -> container.aiWatch.markBilled(provider, detail) }
+                    onBilling = { provider, detail -> container.aiWatch.markBilled(provider, detail) },
+                    callsToday = { ep -> container.aiWatch.callsFor(ep.provider, "", now) },
+                    onSuccess = { ep, reply ->
+                        if (ep.provider != com.dirk.kalshiodds.llm.LlmProviders.BUILTIN) {
+                            runCatching {
+                                container.aiWatch.record(
+                                    com.dirk.kalshiodds.llm.LlmSources.CHAT,
+                                    ep.provider,
+                                    reply.model.ifBlank { ep.model },
+                                    reply.promptTokens,
+                                    reply.completionTokens,
+                                    now,
+                                    reply.latencyMs,
+                                    automatic = false
+                                )
+                            }
+                        }
+                    }
                 )
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
-            } catch (e: Exception) {
-                e.message?.ifBlank { null } ?: "The research call failed."
+            } catch (_: Exception) {
+                com.dirk.kalshiodds.decision.QuantCompanion.explainResearch(prompt)
             }
             runCatching { container.aiChat.postResearch(prompt, text) }
             withContext(Dispatchers.Main) { done(text) }
