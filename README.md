@@ -19,6 +19,14 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.20.1 (Claude branch): three micro scalpers retired after the replay
+
+The arena replay of the 12 recorded days (2026-09-28 → 10-16, 913 windows, run 40005335840) on their defaults:
+BRTI pulse −$248.76 on 1,364 trades (1 of 11 days up), VWAP reversion −$261.89 on 745 (0 of 11), theta favourite
+−$91.69 on 633 (2 of 11). Like every strategy that lost the replay they are retired: they still run in learning
+mode (on by default) so the gate, the live tuner and the Scalping AI keep learning on them. The OBI5 maker made no
+trades there (the recordings have no 5-level book) and stays in.
+
 ## 1.20.0 (Claude branch): four micro scalpers, a self-learning gate, a live tuner, live-window charts
 
 Ideas from a Gemini review of the scalper code (2026-10-23), rebuilt on this app's own book, index and paper engine.

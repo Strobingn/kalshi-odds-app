@@ -424,7 +424,12 @@ enum class ScalpStrategy(
                 BOOK_IMBALANCE, MOMENTUM_SNIPER_REST, ML_REST, DIP_HUNTER_REST, STRETCH_FADE, WHALE_FOLLOW,
                 EXTREME_REVERSION, MOMENTUM_SNIPER, DIP_HUNTER,
                 // 2026-10-20, with the phone's 2026-09-28 day: +$1.80 on 979 trades over all 12 days, and lost that day.
-                FLOW_FADE
+                FLOW_FADE,
+                // 2026-10-23, arena replay of the 12 recorded days (run 40005335840): BRTI pulse −$248.76 on 1,364
+                // trades (1 of 11 days up), VWAP reversion −$261.89 on 745 (0 of 11), theta favourite −$91.69 on 633
+                // (2 of 11). They still run in learning mode. The OBI5 maker never traded there (no 5-level book in the
+                // recordings) and stays in until it has a record.
+                MICRO_BRTI_PULSE, MICRO_VWAP_REV, MICRO_THETA_FAV
             )
         }
 

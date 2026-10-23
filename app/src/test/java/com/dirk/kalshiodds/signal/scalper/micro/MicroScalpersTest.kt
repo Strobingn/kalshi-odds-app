@@ -150,7 +150,16 @@ class MicroScalpersTest {
     fun everyMicroScalperIsActiveWithItsOwnTriggerAndFamily() {
         val micro = ScalpStrategy.values().filter { it.micro }
         assertEquals(4, micro.size)
-        assertTrue(micro.all { it in ScalpStrategy.ACTIVE && it.viewBased && !it.fleet })
+        assertTrue(micro.all { it.viewBased && !it.fleet })
+        // The three that lost in the replay of the recorded days are retired, and still run in learning mode.
+        assertEquals(listOf(ScalpStrategy.MICRO_OBI_MAKER), micro.filter { !ScalpStrategy.isRetiredBase(it) })
+        val was = ScalpStrategy.learningMode
+        try {
+            ScalpStrategy.learningMode = true
+            assertTrue(micro.all { it in ScalpStrategy.ACTIVE })
+        } finally {
+            ScalpStrategy.learningMode = was
+        }
         assertTrue(micro.all { com.dirk.kalshiodds.signal.scalper.ScalpTriggers.of(it) != null })
         assertTrue("the scalps are sold before the close", micro.filter { !it.hold }.all { it.flattenSeconds > 0 })
         assertTrue(ln(1.0) == 0.0)
