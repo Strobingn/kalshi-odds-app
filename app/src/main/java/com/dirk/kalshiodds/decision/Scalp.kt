@@ -832,8 +832,13 @@ class ScalpBook(
         val openFc = _all.value.filter { it.ticker == key && ForecastScalp.isForecast(it) && isActive(it) }
         for (active in openFc) {
             val ride = active.variantId.startsWith(ForecastScalp.RIDE_PREFIX)
-            val f = if (ride) pred else -pred
-            fcStep(active, q, f, h54)?.let { changed += it }
+            val tradeHorizon = ScalpVariants.of(active.variantId)?.fadeHorizonS
+                ?: active.variantId.substringAfterLast("-h", "").let { if (it == "close") -1 else it.toIntOrNull() }
+                ?: h54
+            val tradePred = if (tradeHorizon == h54) pred
+                else x54?.let { LeadForecaster.predict(coin, tradeHorizon, it) } ?: Double.NaN
+            val f = if (ride) tradePred else -tradePred
+            fcStep(active, q, f, tradeHorizon)?.let { changed += it }
         }
         // Kept fade is horizon 600 only. Forecast ride does not open.
         val predFade = x54?.let { LeadForecaster.predict(coin, KeptScalpers.FADE_HORIZON_S, it) }

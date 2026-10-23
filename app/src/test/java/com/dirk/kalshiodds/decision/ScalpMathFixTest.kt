@@ -108,6 +108,20 @@ class ScalpMathFixTest {
         }
     }
 
+    @Test fun forecastVariantsKeepTheirOwnPredictionAndExitHorizon() {
+        val variant = ScalpVariants.ALL.first { it.kind == ScalpVariants.Kind.FADE && it.fadeHorizonS == 300 }
+        val book = ScalpBook(bankrollUsd = { 20_000.0 })
+        book.importRestored(listOf(trade().copy(side = "NO", signalAsk = 0.15, entryPrice = 0.15,
+            ruleVersion = "${ScalpRule.VERSION}|${variant.id}|P")))
+        fun quote(at: Long) = ScalpRule.Quote(ticker, at, now + 600_000L, at,
+            0.84, 100.0, 0.86, 100.0, 100_000.0, 100_000.0, 3e-5)
+        // The 600s model predicts a >1¢ reversal here; this trade's 300s model predicts only noise.
+        book.onForecastQuote(quote(now + 1_000L), 100.0, 100.0, false)
+        assertEquals(ScalpState.OPEN, book.allTrades().single().state)
+        book.onForecastQuote(quote(now + 301_000L), 100.0, 100.0, false)
+        assertEquals("horizon reached", book.allTrades().single().exitReason)
+    }
+
     @Test fun deeperBookChangesContributeToOfiAndUnchangedSnapshotsDoNot() {
         val ofi = HftMathEngines.DepthOfi()
         val bids = listOf(0.49 to 10.0, 0.48 to 10.0)
