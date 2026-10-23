@@ -414,7 +414,10 @@ object ModelFilter {
     }
 
     fun retrainFrom(trades: List<ScalpTrade>, nowMs: Long) = synchronized(lock) {
-        for (t in trades) {
+        // loadScalps() is newest-first. Keep the newest 2,000 closed rows, then walk them oldest-first.
+        val closed = trades.filter { it.netUsd != null && it.entryPrice != null && it.closedAtMs != null }
+        val newest = if (closed.size > 2_000) closed.take(2_000) else closed
+        for (t in newest.asReversed()) {
             val net = t.netUsd ?: continue
             val entry = t.entryPrice ?: continue
             val at = t.entryAtMs ?: t.signalAtMs

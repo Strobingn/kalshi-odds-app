@@ -2311,7 +2311,8 @@ class ScalpBook(
      * Queue one paper clip for the built-in / cloud LLM strategy. No Kalshi order.
      * A second clip on the same ticker and side waits until the first is closed.
      */
-    fun llmEntry(q: ScalpRule.Quote, side: String, conf: Double): String? {
+    fun llmEntry(q: ScalpRule.Quote, side: String, conf: Double, enabled: Boolean = true): String? = synchronized(lock) {
+        if (!enabled) return "paper disabled"
         if (!q.fresh()) return "quote is stale"
         if (q.tauS <= 60.0) return "last 60 seconds"
         val want = side.trim().uppercase()

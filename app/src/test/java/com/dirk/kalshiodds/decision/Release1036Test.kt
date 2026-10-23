@@ -80,6 +80,12 @@ class Release1036Test {
         assertTrue(line.contains(LocalAnalyst.sha256()!!))
         val yes = QuantCompanion.paperLine("Strike 100. BTC spot 101. minutes left 8. YES bid/ask 0.40/0.42. Model fair YES 0.70. Reply ONE line")
         assertTrue(yes, yes.startsWith("YES") || yes == "SKIP" || yes.startsWith("NO"))
+        val wide = QuantCompanion.paperLine("Strike 100000. BTC spot 100000. minutes left 8. YES bid/ask 0.48/0.60. Model fair YES 0.50.")
+        assertEquals("SKIP", wide)
+        val chunked = File.createTempFile("hash", ".bin")
+        chunked.writeBytes(ByteArray(70 * 1024) { (it % 251).toByte() })
+        assertEquals(ModelImport.sha256(chunked.readBytes()), ModelImport.sha256(chunked))
+        chunked.delete()
         assertTrue(LlmProviders.builtinEndpoint().usable)
         file.delete()
     }

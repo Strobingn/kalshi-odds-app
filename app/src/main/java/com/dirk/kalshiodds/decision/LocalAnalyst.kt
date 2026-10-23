@@ -128,7 +128,19 @@ object LocalAnalyst {
 }
 
 object ModelImport {
-    fun sha256(file: File): String = sha256(file.readBytes())
+    /** Stream the digest. A 2.59 GB `.litertlm` must not be loaded into one byte array. */
+    fun sha256(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().buffered().use { input ->
+            val buf = ByteArray(64 * 1024)
+            while (true) {
+                val n = input.read(buf)
+                if (n < 0) break
+                digest.update(buf, 0, n)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
 
     fun sha256(bytes: ByteArray): String {
         val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
@@ -172,6 +184,7 @@ object QuantCompanion {
         val strike = num(prompt, "Strike\\s+([0-9.]+)")
         val spot = num(prompt, "BTC spot\\s+([0-9.]+)")
         val minutes = num(prompt, "minutes left\\s+([0-9.]+)")
+        val yesBid = num(prompt, "YES bid/ask\\s+([0-9.]+)/")
         val yesAsk = num(prompt, "YES bid/ask\\s+[^/\\s]+/([0-9.]+)")
         val fairText = num(prompt, "Model fair YES\\s+([0-9.]+)")
         val tau = (minutes ?: 5.0) * 60.0
@@ -179,7 +192,7 @@ object QuantCompanion {
         val fair = p ?: fairText
         if (fair == null || yesAsk == null) return "SKIP"
         if (yesAsk <= 0.55 && fair - yesAsk > 0.03) return "YES ${fmt(fair.coerceIn(0.05, 0.95))}"
-        val noAsk = (1.0 - yesAsk).coerceIn(0.01, 0.99)
+        val noAsk = (1.0 - (yesBid ?: yesAsk)).coerceIn(0.01, 0.99)
         val noFair = 1.0 - fair
         if (noAsk <= 0.55 && noFair - noAsk > 0.03) return "NO ${fmt(noFair.coerceIn(0.05, 0.95))}"
         return "SKIP"
