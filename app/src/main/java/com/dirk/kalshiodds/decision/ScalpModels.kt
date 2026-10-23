@@ -361,7 +361,7 @@ object ScalpModels {
             Model.MOMO_NOTP -> "stop ${Math.round(ScalpParams.QUEUED_COPIES[2].stop * 100)}¢"
             Model.FAIR_T1 -> "stop ${Math.round(ScalpParams.FAIR_TWEAKS[0].stop * 100)}¢"
             Model.FAIR_T2 -> "stop ${Math.round(ScalpParams.FAIR_TWEAKS[1].stop * 100)}¢"
-            Model.DOS_MM, Model.TS_ARB, Model.MRLA_CS, Model.IV_SMILE -> "5-gate · paper"
+            Model.DOS_MM, Model.TS_ARB, Model.MRLA_CS, Model.IV_SMILE -> "stop 5-gate · paper"
             else -> ScalpModels.legacyStop(m)
         }
     }

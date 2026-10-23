@@ -111,7 +111,7 @@ class QuantHybridUiTest {
         compose.waitForIdle()
         assertEquals(QuantSession.ModelMode.ONNX, QuantSession.mode())
         compose.onNodeWithTag("MODEL_RUNTIME").assertExists()
-        compose.onNodeWithText("ONNX", substring = true).assertExists()
+        compose.onNodeWithText("ONNX ·", substring = true).assertExists()
         compose.onNodeWithTag("KELLY_MODE").performScrollTo().performClick()
         compose.waitForIdle()
         compose.onNodeWithText("Kelly sizing on").assertExists()
