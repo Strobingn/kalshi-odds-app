@@ -292,20 +292,19 @@ object HftSignals {
     }
 
     private fun lnGamma(z: Double): Double {
+        // Lanczos g=7. These coefficients must use the matching shift and denominators.
         val p = doubleArrayOf(
             676.5203681218851, -1259.1392167224028, 771.3234287776531,
             -176.6150291621406, 12.507343278686905, -0.13857109526572012,
             9.984369578019572e-6, 1.5056327351493116e-7
         )
-        var x = z
-        var y = z
-        var tmp = x + 5.5
-        tmp = (x + 0.5) * ln(tmp) - tmp
-        var ser = 1.000000000190015
-        for (c in p) {
-            y += 1.0
-            ser += c / y
+        if (z < 0.5) return ln(Math.PI) - ln(kotlin.math.sin(Math.PI * z)) - lnGamma(1.0 - z)
+        val shifted = z - 1.0
+        var sum = 0.9999999999998099
+        for (i in p.indices) {
+            sum += p[i] / (shifted + i + 1.0)
         }
-        return tmp + ln(2.5066282746310005 * ser / x)
+        val t = shifted + 7.5
+        return 0.5 * ln(2.0 * Math.PI) + (shifted + 0.5) * ln(t) - t + ln(sum)
     }
 }

@@ -139,11 +139,19 @@ object FairGapTune {
         return moveBp == null && vwapZ == null && buffer >= 35.0
     }
 
-    const val STACK_GUARD = "lesson guard: no stacking 64–82¢ under $150 buffer"
+    const val STACK_GUARD = "lesson guard: no expensive same-side stacking near strike"
 
     fun stackingBlocked(variantId: String?, q: ScalpRule.Quote, side: String, ask: Double, open: List<ScalpTrade>): Boolean {
         val spot = q.spot ?: return false
         val strike = q.strike ?: return false
+        // Final-five-minute lesson: correlated strategies buying the same expensive side are one exposure.
+        // A $30–$45 BTC lead is not a wide buffer just because a model prints 85–91% confidence.
+        if (ScalpParams.coinOf(q.ticker) == "BTC" && ask > 0.80 && q.tauS in 0.0..300.0 &&
+            signedBuffer(side, spot, strike) < 180.0 && open.any { t ->
+                t.ticker.equals(q.ticker, true) && t.side == side && (t.entryPrice ?: t.signalAsk) > 0.80 &&
+                    (t.state == ScalpState.PENDING_ENTRY ||
+                        ((t.state == ScalpState.OPEN || t.state == ScalpState.PENDING_EXIT) && t.remaining > 0))
+            }) return true
         if (variantId == null || ask !in 0.64..0.82 || q.tauS !in 420.0..780.0) return false
         if (signedBuffer(side, spot, strike) >= 150.0) return false
         return open.any { t ->
