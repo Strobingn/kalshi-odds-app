@@ -39,7 +39,8 @@ class FleetMathTest {
         assertEquals(0, FleetMath.kellyContracts(0.55, 0.60, 0.0, 250.0))
         // p 0.70 at 0.60: b = 0.4/0.6, f* = (0.7·(b+1) − 1)/b = 0.25; quarter → 6.25% of $250 = $15.6 → 26 contracts.
         assertEquals(26, FleetMath.kellyContracts(0.70, 0.60, 0.0, 250.0))
-        assertEquals(200, FleetMath.kellyContracts(0.999, 0.10, 0.0, 1e9))
+        // No upper limit: Kelly alone sizes it.
+        assertTrue(FleetMath.kellyContracts(0.999, 0.10, 0.0, 1e9) > 1_000_000)
         // Kalshi's fee at 50¢ is 1.75¢ a contract.
         assertEquals(0.0175, FleetMath.takerFeePer(100, 0.50), 1e-9)
         assertEquals(0.53, FleetMath.impliedYesAsk(0.47), 1e-12)

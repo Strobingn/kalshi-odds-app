@@ -34,15 +34,15 @@ class ArenaStrategiesTest {
 
     @Test
     fun everyStrategyHasItsOwnRow() {
-        assertEquals(37, ScalpStrategy.values().size)
+        assertEquals(57, ScalpStrategy.values().size)
         val board = ScalperResults.leaderboard(ScalperState.fresh(), ScalpStrategy.values().toList())
-        assertEquals(37, board.size)
-        assertEquals((1..37).toList(), board.map { it.rank })
+        assertEquals(57, board.size)
+        assertEquals((1..57).toList(), board.map { it.rank })
         assertEquals("idle strategies keep their own order", ScalpStrategy.values().toList(), board.map { it.strategy })
         assertTrue(board.all { it.verdict == "no trades yet" })
         assertTrue(ScalperResults.leaderLine(ScalperState.fresh()).startsWith("No strategy has closed a trade yet"))
         val copy = ScalperSummary.of(ScalperState.fresh(), shown = ScalpStrategy.values().toList())
-        assertEquals(37, copy.strategyLines.size)
+        assertEquals(57, copy.strategyLines.size)
         assertTrue(copy.strategyLines.any { it == "Bounce · buy now: no scalps yet [new · codex]" })
     }
 

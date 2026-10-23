@@ -10,7 +10,7 @@ class RetiredStrategiesTest {
         ScalpStrategy.LATE_COMEBACK, ScalpStrategy.LATE_EDGE, ScalpStrategy.KASHI_FAV_BASE,
         ScalpStrategy.KASHI_FAV_NIGHT, ScalpStrategy.KASHI_FAV_STRICT, ScalpStrategy.KASHI_FAV_97,
         ScalpStrategy.KASHI_FAV_LAST30
-    )
+    ) + ScalpStrategy.values().filter { it.fleet }
 
     @Test
     fun onlyTheMoneyMakersAreActive() {

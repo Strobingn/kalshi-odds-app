@@ -171,10 +171,19 @@ internal fun StrategySettingsCard(st: ScalpStrategy, tuning: ScalpTuning, modelT
                 { ScalpTriggers.text(spec, it) }
             ) { save(k.copy(trigger = if (kotlin.math.abs(it - def) < spec.step / 2) null else it)) }
         }
-        KnobSlider(
-            "Contracts an order", t.contracts.toDouble(), 1.0, ScalpTuning.MAX_CONTRACTS.toDouble(), 1.0, "KNOB_CONTRACTS",
-            k.contracts != null, { "${it.roundToInt()}" }
-        ) { save(k.copy(contracts = it.roundToInt().takeIf { c -> c != d.contracts })) }
+        // No upper limit: type any number of contracts.
+        var draft by androidx.compose.runtime.remember(st, t.contracts) { androidx.compose.runtime.mutableStateOf(t.contracts.toString()) }
+        androidx.compose.material3.OutlinedTextField(
+            value = draft,
+            onValueChange = { v ->
+                draft = v.filter { it.isDigit() }.take(9)
+                draft.toIntOrNull()?.takeIf { it >= 1 }?.let { c -> save(k.copy(contracts = c.takeIf { it != d.contracts })) }
+            },
+            label = { Text("Contracts an order (no limit)") },
+            singleLine = true,
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+            modifier = Modifier.fillMaxWidth().testTag("KNOB_CONTRACTS")
+        )
         if (!st.hold) {
             KnobSlider(
                 "Take profit", t.targetDollars * 100, 1.0, 30.0, 1.0, "KNOB_TARGET", k.targetCents != null, ::cents

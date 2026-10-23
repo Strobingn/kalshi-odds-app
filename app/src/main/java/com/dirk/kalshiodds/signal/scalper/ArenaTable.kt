@@ -206,7 +206,7 @@ object ArenaTable {
 
     /** How it gets in and out, built from the strategy's settings (yours where you changed one). */
     fun rules(st: ScalpStrategy, t: Tuned = Tuned(st, ScalpKnobs(), ScalpTuning.DEFAULT_CONTRACTS)): List<String> {
-        val entry = if (st.hybrid) "Pays the ask when the edge clears the taker fee, else rests a bid (sized at quarter Kelly)."
+        val entry = if (st.hybrid) "Buys at the ask when its edge clears the taker fee, else rests a bid (sized at quarter Kelly)."
         else if (st.taker) "Buys at the ask the moment the signal fires (taker fee)."
         else "Rests a bid and waits up to ${t.entryWaitMs(ScalperEngine.Config().entryWaitMs) / 1000} s for sellers to reach it (no fee)."
         val exit = if (st.hold) {

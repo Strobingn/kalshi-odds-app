@@ -138,7 +138,7 @@ data class OffBookLeg(
 object Fleet {
     const val TICK = 0.01
     const val FINE_TICK = 0.001
-    /** Contracts per market-making quote and per arbitrage pair. */
+    /** Contracts per market-making quote; an arbitrage pair's size when a book shows no size (else the books' depth). */
     const val QUOTE_CONTRACTS = 10
     const val ARB_CONTRACTS = 25
     /** Venue data older than this is not traded on. */
@@ -553,7 +553,9 @@ object Fleet {
         )) {
             val ka = askOf(v, kSide)?.takeIf { it > 0 && it < 1 } ?: continue
             val pa = polyAsk?.takeIf { it > 0 && it < 1 } ?: continue
-            val c = min(ARB_CONTRACTS.toDouble(), polySize ?: 0.0).toInt()
+            // As many pairs as both books show at those asks: no upper limit.
+            val kSize = (if (kSide == "YES") v.yesAskQty else v.noAskQty) ?: ARB_CONTRACTS.toDouble()
+            val c = min(kSize, polySize ?: 0.0).toInt()
             if (c <= 0) continue
             val kFee = FleetMath.takerFeePer(c, ka)
             val pFee = FleetMath.polymarketFeePer(pa, poly.feeRate)
@@ -606,7 +608,11 @@ object Fleet {
             val (kSide, hSide, hAsk) = if (k15 <= k1) Triple("YES", "NO", h.noAsk) else Triple("NO", "YES", h.yesAsk)
             val ka = askOf(v, kSide)?.takeIf { it > 0 && it < 1 } ?: continue
             val ha = hAsk?.takeIf { it > 0 && it < 1 } ?: continue
-            val c = ARB_CONTRACTS
+            // As many pairs as both books show at those asks: no upper limit.
+            val kSize = (if (kSide == "YES") v.yesAskQty else v.noAskQty) ?: ARB_CONTRACTS.toDouble()
+            val hSize = (if (hSide == "YES") h.askSizeYes else h.askSizeNo) ?: ARB_CONTRACTS.toDouble()
+            val c = min(kSize, hSize).toInt()
+            if (c <= 0) continue
             val total = ka + FleetMath.takerFeePer(c, ka) + ha + FleetMath.takerFeePer(c, ha)
             if (1.0 - total < FleetMath.THETA_MIN) continue
             val leg = OffBookLeg(OffBookLeg.Venue.KALSHI, h.id, hSide, ha, c, KalshiFeeTotal(c, ha), h.closeMs ?: v.nowMs)

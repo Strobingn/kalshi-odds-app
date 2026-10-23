@@ -89,8 +89,8 @@ object PaperAiCalibration {
  * memory of its bets, its own journal and its own provider order.
  *
  * The model only answers `place_bet` (YES, NO or SKIP). Code enforces the rules: no cap on bets per window, any time in
- * [ENTRY_FROM_S]..[ENTRY_UNTIL_S] seconds, the side's ask between [MIN_ASK_CENTS] and [MAX_ASK_CENTS], at most
- * [MAX_CONTRACTS] contracts, taker fee charged. It never reaches a real order: it only writes paper bets here.
+ * [ENTRY_FROM_S]..[ENTRY_UNTIL_S] seconds, the side's ask between [MIN_ASK_CENTS] and [MAX_ASK_CENTS], any number of
+ * contracts (no upper limit), taker fee charged. It never reaches a real order: it only writes paper bets here.
  */
 class PaperAi(
     private val chat: LlmChat,
@@ -182,7 +182,7 @@ class PaperAi(
             journal("rejected", buildJsonObject { put("ticker", ticker); put("why", "ask $askCents outside $MIN_ASK_CENTS..$MAX_ASK_CENTS") })
             return note("rejected $decision on $ticker: ask ${askCents ?: "unknown"}c is outside $MIN_ASK_CENTS-$MAX_ASK_CENTS")
         }
-        val contracts = ((obj["contracts"] as? JsonPrimitive)?.doubleOrNull ?: 1.0).roundToInt().coerceIn(1, MAX_CONTRACTS)
+        val contracts = ((obj["contracts"] as? JsonPrimitive)?.doubleOrNull ?: 1.0).roundToInt().coerceAtLeast(1)
         val price = askCents / 100.0
         val bull = (obj["bull_case"] as? JsonPrimitive)?.contentOrNull?.take(300)?.takeIf { it.isNotBlank() }
         val bear = (obj["bear_case"] as? JsonPrimitive)?.contentOrNull?.take(300)?.takeIf { it.isNotBlank() }
@@ -276,7 +276,7 @@ class PaperAi(
     private fun context(f: JsonObject): JsonObject = buildJsonObject {
         put("feed", f)
         put("limits", buildJsonObject {
-            put("askCentsRange", "$MIN_ASK_CENTS..$MAX_ASK_CENTS"); put("maxContracts", MAX_CONTRACTS)
+            put("askCentsRange", "$MIN_ASK_CENTS..$MAX_ASK_CENTS")
             put("betsPerWindow", "unlimited, one per minute"); put("entrySeconds", "$ENTRY_FROM_S..$ENTRY_UNTIL_S")
         })
         put("yourRecord", recordLine())
@@ -297,7 +297,8 @@ class PaperAi(
         const val ENTRY_UNTIL_S = 880
         const val MIN_ASK_CENTS = 10.0
         const val MAX_ASK_CENTS = 85.0
-        const val MAX_CONTRACTS = 50
+        /** No upper limit on contracts a bet (you asked 2026-10-23). */
+        const val MAX_CONTRACTS = Int.MAX_VALUE
         const val KEEP_BETS = 300
         const val MAX_LESSONS = 30
         const val MAX_REFLECT_QUEUE = 5
@@ -341,7 +342,7 @@ Say in one sentence what to do differently, or keep doing, next time: name the s
                             putJsonObject("bull_case") { put("type", "string"); put("description", "The best reason UP (YES) wins this window.") }
                             putJsonObject("bear_case") { put("type", "string"); put("description", "The best reason DOWN (NO) wins this window.") }
                             putJsonObject("decision") { put("type", "string"); put("description", "YES, NO or SKIP") }
-                            putJsonObject("contracts") { put("type", "number"); put("description", "1 to $MAX_CONTRACTS") }
+                            putJsonObject("contracts") { put("type", "number"); put("description", "Any number, 1 or more: there is no upper limit") }
                             putJsonObject("confidence") { put("type", "number"); put("description", "Your chance of winning, 0 to 100") }
                             putJsonObject("reason") { put("type", "string") }
                         }

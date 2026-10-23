@@ -53,13 +53,13 @@ class PaperAiTest {
     }
 
     @Test
-    fun anAskOutsideTheLimitsIsRejectedAndContractsAreCapped() {
+    fun anAskOutsideTheLimitsIsRejectedAndContractsAreNotCapped() {
         val cheap = ai("""{"decision":"YES","reason":"long shot"}""", feed(yesAsk = 4.0))
         assertTrue(cheap.tick().startsWith("rejected"))
         assertTrue(cheap.openBets().isEmpty())
-        val big = ai("""{"decision":"YES","contracts":500,"confidence":70,"reason":"all in"}""")
+        val big = ai("""{"decision":"YES","contracts":25000,"confidence":70,"reason":"all in"}""")
         big.tick()
-        assertEquals(PaperAi.MAX_CONTRACTS, big.openBets().single().contracts)
+        assertEquals(25000, big.openBets().single().contracts)
     }
 
     @Test

@@ -60,7 +60,7 @@ class Tuned(val strategy: ScalpStrategy, val knobs: ScalpKnobs, defaultContracts
     }
 
     val enabled: Boolean = knobs.enabled
-    val contracts: Int = (knobs.contracts ?: defaultContracts).coerceIn(1, ScalpTuning.MAX_CONTRACTS)
+    val contracts: Int = (knobs.contracts ?: defaultContracts).coerceAtLeast(1)
     val targetDollars: Double = knobs.targetCents?.div(100.0) ?: strategy.targetDollars
     val stopDollars: Double = knobs.stopCents?.div(100.0) ?: strategy.stopDollars
     val timeoutMs: Long = knobs.timeoutSeconds?.let { it * 1000L } ?: strategy.timeoutMs
@@ -170,7 +170,8 @@ class ScalpTuning(
 
     companion object {
         const val DEFAULT_CONTRACTS = 50
-        const val MAX_CONTRACTS = 100
+        /** No upper limit on contracts an order (you asked 2026-10-23). */
+        const val MAX_CONTRACTS = Int.MAX_VALUE
     }
 }
 

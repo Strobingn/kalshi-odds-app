@@ -387,5 +387,6 @@ object FleetMath {
     const val KELLY_FRACTION = 0.25
     /** Paper bankroll each fleet scalper sizes against. */
     const val BANKROLL_USD = 250.0
-    const val MAX_CONTRACTS = 200
+    /** No upper limit on contracts an order (you asked 2026-10-23): Kelly alone sizes it. */
+    const val MAX_CONTRACTS = Int.MAX_VALUE
 }
