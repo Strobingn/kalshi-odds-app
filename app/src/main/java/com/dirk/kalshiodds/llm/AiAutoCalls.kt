@@ -23,7 +23,8 @@ object AiAutoCalls {
         if (!auto) return "Auto pace: off"
         if (quota == null) return "Auto pace: at most every 60s"
         val models = LlmProviders.paceModels(ep)
-        val ms = if (models.size >= 2) quota.perModelPaceMs / 2 else quota.perModelPaceMs
+        val raw = if (models.size >= 2) quota.perModelPaceMs / 2 else quota.perModelPaceMs
+        val ms = raw.coerceAtLeast(LlmProviders.AUTO_PACE_MS)
         val label = if (ms < 1_000L) String.format(java.util.Locale.US, "%.1fs", ms / 1000.0) else "${(ms / 1000L).coerceAtLeast(1L)}s"
         return if (models.size >= 2) "Auto pace: every $label, rotating ${models.joinToString(" and ")}"
         else "Auto pace: every $label"
@@ -46,7 +47,9 @@ object AiAutoCalls {
         allowed: (LlmEndpoint) -> Boolean,
         ask: (LlmEndpoint, List<Pair<String, String>>) -> LlmClient.Reply,
         onBilling: (String, String) -> Unit,
-        onFallback: (LlmEndpoint, LlmEndpoint, String) -> Unit = { _, _, _ -> }
+        onFallback: (LlmEndpoint, LlmEndpoint, String) -> Unit = { _, _, _ -> },
+        /** Today's saved calls for this provider. Combined with the pacer's session hits. */
+        callsToday: (LlmEndpoint) -> Int = { 0 }
     ): Pair<LlmEndpoint, LlmClient.Reply>? {
         if (!LlmProviders.freeFamily(selected.provider, selected.model)) return null
         val tail = slots.asSequence()
@@ -62,7 +65,21 @@ object AiAutoCalls {
         for (ep in order) {
             if (!allowed(ep)) continue
             val quota = quotaOf(ep) ?: continue
-            val model = pacer.allow(ep.provider, LlmProviders.paceModels(ep), quota, nowMs, tokens) ?: continue
+            val cap = quota.requestsPerDay
+            val used = maxOf(callsToday(ep).coerceAtLeast(0), pacer.dayCalls(ep.provider, nowMs))
+            if (cap > 0 && used >= cap) {
+                failed = ep to "daily cap $used/$cap"
+                continue
+            }
+            val models = LlmProviders.paceModels(ep)
+            val model = pacer.allow(ep.provider, models, quota, nowMs, tokens)
+            if (model == null) {
+                if (ep.provider == selected.provider) {
+                    val why = pacer.hold(ep.provider, models, quota, nowMs, tokens)?.reason ?: "pace"
+                    failed = selected to why
+                }
+                continue
+            }
             val use = ep.copy(model = model)
             try {
                 val reply = ask(use, messages)
@@ -175,7 +192,7 @@ class FreeCallPacer {
             return Hold("quota", now + 60_000L)
         }
         prune(now)
-        val globalPace = if (models.size >= 2) quota.perModelPaceMs / 2 else quota.perModelPaceMs
+        val globalPace = paceGap(quota, models.size)
         val lastAny = hits.lastOrNull { it.provider == provider }?.at
         val globalAt = if (lastAny != null && globalPace > 0L && now - lastAny < globalPace) lastAny + globalPace else now
         var modelAt = Long.MAX_VALUE
@@ -189,7 +206,7 @@ class FreeCallPacer {
         }
         var at = maxOf(globalAt, modelAt)
         if (globalAt > modelAt) why = "pace"
-        if (at == Long.MAX_VALUE || at <= now) at = now + quota.perModelPaceMs.coerceAtLeast(1_000L)
+        if (at == Long.MAX_VALUE || at <= now) at = now + paceGap(quota, models.size)
         return Hold(why, at)
     }
 
@@ -200,7 +217,7 @@ class FreeCallPacer {
     }
 
     /**
-     * A real HTTP 429. Mistral doubles the wait on each consecutive 429 (30s, 60s, 120s, …, capped at 15 min)
+     * A real HTTP 429. Mistral starts at the 60s pace (or Retry-After, whichever is longer) and doubles each consecutive 429, capped at 15 min.
      * and a successful [record] resets the count. Other providers keep a single Retry-After wait.
      */
     fun note429(provider: String, model: String, retryAfterMs: Long, now: Long) {
@@ -256,7 +273,7 @@ class FreeCallPacer {
         if (models.isEmpty() || tokens <= 0 || quota.requestsPerMinute <= 0 || quota.requestsPerDay <= 0) return null
         prune(now)
         val n = models.size
-        val globalPace = if (n >= 2) quota.perModelPaceMs / 2 else quota.perModelPaceMs
+        val globalPace = paceGap(quota, n)
         val lastAny = hits.lastOrNull { it.provider == provider }?.at
         if (lastAny != null && globalPace > 0L && now - lastAny < globalPace) return null
         for (i in 0 until n) {
@@ -301,14 +318,15 @@ class FreeCallPacer {
             }
             if (hit.at > last) last = hit.at
         }
-        if (last != Long.MIN_VALUE && quota.perModelPaceMs > 0L && now - last < quota.perModelPaceMs) {
-            later(last + quota.perModelPaceMs, "pace")
+        val pace = paceGap(quota, 1)
+        if (last != Long.MIN_VALUE && pace > 0L && now - last < pace) {
+            later(last + pace, "pace")
         }
         if (minuteCalls >= quota.requestsPerMinute && oldestMinute != Long.MAX_VALUE) later(oldestMinute + MINUTE_MS, "minute cap")
         if (dayCalls >= quota.requestsPerDay && oldestDay != Long.MAX_VALUE) later(oldestDay + DAY_MS, "day cap")
         if (minuteTokens + tokens > quota.tokensPerMinute && oldestMinute != Long.MAX_VALUE) later(oldestMinute + MINUTE_MS, "token cap")
         if (dayTokens + tokens > quota.tokensPerDay && oldestDay != Long.MAX_VALUE) later(oldestDay + DAY_MS, "token cap")
-        if (at <= now) at = now + quota.perModelPaceMs.coerceAtLeast(1_000L)
+        if (at <= now) at = now + paceGap(quota, 1)
         return Hold(why, at)
     }
 
@@ -335,8 +353,20 @@ class FreeCallPacer {
         if (dayCalls >= quota.requestsPerDay) return false
         if (minuteTokens + tokens > quota.tokensPerMinute) return false
         if (dayTokens + tokens > quota.tokensPerDay) return false
-        if (last != Long.MIN_VALUE && quota.perModelPaceMs > 0L && now - last < quota.perModelPaceMs) return false
+        val pace = paceGap(quota, 1)
+        if (last != Long.MIN_VALUE && pace > 0L && now - last < pace) return false
         return true
+    }
+
+    /** Calls recorded for this provider since the start of the rolling day window. */
+    fun dayCalls(provider: String, now: Long): Int {
+        prune(now)
+        return hits.count { it.provider == provider && now - it.at in 0 until DAY_MS }
+    }
+
+    private fun paceGap(quota: FreeQuota, modelCount: Int): Long {
+        val raw = if (modelCount >= 2) quota.perModelPaceMs / 2 else quota.perModelPaceMs
+        return raw.coerceAtLeast(LlmProviders.AUTO_PACE_MS)
     }
 
     private fun prune(now: Long) {

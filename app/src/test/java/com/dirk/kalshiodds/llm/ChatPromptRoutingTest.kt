@@ -122,7 +122,8 @@ class ChatPromptRoutingTest {
         ScalpRule.Quote(ticker, now, close, now, bid, 100.0, ask, 100.0, spot, strike, 1e-4)
 
     @Test fun grok47DefaultMigrationAndAliases() {
-        assertEquals("grok-4.7", LlmSettings.DEFAULT_MODEL)
+        assertEquals(LlmProviders.DEFAULT_GROQ_MODEL, LlmSettings.DEFAULT_MODEL)
+        assertEquals("grok-4.7", LlmSettings.XAI_MODEL)
         assertEquals("grok-4.7", LlmSettings.migrateModel("grok-4"))
         assertEquals("grok-4.7", LlmSettings.migrateModel(""))
         assertEquals("grok-3-mini", LlmSettings.migrateModel("grok-3-mini"))

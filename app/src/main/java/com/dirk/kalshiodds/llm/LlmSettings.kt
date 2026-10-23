@@ -8,13 +8,15 @@ import androidx.security.crypto.MasterKeys
 /**
  * LLM API key for the Kalshi Scalper chat + the single PAPER "LLM" strategy. Entered by Dirk in Settings,
  * stored only in EncryptedSharedPreferences (never committed, never synced). OpenAI-compatible endpoint;
- * defaults to xAI. The LLM never reaches any real-order path.
+ * defaults to Groq (llama-3.1-8b-instant). xAI stays available as a paid slot. The LLM never reaches any real-order path.
  */
 class LlmSettings(context: Context) {
     private val prefs: SharedPreferences? = runCatching {
         EncryptedSharedPreferences.create("scalper_llm", MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC), context.applicationContext,
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV, EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM)
     }.getOrNull()
+
+    init { migrateGroqDefault() }
 
     var apiKey: String
         get() = prefs?.getString("key", "").orEmpty()
@@ -34,8 +36,8 @@ class LlmSettings(context: Context) {
      */
     var providerId: String
         get() {
-            val id = prefs?.getString("provider", LlmProviders.XAI).orEmpty().ifBlank { LlmProviders.XAI }
-            return if (LlmProviders.ALL.any { it.id == id }) id else LlmProviders.XAI
+            val id = prefs?.getString("provider", DEFAULT_PROVIDER).orEmpty().ifBlank { DEFAULT_PROVIDER }
+            return if (LlmProviders.ALL.any { it.id == id }) id else DEFAULT_PROVIDER
         }
         set(v) { prefs?.edit()?.putString("provider", v)?.apply() }
 
@@ -80,11 +82,40 @@ class LlmSettings(context: Context) {
         prefs?.edit()?.putString("model.${spec.id}", next)?.apply()
     }
 
-    companion object {
-        const val DEFAULT_BASE = "https://api.x.ai/v1"
-        /** 1.0.8: Grok 4.7 (xAI's public API id; the "Fast" serving tier has no separate public API id). */
-        const val DEFAULT_MODEL = "grok-4.7"
-        /** Blank or the old 1.0.x default "grok-4" → [DEFAULT_MODEL]; any other explicit choice is kept. */
-        fun migrateModel(saved: String): String = saved.trim().let { if (it.isEmpty() || it.equals("grok-4", true)) DEFAULT_MODEL else it }
+    /**
+     * 1.0.35: installs left on Mistral by the 1.0.29 default move to Groq once.
+     * A later manual choice is kept because the flag is already set.
+     */
+    private fun migrateGroqDefault() {
+        val p = prefs ?: return
+        if (p.getBoolean(KEY_MIGRATED_GROQ_1035, false)) return
+        val saved = p.getString("provider", null)
+        val edit = p.edit().putBoolean(KEY_MIGRATED_GROQ_1035, true)
+        val move = groqDefaultMigration(saved, p.getString("model.${LlmProviders.GROQ}", null), already = false)
+        if (move.provider != null) {
+            edit.putString("provider", move.provider)
+            edit.putString("model.${LlmProviders.GROQ}", move.model)
+        }
+        edit.apply()
     }
+
+    companion object {
+        const val KEY_MIGRATED_GROQ_1035 = "migrated_groq_default_1035"
+        const val DEFAULT_PROVIDER = LlmProviders.GROQ
+        const val DEFAULT_BASE = "https://api.groq.com/openai/v1"
+        const val DEFAULT_MODEL = LlmProviders.DEFAULT_GROQ_MODEL
+        /** xAI's public API id. The "Fast" serving tier has no separate public API id. */
+        const val XAI_MODEL = "grok-4.7"
+        /** Blank or the old 1.0.x default "grok-4" → [XAI_MODEL]; any other explicit choice is kept. */
+        fun migrateModel(saved: String): String = saved.trim().let { if (it.isEmpty() || it.equals("grok-4", true)) XAI_MODEL else it }
+
+        /** Only a saved Mistral id moves. A missing id keeps the getter default, and any other saved id stays. */
+        fun groqDefaultMigration(savedProvider: String?, groqModel: String?, already: Boolean): GroqMove {
+            if (already || savedProvider != LlmProviders.MISTRAL) return GroqMove(null, null)
+            val model = groqModel?.trim().orEmpty().ifBlank { DEFAULT_MODEL }
+            return GroqMove(DEFAULT_PROVIDER, model)
+        }
+    }
+
+    data class GroqMove(val provider: String?, val model: String?)
 }

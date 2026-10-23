@@ -28,7 +28,9 @@ class LlmPaperStrategy(
     private val alternates: () -> List<LlmEndpoint> = { emptyList() },
     private val quotaOf: (LlmEndpoint) -> FreeQuota? = { LlmProviders.baseQuota(it.provider, it.model) },
     private val onBilling: (String, String) -> Unit = { _, _ -> },
-    private val onProviderSwitch: (String, String, String) -> Unit = { _, _, _ -> }
+    private val onProviderSwitch: (String, String, String) -> Unit = { _, _, _ -> },
+    private val allowed: (LlmEndpoint) -> Boolean = { autoCalls() && LlmProviders.freeFamily(it.provider, it.model) },
+    private val callsToday: (LlmEndpoint) -> Int = { 0 }
 ) {
     private val _status = MutableStateFlow("needs key")
     val status: StateFlow<String> = _status
@@ -49,6 +51,7 @@ class LlmPaperStrategy(
     )
     @Volatile private var sleepMs: Long = CYCLE_MS
     @Volatile private var paceStatus: String = "waiting for the free-tier pace"
+    @Volatile private var lastAutoAt = Long.MIN_VALUE
 
     fun start(scope: CoroutineScope) = scope.launch {
         while (isActive) {
@@ -63,6 +66,11 @@ class LlmPaperStrategy(
         val ep = endpoint()
         if (!LlmProviders.freeFamily(ep.provider, ep.model)) return null
         val nowMs = System.currentTimeMillis()
+        if (lastAutoAt != Long.MIN_VALUE && nowMs - lastAutoAt < AiLiveFeed.MIN_SPACING_MS) {
+            sleepMs = (AiLiveFeed.MIN_SPACING_MS - (nowMs - lastAutoAt)).coerceIn(CYCLE_MS, AiLiveFeed.MIN_SPACING_MS)
+            paceStatus = "waiting for the free-tier pace"
+            return null
+        }
         val messagesTokens = AiCompact.tokens(messages, 20)
         val slots = listOf(ep) + alternates()
         val hit = AiAutoCalls.callFree(
@@ -76,13 +84,15 @@ class LlmPaperStrategy(
                 if (!MonthlyTokenCaps.room(ep.provider, LlmPrices.monthKey(System.currentTimeMillis()))) null
                 else quotaOf(ep)
             },
-            allowed = { autoCalls() && LlmProviders.freeFamily(it.provider, it.model) },
+            allowed = { this.allowed(it) },
             ask = { use, msgs -> client.chatReply(msgs, 20, use, automatic = true) },
             onBilling = onBilling,
-            onFallback = { from, to, reason -> onProviderSwitch(from.provider, to.provider, reason) }
+            onFallback = { from, to, reason -> onProviderSwitch(from.provider, to.provider, reason) },
+            callsToday = callsToday
         )
         if (hit != null) {
-            sleepMs = CYCLE_MS
+            lastAutoAt = nowMs
+            sleepMs = AiLiveFeed.MIN_SPACING_MS
             paceStatus = ""
             return hit
         }
@@ -95,7 +105,7 @@ class LlmPaperStrategy(
                 if (!MonthlyTokenCaps.room(qep.provider, LlmPrices.monthKey(nowMs))) null
                 else quotaOf(qep)
             },
-            allowed = { autoCalls() && LlmProviders.freeFamily(it.provider, it.model) }
+            allowed = { this.allowed(it) }
         )
         sleepMs = ((wait?.resumeAtMs ?: nowMs) - nowMs).coerceIn(CYCLE_MS, 60_000L)
         paceStatus = AiAutoCalls.paceStatus(wait, nowMs).ifBlank { "" }

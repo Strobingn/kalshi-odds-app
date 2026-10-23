@@ -351,6 +351,7 @@ class AiWindowWatcher(
             store.setNotice("")
             return
         }
+        if (!llmDueNow()) return
         runCatching { freeFollow(epNow) }
     }
 
@@ -372,6 +373,7 @@ class AiWindowWatcher(
         if (!LlmProviders.freeFamily(ep.provider, ep.model)) return
         if (!store.monthlyRoom(ep.provider, now())) return
         val quota = LlmProviders.effectiveQuota(ep.provider, ep.model, store.dailyCap(ep.provider, ep.model)) ?: return
+        if (!llmDueNow()) return
         if (pacer.ready(ep.provider, LlmProviders.paceModels(ep), quota, now(), AiCompact.GROQ_CALL_TOKENS)) runCatching { onWake() }
     }
 
@@ -391,6 +393,7 @@ class AiWindowWatcher(
             store.setNotice("AI follow: no API key for ${LlmProviders.spec(selected.provider).label}")
             return
         }
+        if (!llmDueNow()) return
         val result = AiAutoCalls.callFree(
             selected = selected,
             slots = runCatching { alternates() }.getOrDefault(emptyList()),
@@ -405,7 +408,8 @@ class AiWindowWatcher(
             allowed = { store.autoAllowed(it.provider, it.model) },
             ask = ask,
             onBilling = { provider, detail -> store.markBilled(provider, detail, now()) },
-            onFallback = { from, to, reason -> store.noteFallback(from.provider, to.provider, reason, now()) }
+            onFallback = { from, to, reason -> store.noteFallback(from.provider, to.provider, reason, now()) },
+            callsToday = { store.callsFor(it.provider, "", now()) }
         )
         if (result == null) {
             if (!store.monthlyRoom(selected.provider, now())) {
@@ -429,6 +433,13 @@ class AiWindowWatcher(
         val capAfter = store.config.value.budgetOrNull()
         if (capAfter != null && store.budgetPaused(now())) store.setNotice(LlmUsageText.budgetNotice(store.todaySpend(now()), capAfter))
         else store.setNotice("")
+    }
+
+    /** 60s floor, then the saved interval. A Kalshi tick or the 5s poll cannot slip past this. */
+    private fun llmDueNow(): Boolean {
+        val elapsed = if (lastCallAt == Long.MIN_VALUE) Long.MAX_VALUE else now() - lastCallAt
+        val intervalDue = elapsed >= store.config.value.intervalMs.coerceAtLeast(AiLiveFeed.MIN_SPACING_MS)
+        return AiLiveFeed.llmDue(lastCallAt, now(), pending, intervalDue)
     }
 
     private fun apply(text: String): List<AiAdjustment> {

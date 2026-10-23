@@ -29,6 +29,7 @@ object LlmProviders {
     const val GEMINI = "gemini"
     const val OPENROUTER_FREE = "openrouter-free"
 
+    const val DEFAULT_GROQ_MODEL = "llama-3.1-8b-instant"
     const val GROQ_120 = "openai/gpt-oss-120b"
     const val GROQ_20 = "openai/gpt-oss-20b"
     const val GEMINI_DEFAULT = "gemini-3.8-flash"
@@ -42,7 +43,9 @@ object LlmProviders {
     const val MISTRAL_3B = "ministral-3b-latest"
     val MISTRAL_CHAIN = listOf(MISTRAL_DEFAULT, MISTRAL_NEMO, MISTRAL_3B)
     /** One call per free-plan minute slot (188/min). The day cap is a hard stop, not a 30s idle gap. */
-    const val MISTRAL_PACE_MS = 320L
+    /** Automatic free-provider calls. Same floor as [com.dirk.kalshiodds.llm.AiLiveFeed.MIN_SPACING_MS]. */
+    const val MISTRAL_PACE_MS = 60_000L
+    const val AUTO_PACE_MS = 60_000L
     const val FREE_KEY_HINT = "Get a free key at console.mistral.ai, console.groq.com, or aistudio.google.com."
 
     data class Spec(
@@ -60,17 +63,17 @@ object LlmProviders {
         Spec(OPENAI, "OpenAI", "https://api.openai.com/v1", "gpt-4.1"),
         Spec(MISTRAL, "Mistral (free)", "https://api.mistral.ai/v1", MISTRAL_DEFAULT, free = true),
         Spec(OPENROUTER, "OpenRouter", "https://openrouter.ai/api/v1", "openai/gpt-4o-mini"),
-        Spec(GROQ, "Groq (free)", "https://api.groq.com/openai/v1", GROQ_120, free = true),
+        Spec(GROQ, "Groq (free)", "https://api.groq.com/openai/v1", DEFAULT_GROQ_MODEL, free = true),
         Spec(GEMINI, "Google Gemini (free)", "https://generativelanguage.googleapis.com/v1beta", GEMINI_DEFAULT, free = true, nativeGemini = true),
         Spec(OPENROUTER_FREE, "OpenRouter free models", "https://openrouter.ai/api/v1", OPENROUTER_FREE_MODEL, free = true),
         Spec(CUSTOM, "Custom", "", "")
     )
 
     /**
-     * Automatic free fallback. Mistral, then Groq, then Gemini. OpenRouter `:free` stays selectable
+     * Automatic free fallback. Groq, then Mistral, then Gemini. OpenRouter `:free` stays selectable
      * and is last, so a paid provider is never a fallback. Saved keys are not part of this list.
      */
-    val FREE_IDS = listOf(MISTRAL, GROQ, GEMINI, OPENROUTER_FREE)
+    val FREE_IDS = listOf(GROQ, MISTRAL, GEMINI, OPENROUTER_FREE)
 
     fun spec(id: String): Spec = ALL.firstOrNull { it.id == id } ?: ALL.first()
 
@@ -108,20 +111,16 @@ object LlmProviders {
 
     /**
      * Provider ceilings before the optional daily budget.
-     * Mistral free plan: 188/min and 625K tokens/min on ministral-8b and open-mistral-nemo
-     * (ministral-3b is 750/min). The pace is that minute slot, about 320ms, so a Kalshi
-     * cycle is not left waiting while quota remains. The day cap is a hard stop.
-     * Groq: 30/min, 1,000/day, 8K tokens/min, 200K tokens/day, per model. Pace is 2s.
-     * Gemini's daily figure is the safety budget (500). Pace is 6s (10/min).
-     * OpenRouter `:free`: 20/min, 50/day. Pace is 3s.
+     * Every automatic free provider waits at least 60 seconds between calls.
+     * Mistral's day cap is 2,880. Groq's day cap is 1,000. Gemini's safety budget is 500.
      */
     fun baseQuota(id: String, model: String = ""): FreeQuota? {
         if (!freeFamily(id, model)) return null
         return when (id) {
             MISTRAL -> FreeQuota(188, 2_880, 625_000, 900_000_000, MISTRAL_PACE_MS)
-            GROQ -> FreeQuota(30, 1_000, 8_000, 200_000, 2_000L)
-            GEMINI -> FreeQuota(10, 500, 250_000, 50_000_000, 6_000L)
-            else -> FreeQuota(20, 50, 250_000, 50_000_000, 3_000L)
+            GROQ -> FreeQuota(30, 1_000, 8_000, 200_000, AUTO_PACE_MS)
+            GEMINI -> FreeQuota(10, 500, 250_000, 50_000_000, AUTO_PACE_MS)
+            else -> FreeQuota(20, 50, 250_000, 50_000_000, AUTO_PACE_MS)
         }
     }
 

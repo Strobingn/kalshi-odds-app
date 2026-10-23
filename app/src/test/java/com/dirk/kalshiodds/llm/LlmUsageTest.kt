@@ -113,7 +113,7 @@ class LlmUsageTest {
             java.io.File("src/main/java/com/dirk/kalshiodds/llm/LlmPaperStrategy.kt")
         ).first { it.isFile }.readText()
         assertTrue(paper.contains("CYCLE_MS"))
-        assertFalse(paper.contains("MIN_SPACING_MS"))
+        assertTrue(paper.contains("MIN_SPACING_MS"))
     }
 
     @Test fun providerResolveFillsDefaultsAndRejectsCleartext() {

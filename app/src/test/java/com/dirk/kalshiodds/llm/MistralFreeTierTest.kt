@@ -49,16 +49,16 @@ class MistralFreeTierTest {
         val kept = LlmProviders.resolve(LlmProviders.MISTRAL, "sk-free", "mistral-large-latest", "")
         assertEquals("mistral-large-latest", kept.model)
         assertEquals("sk-free", kept.apiKey)
-        assertEquals(listOf(LlmProviders.MISTRAL, LlmProviders.GROQ, LlmProviders.GEMINI, LlmProviders.OPENROUTER_FREE), LlmProviders.FREE_IDS)
+        assertEquals(listOf(LlmProviders.GROQ, LlmProviders.MISTRAL, LlmProviders.GEMINI, LlmProviders.OPENROUTER_FREE), LlmProviders.FREE_IDS)
         assertEquals("Enter your Mistral API key", LlmProviders.keyPrompt(LlmProviders.MISTRAL))
         assertTrue(AiAutoCalls.defaultAuto(LlmProviders.MISTRAL, LlmProviders.MISTRAL_DEFAULT))
         val quota = LlmProviders.effectiveQuota(LlmProviders.MISTRAL, LlmProviders.MISTRAL_DEFAULT, 2_880)!!
+        assertEquals(60_000L, LlmProviders.MISTRAL_PACE_MS)
         assertEquals(LlmProviders.MISTRAL_PACE_MS, quota.perModelPaceMs)
-        assertEquals(320L, quota.perModelPaceMs)
         assertEquals(188, quota.requestsPerMinute)
         assertEquals(625_000L, quota.tokensPerMinute)
         assertEquals(2_880, quota.requestsPerDay)
-        assertEquals("Auto pace: every 0.3s", AiAutoCalls.paceLabel(true, ep, quota))
+        assertEquals("Auto pace: every 60s", AiAutoCalls.paceLabel(true, ep, quota))
         val settings = source("LlmSettings.kt")
         val saveModel = settings.substring(settings.indexOf("fun saveModelOnly"), settings.indexOf("companion object"))
         assertFalse(saveModel.contains("key."))
@@ -139,14 +139,15 @@ class MistralFreeTierTest {
         val pacer = FreeCallPacer()
         val model = LlmProviders.MISTRAL_DEFAULT
         pacer.note429(LlmProviders.MISTRAL, model, 30_000L, 0L)
-        assertNull(pacer.allow(LlmProviders.MISTRAL, listOf(model), quota, 29_000L, 100))
-        assertNotNull(pacer.allow(LlmProviders.MISTRAL, listOf(model), quota, 30_000L, 100))
-        pacer.note429(LlmProviders.MISTRAL, model, 30_000L, 30_000L)
-        assertNull(pacer.allow(LlmProviders.MISTRAL, listOf(model), quota, 89_000L, 100))
-        assertNotNull(pacer.allow(LlmProviders.MISTRAL, listOf(model), quota, 90_000L, 100))
-        pacer.record(LlmProviders.MISTRAL, model, 90_000L, 100)
-        pacer.note429(LlmProviders.MISTRAL, model, 30_000L, 90_000L)
-        assertNotNull(pacer.allow(LlmProviders.MISTRAL, listOf(model), quota, 120_000L, 100))
+        assertNull(pacer.allow(LlmProviders.MISTRAL, listOf(model), quota, 59_000L, 100))
+        assertNotNull(pacer.allow(LlmProviders.MISTRAL, listOf(model), quota, 60_000L, 100))
+        pacer.note429(LlmProviders.MISTRAL, model, 30_000L, 60_000L)
+        assertNull(pacer.allow(LlmProviders.MISTRAL, listOf(model), quota, 179_000L, 100))
+        assertNotNull(pacer.allow(LlmProviders.MISTRAL, listOf(model), quota, 180_000L, 100))
+        pacer.record(LlmProviders.MISTRAL, model, 180_000L, 100)
+        pacer.note429(LlmProviders.MISTRAL, model, 30_000L, 180_000L)
+        assertNull(pacer.allow(LlmProviders.MISTRAL, listOf(model), quota, 239_000L, 100))
+        assertNotNull(pacer.allow(LlmProviders.MISTRAL, listOf(model), quota, 240_000L, 100))
 
         val paced = FreeCallPacer()
         paced.record(LlmProviders.MISTRAL, model, 0L, 100)
@@ -209,7 +210,7 @@ class MistralFreeTierTest {
         assertNotNull(fresh.allow(LlmProviders.MISTRAL, listOf(LlmProviders.MISTRAL_DEFAULT), quota, 0L, 100))
     }
 
-    @Test fun thirtySecondPaceStaysInsideTheFreeMinuteAndDayCeilings() {
+    @Test fun sixtySecondPaceStaysInsideTheFreeMinuteAndDayCeilings() {
         val quota = LlmProviders.effectiveQuota(LlmProviders.MISTRAL, LlmProviders.MISTRAL_DEFAULT, 2_880)!!
         val pacer = FreeCallPacer()
         val hits = ArrayList<Long>()
@@ -222,9 +223,9 @@ class MistralFreeTierTest {
             }
             t += 1_000L
         }
-        assertEquals(180, hits.size)
+        assertEquals(3, hits.size)
         assertEquals(0L, hits.first())
-        assertEquals(179_000L, hits.last())
+        assertEquals(120_000L, hits.last())
         assertTrue(hits.zipWithNext { a, b -> b - a }.all { it >= LlmProviders.MISTRAL_PACE_MS })
         val day = FreeCallPacer()
         var n = 0
@@ -234,13 +235,14 @@ class MistralFreeTierTest {
             val model = day.allow(LlmProviders.MISTRAL, listOf(LlmProviders.MISTRAL_DEFAULT), quota, t, 180)
             if (model != null) {
                 day.record(LlmProviders.MISTRAL, model, t, 180)
-                if (prev != Long.MIN_VALUE) assertTrue(t - prev >= 30_000L)
+                if (prev != Long.MIN_VALUE) assertTrue(t - prev >= 60_000L)
                 prev = t
                 n++
             }
-            t += 30_000L
+            t += 60_000L
         }
-        assertEquals(2_880, n)
+        assertEquals(1_440, n)
+        assertTrue(n < quota.requestsPerDay)
     }
 
     @Test fun monthlyTokenCapStopsAutomaticCallsAndCostsStayZero() {
@@ -304,7 +306,7 @@ class MistralFreeTierTest {
         assertEquals(LlmProviders.GEMINI, LlmProviders.chartProvider(old.provider, old.model))
         val limits = LlmProviders.FREE_IDS.associateWith { store.dailyCap(it, "") }
         val versus = AiUsageCharts.callsVsDailyLimit(store.buckets(), limits, now)
-        assertEquals(LlmProviders.MISTRAL, versus.first().provider)
+        assertEquals(LlmProviders.GROQ, versus.first().provider)
         assertEquals(1, versus.first { it.provider == LlmProviders.MISTRAL }.calls)
         assertEquals(2_880, versus.first { it.provider == LlmProviders.MISTRAL }.limit)
         assertEquals(1, versus.first { it.provider == LlmProviders.GROQ }.calls)
