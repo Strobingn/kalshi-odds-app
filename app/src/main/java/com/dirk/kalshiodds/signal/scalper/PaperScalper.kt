@@ -890,23 +890,42 @@ class ScalperStore(context: Context) {
      * once it has matched the Kotlin trees, and stays on the Kotlin trees if the file is missing, stale or fails.
      */
     @Volatile
-    private var onnx: OnnxTrees? = null
+    private var engine: ModelEngines.Opened? = null
 
     init {
         val m = model
         val json = modelBytes
         if (m != null && json != null) {
+            val libDir = context.applicationInfo?.nativeLibraryDir.orEmpty()
             Thread({
-                val why = runCatching {
-                    val bytes = context.assets.open(ScalperModel.ONNX_ASSET_NAME).use { it.readBytes() }
-                    val trees = OnnxTrees.open(bytes, json, m.features)
-                    val failed = m.attachOnnx(trees::predict)
-                    if (failed == null) onnx = trees else trees.close()
-                    failed
-                }.getOrElse { e -> "ONNX not loaded: ${e.message ?: e.javaClass.simpleName}" }
-                if (why != null && !m.engine.contains("(")) m.markKotlin(why)
-                if (why != null) android.util.Log.w("ScalperModel", why)
-            }, "scalper-onnx").apply { isDaemon = true }.start()
+                runCatching {
+                    engine = ModelEngines.choose(
+                        m,
+                        npu = {
+                            check(NpuTrees.isSnapdragon()) { "not a Snapdragon phone (${NpuTrees.chipName()})" }
+                            // If opening the NPU ever takes the app down, the next start of this version skips it instead of crashing again.
+                            val version = com.dirk.kalshiodds.BuildConfig.VERSION_CODE
+                            check(prefs.getInt(NPU_OPENING_KEY, -1) != version) { "skipped: opening the NPU stopped the app last time (this version)" }
+                            prefs.edit().putInt(NPU_OPENING_KEY, version).commit()
+                            try {
+                                val bytes = context.assets.open(ScalperModel.NPU_ASSET_NAME).use { it.readBytes() }
+                                val t = NpuTrees.open(bytes, json, m, onNpu = true, nativeLibraryDir = libDir)
+                                // One real row through it before the flag clears: a crash here also counts.
+                                t.margin(m.probeRows(1).first())
+                                ModelEngines.Opened(t.label, t::margin, t::close)
+                            } finally {
+                                prefs.edit().remove(NPU_OPENING_KEY).commit()
+                            }
+                        },
+                        cpu = {
+                            val bytes = context.assets.open(ScalperModel.ONNX_ASSET_NAME).use { it.readBytes() }
+                            val t = OnnxTrees.open(bytes, json, m.features)
+                            ModelEngines.Opened("ONNX Runtime (CPU)", t::predict, t::close)
+                        }
+                    )
+                }.onFailure { e -> m.markKotlin("engines not loaded: ${e.message ?: e.javaClass.simpleName}") }
+                for (e in m.engines) android.util.Log.i("ScalperModel", "${e.name}: ${e.note} · open ${e.openMs} ms · ${e.warmMicros} µs")
+            }, "scalper-engines").apply { isDaemon = true }.start()
         }
     }
 
@@ -927,6 +946,8 @@ class ScalperStore(context: Context) {
         const val KEY = "state_json"
         const val KNOBS_KEY = "strategy_settings_json"
         const val CHECKS_KEY = "contract_checks_json"
+        /** The app version that was opening the NPU; still set at start = that open crashed. */
+        const val NPU_OPENING_KEY = "npu_opening_version"
         val knobsSerializer = kotlinx.serialization.serializer<Map<String, ScalpKnobs>>()
     }
 }

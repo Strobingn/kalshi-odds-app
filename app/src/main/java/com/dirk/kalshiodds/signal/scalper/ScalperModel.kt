@@ -191,6 +191,83 @@ class ScalperModel(
         return sum
     }
 
+    // ------------------------------------------------------------ the NPU copy (scalper_model_npu.onnx)
+
+    /** Per feature: its split thresholds, sorted, no repeats (`export_npu.edges`). */
+    val binEdges: Array<DoubleArray> by lazy {
+        val sets = Array(features.size) { java.util.TreeSet<Double>() }
+        for (t in trees) for (i in t.feature.indices) if (t.feature[i] >= 0) sets[t.feature[i]] += t.threshold[i]
+        Array(features.size) { sets[it].toDoubleArray() }
+    }
+
+    /** Per tree: its leaf node ids in node order (the NPU graph's leaf slots). */
+    val leafNodes: Array<IntArray> by lazy { Array(trees.size) { ti -> trees[ti].feature.indices.filter { trees[ti].feature[it] < 0 }.toIntArray() } }
+
+    /** Leaf slots a tree has in the NPU graph's output (the most leaves any tree has). */
+    val leafSlots: Int get() = leafNodes.maxOf { it.size }
+
+    /**
+     * The NPU graph's input for [x]: per feature, how many of its splits lie below the value (a missing value counts
+     * them all). `x <= threshold k` exactly when `bins <= k`, so the graph's fp16 math only ever sees small whole numbers.
+     */
+    fun bins(x: FloatArray): FloatArray {
+        require(x.size == features.size) { "expected ${features.size} features, got ${x.size}" }
+        return FloatArray(x.size) { f ->
+            val e = binEdges[f]
+            val v = x[f].toDouble()
+            if (v.isNaN()) return@FloatArray e.size.toFloat()
+            var lo = 0
+            var hi = e.size
+            while (lo < hi) {
+                val mid = (lo + hi) ushr 1
+                if (e[mid] < v) lo = mid + 1 else hi = mid
+            }
+            lo.toFloat()
+        }
+    }
+
+    /**
+     * The trees' sum from the NPU graph's leaf mask: each tree must have exactly one slot at 1 (else it throws, and the
+     * caller falls back). The leaves are added in tree order in double, exactly as [marginTrees] adds them.
+     */
+    fun marginFromLeaves(mask: FloatArray): Double {
+        val nl = leafSlots
+        require(mask.size == trees.size * nl) { "leaf mask has ${mask.size} slots, want ${trees.size * nl}" }
+        var sum = 0.0
+        for (ti in trees.indices) {
+            var hit = -1
+            for (j in 0 until nl) {
+                val v = mask[ti * nl + j]
+                if (v == 1f) {
+                    check(hit < 0) { "tree $ti: two leaves" }
+                    hit = j
+                } else check(v == 0f) { "tree $ti: leaf value $v" }
+            }
+            check(hit in leafNodes[ti].indices) { "tree $ti: no leaf" }
+            sum += trees[ti].value[leafNodes[ti][hit]]
+        }
+        return sum
+    }
+
+    /** One engine the app tried for these trees, and how fast it answered, for the screens. */
+    data class EngineTiming(val name: String, val ok: Boolean, val note: String, val openMs: Long, val warmMicros: Double)
+
+    /** Every engine tried at start (NPU, ONNX CPU, Kotlin trees), with its timing or why it was not used. */
+    @Volatile
+    var engines: List<EngineTiming> = emptyList()
+
+    /** Microseconds a [run] call takes on [probes] after a warm-up pass: the median of 5 passes, per row. */
+    fun timeMicros(run: (FloatArray) -> Double, probes: List<FloatArray> = probeRows()): Double {
+        for (x in probes) run(x)
+        val passes = DoubleArray(5) {
+            val t0 = System.nanoTime()
+            for (x in probes) run(x)
+            (System.nanoTime() - t0) / 1000.0 / probes.size
+        }
+        passes.sort()
+        return passes[2]
+    }
+
     /** Cents a queue of [contractsAhead] takes off the front-of-queue result (piecewise linear, flat past the last point). */
     fun queuePenaltyCents(contractsAhead: Double): Double {
         if (queuePenalty.isEmpty() || !contractsAhead.isFinite() || contractsAhead <= 0.0) return 0.0
@@ -238,6 +315,8 @@ class ScalperModel(
     companion object {
         const val ASSET_NAME = "scalper_model.json"
         const val ONNX_ASSET_NAME = "scalper_model.onnx"
+        /** The same trees as a graph of plain tensor ops for the Snapdragon NPU (`export_npu.py`). */
+        const val NPU_ASSET_NAME = "scalper_model_npu.onnx"
         /** Largest difference, in cents, allowed between the ONNX model and the Kotlin trees (float32 leaf sums). */
         const val PARITY_TOLERANCE_CENTS = 1e-3
 

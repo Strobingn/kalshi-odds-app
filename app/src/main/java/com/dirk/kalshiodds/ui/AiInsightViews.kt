@@ -62,7 +62,9 @@ data class ModelReport(
     val gain: List<Triple<String, Double, String>>,
     /** VALID total ($) at each step of the feature selection, most features first. */
     val selection: List<Double>,
-    val selectionLabels: List<String>
+    val selectionLabels: List<String>,
+    /** Every engine tried for the trees (NPU, ONNX on the CPU, Kotlin), with its speed or why it was not used. */
+    val engines: List<com.dirk.kalshiodds.signal.scalper.ScalperModel.EngineTiming> = emptyList()
 )
 
 // ---------------------------------------------------------------- on-phone model (Keys tab)
@@ -317,6 +319,16 @@ fun ModelReportCard(r: ModelReport) {
     AiCard(r.title, "${r.features} features · ${r.trees} trees" + (r.maxDepth?.let { " · depth ≤ $it" } ?: "") + " · runs on ${r.engine}") {
         Text(r.tested, fontSize = 11.sp, color = c.textSecondary)
         Text(r.testLine, fontSize = 12.sp, color = c.textPrimary)
+        if (r.engines.isNotEmpty()) {
+            Text("Where the model runs: microseconds a prediction (warm)", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = c.textSecondary)
+            SignedBars(r.engines.filter { it.ok && it.warmMicros > 0 }.map { e ->
+                SignedBar(e.name, e.warmMicros, String.format(Locale.US, "%.0f µs", e.warmMicros), e.name)
+            }, labelWidth = 150.dp)
+            for (e in r.engines) {
+                val open = if (e.openMs > 0) " · opened in ${e.openMs} ms" else ""
+                Text("${if (e.ok) "✓" else "✗"} ${e.name}: ${e.note}$open", fontSize = 11.sp, color = if (e.ok) c.textPrimary else c.textSecondary)
+            }
+        }
         if (r.chanceBins.isNotEmpty()) {
             Text("Calibration on the test days: chance it gave → share that made money", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = c.textSecondary)
             CalibrationPlot(r.chanceBins, { "${(it * 100).roundToInt()}%" }, xName = "model chance", yName = "made money")
@@ -368,6 +380,7 @@ fun modelReport(m: com.dirk.kalshiodds.signal.scalper.ScalperModel): ModelReport
         ModelReport(
             title = "ML scalper model",
             engine = m.engine,
+            engines = m.engines,
             features = m.features.size,
             trees = m.treeCount,
             maxDepth = rep.optInt("max_depth").takeIf { it > 0 },

@@ -538,6 +538,20 @@ class ArenaReplayTest {
             }
             sb.append("${r.st.name} $verdict\n")
         }
+        // Which side each strategy bought, and whether that side was the cheaper one when it bought.
+        sb.append("\n## Sides\n\n| Strategy | UP | DOWN | Bought the side under 50¢ | UP net $ | DOWN net $ |\n|---|---:|---:|---:|---:|---:|\n")
+        for (r in rows) {
+            val mine = trades.filter { it.strategy == r.st.name }
+            if (mine.isEmpty()) continue
+            val up = mine.filter { it.side == "YES" }
+            val down = mine.filter { it.side == "NO" }
+            sb.append(
+                String.format(
+                    Locale.US, "| %s | %d | %d | %d | %+.2f | %+.2f |\n",
+                    r.st.name, up.size, down.size, mine.count { it.entry < 0.5 }, up.sumOf { it.pnlUsd }, down.sumOf { it.pnlUsd }
+                )
+            )
+        }
         return sb.toString()
     }
 }

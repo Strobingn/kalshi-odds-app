@@ -27,6 +27,7 @@ on:
       - "tools/research/scalp/queue_ml.py"
       - "tools/research/scalp/export_app_model.py"
       - "tools/research/scalp/export_onnx.py"
+      - "tools/research/scalp/export_npu.py"
       - "tools/research/scalp/build_ml.py"
 
 permissions:
@@ -156,6 +157,8 @@ jobs:
           pip install -q onnx onnxruntime
           python3 tools/research/scalp/export_onnx.py app/src/main/assets/scalper_model.json app/src/main/assets/scalper_model.onnx
           python3 tools/research/scalp/test_export_onnx.py
+          python3 tools/research/scalp/export_npu.py app/src/main/assets/scalper_model.json app/src/main/assets/scalper_model_npu.onnx
+          python3 tools/research/scalp/test_export_npu.py
           mkdir -p docs
           cp work/report.md docs/scalper-model-retrain.md
 
@@ -177,7 +180,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app/src/main/assets/scalper_model.json app/src/main/assets/scalper_model.onnx app/src/test/resources/scalper_parity.json docs/scalper-model-retrain.md
+          git add app/src/main/assets/scalper_model.json app/src/main/assets/scalper_model.onnx app/src/main/assets/scalper_model_npu.onnx app/src/test/resources/scalper_parity.json docs/scalper-model-retrain.md
           range=$(python3 -c 'import json; print(" … ".join(json.load(open("work/gate.json"))["test"]))')
           git commit -m "Scalper model retrained, tested on ${range}" -m "$(cat work/gate.md)"
           # The branch may have moved during the run (this commit only touches the model files): replay onto it.
