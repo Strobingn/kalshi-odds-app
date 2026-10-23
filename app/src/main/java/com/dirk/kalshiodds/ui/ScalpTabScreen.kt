@@ -166,7 +166,8 @@ fun ScalpTabScreen(viewModel: OddsViewModel, onOpenScalpData: () -> Unit, onOpen
         aiPanel = aiPanel,
         onAiFollows = { on -> aiStore?.setFollows(on) },
         extras = extras,
-        onResetBankroll = viewModel::resetScalpingBankroll
+        onResetBankroll = viewModel::resetScalpingBankroll,
+        onAskResearch = viewModel::askModelResearch
     )
 }
 
@@ -189,7 +190,8 @@ fun ScalpTabContent(
     aiPanel: AiWatchPanelModel? = null,
     onAiFollows: (Boolean) -> Unit = {},
     extras: LiveWindowExtras = LiveWindowExtras(),
-    onResetBankroll: () -> Unit = {}
+    onResetBankroll: () -> Unit = {},
+    onAskResearch: (String, (String) -> Unit) -> Unit = { _, done -> done("The drivers above are the explanation. AI chat is not connected on this screen.") }
 ) {
     if (showCoinCards) {
         var ladder by rememberSaveable { mutableStateOf(false) }
@@ -199,10 +201,10 @@ fun ScalpTabContent(
                 Box(Modifier.weight(1f)) {
                     ScalpTabContent(st, onOpenScalpData, onOpenScalpRules, onSelectMarket, onSelectSide,
                         onPlace, onCancel, onReprice, onSellOwnedAt, onOpenAlgo, showCoinCards = false, onOpenSettings = onOpenSettings,
-                        aiPanel = aiPanel, onAiFollows = onAiFollows, extras = extras)
+                        aiPanel = aiPanel, onAiFollows = onAiFollows, extras = extras, onAskResearch = onAskResearch)
                 }
             }
-        } else KashiArenaContent(st, onOpenAlgo, onOpenSettings, onOpenScalpData, { ladder = true }, aiPanel = aiPanel, onAiFollows = onAiFollows, extras = extras, onResetBankroll = onResetBankroll)
+        } else KashiArenaContent(st, onOpenAlgo, onOpenSettings, onOpenScalpData, { ladder = true }, aiPanel = aiPanel, onAiFollows = onAiFollows, extras = extras, onResetBankroll = onResetBankroll, onAskResearch = onAskResearch)
         return
     }
     var qty by remember { mutableIntStateOf(PriceLadder.PRESET_SIZES[1]) }

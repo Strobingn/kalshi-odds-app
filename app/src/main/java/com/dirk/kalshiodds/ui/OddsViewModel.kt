@@ -267,6 +267,43 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * One research question from the Model filter card. Local loopback or the free chain, then the
+     * client is done. The live scalper never calls this.
+     */
+    fun askModelResearch(prompt: String, done: (String) -> Unit) {
+        vmScope.launch(Dispatchers.IO) {
+            val text = try {
+                val settings = container.llmSettings
+                val custom = settings.readSlot(com.dirk.kalshiodds.llm.LlmProviders.CUSTOM)
+                val local = custom.takeIf { com.dirk.kalshiodds.llm.ModelResearchAsk.isLoopback(it.baseUrl) }
+                val slots = com.dirk.kalshiodds.llm.LlmProviders.FREE_IDS.map { settings.readSlot(it) }
+                val now = container.clock.nowMs()
+                com.dirk.kalshiodds.llm.ModelResearchAsk.ask(
+                    prompt = prompt,
+                    local = local,
+                    slots = slots,
+                    nowMs = now,
+                    pacer = container.freePacer,
+                    quotaOf = { ep ->
+                        com.dirk.kalshiodds.llm.LlmProviders.effectiveQuota(
+                            ep.provider, ep.model, container.aiWatch.dailyCap(ep.provider, ep.model)
+                        )
+                    },
+                    allowed = { ep -> container.aiWatch.blockNotice(ep.provider, ep.model, now).isEmpty() },
+                    ask = { ep, msgs -> container.llmClient.chatReply(msgs, 400, ep, automatic = false) },
+                    onBilling = { provider, detail -> container.aiWatch.markBilled(provider, detail) }
+                )
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (e: Exception) {
+                e.message?.ifBlank { null } ?: "The research call failed."
+            }
+            runCatching { container.aiChat.postResearch(prompt, text) }
+            withContext(Dispatchers.Main) { done(text) }
+        }
+    }
+
     fun resetScalpingBankroll() {
         vmScope.launch(Dispatchers.IO) {
             ioCatching {
@@ -1853,6 +1890,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             val qq = q.copy(
                 cfSpot = cfId?.let { container.cfFeed.settlementPrice(it, now, q.tauS) },
                 cfAgeMs = cfTick?.ageMs(now),
+                settleAvg = cfTick?.finalMinuteAverage?.value ?: cfTick?.avg60s?.value,
                 bookGap = bookFresh && !hub.scoring.book.hasSnapshot(market.ticker)
             )
             if (tradeThis) {

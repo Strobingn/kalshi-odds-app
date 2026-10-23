@@ -249,6 +249,12 @@ class AppContainer(context: Context) {
         // Open paper clips are limited by free paper cash. The reader is bound after [paper] exists.
         bankrollUsd = { scalpBankroll.usd }
     )
+    init {
+        val asset = runCatching {
+            app.assets.open("scalp_quant.onnx").use { stream -> stream.readBytes() }
+        }.getOrNull()
+        runCatching { com.dirk.kalshiodds.decision.ModelFilter.bind(app.filesDir, app.cacheDir, asset) }
+    }
     /** 1.0.9 paper insights: auto-bench, alerts (hot streak / big loss / strong AI). Never touches real money. */
     val scalpInsightNotifier by lazy { com.dirk.kalshiodds.signal.notify.ScalpInsightNotifier(app) }
     val scalpInsights by lazy {

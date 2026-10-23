@@ -153,7 +153,9 @@ object ScalpRule {
         val bookGap: Boolean = false,
         /** 0.3.68: full ladders (best first) for depth-walking multi-contract paper fills. Empty = top of book only. */
         val yesBidsDesc: List<Pair<Double, Double>> = emptyList(),
-        val noBidsDesc: List<Pair<Double, Double>> = emptyList()
+        val noBidsDesc: List<Pair<Double, Double>> = emptyList(),
+        /** Running settlement average (final-minute window when Kalshi publishes it). */
+        val settleAvg: Double? = null
     ) {
         /** Asks to lift for [side], best (lowest) first. YES asks come from NO bids, NO asks from YES bids. */
         fun askLadder(side: String): List<Pair<Double, Double>> {
@@ -604,11 +606,12 @@ class ScalpBook(
         // 0.3.65: peak bid for every open trade (stored on close) + v2 lane.
         mineAll.forEach { t -> if ((!ScalpV2.isV2(t.variantId) || ScalpV2.fresh(q)) && (t.state == ScalpState.OPEN || t.state == ScalpState.PENDING_EXIT)) q.bid(t.side)?.takeIf { it > 0.0 }?.let { b -> peakBid[t.id] = maxOf(peakBid[t.id] ?: b, b) } }
         changed += stepV2(q)
+        if (liveExtras) changed += stepModelTwins(q)
         changed += stepResearch(q, enabled)
         // 1.0.2: Dirk's manual sliders on original strategies (stop % below fill, take profit after fees, max hold).
         val overlay = settingsExits(mineAll, q); changed += overlay.values
         val mineCur = if (overlay.isEmpty()) mineAll else mineAll.map { overlay[it.id] ?: it }
-        mineCur.filter { isActive(it) && !ForecastScalp.isForecast(it) && !ScalpV2.isV2(it.variantId) && !Research.isResearch(it.variantId) }.forEach { t ->
+        mineCur.filter { isActive(it) && !ForecastScalp.isForecast(it) && !ScalpV2.isV2(it.variantId) && !Research.isResearch(it.variantId) && !ModelFilter.isTwin(it.variantId) }.forEach { t ->
             // 0.3.69 fix: sf rows have their own lane (entries + TP/stop/60 s exits). They used to also fall through here with
             // the generic primary params, whose profit-target / fair take-profit / turn-down exits fired first, so the sf
             // take-profit never decided (sf41≡sf42, sf43≡sf44). Here they now only get the adverse-selection marks.
@@ -655,7 +658,9 @@ class ScalpBook(
                         sliceUsed[model] = (sliceUsed[model] ?: 0.0) + cost
                         openCost += cost
                     }
-                    val makerBid = if (p.maker) q.bid(sig.side)?.takeIf { it > 0.0 } else null
+                    val makerBid = if (p.maker) q.bid(sig.side)?.takeIf { it > 0.0 }?.let { touch ->
+                        HftSignals.restingBid(touch, q.ask(sig.side), q.tauS, 0.0)
+                    } else null
                     if (p.maker && makerBid == null) continue
                     armTrigger(p.id, q.ticker, sig.side)
                     changed += ScalpTrade(
@@ -687,6 +692,7 @@ class ScalpBook(
                 openCost = variantFair.second
             }
             if (liveExtras && coin == ShockFav.TRADE_COIN) enterKeptV2(q, recent)
+            if (liveExtras && coin == ShockFav.TRADE_COIN) changed += enterModelFair(q, recent)
         }
         changed.forEach { save(it) }
         if (changed.any { it.state == ScalpState.CLOSED }) maybeTune(q.nowMs)
@@ -1113,6 +1119,7 @@ class ScalpBook(
         }
         // exits first (shock legs; fav legs hold to settlement)
         for (t in mine) {
+            if (ModelFilter.isTwin(t.variantId)) continue
             if (t.state != ScalpState.OPEN && t.state != ScalpState.PENDING_EXIT) continue
             if (!live) continue
             val rawP = shockParamsOf(t.variantId) ?: continue
@@ -1299,6 +1306,7 @@ class ScalpBook(
                 val variantPass = enterShockVariants(q, key, fairYes, ring, sec, sigma, openCost, bankroll, mine)
                 changed += variantPass.first
                 openCost = variantPass.second
+                changed += enterModelDip(q, key, fairYes)
             }
         }
         changed.forEach { save(it) }
@@ -1439,6 +1447,145 @@ class ScalpBook(
         if (n <= 0) return null
         val next = ScalpFills.sell(t, q.nowMs, n, n * bid, ScalpRule.orderFee(n, bid))
         return if (next.remaining <= 0) close(next, q.nowMs, next.exitReason) else next
+    }
+
+    /** Paper model-filter twins. Existing scalpers are not modified. */
+    private fun stepModelTwins(q: ScalpRule.Quote): List<ScalpTrade> {
+        val out = ArrayList<ScalpTrade>()
+        for (t in _all.value) {
+            if (!ModelFilter.isTwin(t.variantId) || !t.ticker.equals(q.ticker, true) || !isActive(t)) continue
+            val twin = ModelFilter.twin(t.variantId) ?: continue
+            when (t.state) {
+                ScalpState.PENDING_ENTRY -> {
+                    val age = q.nowMs - t.signalAtMs
+                    if (q.tauS <= ModelFilter.exitBeforeSeconds() || age > 20_000L) {
+                        out += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; model filter: no fill")
+                        ModelFilter.noteUnfilled(twin.id)
+                        continue
+                    }
+                    if (age < ScalpRule.LATENCY_MS || !q.fresh()) continue
+                    val ask = q.ask(t.side) ?: continue
+                    val floor = ScalpFloors.cents(twin.parentId) / 100.0
+                    if (!ScalpRule.buyPriceOk(ask) || ask + 1e-9 < floor) continue
+                    val n = minOf(t.contracts.coerceAtLeast(1), kotlin.math.floor((q.askSize(t.side) ?: 0.0) + 1e-9).toInt(), twin.clip)
+                    if (n <= 0) continue
+                    out += t.copy(state = ScalpState.OPEN, contracts = n, entryPrice = ask, entryFeeUsd = ScalpRule.orderFee(n, ask), entryAtMs = q.nowMs)
+                }
+                ScalpState.OPEN, ScalpState.PENDING_EXIT -> {
+                    val bid = q.bid(t.side)?.takeIf { it > 0.0 } ?: continue
+                    val entry = t.entryPrice ?: continue
+                    val reason = modelExitReason(twin, entry, bid, q.tauS) ?: continue
+                    val sold = ScalpFills.sell(t, q.nowMs, t.remaining, t.remaining * bid, ScalpRule.orderFee(t.remaining, bid))
+                    val closed = close(sold, q.nowMs, reason)
+                    out += closed
+                    ModelFilter.onClosed(twin.id, closed.netUsd ?: 0.0, q.tauS, q.nowMs, null, closed.contracts, closed.soldContracts)
+                }
+                else -> Unit
+            }
+        }
+        return out
+    }
+
+    private fun modelExitReason(twin: ModelFilter.Twin, entry: Double, bid: Double, tauS: Double): String? {
+        if (ModelFilter.mustExit(tauS)) return "model filter: exit ${ModelFilter.exitBeforeSeconds().toInt()}s before close"
+        return when (twin.kind) {
+            ModelFilter.Kind.SIMPLE_DIP -> {
+                val p = ShockFav.v(twin.parentId)
+                val stop = ShockFav.stopC(p) / 100.0
+                when {
+                    bid >= entry + p.tp - 1e-9 -> "take profit +${kotlin.math.round(p.tp * 100)}¢"
+                    bid <= entry - stop + 1e-9 -> "stop −${ShockFav.stopC(p)}¢"
+                    else -> null
+                }
+            }
+            ModelFilter.Kind.FAIR, ModelFilter.Kind.V2_FAIR, ModelFilter.Kind.V2_DIP -> {
+                val p = ScalpParams.byId(if (twin.kind == ModelFilter.Kind.FAIR) KeptScalpers.FAIR_ID else if (twin.kind == ModelFilter.Kind.V2_FAIR) KeptScalpers.V2_FAIR_BASE else KeptScalpers.V2_DIP_BASE) ?: return null
+                when {
+                    bid >= entry + p.target - 1e-9 -> "take profit +${kotlin.math.round(p.target * 100)}¢"
+                    bid <= entry - p.stop + 1e-9 -> "stop −${kotlin.math.round(p.stop * 100)}¢"
+                    else -> null
+                }
+            }
+        }
+    }
+
+    private fun enterModelFair(q: ScalpRule.Quote, recent: List<ScalpRule.Snap>): List<ScalpTrade> {
+        ModelFilter.observe(q)
+        if (!ModelFilter.dueForEntry(q.ticker, q.nowMs)) return emptyList()
+        val out = ArrayList<ScalpTrade>()
+        for (twin in ModelFilter.TWINS) {
+            if (twin.kind == ModelFilter.Kind.SIMPLE_DIP) continue
+            val params = when (twin.kind) {
+                ModelFilter.Kind.FAIR -> ScalpParams.byId(KeptScalpers.FAIR_ID)
+                ModelFilter.Kind.V2_FAIR -> ScalpParams.byId(KeptScalpers.V2_FAIR_BASE)
+                ModelFilter.Kind.V2_DIP -> ScalpParams.byId(KeptScalpers.V2_DIP_BASE)?.let {
+                    it.copy(minGap = maxOf(it.minGap, ScalpV2.feeClearingDipGap(ScalpV2.DIP_EDGE_ASK, twin.clip)))
+                }
+                else -> null
+            } ?: continue
+            val (sig, skip) = if (params.strategy == ScalpStrategy.FAIR_GAP) ScalpRule.entrySignal(q, params)
+            else ScalpRule.strategySignal(q, params, listOf("YES", "NO"), recent)
+            val row = modelEntry(q, twin, sig, skip) ?: continue
+            out += row
+        }
+        return out
+    }
+
+    private fun enterModelDip(q: ScalpRule.Quote, key: String, fairYes: Double): List<ScalpTrade> {
+        ModelFilter.observe(q)
+        if (!ModelFilter.dueForEntry(q.ticker, q.nowMs)) return emptyList()
+        val out = ArrayList<ScalpTrade>()
+        for (twin in ModelFilter.TWINS) {
+            if (twin.kind != ModelFilter.Kind.SIMPLE_DIP) continue
+            val p = ShockFav.v(twin.parentId)
+            val side = simpleDipSide(key, p, q)
+            val sig = side?.let { sd ->
+                val ask = q.ask(sd) ?: return@let null
+                val fair = if (sd == "YES") fairYes else 1.0 - fairYes
+                ScalpRule.Entry(sd, ask, fair, fair - ask)
+            }
+            val row = modelEntry(q, twin, sig, if (side == null) "dip trigger not met" else "enter") ?: continue
+            out += row
+        }
+        return out
+    }
+
+    private fun modelEntry(q: ScalpRule.Quote, twin: ModelFilter.Twin, sig: ScalpRule.Entry?, skip: String): ScalpTrade? {
+        val window = ScalpModels.windowKeyOf(q.ticker)
+        if (sig == null) {
+            clearTrigger(twin.id, q.ticker)
+            gates.block(twin.id, window, skip)
+            return null
+        }
+        if (q.tauS <= ModelFilter.exitBeforeSeconds()) {
+            gates.block(twin.id, window, "model filter: inside the final ${ModelFilter.exitBeforeSeconds().toInt()}s")
+            return null
+        }
+        val d = ModelFilter.decide(twin, q, sig.side, sig.ask, sig.fair)
+        if (!d.enter) {
+            clearTrigger(twin.id, q.ticker)
+            gates.block(twin.id, window, d.reason)
+            return null
+        }
+        val n = ModelFilter.sized(twin.clip, d.scalar, twin.clip)
+        val floor = ScalpFloors.cents(twin.parentId) / 100.0
+        val blocked = ScalpParamSanity.entryBlock(sig.side, sig.ask, n, floor, bankrollUsd(), twin.clip)
+        if (blocked != null || !ScalpRule.buyPriceOk(sig.ask)) {
+            gates.block(twin.id, window, blocked ?: "ask above 55¢ ceiling")
+            return null
+        }
+        if (!triggerIsNew(twin.id, q.ticker, sig.side)) {
+            gates.block(twin.id, window, "same trigger still on")
+            return null
+        }
+        armTrigger(twin.id, q.ticker, sig.side)
+        gates.entered(twin.id, window)
+        return ScalpTrade(
+            id = idFactory(), ticker = q.ticker.uppercase(), side = sig.side, state = ScalpState.PENDING_ENTRY,
+            signalAtMs = q.nowMs, signalAsk = sig.ask, fairAtSignal = sig.fair, contracts = n,
+            note = "model filter ${twin.id} · ${d.reason} · ${d.policyVersion} · ${d.modelVersion}",
+            ruleVersion = "${ScalpRule.VERSION}|${twin.id}|P"
+        )
     }
 
     /** Taker paper entry at the displayed ask, capped at displayed size; skipped when shared free cash can't cover it. */
@@ -1741,7 +1888,9 @@ class ScalpBook(
         o50Peak.remove(t.id)
         while (o50Peak.size > 500) o50Peak.remove(o50Peak.keys.first())
         val net = t.proceedsUsd - t.exitFeeUsd - t.entryCostUsd
-        return t.copy(state = ScalpState.CLOSED, closedAtMs = atMs, netUsd = net, exitReason = reason)
+        val closed = t.copy(state = ScalpState.CLOSED, closedAtMs = atMs, netUsd = net, exitReason = reason)
+        ModelFilter.noteControl(closed.variantId, net)
+        return closed
     }
 
     /** Settlement: anything still held pays $1 / $0, no fee; pending entries become no-fills. */
@@ -2334,7 +2483,7 @@ class ScalpBook(
             it.ticker == key && ScalpV2.isV2(it.variantId) && it.state in listOf(ScalpState.OPEN, ScalpState.PENDING_EXIT)
         }.groupingBy { "${ScalpModels.modelOf(it)?.code ?: it.variantId}|${it.side}" }.eachCount().toMutableMap()
         for (t in _all.value) {
-            if (t.ticker != key || !ScalpV2.isV2(t.variantId) || !isActive(t)) continue
+            if (t.ticker != key || !ScalpV2.isV2(t.variantId) || ModelFilter.isTwin(t.variantId) || !isActive(t)) continue
             when (t.state) {
                 ScalpState.PENDING_ENTRY -> {
                     val age = q.nowMs - t.signalAtMs

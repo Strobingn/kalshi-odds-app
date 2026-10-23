@@ -48,7 +48,7 @@ class KalshiTokenBucket(
     private val nowMs: () -> Long = { System.currentTimeMillis() },
     private val randomUnit: () -> Double = { Math.random() },
     tier: KalshiTier = KalshiTier.BASIC,
-    private val baseBackoffMs: Long = 250L,
+    private val baseBackoffMs: Long = 50L,
     private val maxBackoffMs: Long = 8_000L
 ) {
     private val lock = Any()
@@ -61,6 +61,7 @@ class KalshiTokenBucket(
     private var readHoldUntilMs = 0L
     private var writeHoldUntilMs = 0L
     private var readAttempt = 0
+    private var writeAttempt = 0
     private var droppedAtMs: Long? = null
     private val spent = java.util.ArrayDeque<Pair<Long, Double>>()
     @Volatile var real429s: Int = 0
@@ -130,6 +131,7 @@ class KalshiTokenBucket(
             lastWriteMs = now
             if (writeTokens + 1e-9 >= cost) {
                 writeTokens -= cost
+                writeAttempt = 0
                 return null
             }
             return ceil((cost - writeTokens) / rate * 1_000.0).toLong().coerceAtLeast(1L)
@@ -158,7 +160,8 @@ class KalshiTokenBucket(
 
     fun noteWrite429(retryAfterMs: Long?): Long {
         synchronized(lock) {
-            val wait = backoffDelayMs(0, retryAfterMs)
+            val wait = backoffDelayMs(writeAttempt, retryAfterMs)
+            writeAttempt = (writeAttempt + 1).coerceAtMost(8)
             writeHoldUntilMs = maxOf(writeHoldUntilMs, nowMs() + wait)
             return wait
         }
@@ -170,7 +173,8 @@ class KalshiTokenBucket(
     fun backoffDelayMs(attemptIndex: Int, retryAfterMs: Long?, unit: Double = randomUnit()): Long {
         val shift = attemptIndex.coerceIn(0, 6)
         val capped = min(baseBackoffMs shl shift, maxBackoffMs)
-        val computed = capped + (capped * JITTER_FRACTION * unit.coerceIn(0.0, 1.0)).toLong()
+        // First step is 50–100 ms; each further 429 doubles that window.
+        val computed = capped + (capped * unit.coerceIn(0.0, 1.0)).toLong()
         val retry = retryAfterMs?.takeIf { it > 0L }
         return if (retry != null) maxOf(computed, retry) else computed
     }

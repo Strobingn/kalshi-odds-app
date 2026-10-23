@@ -87,7 +87,7 @@ object SyncMerge {
     }
 
     /** Kinds re-sent every sync while recent (idempotent upsert) because they change without a new timestamp. */
-    val ALWAYS_PUSH = setOf("shadow", "scalp", "scalp_gate", "scalp_reset") // scalp rows, block counts, and reset markers ride every sync
+    val ALWAYS_PUSH = setOf("shadow", "scalp", "scalp_gate", "scalp_reset", "model_decision")
 
     fun outgoing(local: List<Record>, lastPushMs: Long): List<Record> =
         local.filter { (it.updatedAtMs >= lastPushMs || it.kind in ALWAYS_PUSH) && !isForbiddenPayload(it.payload) }
