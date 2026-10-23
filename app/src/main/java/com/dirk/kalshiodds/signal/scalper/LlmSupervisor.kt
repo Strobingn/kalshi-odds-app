@@ -239,7 +239,7 @@ fun interface LlmChat {
 }
 
 /**
- * An OpenAI-compatible provider. Groq and Mistral both speak this. [models] are tried in order: providers retire
+ * An OpenAI-compatible provider. Groq, Cerebras, Gemini and Mistral all speak this. [models] are tried in order: providers retire
  * models (Groq dropped llama-3.3-70b-versatile for some keys), so a "model not found" moves on to the next one and the
  * one that answered is remembered.
  */
@@ -259,11 +259,24 @@ class LlmProvider(
     companion object {
         const val GROQ_URL = "https://api.groq.com/openai/v1"
         const val MISTRAL_URL = "https://api.mistral.ai/v1"
+        /** Gemini's OpenAI-compatible endpoint (Google AI Studio keys). */
+        const val GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
+        const val CEREBRAS_URL = "https://api.cerebras.ai/v1"
+
+        /** Display names, in the order the AIs rotate through them. */
+        val NAMES = linkedMapOf("groq" to "Groq", "cerebras" to "Cerebras", "gemini" to "Gemini", "mistral" to "Mistral")
 
         /** Checked 2026-10-22 against a free Groq key: all three make the tool call; llama-3.3-70b-versatile was gone. */
         val GROQ_MODELS = listOf("openai/gpt-oss-120b", "qwen/qwen3.8-27b", "openai/gpt-oss-20b", "llama-3.3-70b-versatile")
         /** Free ("Experiment") Mistral keys get "not available in your subscription tier" for mistral-large: small first. */
         val MISTRAL_MODELS = listOf("mistral-small-latest", "open-mistral-nemo", "ministral-8b-latest", "mistral-medium-latest", "mistral-large-latest")
+        /**
+         * Free-tier Gemini models, newest first (2026-10: 3.8 Flash is the stable one). Google counts the free quota per
+         * model, so a "quota" / "exhausted" answer moves on to the next model before the next provider.
+         */
+        val GEMINI_MODELS = listOf("gemini-3.8-flash", "gemini-flash-latest", "gemini-3-flash-preview", "gemini-3.1-flash-lite", "gemini-flash-lite-latest", "gemini-2.5-flash")
+        /** Cerebras free trial (2026-10): 5 requests a minute and 1M tokens a day per model. */
+        val CEREBRAS_MODELS = listOf("gpt-oss-120b", "qwen-3.8-27b")
     }
 }
 
@@ -348,7 +361,8 @@ class HttpLlmChat(
 
     /** gpt-oss spends its answer budget on reasoning; "low" leaves room for the tool call. Groq only. */
     private fun kotlinx.serialization.json.JsonObjectBuilder.reasoningLow(model: String) {
-        if (model.startsWith("openai/gpt-oss")) put("reasoning_effort", "low")
+        // gpt-oss counts its reasoning in the answer budget; Gemini 3 thinks at "high" unless told (maps to thinking_level).
+        if (model.startsWith("openai/gpt-oss") || model.startsWith("gpt-oss") || model.startsWith("gemini")) put("reasoning_effort", "low")
     }
 
     private fun isJsonObject(s: String): Boolean = runCatching { Json.parseToJsonElement(s) is JsonObject }.getOrDefault(false)
@@ -364,6 +378,7 @@ class HttpLlmChat(
                 put("model", model)
                 put("temperature", 0.4)
                 put("max_tokens", 900)
+                reasoningLow(model)
                 putJsonArray("messages") {
                     for ((role, t) in messages) add(buildJsonObject { put("role", role); put("content", t) })
                 }
@@ -423,9 +438,14 @@ class HttpLlmChat(
                     lastError = "${p.name} $model: $why"
                     runCatching { onCall(LlmAttempt(p.name, model, false, System.currentTimeMillis() - t0, why)) }
                     onError(lastError)
-                    if ((e as? Failure)?.wrongModel != true) break // rate limit, bad key, network: next provider
+                    if ((e as? Failure)?.wrongModel != true) {
+                        rotation?.failed(p.name)
+                        break // rate limit, bad key, network: next provider
+                    }
                     i = (i + 1) % p.models.size
                     tried += 1
+                    // Every model of this provider refused (over its limit on all of them): the rotation moves on.
+                    if (tried >= p.models.size) rotation?.failed(p.name)
                 }
             }
         }
@@ -447,7 +467,7 @@ class HttpLlmChat(
                 val toolProblem = r.code == 400 && (m.contains("tool") || m.contains("function"))
                 // This model is gone, not in the plan, or out of its own quota (Google counts per model): try the next model.
                 val wrongModel = r.code == 404 || r.code == 403 || m.contains("not available") || m.contains("tier") ||
-                    m.contains("quota") || m.contains("not found") || m.contains("does not exist") ||
+                    m.contains("quota") || m.contains("exhausted") || m.contains("not found") || m.contains("does not exist") ||
                     m.contains("decommission") || m.contains("not supported")
                 throw Failure("HTTP ${r.code} ${msg.take(160)}".trim(), wrongModel, toolProblem)
             }

@@ -5,7 +5,7 @@ data class Written(val text: String, val source: String, val onPhone: Boolean)
 
 /**
  * Writes the Explain and daily-review text. The on-phone model ([LocalLlm]) goes first when one is installed and
- * "Use the on-phone model" is on; otherwise, or when it fails, the cloud keys (Groq / Mistral) answer. When neither
+ * "Use the on-phone model" is on; otherwise, or when it fails, the cloud keys (Groq, Cerebras, Gemini, Mistral) answer. When neither
  * can, the failure says what to set up.
  */
 class AiWriter(
@@ -35,8 +35,8 @@ class AiWriter(
         }
         if (!localFirst && local.isInstalled) return fromLocal(system, user, maxTokens, onText, null)
         return Result.failure(
-            IllegalStateException(localFailure?.let { "on-phone model: $it; no Groq or Mistral key saved" }
-                ?: "install an on-phone model or add a Groq or Mistral key (AI → Keys)")
+            IllegalStateException(localFailure?.let { "on-phone model: $it; no cloud API key saved" }
+                ?: "install an on-phone model or add a Groq, Cerebras, Gemini or Mistral key (AI → Keys)")
         )
     }
 

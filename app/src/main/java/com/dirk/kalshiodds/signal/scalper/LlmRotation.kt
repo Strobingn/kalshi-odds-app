@@ -6,13 +6,16 @@ import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * Shared by every AI: all calls go to one provider until it has answered [every] calls, then the next provider with a
- * key takes over (Groq → Mistral → Groq …). Spreads the load over the free tiers (Groq allows 1,000 requests a
- * day). A provider that fails still falls through to the next one for that call; only answered calls count.
+ * key takes over (Groq → Cerebras → Gemini → Mistral → Groq …). Spreads the load over the free tiers. A provider that
+ * fails still falls through to the next one for that call; only answered calls count. When the current one fails
+ * [maxFailures] calls in a row (over its free limit, a bad key), the rotation moves on at once instead of trying it
+ * first on every call.
  */
 class LlmRotation(
     private val names: List<String>,
     private val every: Int = 500,
     private val hasKey: (String) -> Boolean,
+    private val maxFailures: Int = 3,
     load: () -> Pair<String, Int>? = { null },
     private val save: (String, Int) -> Unit = { _, _ -> }
 ) {
@@ -21,6 +24,7 @@ class LlmRotation(
     private val lock = Any()
     private var current: String
     private var calls: Int
+    private var failures = 0
     private val _state: MutableStateFlow<State>
     val state: StateFlow<State>
 
@@ -40,10 +44,20 @@ class LlmRotation(
         cycle.filter { it in available } + available.filter { it !in cycle }
     }
 
+    /** A call [provider] could not answer. [maxFailures] in a row on the current one moves the rotation on. */
+    fun failed(provider: String) {
+        synchronized(lock) {
+            if (provider != current) return
+            failures += 1
+            if (failures >= maxFailures) advance()
+        }
+    }
+
     /** One answered call by [provider]. Counts toward the switch only when it is the current one. */
     fun answered(provider: String) {
         val s = synchronized(lock) {
             if (provider != current) return
+            failures = 0
             calls += 1
             if (calls >= every) advance()
             State(current, calls, every)
@@ -60,11 +74,13 @@ class LlmRotation(
             if (hasKey(next) && next != current) {
                 current = next
                 calls = 0
+                failures = 0
                 _state.value = State(current, calls, every)
                 runCatching { save(current, calls) }
                 return
             }
         }
         if (calls >= every) calls = 0
+        failures = 0
     }
 }

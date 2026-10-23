@@ -76,7 +76,7 @@ import com.dirk.kalshiodds.ui.theme.DipTheme
 
 /**
  * The AI tab: Dashboard (charts of every AI call, the scalping winners and losers, the Paper AI's bets), Chat (one thread
- * per AI) and Keys (Groq / Mistral keys, a real Test button, the on/off switches). Paper only throughout.
+ * per AI) and Keys (Groq / Cerebras / Gemini / Mistral keys, a real Test button, the on/off switches). Paper only throughout.
  */
 @Composable
 fun AiScreen(vm: AiViewModel) {
@@ -465,8 +465,11 @@ fun AiKeysContent(
 ) {
     val c = DipTheme.colors
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        AiCard("API keys", "Free keys work. Stored encrypted on this phone, never uploaded anywhere else.") {
-            for ((name, draft) in listOf("Groq" to s.groqDraft, "Mistral" to s.mistralDraft)) {
+        AiCard(
+            "API keys",
+            "Free keys work: Groq (console.groq.com), Cerebras (cloud.cerebras.ai), Gemini (aistudio.google.com/apikey), Mistral (console.mistral.ai). Stored encrypted on this phone, never uploaded anywhere else."
+        ) {
+            for ((name, draft) in listOf("Groq" to s.groqDraft, "Cerebras" to s.cerebrasDraft, "Gemini" to s.geminiDraft, "Mistral" to s.mistralDraft)) {
                 val saved = s.saved.firstOrNull { it.first == name }?.second == true
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
@@ -497,9 +500,9 @@ fun AiKeysContent(
             SwitchRow("Learning mode", "Small retired strategies bet on paper too; the 17 big losers stay out", s.learningOn, onLearning)
         }
         AiCard("Provider rotation", "All AIs share one provider for 500 answered calls, then switch to the next one with a key") {
-            Text("Groq → Mistral → Groq …", fontSize = 12.sp, color = c.textPrimary)
+            Text("Groq → Cerebras → Gemini → Mistral → Groq … (only those with a key)", fontSize = 12.sp, color = c.textPrimary)
             if (s.rotation.isNotBlank()) Text(s.rotation, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.accentBlue)
-            Text("If the current one fails or hits its free limit, that call goes to the next provider at once. Groq models are tried in order: gpt-oss-120b, qwen3.8-27b, gpt-oss-20b; a retired model is skipped.", fontSize = 11.sp, color = c.textSecondary)
+            Text("If the current one fails or hits its free limit, that call goes to the next provider at once, and after 3 failures in a row the rotation moves on to the next provider. Each provider's models are tried in order (Gemini: 3.8 Flash, then the other free Flash models); a retired or exhausted model is skipped.", fontSize = 11.sp, color = c.textSecondary)
         }
     }
 }

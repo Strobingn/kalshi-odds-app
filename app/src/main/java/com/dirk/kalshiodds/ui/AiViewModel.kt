@@ -20,6 +20,8 @@ import kotlinx.coroutines.launch
 data class AiKeysState(
     val groqDraft: String = "",
     val mistralDraft: String = "",
+    val geminiDraft: String = "",
+    val cerebrasDraft: String = "",
     val saved: List<Pair<String, Boolean>> = emptyList(),
     val scalpingOn: Boolean = true,
     val paperOn: Boolean = true,
@@ -54,10 +56,9 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun savedKeys() = listOf(
-        "Groq" to secrets.groqApiKey.isNotBlank(),
-        "Mistral" to secrets.mistralApiKey.isNotBlank()
-    )
+    private fun savedKeys() = com.dirk.kalshiodds.signal.scalper.LlmProvider.NAMES.map { (id, name) -> name to container.llmKey(id).isNotBlank() }
+
+    private fun idOf(name: String) = com.dirk.kalshiodds.signal.scalper.LlmProvider.NAMES.entries.firstOrNull { it.value == name }?.key ?: name.lowercase()
 
     private fun rotationLine(): String {
         val r = container.llmRotation.state.value
@@ -96,6 +97,8 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
     fun setDraft(provider: String, v: String) = _keys.update {
         when (provider) {
             "Groq" -> it.copy(groqDraft = v)
+            "Gemini" -> it.copy(geminiDraft = v)
+            "Cerebras" -> it.copy(cerebrasDraft = v)
             else -> it.copy(mistralDraft = v)
         }
     }
@@ -105,15 +108,16 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
         val k = _keys.value
         if (k.groqDraft.isNotBlank()) secrets.groqApiKey = k.groqDraft.trim()
         if (k.mistralDraft.isNotBlank()) secrets.mistralApiKey = k.mistralDraft.trim()
-        val any = k.groqDraft.isNotBlank() || k.mistralDraft.isNotBlank()
+        if (k.geminiDraft.isNotBlank()) secrets.geminiApiKey = k.geminiDraft.trim()
+        if (k.cerebrasDraft.isNotBlank()) secrets.cerebrasApiKey = k.cerebrasDraft.trim()
+        val any = listOf(k.groqDraft, k.mistralDraft, k.geminiDraft, k.cerebrasDraft).any { it.isNotBlank() }
         _keys.value = keysNow().copy(message = if (any) "Saved (encrypted on this phone). Testing…" else "Type a key first", testLines = k.testLines)
         if (any) { testKeys(); container.kickAi() }
     }
 
     fun clearKey(provider: String) {
         when (provider) {
-            "Groq" -> secrets.groqApiKey = ""
-            else -> secrets.mistralApiKey = ""
+            else -> container.setLlmKey(idOf(provider), "")
         }
         _keys.value = keysNow().copy(message = "$provider key removed")
     }

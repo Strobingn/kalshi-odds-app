@@ -112,7 +112,7 @@ fun OnPhoneModelCard(
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Use the on-phone model first", fontWeight = FontWeight.SemiBold, color = c.textPrimary)
-                Text("For Explain and the daily review; your Groq / Mistral keys are the fallback", fontSize = 11.sp, color = c.textSecondary)
+                Text("For Explain and the daily review; your cloud keys (Groq, Cerebras, Gemini, Mistral) are the fallback", fontSize = 11.sp, color = c.textSecondary)
             }
             Switch(checked = s.preferLocal, onCheckedChange = onPreferLocal)
         }

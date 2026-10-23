@@ -216,7 +216,7 @@ class AppContainer(context: Context) {
     val coinbaseIndex = com.dirk.kalshiodds.signal.external.CfIndexBook()
 
     /**
-     * AI supervisor: a Groq / Mistral chat LLM that reads the live 15-minute feed every 60 s and tunes the
+     * AI supervisor: a chat LLM (Groq / Cerebras / Gemini / Mistral) that reads the live 15-minute feed every 60 s and tunes the
      * paper scalper's settings, learning from every closed trade. It changes only the Arena settings
      * ([ScalpKnobs], within hard bounds, no cooldown). Paper only; it cannot reach an order. On while
      * Data → "AI supervisor" is on and a key is saved.
@@ -233,7 +233,7 @@ class AppContainer(context: Context) {
     val supervisorLog = com.dirk.kalshiodds.signal.scalper.SupervisorLog(java.io.File(app.filesDir, "supervisor"))
 
     /**
-     * Provider slots (Groq, Mistral; keys saved encrypted in AI → Keys). Each AI has its OWN order so the two
+     * Provider slots (Groq, Cerebras, Gemini, Mistral; keys saved encrypted in AI → Keys). Each AI has its OWN order so the two
      * AIs spread across the free tiers: the Scalping AI calls every 60 s, the Paper AI once per window.
      */
     private fun llmProviders(vararg order: String): List<com.dirk.kalshiodds.signal.scalper.LlmProvider> {
@@ -241,20 +241,40 @@ class AppContainer(context: Context) {
         return order.map { n ->
             when (n) {
                 "groq" -> com.dirk.kalshiodds.signal.scalper.LlmProvider("groq", P.GROQ_URL, P.GROQ_MODELS) { extraSecrets.groqApiKey }
+                "cerebras" -> com.dirk.kalshiodds.signal.scalper.LlmProvider("cerebras", P.CEREBRAS_URL, P.CEREBRAS_MODELS) { extraSecrets.cerebrasApiKey }
+                // Gemini's compatibility layer documents tool_choice "auto" only.
+                "gemini" -> com.dirk.kalshiodds.signal.scalper.LlmProvider("gemini", P.GEMINI_URL, P.GEMINI_MODELS, "auto") { extraSecrets.geminiApiKey }
                 else -> com.dirk.kalshiodds.signal.scalper.LlmProvider("mistral", P.MISTRAL_URL, P.MISTRAL_MODELS) { extraSecrets.mistralApiKey }
             }
         }
     }
+    /** Every provider, in rotation order. */
+    private val ALL_LLM = com.dirk.kalshiodds.signal.scalper.LlmProvider.NAMES.keys.toList()
+
+    /** The saved key of provider [n] ("groq", "cerebras", "gemini", "mistral"). */
+    fun llmKey(n: String): String = when (n) {
+        "groq" -> extraSecrets.groqApiKey
+        "cerebras" -> extraSecrets.cerebrasApiKey
+        "gemini" -> extraSecrets.geminiApiKey
+        "mistral" -> extraSecrets.mistralApiKey
+        else -> ""
+    }
+
+    /** Saves (or, blank, removes) the key of provider [n]. */
+    fun setLlmKey(n: String, v: String) {
+        when (n) {
+            "groq" -> extraSecrets.groqApiKey = v
+            "cerebras" -> extraSecrets.cerebrasApiKey = v
+            "gemini" -> extraSecrets.geminiApiKey = v
+            "mistral" -> extraSecrets.mistralApiKey = v
+        }
+    }
+
     /** Both AIs and the chat share one provider: 500 answered calls each, then the next one with a key. */
     val llmRotation = com.dirk.kalshiodds.signal.scalper.LlmRotation(
-        names = listOf("groq", "mistral"),
+        names = ALL_LLM,
         every = 500,
-        hasKey = { n ->
-            when (n) {
-                "groq" -> extraSecrets.groqApiKey.isNotBlank()
-                else -> extraSecrets.mistralApiKey.isNotBlank()
-            }
-        },
+        hasKey = { n -> llmKey(n).isNotBlank() },
         load = { supervisorPrefs.getString("rotation_provider", null)?.let { it to supervisorPrefs.getInt("rotation_calls", 0) } },
         save = { n, c -> supervisorPrefs.edit().putString("rotation_provider", n).putInt("rotation_calls", c).apply() }
     )
@@ -282,17 +302,17 @@ class AppContainer(context: Context) {
 
     /** Keys screen's Test button: one real tool-call request per provider. Blocks: call off the main thread. */
     fun testLlmKeys(): List<String> =
-        com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders("groq", "mistral"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.CHAT)).test()
+        com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders(*ALL_LLM.toTypedArray()), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.CHAT)).test()
 
     val anyLlmKey: Boolean
-        get() = extraSecrets.groqApiKey.isNotBlank() || extraSecrets.mistralApiKey.isNotBlank()
+        get() = ALL_LLM.any { llmKey(it).isNotBlank() }
     private fun llmError(kind: String): (String) -> Unit =
         { msg -> supervisorLog.append(kind, "{\"ts\":${System.currentTimeMillis()},\"error\":\"$msg\"}") }
 
-    /** Scalping AI: tunes the scalping algorithms every 60 s. Groq and Mistral, rotating every 500 calls. */
+    /** Scalping AI: tunes the scalping algorithms every 60 s. Groq, Cerebras, Gemini and Mistral, rotating every 500 calls. */
     val llmSupervisor = com.dirk.kalshiodds.signal.scalper.LlmSupervisor(
         tuning = scalperStore.tuning,
-        chat = com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders("groq", "mistral"), onError = llmError("errors"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.SCALPING), rotation = llmRotation),
+        chat = com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders(*ALL_LLM.toTypedArray()), onError = llmError("errors"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.SCALPING), rotation = llmRotation),
         feed = { supervisorFeed() },
         stats = { name -> scalperStore.ledger.snapshot().stats(name) },
         sink = { kind, line -> supervisorLog.append(kind, line) },
@@ -306,9 +326,9 @@ class AppContainer(context: Context) {
         onEvent = eventsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.SCALPING)
     )
 
-    /** Paper AI: a different AI. Decides one paper bet per window. Groq and Mistral, rotating every 500 calls. Own memory and journal. */
+    /** Paper AI: a different AI. Decides paper bets every minute. Groq, Cerebras, Gemini and Mistral, rotating every 500 calls. Own memory and journal. */
     val paperAi = com.dirk.kalshiodds.signal.scalper.PaperAi(
-        chat = com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders("groq", "mistral"), onError = llmError("paper_ai_errors"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.PAPER), rotation = llmRotation, maxTokens = 1200),
+        chat = com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders(*ALL_LLM.toTypedArray()), onError = llmError("paper_ai_errors"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.PAPER), rotation = llmRotation, maxTokens = 1200),
         feed = { supervisorFeed() },
         sink = { kind, line -> supervisorLog.append(kind, line) },
         persistMemory = { json -> supervisorPrefs.edit().putString("paper_ai_memory", json).apply() },
@@ -322,7 +342,7 @@ class AppContainer(context: Context) {
     )
 
     /** The chat screen: one thread per AI, history kept on the phone. */
-    private val chatLlm = com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders("groq", "mistral"), onError = llmError("chat_errors"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.CHAT), rotation = llmRotation)
+    private val chatLlm = com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders(*ALL_LLM.toTypedArray()), onError = llmError("chat_errors"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.CHAT), rotation = llmRotation)
     val aiChat = com.dirk.kalshiodds.signal.scalper.AiChat(
         ask = { msgs -> chatLlm.chat(msgs) },
         tuning = scalperStore.tuning,
@@ -359,8 +379,8 @@ class AppContainer(context: Context) {
         }
     )
 
-    /** Cloud fallback for Explain and the daily review: the same Groq / Mistral keys and rotation as the chat. */
-    private val writerLlm = com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders("groq", "mistral"), onError = llmError("writer_errors"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.CHAT), rotation = llmRotation)
+    /** Cloud fallback for Explain and the daily review: the same cloud keys and rotation as the chat. */
+    private val writerLlm = com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders(*ALL_LLM.toTypedArray()), onError = llmError("writer_errors"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.CHAT), rotation = llmRotation)
 
     val aiWriter = com.dirk.kalshiodds.llm.AiWriter(
         local = localLlm,
@@ -407,8 +427,8 @@ class AppContainer(context: Context) {
             kotlinx.coroutines.delay(5_000L)
             while (true) {
                 if (!anyLlmKey) {
-                    if (extraSecrets.supervisorEnabled) llmSupervisor.idle("add a Groq or Mistral key in AI → Keys to start")
-                    if (extraSecrets.paperAiEnabled) paperAi.idle("add a Groq or Mistral key in AI → Keys to start")
+                    if (extraSecrets.supervisorEnabled) llmSupervisor.idle("add a Groq, Cerebras, Gemini or Mistral key in AI → Keys to start")
+                    if (extraSecrets.paperAiEnabled) paperAi.idle("add a Groq, Cerebras, Gemini or Mistral key in AI → Keys to start")
                     kotlinx.coroutines.withTimeoutOrNull(60_000L) { aiKick.receive() }
                     continue
                 }

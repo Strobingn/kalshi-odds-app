@@ -19,6 +19,20 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.17.1 (Claude branch): Gemini and Cerebras keys; the rotation skips a provider over its limit
+
+- **Four free providers** (AI → Keys): Groq, Cerebras, Gemini and Mistral, rotating every 500 answered calls in
+  that order (only those with a key). Every AI uses them: the Scalping AI, the Paper AI, the chat, Explain and the
+  daily review.
+  - Gemini: the OpenAI-compatible endpoint with a Google AI Studio key; models tried in order
+    `gemini-3.8-flash`, `gemini-flash-latest`, `gemini-3-flash-preview`, `gemini-3.1-flash-lite`,
+    `gemini-flash-lite-latest`, `gemini-2.5-flash` (Google counts the free quota per model, so "Resource has been
+    exhausted" moves on to the next model). Reasoning is set low so thinking does not eat the answer budget.
+  - Cerebras: `gpt-oss-120b`, then `qwen-3.8-27b` (free trial: 5 requests a minute, 1M tokens a day per model).
+- **An over-limit provider is skipped.** When the current provider fails 3 calls in a row (its free limit, a bad
+  key), the rotation moves to the next one at once instead of trying it first on every call; an answer in between
+  resets the count.
+
 ## 1.17.0 (Claude branch): on-phone AI, Explain this trade, daily reviews, a calibrated ML scalper
 
 - **On-phone AI (AI → Keys → On-phone AI).** A small LLM that runs on the phone's CPU: llama.cpp (release

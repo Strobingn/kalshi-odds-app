@@ -26,7 +26,7 @@ class SecureExtraStore(context: Context) {
             prefs.edit().putString(KEY_GITHUB, value.trim()).commit()
         }
 
-    /** Groq / Mistral keys for the AI supervisor (signal/scalper/LlmSupervisor.kt). Encrypted like the rest. */
+    /** Groq / Mistral (and Gemini, Cerebras below) keys for the AIs (signal/scalper/LlmSupervisor.kt). Encrypted like the rest. */
     var groqApiKey: String
         get() = prefs.getString(KEY_GROQ, "").orEmpty()
         set(value) {
@@ -39,11 +39,18 @@ class SecureExtraStore(context: Context) {
             prefs.edit().putString(KEY_MISTRAL, value.trim()).commit()
         }
 
-    /** Gemini key (free tier), the third provider slot for both AIs. */
+    /** Gemini key (Google AI Studio, free tier): one of the providers every AI rotates through. */
     var geminiApiKey: String
         get() = prefs.getString(KEY_GEMINI, "").orEmpty()
         set(value) {
             prefs.edit().putString(KEY_GEMINI, value.trim()).commit()
+        }
+
+    /** Cerebras key (free tier): one of the providers every AI rotates through. */
+    var cerebrasApiKey: String
+        get() = prefs.getString(KEY_CEREBRAS, "").orEmpty()
+        set(value) {
+            prefs.edit().putString(KEY_CEREBRAS, value.trim()).commit()
         }
 
     /** The Paper AI (one paper bet per window) runs while this is on (the default) and a key is saved. */
@@ -100,6 +107,7 @@ class SecureExtraStore(context: Context) {
         private const val KEY_GROQ = "groq_api_key"
         private const val KEY_MISTRAL = "mistral_api_key"
         private const val KEY_GEMINI = "gemini_api_key"
+        private const val KEY_CEREBRAS = "cerebras_api_key"
         private const val KEY_PAPER_AI_ON = "paper_ai_enabled"
         private const val KEY_SUPERVISOR_ON = "ai_supervisor_enabled"
         private const val KEY_DEMO_ID = "kalshi_demo_key_id"
