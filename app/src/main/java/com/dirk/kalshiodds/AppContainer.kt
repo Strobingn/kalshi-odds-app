@@ -134,7 +134,8 @@ class AppContainer(context: Context) {
         engine = com.dirk.kalshiodds.signal.scalper.ScalperEngine(tuning = scalperStore.tuning),
         onReset = { scalperStore.log.archive() },
         fairYes = { t, now -> scalperFairYes(t, now) },
-        fleetFeed = com.dirk.kalshiodds.signal.scalper.fleet.LazyFleetFeed { fleetHub }
+        fleetFeed = com.dirk.kalshiodds.signal.scalper.fleet.LazyFleetFeed { fleetHub },
+        gate = scalperStore.gate
     )
 
     /** TimesFM 2.5 weights for the fleet's scalper 20 (downloaded on request, 249 MB). */
@@ -435,29 +436,109 @@ class AppContainer(context: Context) {
     ).also { it.startAuto() }
 
     private val aiKick = kotlinx.coroutines.channels.Channel<Unit>(kotlinx.coroutines.channels.Channel.CONFLATED)
+    private val scalpKick = kotlinx.coroutines.channels.Channel<Unit>(kotlinx.coroutines.channels.Channel.CONFLATED)
 
     /** Run both AIs now instead of waiting for the next minute (after saving keys, switching an AI on). */
-    fun kickAi() { aiKick.trySend(Unit) }
+    fun kickAi() {
+        aiKick.trySend(Unit)
+        scalpKick.trySend(Unit)
+    }
+
+    /**
+     * The live tuner (on the phone, no key needed): after every 4 closed trades of a strategy it makes a winner
+     * bigger and looser and a loser smaller and stricter. AI tab → "Live tuner" switches it.
+     */
+    val liveTuner = com.dirk.kalshiodds.signal.scalper.LiveTuner(
+        tuning = scalperStore.tuning,
+        onChange = { c ->
+            aiActivity.record(
+                com.dirk.kalshiodds.signal.scalper.AiEvent.LIVE, com.dirk.kalshiodds.signal.scalper.AiEvent.APPLIED,
+                detail = "${c.strategy} ${c.param} ${c.old?.let { Math.round(it * 100.0) / 100.0 } ?: "default"} → ${Math.round(c.new * 100.0) / 100.0} · ${c.reason}"
+            )
+            supervisorLog.append("live_tuner", "{\"ts\":${System.currentTimeMillis()},\"strategy\":\"${c.strategy}\",\"param\":\"${c.param}\",\"new\":${c.new}}")
+        }
+    ).also { it.enabled = supervisorPrefs.getBoolean("live_tuner_on", true) }
+
+    /** Live tuner on / off (AI tab). */
+    var liveTunerOn: Boolean
+        get() = liveTuner.enabled
+        set(v) {
+            liveTuner.enabled = v
+            supervisorPrefs.edit().putBoolean("live_tuner_on", v).apply()
+        }
+
+    /** Self-learning entry gate on / off (AI tab). It keeps learning either way. */
+    var gateOn: Boolean
+        get() = scalperStore.gate.enabled
+        set(v) = scalperStore.setGateEnabled(v)
+
+    private val liveWatch = com.dirk.kalshiodds.signal.scalper.LiveWindowWatch()
+    @Volatile private var lastScalpTickMs = 0L
+    private val closesSinceTick = java.util.concurrent.atomic.AtomicInteger(0)
 
     private val supervisorScope = kotlinx.coroutines.CoroutineScope(
         kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO
     )
 
     init {
-        scalper.onClosed = { llmSupervisor.onClosed(it) }
+        scalper.onClosed = {
+            llmSupervisor.onClosed(it)
+            liveTuner.onClosed(it)
+            closesSinceTick.incrementAndGet()
+        }
+        // Scalping AI: every 60 s, and early (at most every 20 s) on a new window, a fast move or a run of closed trades.
         supervisorScope.launch {
             kotlinx.coroutines.delay(5_000L)
             while (true) {
                 if (!anyLlmKey) {
                     if (extraSecrets.supervisorEnabled) llmSupervisor.idle("add a Groq, Cerebras, Gemini or Mistral key in AI → Keys to start")
-                    if (extraSecrets.paperAiEnabled) paperAi.idle("add a Groq, Cerebras, Gemini or Mistral key in AI → Keys to start")
-                    kotlinx.coroutines.withTimeoutOrNull(60_000L) { aiKick.receive() }
+                    kotlinx.coroutines.withTimeoutOrNull(60_000L) { scalpKick.receive() }
                     continue
                 }
                 if (extraSecrets.supervisorEnabled) runCatching { llmSupervisor.tick() }
-                if (extraSecrets.paperAiEnabled) runCatching { paperAi.tick() }
-                // Next pass in 60 s, or at once after keys are saved or an AI is switched on.
+                lastScalpTickMs = System.currentTimeMillis()
+                closesSinceTick.set(0)
+                kotlinx.coroutines.withTimeoutOrNull(60_000L) { scalpKick.receive() }
+            }
+        }
+        // Paper AI: every 60 s, or at once after keys are saved or it is switched on.
+        supervisorScope.launch {
+            kotlinx.coroutines.delay(5_000L)
+            while (true) {
+                if (!anyLlmKey) {
+                    if (extraSecrets.paperAiEnabled) paperAi.idle("add a Groq, Cerebras, Gemini or Mistral key in AI → Keys to start")
+                } else if (extraSecrets.paperAiEnabled) {
+                    runCatching { paperAi.tick() }
+                }
                 kotlinx.coroutines.withTimeoutOrNull(60_000L) { aiKick.receive() }
+            }
+        }
+        // The live window, once a second: the live tuner learns the trades just closed, and the Scalping AI is called
+        // early when the window does something worth a fresh look.
+        supervisorScope.launch {
+            kotlinx.coroutines.delay(3_000L)
+            while (true) {
+                runCatching {
+                    if (liveTuner.step().isNotEmpty()) llmSupervisor.noteExternalChange()
+                }
+                runCatching {
+                    if (extraSecrets.supervisorEnabled && anyLlmKey) {
+                        val now = System.currentTimeMillis()
+                        val w = scalper.liveWindow(now)
+                        val move = w?.let { lw ->
+                            val sec = ((now - lw.openMs) / 1000L).toInt()
+                            val last = lw.mids.lastOrNull()?.second
+                            val then = lw.mids.lastOrNull { it.first <= sec - 10 }?.second
+                            if (last != null && then != null) (last - then) * 100.0 else null
+                        }
+                        liveWatch.check(now, w?.ticker, move, closesSinceTick.get(), lastScalpTickMs)?.let { why ->
+                            aiActivity.record(com.dirk.kalshiodds.signal.scalper.AiEvent.SCALPING, com.dirk.kalshiodds.signal.scalper.AiEvent.KICK, detail = why)
+                            lastScalpTickMs = now
+                            scalpKick.trySend(Unit)
+                        }
+                    }
+                }
+                kotlinx.coroutines.delay(1_000L)
             }
         }
     }

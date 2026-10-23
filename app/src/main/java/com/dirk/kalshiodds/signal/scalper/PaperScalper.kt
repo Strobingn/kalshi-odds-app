@@ -366,9 +366,12 @@ class PaperScalper(
     /** What runs; null = [ScalpStrategy.ACTIVE]. The retired strategies open nothing unless learning mode is on; tests and the replay pass them all. */
     private val strategies: List<ScalpStrategy>? = null,
     /** The 20-scalper fleet's outside data (index, venues, forecaster); null = the fleet does not trade. */
-    private val fleetFeed: com.dirk.kalshiodds.signal.scalper.fleet.FleetFeed? = null
+    private val fleetFeed: com.dirk.kalshiodds.signal.scalper.fleet.FleetFeed? = null,
+    /** The self-learning entry gate ([OnlineGate]); null = every entry goes ahead and nothing is learned. */
+    val gate: OnlineGate? = null
 ) {
     private val fleetTape = com.dirk.kalshiodds.signal.scalper.fleet.FleetTape()
+    private val microTape = com.dirk.kalshiodds.signal.scalper.micro.MicroTape()
     /** Fleet orders resting on the book whose other-venue legs open when they fill (the perp hedge). */
     private val pendingLegs = HashMap<Long, Pair<String, List<com.dirk.kalshiodds.signal.scalper.fleet.OffBookLeg>>>()
 
@@ -410,6 +413,12 @@ class PaperScalper(
                 is ScalpEvent.Unfilled -> pendingLegs.remove(e.order.id)
                 else -> {}
             }
+        }
+        val g = gate
+        if (g != null) for (e in events) when (e) {
+            is ScalpEvent.Closed -> runCatching { g.learn(e.scalp.order.id, e.scalp.pnlUsd, e.scalp.order.contracts, e.scalp.closedAtMs) }
+            is ScalpEvent.Unfilled -> g.forget(e.order.id)
+            else -> {}
         }
         val hook = onClosed
         if (hook != null) for (e in events) if (e is ScalpEvent.Closed) runCatching { hook(e.scalp) }
@@ -458,7 +467,10 @@ class PaperScalper(
             events += engine.onTrade(ticker, takerYes, p, c, nowMs) { side, price -> offerQueue(ticker, side, price) }
         }
         grid.add(nowMs, takerYes, p, c)
-        if (fleetFeed != null) fleetTape.onTrade(ticker, takerYes, c, nowMs)
+        if (fleetFeed != null) {
+            fleetTape.onTrade(ticker, takerYes, c, nowMs)
+            microTape.onTrade(ticker, p, c, nowMs)
+        }
         events += decide(ticker, grid, nowMs)
         book(events, nowMs = nowMs)
     }
@@ -510,6 +522,10 @@ class PaperScalper(
         return LiveWindow(e.key, grid.openMs, mids, engine.openPositions(e.key))
     }
 
+    /** The live window's order-book and index series, second by second (the arena's micro charts). */
+    @Synchronized
+    fun liveMicro(): com.dirk.kalshiodds.signal.scalper.micro.LiveMicro? = microTape.live()
+
     /**
      * Archive the trade files, then start a fresh record. When the archive does not complete, nothing
      * is reset (the old rows would still show beside zeroed totals) and this returns false.
@@ -539,6 +555,7 @@ class PaperScalper(
                 onceDone.remove(e.key)
                 lastDecision.remove(e.key)
                 forgetWindow(e.key)
+                microTape.forget(e.key)
                 it.remove()
             }
         }
@@ -552,7 +569,7 @@ class PaperScalper(
         val top = topOfBook(ticker)
         val bidYes = top?.yesBid ?: grid.yesBid(s).takeIf { !it.isNaN() }
         val bidNo = top?.noBid ?: grid.yesAsk(s).takeIf { !it.isNaN() }?.let { 1.0 - it }
-        return engine.onClock(ticker, nowMs, bidYes, bidNo)
+        return engine.onClock(ticker, nowMs, bidYes, bidNo, PrintGrid.SECONDS - s)
     }
 
     /**
@@ -587,17 +604,19 @@ class PaperScalper(
             t.enabled && s - last[st.ordinal + 1] >= t.cadenceSeconds && inWindow(st, t) && t.inMinutes(s) &&
                 (done == null || st !in done) && !pausedForLoss(st, t.dailyLossUsd, nowMs)
         }
-        if (due0.isEmpty()) return emptyList()
         for (st in due0) last[st.ordinal + 1] = s
         val events = ArrayList<ScalpEvent>()
-        val fleetDue = due0.filter { it.fleet }
-        if (fleetDue.isNotEmpty()) events += decideFleet(ticker, grid, nowMs, s, fleetDue)
+        // The fleet's view is built every second while it is on (the micro charts follow the window even when no
+        // view-based strategy is due); the fleet and the micro scalpers decide on it.
+        val viewDue = due0.filter { it.viewBased }
+        if (fleetFeed != null) events += decideFleet(ticker, grid, nowMs, s, viewDue)
+        if (due0.isEmpty()) return events
         // The opening ride cannot wait for a minute of prints; everything else needs one.
         val warm = grid.warm(s)
-        val due = (if (warm) due0 else due0.filter { it.opening }).filter { !it.fleet && s in OPEN_FIRST_SECOND..LATE_LAST_SECOND }
+        val due = (if (warm) due0 else due0.filter { it.opening }).filter { !it.viewBased && s in OPEN_FIRST_SECOND..LATE_LAST_SECOND }
         if (due.isEmpty()) return events
         val top = topOfBook(ticker)
-        val fairY = if (due.any { it.fav != null || it.opening }) {
+        val fairY = if (gate != null || due.any { it.fav != null || it.opening }) {
             runCatching { fairYes(ticker, nowMs) }.getOrNull()?.takeIf { it.isFinite() }
         } else {
             null
@@ -646,6 +665,12 @@ class PaperScalper(
             fun seen(x: FloatArray?) = ScalpContext(
                 bid = bid, ask = ask, bidQty = queue, askQty = askQty,
                 move10 = d10.takeIf { !it.isNaN() }, move30 = d30.takeIf { !it.isNaN() }, features = x
+            )
+            // The self-learning gate's view of an entry at [px] on this side (null when the gate is off).
+            val fairSide = fairY?.let { if (yes) it else 1.0 - it }
+            val obiSide = if (queue != null && askQty != null && queue + askQty > 0.0) (queue - askQty) / (queue + askQty) else null
+            fun gateX(px: Double): DoubleArray? = if (gate == null) null else OnlineGate.features(
+                px, spread, d10.takeIf { !it.isNaN() }, d30.takeIf { !it.isNaN() }, tte, fairSide?.let { it - px }, obiSide
             )
             val opened = ordersThisWindow.getOrPut(ticker) { IntArray(ScalpStrategy.values().size) }
             val lastOpen = lastOrderMs.getOrPut(ticker) { LongArray(ScalpStrategy.values().size) { Long.MIN_VALUE / 2 } }
@@ -799,28 +824,39 @@ class PaperScalper(
                     // The model's own cut, unless you set another (in cents, as the model speaks).
                     if (pred < tn.trigger(m.thetaCents)) continue
                     val expected = m.expectedCents(pred, queue ?: engine.config.unknownQueue)
+                    val gx = gateX(bid)
+                    if (gx != null && !gate!!.allows(st.name, gx)) continue
                     engine.post(st, ticker, side, bid, queue, pred, expected, nowMs, seen(x))?.let {
                         events += it
                         noteOrder()
+                        if (gx != null) gate!!.remember(it.order.id, st.name, gx)
                     }
                 } else if (fire) {
                     if (st.taker) {
+                        val gx = gateX(ask)
+                        if (gx != null && !gate!!.allows(st.name, gx)) continue
                         val bought = engine.buyNow(
                             st, ticker, side, ask, { sd, px -> offerQueue(ticker, sd, px) }, nowMs, seen(null)
                         )
                         if (bought.isNotEmpty() && (st.opening || st == ScalpStrategy.LATE_EDGE)) {
                             onceDone.getOrPut(ticker) { HashSet() }.add(st)
                         }
-                        if (bought.isNotEmpty()) noteOrder()
+                        if (bought.isNotEmpty()) {
+                            noteOrder()
+                            if (gx != null) (bought.first() as? ScalpEvent.Posted)?.let { gate!!.remember(it.order.id, st.name, gx) }
+                        }
                         events += bought
                     } else {
                         // 1¢ better rests inside the spread, so nobody is ahead of it at its price.
                         val improve = st == ScalpStrategy.IMPROVE_1C
                         val px = if (improve) ScalperEngine.round4(bid + 0.01) else bid
                         val q = if (improve) 0.0 else queue
+                        val gx = gateX(px)
+                        if (gx != null && !gate!!.allows(st.name, gx)) continue
                         engine.post(st, ticker, side, px, q, 0.0, 0.0, nowMs, seen(null))?.let {
                             events += it
                             noteOrder()
+                            if (gx != null) gate!!.remember(it.order.id, st.name, gx)
                         }
                     }
                 }
@@ -838,7 +874,10 @@ class PaperScalper(
         val fair = runCatching { fairYes(ticker, nowMs) }.getOrNull()?.takeIf { it.isFinite() }
         val view = com.dirk.kalshiodds.signal.scalper.fleet.FleetViews.build(ticker, nowMs, close, s, grid, top, levels, fair, fleetTape, engine, feed)
         runCatching { feed.onView(view) }
+        // The micro scalpers' signals, once a second (also the live micro chart's series).
+        val sig = runCatching { microTape.signals(view) }.getOrDefault(com.dirk.kalshiodds.signal.scalper.micro.MicroSignals())
         val events = ArrayList<ScalpEvent>()
+        if (due.isEmpty()) return events
         val opened = ordersThisWindow.getOrPut(ticker) { IntArray(ScalpStrategy.values().size) }
         val lastOpen = lastOrderMs.getOrPut(ticker) { LongArray(ScalpStrategy.values().size) { Long.MIN_VALUE / 2 } }
         for (st in due) {
@@ -846,8 +885,30 @@ class PaperScalper(
             val most = tn.maxOrdersPerWindow
             if (most != null && opened[st.ordinal] >= most) continue
             if (tn.cooldownMs > 0 && nowMs - lastOpen[st.ordinal] < tn.cooldownMs) continue
-            for (o in com.dirk.kalshiodds.signal.scalper.fleet.Fleet.decide(st, view)) {
+            val orders = if (st.micro) {
+                com.dirk.kalshiodds.signal.scalper.micro.MicroScalpers.decide(st, view, sig, tn.triggerValue(microDefault(st)), tn.contracts)
+            } else {
+                com.dirk.kalshiodds.signal.scalper.fleet.Fleet.decide(st, view)
+            }
+            for (o in orders) {
                 if (!tn.sideAllowed(o.side)) continue
+                // The self-learning gate: an entry that looks like the strategy's past losers is skipped.
+                val gx = gate?.let {
+                    val yesSide = o.side == "YES"
+                    val b = if (yesSide) view.yesBid else view.noBid
+                    val a = if (yesSide) view.yesAsk else view.noAsk
+                    val mids = view.yesMids
+                    fun moveAgo(n: Int): Double? {
+                        val now = mids.lastOrNull()?.takeIf { v -> v.isFinite() } ?: return null
+                        val then = mids.getOrNull(mids.size - 1 - n)?.takeIf { v -> v.isFinite() } ?: return null
+                        return if (yesSide) now - then else then - now
+                    }
+                    OnlineGate.features(
+                        o.price, if (a != null && b != null) a - b else null, moveAgo(10), moveAgo(30), view.tte.toInt(),
+                        o.pModel - o.price, sig.obi5?.let { v -> if (yesSide) v else -v }
+                    )
+                }
+                if (gx != null && o.onBook && !gate!!.allows(st.name, gx)) continue
                 val ctx = ScalpContext(
                     bid = if (o.side == "YES") view.yesBid else view.noBid, ask = if (o.side == "YES") view.yesAsk else view.noAsk,
                     bidQty = if (o.side == "YES") view.yesBidQty else view.noBidQty, askQty = if (o.side == "YES") view.yesAskQty else view.noAskQty,
@@ -867,6 +928,7 @@ class PaperScalper(
                         contracts = o.contracts, targetPrice = o.exitPrice, predictionCents = edgeCents
                     )
                     if (bought.isNotEmpty()) {
+                        if (gx != null) (bought.first() as? ScalpEvent.Posted)?.let { gate!!.remember(it.order.id, st.name, gx) }
                         opened[st.ordinal]++
                         lastOpen[st.ordinal] = nowMs
                         for (leg in o.offBook) runCatching { feed.openOffBook(st, leg, o.note, nowMs) }
@@ -877,6 +939,7 @@ class PaperScalper(
                     val queue = levels?.let { levelsOnSide.firstOrNull { abs(it.first - o.price) <= ScalperEngine.TICK_EPS }?.second ?: 0.0 }
                     engine.post(st, ticker, o.side, o.price, queue, edgeCents, edgeCents, nowMs, ctx, contracts = o.contracts, targetPrice = o.exitPrice)?.let {
                         events += it
+                        if (gx != null) gate!!.remember(it.order.id, st.name, gx)
                         opened[st.ordinal]++
                         lastOpen[st.ordinal] = nowMs
                         if (o.offBook.isNotEmpty()) pendingLegs[it.order.id] = o.note to o.offBook
@@ -897,6 +960,15 @@ class PaperScalper(
         val levels = if (side == "YES") book.no else book.yes
         val target = 1.0 - price
         return levels.firstOrNull { abs(it.first - target) <= ScalperEngine.TICK_EPS }?.second ?: 0.0
+    }
+
+    /** A micro scalper's main trigger when nobody has set one (dollars or a fraction, as the rule reads it). */
+    private fun microDefault(st: ScalpStrategy): Double = when (st) {
+        ScalpStrategy.MICRO_OBI_MAKER -> 0.35
+        ScalpStrategy.MICRO_BRTI_PULSE -> 0.75
+        ScalpStrategy.MICRO_VWAP_REV -> 0.03
+        ScalpStrategy.MICRO_THETA_FAV -> 0.80
+        else -> 0.0
     }
 
     companion object {
@@ -951,6 +1023,18 @@ class ScalperStore(context: Context) {
         record = { trades, orders -> log.add(trades, orders) },
         run = log.run
     )
+
+    /** The self-learning entry gate ([OnlineGate]), kept on the phone; on unless switched off on the AI tab. */
+    val gate: OnlineGate = OnlineGate(
+        initial = OnlineGate.decode(prefs.getString(GATE_KEY, null)),
+        persist = { m -> runCatching { prefs.edit().putString(GATE_KEY, OnlineGate.encode(m)).apply() } }
+    ).also { it.enabled = prefs.getBoolean(GATE_ON_KEY, true) }
+
+    /** Switch the self-learning gate on or off (it keeps learning either way). */
+    fun setGateEnabled(on: Boolean) {
+        gate.enabled = on
+        prefs.edit().putBoolean(GATE_ON_KEY, on).apply()
+    }
 
     /** Your per-strategy settings, kept with the record ([ScalpTuning]). */
     val tuning: ScalpTuning = ScalpTuning(
@@ -1032,6 +1116,8 @@ class ScalperStore(context: Context) {
         const val KEY = "state_json"
         const val KNOBS_KEY = "strategy_settings_json"
         const val CHECKS_KEY = "contract_checks_json"
+        const val GATE_KEY = "online_gate_json"
+        const val GATE_ON_KEY = "online_gate_on"
         /** The app version that was opening the NPU; still set at start = that open crashed. */
         const val NPU_OPENING_KEY = "npu_opening_version"
         /** The app version that was opening ONNX Runtime; still set at start = that open crashed. */

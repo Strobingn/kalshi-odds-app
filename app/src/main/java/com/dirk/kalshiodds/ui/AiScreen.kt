@@ -106,7 +106,7 @@ fun AiScreen(vm: AiViewModel) {
         AiSectionTabs(section) { section = it }
         when (section) {
             0 -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
-                AiDashboardContent(dash, onOpenKeys = { section = 2 })
+                AiDashboardContent(dash, onOpenKeys = { section = 2 }, onLiveTuner = vm::setLiveTuner, onGate = vm::setGate)
                 report?.let {
                     Spacer(Modifier.height(12.dp))
                     ModelReportCard(it)

@@ -220,6 +220,10 @@ object ScalpTriggers {
             Spec("Fair price at least", Unit.PERCENT, st.fav!!.fairMin * 100.0, 80.0, 99.0, 1.0)
         ScalpStrategy.OPENING_RIDE -> Spec("Lean at least", Unit.PERCENT, PaperScalper.OPEN_LEAN * 100.0, 50.0, 70.0, 1.0)
         ScalpStrategy.LATE_EDGE -> cents("Edge over the fee", st.fav!!.gap, 0.0, 10.0)
+        ScalpStrategy.MICRO_OBI_MAKER -> Spec("Book imbalance (5 levels) at least", Unit.PERCENT, 35.0, 10.0, 90.0, 5.0)
+        ScalpStrategy.MICRO_BRTI_PULSE -> Spec("Index move in 10 s, in σ", Unit.RATIO, 0.75, 0.25, 4.0, 0.05)
+        ScalpStrategy.MICRO_VWAP_REV -> cents("Away from the 30 s VWAP", 0.03, 1.0, 10.0)
+        ScalpStrategy.MICRO_THETA_FAV -> Spec("Fair price at least", Unit.PERCENT, 80.0, 60.0, 97.0, 1.0)
         else -> null
     }
 

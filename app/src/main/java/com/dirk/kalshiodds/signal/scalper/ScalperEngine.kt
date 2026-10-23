@@ -50,6 +50,9 @@ enum class ExitKind { TARGET, STOP, TIMEOUT, SETTLED }
 /** Origin tag of the 20-scalper fleet ([ScalpStrategy.fleet]). */
 const val FLEET_ORIGIN = "20-scalper plan"
 
+/** Origin tag of the four micro scalpers ([ScalpStrategy.micro]). */
+const val MICRO_ORIGIN = "micro (Gemini review)"
+
 enum class ScalpStrategy(
     val label: String,
     val taker: Boolean,
@@ -78,7 +81,9 @@ enum class ScalpStrategy(
     /** Seconds since the window opened when it may trade (the fleet's own windows); null = the usual minutes 1–13. */
     val activeSeconds: IntRange? = null,
     /** May both pay the ask and rest a bid ([fleet] scalpers choose per order). */
-    val hybrid: Boolean = false
+    val hybrid: Boolean = false,
+    /** A scalp still open with this many seconds or fewer left is sold at the bid instead of riding to the settlement (0 = rides). */
+    val flattenSeconds: Int = 0
 ) {
     /** The trained model picks calm moments. Rest in, +1¢ out. */
     ML_REST("ML scalper · resting", false, 0.01, 0.04, 120_000L, 5, 12, -2.01),
@@ -363,10 +368,33 @@ enum class ScalpStrategy(
         entryMin = 0.30, entryMax = 0.70, origin = FLEET_ORIGIN, activeSeconds = 720..870),
     /** 20 · TimesFM 2.5 forecast of the index with a slow regime gate (≥ 0.60): rest early, take late. */
     FLEET_TIMESFM("20 TimesFM + regime gate", true, 0.0, 0.0, 0L, 5, 1, null, hold = true,
-        entryMin = 0.03, entryMax = 0.97, origin = FLEET_ORIGIN, activeSeconds = 60..810, hybrid = true);
+        entryMin = 0.03, entryMax = 0.97, origin = FLEET_ORIGIN, activeSeconds = 60..810, hybrid = true),
+
+    // ---------------------------------------------------------------- the four micro scalpers (1.20.0)
+    // Ideas from the Gemini review of 2026-10-23, built on this app's own book, index and paper engine
+    // (micro/Micro.kt). Fee-aware; the scalps are sold before the last seconds instead of riding to the settlement.
+
+    /** Five-level book imbalance (|OBI5| ≥ 35%) with the Student-t fair 2.5¢+ over the bid: rest, sell 3¢ up. */
+    MICRO_OBI_MAKER("OBI5 maker · rest, +3¢", false, 0.03, 0.03, 90_000L, 1, 2, null,
+        entryMin = 0.05, entryMax = 0.95, origin = MICRO_ORIGIN, activeSeconds = 30..860, flattenSeconds = 20),
+    /** The settlement index moved 0.75σ+ in 10 s and the Kalshi book lags the fair by 2¢+: pay the ask, sell the catch-up. */
+    MICRO_BRTI_PULSE("BRTI pulse · buy now, sell the catch-up", true, 0.03, 0.03, 45_000L, 1, 2, null,
+        entryMin = 0.05, entryMax = 0.95, origin = MICRO_ORIGIN, activeSeconds = 15..870, flattenSeconds = 15),
+    /** The book 3¢+ off its 30-second VWAP with the index calm: rest on the cheap side, sell at the VWAP. */
+    MICRO_VWAP_REV("VWAP reversion · rest, sell at VWAP", false, 0.03, 0.04, 120_000L, 2, 2, null,
+        entryMin = 0.05, entryMax = 0.95, origin = MICRO_ORIGIN, activeSeconds = 60..840, flattenSeconds = 20),
+    /** 90–240 s left, the leader's Student-t fair 80%+: pay the ask on a 2¢ edge over the fee, else rest. Hold to the close. */
+    MICRO_THETA_FAV("Theta favourite · 90–240 s left, hold", true, 0.0, 0.15, 0L, 2, 1, null, hold = true,
+        entryMin = 0.50, entryMax = 0.95, origin = MICRO_ORIGIN, activeSeconds = 660..810, hybrid = true);
 
     /** One of the 20-scalper fleet ([com.dirk.kalshiodds.signal.scalper.fleet.Fleet]). */
     val fleet: Boolean get() = origin == FLEET_ORIGIN
+
+    /** One of the four micro scalpers ([com.dirk.kalshiodds.signal.scalper.micro.MicroScalpers]). */
+    val micro: Boolean get() = origin == MICRO_ORIGIN
+
+    /** Decides on the fleet's one-second view of the window (the fleet and the micro scalpers). */
+    val viewBased: Boolean get() = fleet || micro
 
     /**
      * Kashi's late-favourite entry: [tteMin]–[tteMax] seconds left, the side's
@@ -846,7 +874,14 @@ class ScalperEngine(
      * filled scalps at the side's current bid ([bidYes] / [bidNo]; null =
      * no bid to sell into, so the scalp waits).
      */
-    fun onClock(ticker: String, nowMs: Long, bidYes: Double?, bidNo: Double?): List<ScalpEvent> {
+    fun onClock(
+        ticker: String,
+        nowMs: Long,
+        bidYes: Double?,
+        bidNo: Double?,
+        /** Seconds to the window's close; a scalp of a strategy with [ScalpStrategy.flattenSeconds] is sold inside them. */
+        secondsLeft: Int? = null
+    ): List<ScalpEvent> {
         val list = byTicker[ticker] ?: return emptyList()
         if (list.isEmpty()) return emptyList()
         val events = ArrayList<ScalpEvent>(2)
@@ -867,6 +902,14 @@ class ScalperEngine(
             if (o.strategy.hold && t.stopDollars <= 0.0) continue
             val bid = (if (o.side == "YES") bidYes else bidNo)?.takeIf { b -> b.isFinite() && b >= 0.0 && b < 1.0 }
                 ?: continue
+            // Final-window exit: a scalp is not left to ride into the settlement.
+            val flat = o.strategy.flattenSeconds
+            if (!o.strategy.hold && flat > 0 && secondsLeft != null && secondsLeft <= flat) {
+                it.remove()
+                val fee = if (bid > 0.0) KalshiFee.total(o.contracts, bid, config.feeRate) else 0.0
+                events += ScalpEvent.Closed(close(w, bid, ExitKind.TIMEOUT, feeUsd = fee, nowMs = nowMs))
+                continue
+            }
             if (t.trail && bid > w.peakBid) w.peakBid = bid
             val stopFrom = if (t.trail) w.peakBid else o.price
             val stopped = t.stopDollars > 0.0 && bid <= stopFrom - t.stopDollars + EPS

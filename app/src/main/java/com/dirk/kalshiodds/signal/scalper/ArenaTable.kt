@@ -23,6 +23,7 @@ object ArenaTable {
         HOLD("Hold to close"),
         NEW("New"),
         FLEET("20 fleet"),
+        MICRO("4 micro"),
         TRADED("Has traded")
     }
 
@@ -80,6 +81,7 @@ object ArenaTable {
         Family.ALL -> true
         Family.NEW -> isNew(row.strategy)
         Family.FLEET -> row.strategy.fleet
+        Family.MICRO -> row.strategy.micro
         Family.TRADED -> row.trades > 0
         else -> familyOf(row.strategy) == family
     }
@@ -200,6 +202,10 @@ object ArenaTable {
         ScalpStrategy.FLEET_MACRO_REVERT -> "Within 5 minutes of a CPI, jobs or FOMC release: a 2.5σ move whose repricing has stalled, spread 5¢+: bid inside on the reversion."
         ScalpStrategy.FLEET_PIN_GAMMA -> "Last 3 minutes, near even (42–58¢) and within 0.15% of the strike: two-sided quotes δ around the fair price, flipped every few seconds."
         ScalpStrategy.FLEET_TIMESFM -> "TimesFM 2.5's forecast of the index gives a side 1.5¢+ over its price (plus fee) while the regime score is 0.60+: rest early, take late."
+        ScalpStrategy.MICRO_OBI_MAKER -> "The top five book levels lean 35%+ to one side and the Student-t fair from the index beats the bid by 2.5¢+: rest a bid (1¢ inside a 3¢+ spread), sell 3¢ up."
+        ScalpStrategy.MICRO_BRTI_PULSE -> "The settlement index moved 0.75σ+ in 10 s and the fair price ran 2¢+ further than the Kalshi book: pay the ask on a 2¢ edge over the fee, sell where the book should catch up."
+        ScalpStrategy.MICRO_VWAP_REV -> "The book 3¢+ away from the last 30 s volume-weighted price (200+ contracts) while the index stayed calm: rest on the cheap side, sell at the VWAP."
+        ScalpStrategy.MICRO_THETA_FAV -> "90–240 s left, the leading side's Student-t fair (on the settlement average) 80%+: pay the ask on a 2¢ edge over the fee, else rest a bid 3¢+ under the fair; hold."
     }
 
     private fun c(d: Double): String = "${Math.round(d * 100)}¢"

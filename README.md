@@ -19,6 +19,41 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.20.0 (Claude branch): four micro scalpers, a self-learning gate, a live tuner, live-window charts
+
+Ideas from a Gemini review of the scalper code (2026-10-23), rebuilt on this app's own book, index and paper engine.
+Paper only, like the rest of the arena.
+
+- **Four micro scalpers** (`signal/scalper/micro/Micro.kt`, arena filter "4 micro"), each fee-aware and each
+  with its own trigger in Arena → strategy → Settings:
+  - *OBI5 maker*: the top five book levels lean 35%+ to one side and the index's Student-t fair beats the bid
+    by 2.5¢+: rest a bid, sell 3¢ up.
+  - *BRTI pulse*: the settlement index moved 0.75σ+ in 10 s and the fair ran 2¢+ further than the Kalshi book:
+    pay the ask on a 2¢ edge over the fee, sell where the book should catch up.
+  - *VWAP reversion*: the book 3¢+ off the last 30 s VWAP of the prints while the index stays calm: rest on the
+    cheap side, sell at the VWAP.
+  - *Theta favourite*: 90–240 s left, the leader's Student-t fair (on the settlement average) 80%+: pay the ask
+    on a 2¢ edge over the fee, else rest; hold.
+  The three scalps are sold at the bid in the last 15–20 s instead of riding into the settlement.
+- **Self-learning gate** (`OnlineGate.kt`): one small online model per strategy, trained on every closed trade
+  (price, spread, moves, time left, fair edge, book imbalance). After 30 trades it skips entries that look like
+  that strategy's losers; its threshold rises after a loss it let through and falls after a win. AI tab switch.
+- **Live tuner** (`LiveTuner.kt`): on the phone, no key needed. After every 4 closed trades of a strategy it makes
+  a winner bigger (×1.25, up to 500 on its own) and looser, a loser smaller (×0.7) and stricter, inside the
+  Scalping AI's hard bounds. AI tab switch.
+- **The Scalping AI follows the window**: still every 60 s, and now also early (at most every 20 s) on a new
+  window, a 4¢ move in 10 s or 6 closed trades. The Paper AI keeps its own minute.
+- **Charts**: Arena → Overview gets an *AI live window follower* (Bitcoin − strike above, UP / DOWN bids and the
+  fair chance of UP below) and *Order-book microstructure* (fair, micro-price, 30 s VWAP, OBI5 / OFI5);
+  Analysis → Race gets *Risk and return* (win rate against net, bubbles sized by trades); the AI tab gets the live
+  tuner's feed and the gate's learning chart (rolling win rate, threshold, predicted chance).
+
+## 1.19.1 (Claude branch): app starts again
+
+1.18.0 and 1.19.0 shipped ONNX Runtime's Snapdragon NPU build (about 170 MB of Qualcomm QNN libraries) and the
+phone would not start. Back to the CPU build of ONNX Runtime; the NPU engine is off; opening ONNX Runtime is
+crash-guarded (a start that dies there makes the next start use the Kotlin trees).
+
 ## 1.17.1 (Claude branch): Gemini and Cerebras keys; the rotation skips a provider over its limit
 
 - **Four free providers** (AI → Keys): Groq, Cerebras, Gemini and Mistral, rotating every 500 answered calls in

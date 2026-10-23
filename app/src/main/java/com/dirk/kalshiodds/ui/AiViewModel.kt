@@ -88,10 +88,16 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
             learningOn = container.learningMode,
             scalpingStatus = container.llmSupervisor.status.value,
             paperStatus = container.paperAi.status.value + " · " + container.paperAi.record.value,
-            paperLessons = container.paperAi.lessons().takeLast(8).reversed()
+            paperLessons = container.paperAi.lessons().takeLast(8).reversed(),
+            liveTunerOn = container.liveTunerOn,
+            gateOn = container.gateOn
         )
         val bets = container.paperAi.openBets() + container.paperAi.settledBets()
-        return AiDashboard.build(base, System.currentTimeMillis(), container.aiActivity.events.value, strategies, bets)
+        val gate = container.scalperStore.gate
+        return AiDashboard.withGate(
+            AiDashboard.build(base, System.currentTimeMillis(), container.aiActivity.events.value, strategies, bets),
+            gate.points(), gate.rows()
+        )
     }
 
     fun setDraft(provider: String, v: String) = _keys.update {
@@ -135,6 +141,8 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
     fun setPaperOn(on: Boolean) { secrets.paperAiEnabled = on; _keys.update { it.copy(paperOn = on) }; if (on) container.kickAi() }
     fun setLearning(on: Boolean) { container.learningMode = on; _keys.update { it.copy(learningOn = on) } }
     fun runNow() = container.kickAi()
+    fun setLiveTuner(on: Boolean) { container.liveTunerOn = on; _dashboard.update { it.copy(liveTunerOn = on) } }
+    fun setGate(on: Boolean) { container.gateOn = on; _dashboard.update { it.copy(gateOn = on) } }
 
     fun send(which: String, text: String) { viewModelScope.launch(Dispatchers.IO) { container.aiChat.send(which, text) } }
     fun apply(id: Long) { viewModelScope.launch(Dispatchers.IO) { container.aiChat.apply(id) } }

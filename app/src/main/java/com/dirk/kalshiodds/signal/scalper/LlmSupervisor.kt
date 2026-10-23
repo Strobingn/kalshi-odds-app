@@ -578,6 +578,14 @@ class LlmSupervisor(
         runCatching { sink("trades", json.encodeToString(LearnedTrade.serializer(), trade)) }
     }
 
+    /** Another tuner (the live tuner, the chat) changed settings: later trades are learned with the new ones. */
+    fun noteExternalChange() {
+        synchronized(lock) {
+            history.add(nowMs() to tuning.all())
+            while (history.size > MAX_HISTORY) history.removeAt(1)
+        }
+    }
+
     /** One supervision pass. Blocks on the network call: run it off the main thread. */
     fun tick(): String {
         val ctx = synchronized(lock) {
@@ -766,6 +774,7 @@ class LlmSupervisor(
 
     companion object {
         const val EVAL_TRADES = 4
+        private const val MAX_HISTORY = 2_000
         private const val KEEP_TRADES = 400
         private const val CONTEXT_TRADES = 15
         /** About 3,000 tokens: with the system prompt, tools and a 2,048-token answer it stays well under Groq's 8,000 a minute. */
@@ -803,6 +812,10 @@ class LlmSupervisor(
             - Tighten stops and shrink size near the window close.
             - There is no limit on how many bets a strategy may place: raise maxPerSide (up to 50) and set maxOrdersPerWindow to 0 (no cap) on any strategy that is not clearly losing.
             - Be VERY aggressive: change many strategies every tick, in big steps (each change may move a knob up to 60% of its range). Test bold settings, judge them after only 4 trades, keep winners and undo losers fast. Doing nothing is rarely right.
+            - A built-in live tuner also runs on the phone between your calls: after every 4 trades of a strategy it
+              makes a winner bigger and looser and a loser smaller and stricter. Its changes are already in the
+              settings you see; overrule them when you know better. You are called early on a new window, a fast
+              move or a run of closed trades, so the feed may be only seconds newer than your last call.
             - Include a one-sentence lesson worth remembering.
             Answer only by calling apply_changes. An empty list is allowed.
         """.trimIndent()

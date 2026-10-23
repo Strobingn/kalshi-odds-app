@@ -151,6 +151,14 @@ fun ScalperResultsRoute(onBack: (() -> Unit)?, onOpenSettings: () -> Unit = {}) 
             delay(1_000L)
         }
     }
+    // The live window's book and index, second by second (the follower and micro charts).
+    val liveMicro by produceState<com.dirk.kalshiodds.signal.scalper.micro.LiveMicro?>(null, scalper) {
+        val sc = scalper ?: return@produceState
+        while (true) {
+            value = runCatching { sc.liveMicro() }.getOrNull()
+            delay(1_000L)
+        }
+    }
     val saveZip = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri: Uri? ->
         val s = store
         if (uri != null && s != null) {
@@ -175,6 +183,7 @@ fun ScalperResultsRoute(onBack: (() -> Unit)?, onOpenSettings: () -> Unit = {}) 
         feed = feed,
         chartTrades = chartTrades,
         live = live,
+        liveMicro = liveMicro,
         tuning = container?.scalper?.engine?.tuning,
         modelTheta = store?.model?.thetaCents,
         modelEngine = store?.model?.engine,
@@ -274,6 +283,8 @@ fun ScalperResultsScreen(
     chartTrades: List<ScalpTrade> = trades,
     /** The window trading now, for the live chart (null before its first print). */
     live: LiveWindow? = null,
+    /** The live window's book and index second by second (null hides the follower and micro charts' data). */
+    liveMicro: com.dirk.kalshiodds.signal.scalper.micro.LiveMicro? = null,
     initialSection: ArenaSection = ArenaSection.OVERVIEW,
     /** For the day-by-day grid; the phone's date in the app. */
     today: java.time.LocalDate = java.time.LocalDate.now(),
@@ -499,6 +510,20 @@ fun ScalperResultsScreen(
                             "CHART_LIVE"
                         ) { LiveWindowChart(live, liveMarkers, selected) }
                     }
+                    item(key = "chart_follow") {
+                        ChartCard(
+                            "AI live window follower",
+                            "Bitcoin against the strike, the UP and DOWN bids and the index's fair chance of UP, second by second.",
+                            "CHART_FOLLOW_CARD"
+                        ) { LiveFollowerChart(liveMicro) }
+                    }
+                    item(key = "chart_micro") {
+                        ChartCard(
+                            "Order-book microstructure",
+                            "Last 5 minutes: fair, micro-price and 30 s VWAP against the UP mid, with 5-level imbalance and order flow. What the 4 micro scalpers trade on.",
+                            "CHART_MICRO_CARD"
+                        ) { MicroRibbonChart(liveMicro) }
+                    }
                     item(key = "top_head") {
                         ArenaSectionHeader("Top strategies", "See all $n") { sectionName = ArenaSection.COMPARE.name }
                     }
@@ -565,6 +590,13 @@ fun ScalperResultsScreen(
                                 ChartCard("Who is winning", "Paper profit after fees per strategy, best on top. Tap one to follow it.", "CHART_PNL") {
                                     PnlBarsChart(board, selected, onSelect)
                                 }
+                            }
+                            item(key = "chart_risk") {
+                                ChartCard(
+                                    "Risk and return",
+                                    "Each strategy at its win rate (across) and net after fees (up), sized by trades. Tap one to follow it.",
+                                    "CHART_RISK"
+                                ) { RiskReturnChart(compareRows, selected, onSelect) }
                             }
                             item(key = "chart_race") {
                                 ChartCard(

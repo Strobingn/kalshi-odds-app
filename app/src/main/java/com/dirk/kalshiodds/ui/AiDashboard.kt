@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -16,6 +17,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -72,7 +74,22 @@ data class AiDashboardState(
     val recentChanges: List<String> = emptyList(),
     val recentBets: List<String> = emptyList(),
     /** The Paper AI's lessons, written after each settled window it bet on; newest first. */
-    val paperLessons: List<String> = emptyList()
+    val paperLessons: List<String> = emptyList(),
+    /** The on-phone live tuner and the self-learning gate (both need no key). */
+    val liveTunerOn: Boolean = true,
+    val gateOn: Boolean = true,
+    val liveChanges24h: Int = 0,
+    /** Times the Scalping AI was called early in the last 24 h. */
+    val kicks24h: Int = 0,
+    /** Newest first: live-tuner changes and early calls. */
+    val liveFeed: List<String> = emptyList(),
+    /** Per learned trade, oldest first: (rolling win rate, threshold, predicted chance of a win), each 0..1. */
+    val gateCurve: List<Triple<Double, Double, Double>> = emptyList(),
+    /** Per strategy: (name, threshold 0..1, "n · p · skipped"). */
+    val gateRows: List<Triple<String, Double, String>> = emptyList(),
+    val gateLearned: Int = 0,
+    val gateSkipped: Int = 0,
+    val gateActive: Int = 0
 )
 
 object AiDashboard {
@@ -146,10 +163,16 @@ object AiDashboard {
         val mostChanged = counts.map { Triple(pretty(it.key), it.value / topCount, "${it.value} changes") }
 
         val clock = SimpleDateFormat("h:mm a", Locale.US).apply { timeZone = zone }
-        val recentChanges = all.filter { it.kind in setOf(AiEvent.APPLIED, AiEvent.SCORED_BETTER, AiEvent.SCORED_WORSE) }
+        val recentChanges = all.filter { it.ai != AiEvent.LIVE && it.kind in setOf(AiEvent.APPLIED, AiEvent.SCORED_BETTER, AiEvent.SCORED_WORSE) }
             .takeLast(10).reversed().map {
                 val tag = when (it.kind) { AiEvent.APPLIED -> "changed"; AiEvent.SCORED_BETTER -> "scored BETTER"; else -> "scored WORSE" }
                 "${clock.format(Date(it.atMs))}  $tag  ${it.detail}"
+            }
+        val secClock = SimpleDateFormat("h:mm:ss a", Locale.US).apply { timeZone = zone }
+        val liveFeed = all.filter { (it.ai == AiEvent.LIVE && it.kind == AiEvent.APPLIED) || it.kind == AiEvent.KICK }
+            .takeLast(14).reversed().map {
+                val tag = if (it.kind == AiEvent.KICK) "asked Scalping AI early:" else "live tuner:"
+                "${secClock.format(Date(it.atMs))}  $tag ${it.detail}"
             }
 
         val settled = bets.filter { it.result != null }.sortedBy { it.openedMs }
@@ -192,7 +215,38 @@ object AiDashboard {
             paperOpen = bets.count { it.result == null },
             paperNet = run,
             recentChanges = recentChanges,
-            recentBets = recentBets
+            recentBets = recentBets,
+            liveChanges24h = day.count { it.ai == AiEvent.LIVE && it.kind == AiEvent.APPLIED },
+            kicks24h = day.count { it.kind == AiEvent.KICK },
+            liveFeed = liveFeed
+        )
+    }
+
+    /**
+     * The self-learning gate's chart and table from its learned points and rows: a 50-trade rolling win rate, and the
+     * threshold and predicted chance smoothed over 20 trades.
+     */
+    fun withGate(s: AiDashboardState, points: List<com.dirk.kalshiodds.signal.scalper.OnlineGate.Point>, rows: List<com.dirk.kalshiodds.signal.scalper.OnlineGate.Row>): AiDashboardState {
+        val wins = ArrayDeque<Int>()
+        var conf: Double? = null
+        var p: Double? = null
+        val a = 1.0 / 20.0
+        val curve = points.map { pt ->
+            wins.addLast(if (pt.win) 1 else 0)
+            while (wins.size > 50) wins.removeFirst()
+            conf = conf?.let { it * (1 - a) + pt.minConf * a } ?: pt.minConf
+            p = p?.let { it * (1 - a) + pt.p * a } ?: pt.p
+            Triple(wins.average(), conf!!, p!!)
+        }
+        val table = rows.filter { it.n > 0 }.take(12).map { r ->
+            Triple(
+                pretty(r.strategy), r.minConf,
+                "${r.n} learned · ${r.lastP?.let { "p ${Math.round(it * 100)}%" } ?: "p —"} · ${r.skipped} skipped" + if (r.gating) "" else " · warming up"
+            )
+        }
+        return s.copy(
+            gateCurve = curve, gateRows = table,
+            gateLearned = rows.sumOf { it.n }, gateSkipped = rows.sumOf { it.skipped }, gateActive = rows.count { it.gating }
         )
     }
 
@@ -204,7 +258,13 @@ object AiDashboard {
 
 /** The Dashboard section of the AI tab. Stateless: draws [s]. */
 @Composable
-fun AiDashboardContent(s: AiDashboardState, onOpenKeys: () -> Unit = {}) {
+fun AiDashboardContent(
+    s: AiDashboardState,
+    onOpenKeys: () -> Unit = {},
+    /** Switches for the on-phone live tuner and the self-learning gate; null hides them (screenshots). */
+    onLiveTuner: ((Boolean) -> Unit)? = null,
+    onGate: ((Boolean) -> Unit)? = null
+) {
     val c = DipTheme.colors
     val scalpColor = c.accentBlue
     val paperColor = c.accentPurple
@@ -224,6 +284,14 @@ fun AiDashboardContent(s: AiDashboardState, onOpenKeys: () -> Unit = {}) {
         if (s.rotation.isNotBlank()) Text(s.rotation, fontSize = 11.sp, color = c.textSecondary)
         AiStatusCard("SCALPING AI", s.scalpingOn, "Tunes the scalping algorithms every 60 s", s.scalpingStatus, scalpColor)
         AiStatusCard("PAPER AI", s.paperOn, "Places paper bets every minute", s.paperStatus, paperColor)
+        AiSwitchCard(
+            "LIVE TUNER", s.liveTunerOn, "On the phone, no key: after every 4 trades a winner gets bigger and looser, a loser smaller and stricter",
+            "${s.liveChanges24h} changes · ${s.kicks24h} early Scalping AI calls (24 h)", chatColor, onLiveTuner, "SWITCH_LIVE_TUNER"
+        )
+        AiSwitchCard(
+            "SELF-LEARNING GATE", s.gateOn, "Learns from every closed trade and skips entries that look like a strategy's losers",
+            "${s.gateLearned} trades learned · ${s.gateActive} strategies gated · ${s.gateSkipped} entries skipped", c.up, onGate, "SWITCH_GATE"
+        )
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             StatTile("AI calls 24h", s.calls24h.toString(), c.textPrimary, "${if (s.calls24h == 0) 0 else Math.round(100.0 * s.callsOk24h / s.calls24h)}% answered")
@@ -234,6 +302,23 @@ fun AiDashboardContent(s: AiDashboardState, onOpenKeys: () -> Unit = {}) {
             StatTile("Arena net", fmtSignedUsd(s.arenaNet), if (s.arenaNet >= 0) c.up else c.down, "${s.arenaTrades} trades")
             StatTile("Arena win rate", if (s.arenaTrades == 0) "—" else "${Math.round(s.arenaWinRate * 100)}%", if (s.arenaTrades == 0) c.textPrimary else if (s.arenaWinRate >= 0.5) c.up else c.down, "after fees")
             StatTile("Paper AI net", fmtSignedUsd(s.paperNet), if (s.paperNet >= 0) c.up else c.down, "${s.paperWins}W · ${s.paperLosses}L · ${s.paperOpen} open")
+        }
+
+        AiCard("Live tuner and early calls", "Newest first · the arena adapts between the Scalping AI's calls") {
+            if (s.liveFeed.isEmpty()) Empty("Nothing yet: it changes a strategy after its 4th closed trade")
+            s.liveFeed.forEach { Text(it, fontSize = 11.sp, color = c.textPrimary, maxLines = 2) }
+        }
+        AiCard("Self-learning gate", "Rolling win rate (50 trades), the learned threshold and the predicted chance of a win, per learned trade") {
+            if (s.gateCurve.size < 2) {
+                Empty("Draws after the first trades close")
+            } else {
+                GateChart(s.gateCurve, c.up, chatColor, scalpColor)
+                Legend(listOf("Win rate" to c.up, "Threshold" to chatColor, "Predicted" to scalpColor))
+            }
+            if (s.gateRows.isNotEmpty()) {
+                Text("Threshold by strategy", fontSize = 11.sp, color = c.textSecondary, modifier = Modifier.padding(top = 6.dp))
+                PercentBars(s.gateRows, labelWidth = 130.dp)
+            }
         }
 
         AiCard("AI calls per hour", "Last 24 hours, every request to Groq, Cerebras, Gemini and Mistral") {
@@ -357,6 +442,59 @@ private fun AiStatusCard(name: String, on: Boolean, what: String, status: String
             Text(what, fontSize = 11.sp, color = c.textSecondary)
             if (status.isNotBlank()) Text(status, fontSize = 12.sp, color = c.textPrimary, maxLines = 2)
         }
+    }
+}
+
+@Composable
+private fun AiSwitchCard(name: String, on: Boolean, what: String, status: String, color: Color, onToggle: ((Boolean) -> Unit)?, tag: String) {
+    val c = DipTheme.colors
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(c.surface, RoundedCornerShape(14.dp))
+            .border(1.dp, if (on) color else c.border, RoundedCornerShape(14.dp))
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Box(Modifier.size(12.dp).background(if (on) color else c.textSecondary, CircleShape))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(name, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = color, letterSpacing = 0.8.sp)
+                Text(if (on) "ON" else "OFF", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (on) c.up else c.textSecondary)
+            }
+            Text(what, fontSize = 11.sp, color = c.textSecondary)
+            Text(status, fontSize = 12.sp, color = c.textPrimary, maxLines = 2)
+        }
+        if (onToggle != null) {
+            androidx.compose.material3.Switch(checked = on, onCheckedChange = onToggle, modifier = Modifier.testTag(tag))
+        }
+    }
+}
+
+/** Three 0..1 lines over the learned trades, with 25 / 50 / 75% guides. */
+@Composable
+private fun GateChart(points: List<Triple<Double, Double, Double>>, win: Color, conf: Color, pred: Color) {
+    val c = DipTheme.colors
+    androidx.compose.foundation.Canvas(Modifier.fillMaxWidth().height(150.dp).testTag("CHART_GATE")) {
+        val w = size.width
+        val h = size.height
+        for (g in listOf(0.25, 0.5, 0.75)) {
+            val y = h * (1f - g.toFloat())
+            drawLine(if (g == 0.5) c.textSecondary.copy(alpha = 0.6f) else c.border, androidx.compose.ui.geometry.Offset(0f, y), androidx.compose.ui.geometry.Offset(w, y), strokeWidth = 1.dp.toPx())
+        }
+        fun line(sel: (Triple<Double, Double, Double>) -> Double, color: Color, width: Float) {
+            val path = androidx.compose.ui.graphics.Path()
+            points.forEachIndexed { i, pt ->
+                val x = w * i / (points.size - 1).coerceAtLeast(1)
+                val y = h * (1f - sel(pt).coerceIn(0.0, 1.0).toFloat())
+                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+            }
+            drawPath(path, color, style = androidx.compose.ui.graphics.drawscope.Stroke(width = width))
+        }
+        line({ it.second }, conf, 2.dp.toPx())
+        line({ it.third }, pred, 1.5.dp.toPx())
+        line({ it.first }, win, 2.5.dp.toPx())
     }
 }
 

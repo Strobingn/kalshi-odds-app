@@ -25,6 +25,10 @@ data class AiEvent(
         const val SCALPING = "scalping"
         const val PAPER = "paper"
         const val CHAT = "chat"
+        /** The on-phone live tuner ([LiveTuner]): no LLM, changes after every 4 trades of a strategy. */
+        const val LIVE = "live"
+        /** The Scalping AI was asked early (a new window, a fast move, a run of closed trades). */
+        const val KICK = "kick"
 
         const val CALL = "call"
         const val APPLIED = "applied"
