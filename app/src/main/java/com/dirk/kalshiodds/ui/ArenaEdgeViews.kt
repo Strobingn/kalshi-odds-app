@@ -111,7 +111,7 @@ internal fun CalibrationChart(bands: List<ArenaEdge.CalBand>, scope: String) {
                     val cx = x(b.avgPrice)
                     val top = (b.winRate + 2 * b.stdErr).coerceAtMost(1.0)
                     val bottom = (b.winRate - 2 * b.stdErr).coerceAtLeast(0.0)
-                    drawLine(c.copy(alpha = 0.55f), Offset(cx, y(top)), Offset(cx, y(bottom)), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
+                    drawLine(c.copy(alpha = 0.55f), Offset(cx, y(top)), Offset(cx, y(bottom)), strokeWidth = 1.25.dp.toPx(), cap = StrokeCap.Round)
                     val dash = 7.dp.toPx()
                     drawLine(colors.textSecondary, Offset(cx - dash, y(b.breakEven)), Offset(cx + dash, y(b.breakEven)), strokeWidth = 1.5.dp.toPx())
                     val r = (3.5 + 3.0 * minOf(b.trades, 60) / 60.0).dp.toPx()
@@ -199,7 +199,7 @@ internal fun ProjectionChart(fan: ArenaEdge.Fan?, scope: String) {
                     moveTo(x(0), y(0.0))
                     fan.steps.forEachIndexed { k, s -> lineTo(x(s), y(fan.p50[k])) }
                 }
-                drawPath(line, mid, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+                drawPath(line, mid, style = Stroke(width = 1.25.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
                 scrub?.let { k ->
                     val sx = x(fan.steps[k])
                     drawLine(colors.textSecondary, Offset(sx, 0f), Offset(sx, size.height), strokeWidth = 1.dp.toPx())
@@ -270,7 +270,7 @@ internal fun RollingEdgeChart(points: List<CurvePoint>, window: Int, scope: Stri
                     val a = points[k - 1]
                     val b = points[k]
                     val col = if ((a.pnlUsd + b.pnlUsd) / 2 >= 0) ac.gain else ac.loss
-                    drawLine(col, Offset(x(a.tMs), y(a.pnlUsd)), Offset(x(b.tMs), y(b.pnlUsd)), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
+                    drawLine(col, Offset(x(a.tMs), y(a.pnlUsd)), Offset(x(b.tMs), y(b.pnlUsd)), strokeWidth = 1.25.dp.toPx(), cap = StrokeCap.Round)
                 }
                 scrub?.let { k ->
                     val p = points[k]

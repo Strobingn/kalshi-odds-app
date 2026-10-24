@@ -43,7 +43,7 @@ fun OddsSparkline(
         val min = points.min()
         val max = points.max()
         val span = (max - min).coerceAtLeast(0.4f)
-        val stroke = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round)
+        val stroke = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round)
         fun yOf(v: Float) = size.height * (1f - ((v - min) / span).coerceIn(0f, 1f))
         val path = Path()
         val area = Path()

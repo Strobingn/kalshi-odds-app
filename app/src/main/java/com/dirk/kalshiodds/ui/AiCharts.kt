@@ -221,7 +221,7 @@ fun LineChart(values: List<Double>, height: Dp = 130.dp, format: (Double) -> Str
             }
             fill.lineTo(size.width, zero); fill.close()
             drawPath(fill, Brush.verticalGradient(listOf(color.copy(alpha = 0.35f), color.copy(alpha = 0.03f))))
-            drawPath(line, color, style = Stroke(width = 4f, cap = StrokeCap.Round))
+            drawPath(line, color, style = Stroke(width = 2.5f, cap = StrokeCap.Round))
             drawCircle(color, 6f, Offset(size.width, y(values.last())))
         }
         Text("low ${format(lo)}", fontSize = 10.sp, color = c.textSecondary)

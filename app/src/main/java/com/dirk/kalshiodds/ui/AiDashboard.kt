@@ -492,9 +492,9 @@ private fun GateChart(points: List<Triple<Double, Double, Double>>, win: Color, 
             }
             drawPath(path, color, style = androidx.compose.ui.graphics.drawscope.Stroke(width = width))
         }
-        line({ it.second }, conf, 2.dp.toPx())
-        line({ it.third }, pred, 1.5.dp.toPx())
-        line({ it.first }, win, 2.5.dp.toPx())
+        line({ it.second }, conf, 1.25.dp.toPx())
+        line({ it.third }, pred, 1.dp.toPx())
+        line({ it.first }, win, 1.5.dp.toPx())
     }
 }
 

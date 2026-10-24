@@ -66,7 +66,7 @@ fun CalibrationPlot(points: List<CalPoint>, format: (Double) -> String, height: 
             }
             val path = Path()
             points.forEachIndexed { i, p -> if (i == 0) path.moveTo(x(p.predicted), y(p.actual)) else path.lineTo(x(p.predicted), y(p.actual)) }
-            drawPath(path, c.accentBlue, style = Stroke(width = 3f, cap = StrokeCap.Round))
+            drawPath(path, c.accentBlue, style = Stroke(width = 2f, cap = StrokeCap.Round))
             for (p in points) {
                 val r = 5f + 9f * sqrt(p.n.toFloat() / most)
                 val col = if (p.actual >= p.predicted - (hi - lo) * 0.02) c.up else c.down

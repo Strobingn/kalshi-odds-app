@@ -115,7 +115,7 @@ internal fun Readout(value: String, label: String) {
 @Composable
 internal fun LineKey(color: Color) {
     Canvas(Modifier.size(width = 14.dp, height = 10.dp)) {
-        drawLine(color, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
+        drawLine(color, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), strokeWidth = 1.25.dp.toPx(), cap = StrokeCap.Round)
     }
 }
 
@@ -267,7 +267,7 @@ internal fun EquityRaceChart(curves: List<ArenaCharts.Curve>, selected: ScalpStr
                 }
                 val grey = curves.filter { it.strategy !in colorOf }
                 for (c in grey) drawCurve(c.points, ::x, ::y, ac.muted.copy(alpha = 0.55f), 1.dp.toPx())
-                for (c in hl) drawCurve(c.points, ::x, ::y, colorOf.getValue(c.strategy), 2.dp.toPx())
+                for (c in hl) drawCurve(c.points, ::x, ::y, colorOf.getValue(c.strategy), 1.25.dp.toPx())
                 for (c in hl) {
                     val p = c.points.last()
                     drawCircle(ac.surface, radius = 6.dp.toPx(), center = Offset(x(p.tMs), y(p.pnlUsd)))
@@ -370,7 +370,7 @@ internal fun ScrubLineChart(
                     close()
                 }
                 drawPath(wash, line.copy(alpha = 0.10f))
-                drawPath(path, line, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+                drawPath(path, line, style = Stroke(width = 1.25.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
                 val end = points.last()
                 drawCircle(ac.surface, radius = 6.dp.toPx(), center = Offset(x(end.tMs), y(end.pnlUsd)))
                 drawCircle(line, radius = 4.dp.toPx(), center = Offset(x(end.tMs), y(end.pnlUsd)))
@@ -591,7 +591,7 @@ internal fun FeeDragChart(rows: List<ArenaCharts.FeeDrag>) {
                 fun x(v: Double) = size.width * ((v - lo) / (hi - lo)).toFloat()
                 val cy = size.height / 2
                 drawLine(ac.baseline, Offset(x(0.0), 0f), Offset(x(0.0), size.height), strokeWidth = 1.dp.toPx())
-                drawLine(ac.muted, Offset(x(r.grossUsd), cy), Offset(x(r.netUsd), cy), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
+                drawLine(ac.muted, Offset(x(r.grossUsd), cy), Offset(x(r.netUsd), cy), strokeWidth = 1.25.dp.toPx(), cap = StrokeCap.Round)
                 drawCircle(ac.surface, radius = 6.dp.toPx(), center = Offset(x(r.grossUsd), cy))
                 drawCircle(ac.shadeLight, radius = 4.dp.toPx(), center = Offset(x(r.grossUsd), cy))
                 drawCircle(ac.surface, radius = 6.dp.toPx(), center = Offset(x(r.netUsd), cy))
@@ -625,7 +625,7 @@ internal fun Sparkline(curve: ArenaCharts.Curve?, modifier: Modifier = Modifier)
         fun x(t: Long) = 3.dp.toPx() + (size.width - 6.dp.toPx()) * ((t - t0).toFloat() / (t1 - t0).toFloat())
         fun y(v: Double) = 3.dp.toPx() + (size.height - 6.dp.toPx()) * (1f - ((v - lo) / span).toFloat())
         drawLine(ac.grid, Offset(0f, y(0.0)), Offset(size.width, y(0.0)), strokeWidth = 1.dp.toPx())
-        drawCurve(pts, ::x, ::y, ac.muted, 1.5.dp.toPx())
+        drawCurve(pts, ::x, ::y, ac.muted, 1.dp.toPx())
         val end = pts.last()
         drawCircle(if (end.pnlUsd >= 0) ac.gain else ac.loss, radius = 3.dp.toPx(), center = Offset(x(end.tMs), y(end.pnlUsd)))
     }

@@ -123,12 +123,12 @@ internal fun LiveWindowChart(window: LiveWindow?, markers: List<ArenaStats.Marke
                 }
                 val path = Path()
                 window.mids.forEachIndexed { i, (s, p) -> if (i == 0) path.moveTo(x(s.toDouble()), y(p)) else path.lineTo(x(s.toDouble()), y(p)) }
-                drawPath(path, ac.series[0], style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+                drawPath(path, ac.series[0], style = Stroke(width = 1.25.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
                 val downPath = Path()
                 window.mids.forEachIndexed { i, (s, p) ->
                     if (i == 0) downPath.moveTo(x(s.toDouble()), y(1.0 - p)) else downPath.lineTo(x(s.toDouble()), y(1.0 - p))
                 }
-                drawPath(downPath, ac.series[1], style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+                drawPath(downPath, ac.series[1], style = Stroke(width = 1.25.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
                 val dim = { m: ArenaStats.Marker -> selected != null && m.strategy != selected }
                 fun colorOf(m: ArenaStats.Marker): Color = when {
                     m.kind == ArenaStats.MarkerKind.OPEN -> ac.muted
@@ -214,7 +214,7 @@ internal fun DrawdownChart(points: List<CurvePoint>) {
             wash.lineTo(x(dd.last().tMs), 0f)
             wash.close()
             drawPath(wash, ac.loss.copy(alpha = 0.10f))
-            drawPath(line, ac.loss, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+            drawPath(line, ac.loss, style = Stroke(width = 1.25.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Muted(ScalperResults.timeLabel(t0))

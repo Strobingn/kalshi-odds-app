@@ -206,7 +206,7 @@ fun BidChart(
                     area.lineTo(firstX, size.height)
                     area.close()
                     drawPath(area, color.copy(alpha = 0.16f))
-                    drawPath(path, color, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
+                    drawPath(path, color, style = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round))
                 }
             }
             line({ it.upBidCents }, colors.up)
@@ -291,7 +291,7 @@ private fun SpotPathCanvas(
                 val y = yOf(px)
                 if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
             }
-            drawPath(path, colors.accentOrange, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
+            drawPath(path, colors.accentOrange, style = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round))
         }
         val endPx = lastSpot ?: series.lastOrNull()?.second
         val endT = series.lastOrNull()?.first ?: t1

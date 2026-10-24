@@ -105,7 +105,7 @@ fun RunningSeriesChart(
         area.lineTo(startX, baseY)
         area.close()
         drawPath(area, line.copy(alpha = 0.18f))
-        drawPath(linePath, line, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
+        drawPath(linePath, line, style = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round))
         drawCircle(line, 4.dp.toPx(), Offset(endX, yOf(last)))
     }
     if (showDelta) {

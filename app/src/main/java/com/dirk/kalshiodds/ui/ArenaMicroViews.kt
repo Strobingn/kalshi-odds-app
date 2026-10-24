@@ -143,7 +143,7 @@ internal fun LiveFollowerChart(micro: LiveMicro?) {
             fun yd(d: Double) = top / 2f - (d / dMax).toFloat() * (top / 2f)
             drawLine(ac.baseline, Offset(0f, yd(0.0)), Offset(w, yd(0.0)), strokeWidth = 1.dp.toPx())
             val xs = pts.map { it.s }
-            series(xs, pts.map { p -> if (p.spot != null && p.strike != null) p.spot - p.strike else null }, ::x, ::yd, mc.spot, 2.2.dp.toPx())
+            series(xs, pts.map { p -> if (p.spot != null && p.strike != null) p.spot - p.strike else null }, ::x, ::yd, mc.spot, 1.4.dp.toPx())
             // Bottom pane: the two bids and the fair chance of UP.
             val b0 = top + gap
             val bh = size.height - b0
@@ -154,9 +154,9 @@ internal fun LiveFollowerChart(micro: LiveMicro?) {
                 g += 0.1
             }
             for (m in 5..10 step 5) drawLine(ac.grid, Offset(x(m * 60), 0f), Offset(x(m * 60), size.height), strokeWidth = 1.dp.toPx())
-            series(xs, pts.map { it.yesBid }, ::x, ::yp, mc.up, 2.dp.toPx())
-            series(xs, pts.map { it.noBid }, ::x, ::yp, mc.down, 1.8.dp.toPx())
-            series(xs, pts.map { it.fair }, ::x, ::yp, mc.fair, 2.dp.toPx())
+            series(xs, pts.map { it.yesBid }, ::x, ::yp, mc.up, 1.25.dp.toPx())
+            series(xs, pts.map { it.noBid }, ::x, ::yp, mc.down, 1.2.dp.toPx())
+            series(xs, pts.map { it.fair }, ::x, ::yp, mc.fair, 1.25.dp.toPx())
         }
         Keys(listOf("BTC − strike" to mc.spot, "UP bid" to mc.up, "DOWN bid" to mc.down, "Fair UP (Student-t)" to mc.fair))
     }
@@ -200,10 +200,10 @@ internal fun MicroRibbonChart(micro: LiveMicro?) {
                 g += 0.05
             }
             val xs = pts.map { it.s }
-            series(xs, pts.map { it.yesMid }, ::x, ::y, mc.mid, 1.5.dp.toPx())
-            series(xs, pts.map { it.vwap }, ::x, ::y, mc.vwap, 1.8.dp.toPx())
-            series(xs, pts.map { it.micro }, ::x, ::y, mc.book, 1.8.dp.toPx())
-            series(xs, pts.map { it.fair }, ::x, ::y, mc.fair, 2.2.dp.toPx())
+            series(xs, pts.map { it.yesMid }, ::x, ::y, mc.mid, 1.dp.toPx())
+            series(xs, pts.map { it.vwap }, ::x, ::y, mc.vwap, 1.2.dp.toPx())
+            series(xs, pts.map { it.micro }, ::x, ::y, mc.book, 1.2.dp.toPx())
+            series(xs, pts.map { it.fair }, ::x, ::y, mc.fair, 1.4.dp.toPx())
         }
         Keys(listOf("UP mid" to mc.mid, "Fair (index)" to mc.fair, "Micro-price" to mc.book, "VWAP 30 s" to mc.vwap))
         Canvas(Modifier.fillMaxWidth().height(70.dp).testTag("CHART_OFI")) {
@@ -220,7 +220,7 @@ internal fun MicroRibbonChart(micro: LiveMicro?) {
                 val top = if (v >= 0) mid - v * mid else mid
                 drawRect(color, Offset(x(p.s) - barW / 2, top), androidx.compose.ui.geometry.Size(barW, abs(v) * mid))
             }
-            series(pts.map { it.s }, pts.map { it.obi5 }, ::x, { v -> mid - v.toFloat().coerceIn(-1f, 1f) * mid }, mc.fair, 1.8.dp.toPx())
+            series(pts.map { it.s }, pts.map { it.obi5 }, ::x, { v -> mid - v.toFloat().coerceIn(-1f, 1f) * mid }, mc.fair, 1.2.dp.toPx())
         }
         Keys(listOf("OBI5 (line, −1…+1)" to mc.fair, "OFI5 (bars, ±$OFI_SCALE books)" to mc.up))
     }
