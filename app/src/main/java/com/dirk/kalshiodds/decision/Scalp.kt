@@ -495,6 +495,7 @@ class ScalpBook(
     }
     private val lock = Any()
     private val hft = HftBook()
+    private val fleet = TwentyScalperFleet.FleetBook()
     private val gates = ScalpGateLog()
     /** Close time last seen on a quote. Wins over the ticker stamp when a test pins closeMs. */
     private val closeSeen = HashMap<String, Long>()
@@ -620,7 +621,7 @@ class ScalpBook(
         // 1.0.2: Dirk's manual sliders on original strategies (stop % below fill, take profit after fees, max hold).
         val overlay = settingsExits(mineAll, q); changed += overlay.values
         val mineCur = if (overlay.isEmpty()) mineAll else mineAll.map { overlay[it.id] ?: it }
-        mineCur.filter { isActive(it) && !ForecastScalp.isForecast(it) && !ScalpV2.isV2(it.variantId) && !Research.isResearch(it.variantId) && !ModelFilter.isTwin(it.variantId) && !HftMathEngines.isHft(it.variantId) }.forEach { t ->
+        mineCur.filter { isActive(it) && !ForecastScalp.isForecast(it) && !ScalpV2.isV2(it.variantId) && !Research.isResearch(it.variantId) && !ModelFilter.isTwin(it.variantId) && !HftMathEngines.isHft(it.variantId) && !TwentyScalperFleet.isFleet(it.variantId) }.forEach { t ->
             // 0.3.69 fix: sf rows have their own lane (entries + TP/stop/60 s exits). They used to also fall through here with
             // the generic primary params, whose profit-target / fair take-profit / turn-down exits fired first, so the sf
             // take-profit never decided (sf41≡sf42, sf43≡sf44). Here they now only get the adverse-selection marks.
@@ -709,6 +710,7 @@ class ScalpBook(
                 changed += hft.onQuote(q, bankrollUsd(), idFactory)
                 DosMmEngine.publish(hft.telemetry())
             }
+            changed += fleet.onQuote(q, bankrollUsd(), idFactory)
         }
         changed.forEach { save(it) }
         unlatchClosed(changed)
@@ -2018,6 +2020,7 @@ class ScalpBook(
     }
 
     fun settle(ticker: String, result: String, atMs: Long = System.currentTimeMillis()): List<ScalpTrade> = synchronized(lock) {
+        fleet.onSettled(ticker)
         val r = result.lowercase()
         val out = _all.value.filter {
             it.ticker.equals(ticker, true) && it.state != ScalpState.CLOSED && it.state != ScalpState.NO_FILL
@@ -2451,7 +2454,7 @@ class ScalpBook(
     private fun settingsExits(mine: List<ScalpTrade>, q: ScalpRule.Quote): Map<String, ScalpTrade> {
         val out = HashMap<String, ScalpTrade>()
         for (t in mine) {
-            if (t.state != ScalpState.OPEN || ScalpV2.isV2(t.variantId) || Research.isResearch(t.variantId) || ForecastScalp.isForecast(t) || HftMathEngines.isHft(t.variantId)) continue
+            if (t.state != ScalpState.OPEN || ScalpV2.isV2(t.variantId) || Research.isResearch(t.variantId) || ForecastScalp.isForecast(t) || HftMathEngines.isHft(t.variantId) || TwentyScalperFleet.isFleet(t.variantId)) continue
             val s = entryView(codeOf(t)) ?: continue
             val bid = q.bid(t.side)?.takeIf { it > 0 } ?: continue
             val entry = t.entryPrice ?: continue

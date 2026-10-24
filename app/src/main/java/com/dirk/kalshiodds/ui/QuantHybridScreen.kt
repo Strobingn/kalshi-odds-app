@@ -35,6 +35,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.decision.DosMmEngine
+import com.dirk.kalshiodds.decision.TwentyScalperFleet
 import com.dirk.kalshiodds.decision.HftMathEngines
 import com.dirk.kalshiodds.decision.LocalAnalyst
 import com.dirk.kalshiodds.decision.ModelFilter
@@ -349,6 +350,7 @@ internal fun QuantHybridScreen(
         }
 
         StopPolicyCard()
+        FleetCard()
         HftEnginesCard()
         LocalLlmCard(rev) { rev++ }
     }
@@ -411,6 +413,33 @@ private fun LocalLlmCard(rev: Int, bump: () -> Unit) {
             Text(if (eng.pauseDuringActiveEntry) "Pause local model during an entry" else "Local model may run during an entry")
         }
         Text("SHA-256 verifies an imported .litertlm. Until that file is on the phone, Groq and the quant analyst answer.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
+private fun FleetCard() {
+    val c = DipTheme.colors
+    val live by TwentyScalperFleet.latest.collectAsState()
+    ArenaCard(Modifier.testTag("FLEET_20")) {
+        Text("20-scalper paper fleet", color = c.textPrimary, fontWeight = FontWeight.SemiBold)
+        Text(
+            "Paper only. No live orders. Book age under ${TwentyScalperFleet.STALE_MS} ms. Net EV ≥ ${TwentyScalperFleet.THETA_MIN} after the quadratic fee and ladder slippage. Quarter-Kelly.",
+            color = c.textSecondary,
+            style = MaterialTheme.typography.bodySmall
+        )
+        TwentyScalperFleet.Category.entries.forEach { cat ->
+            val rows = TwentyScalperFleet.ALL.filter { it.category == cat }
+            Text(cat.name, color = c.spot, style = MaterialTheme.typography.labelMedium)
+            Text(
+                rows.joinToString(" · ") { row -> row.id + if (row.externalStub) " stub" else "" },
+                color = c.textPrimary,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.testTag("FLEET_${cat.name}")
+            )
+        }
+        val status = if (live.ticker.isBlank()) "waiting for a BTC, ETH, or SOL quote"
+        else "${live.ticker} · age ${live.bookAgeMs} ms · ${if (live.stale) "stale" else "fresh"} · opened ${live.admitted.size}"
+        Text(status, color = c.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("FLEET_STATUS"))
     }
 }
 
