@@ -96,6 +96,17 @@ class ScalpWindowChartTest {
         assertEquals(listOf(tk, "older"), choices.map { it.ticker })
     }
 
+    @Test fun settleCalloutsStayInsideThePlot() {
+        assertFalse(ScalpChartReadability.labelAbove(99.9))
+        assertEquals(16f, ScalpChartReadability.labelDyDp(99.9))
+        assertTrue(ScalpChartReadability.labelAbove(0.1))
+        assertEquals(-14f, ScalpChartReadability.labelDyDp(0.1))
+        assertTrue(ScalpChartReadability.labelAbove(50.0))
+        assertEquals(1.35f, com.dirk.kalshiodds.ui.charts.ChartStroke.SERIES_DP)
+        assertTrue(ScalpChartReadability.MARKER_DP > 5f)
+        assertTrue(ScalpChartReadability.END_DOT_DP > 3f)
+    }
+
     @Test fun bookPartialExitRecordsSurvivePersistenceAndRestart() {
         val store = InMemoryScalpPersistence().also { it.seed(listOf(trade().copy(state = ScalpState.PENDING_EXIT, exitDecidedAtMs = start + 80_000, exitReason = "trail"))) }
         val book = ScalpBook(store, variants = emptyList(), liveExtras = true)

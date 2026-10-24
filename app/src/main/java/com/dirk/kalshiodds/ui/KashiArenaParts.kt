@@ -304,13 +304,20 @@ internal fun ArenaBadge(text: String, tone: ArenaTone) {
 
 /** Round color keys under a chart. */
 @Composable
-internal fun ChartLegend(items: List<Pair<Color, String>>) {
+internal fun ChartLegend(items: List<Pair<Color, String>>, emphasis: Boolean = false) {
     val c = DipTheme.colors
     FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         items.forEach { (color, label) ->
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                Box(Modifier.size(9.dp).clip(CircleShape).background(color))
-                Text(label, color = c.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                val swatch = Modifier.size(if (emphasis) 12.dp else 9.dp).clip(CircleShape).background(color)
+                Box(if (emphasis) swatch.border(1.dp, c.textPrimary.copy(alpha = 0.55f), CircleShape) else swatch)
+                Text(
+                    label,
+                    color = if (emphasis) c.textPrimary else c.textSecondary,
+                    style = if (emphasis) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelSmall,
+                    fontWeight = if (emphasis) FontWeight.SemiBold else FontWeight.Normal,
+                    maxLines = 1
+                )
             }
         }
     }
