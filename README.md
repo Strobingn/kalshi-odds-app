@@ -30,7 +30,7 @@ your passphrase (PBKDF2-SHA256, 120,000 rounds). It is rewritten every 10 minute
 when something changed. After a reinstall: type the passphrase, Restore settings, pick the file; the app restarts.
 
 **Faster.** Kalshi REST polling is 400 ms ± 100 (was 750 ± 250), and 3 s while the WebSocket is live (was 15 s); the
-background service's refresh is 15 s (was 45 s); a new window is looked for every 1.5 s (was 2.5 s). The cards'
+background service's refresh is 15 s (was 45 s); a new window is looked for every 1.5 s (was 2.5 s, both the rollover and the market resolver). The cards'
 charts redraw up to every 150 ms (was 250), are built off the main thread with the archive reads cached, and have
 150 points (was 64). The Arena's live window and micro charts refresh 4 times a second (were once), its record twice
 a second, its trade list every 1.5 s and its trade charts every 4 s.

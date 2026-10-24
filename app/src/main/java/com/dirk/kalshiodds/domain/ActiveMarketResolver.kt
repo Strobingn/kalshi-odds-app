@@ -11,7 +11,7 @@ package com.dirk.kalshiodds.domain
  */
 object ActiveMarketResolver {
     const val GRACE_AFTER_CLOSE_MS = 0L
-    const val RETRY_MS = 2_500L
+    const val RETRY_MS = 1_500L
 
     fun forSeries(
         series: String,
