@@ -53,7 +53,7 @@ data class ProviderQuota(val id: String, val label: String, val model: String, v
 internal fun ModelFilterCard(onOpenQuant: () -> Unit = {}) {
     val c = DipTheme.colors
     val tel = ModelFilter.telemetry()
-    ArenaCard(Modifier.testTag("MODEL_FILTER")) {
+    ArenaCard(Modifier.testTag("MODEL_FILTER"), accent = c.accentBlue) {
         Text("Quant & Hybrid", color = c.textPrimary, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Text(
             "Live filter is on-device. Groq explains a trade only when you ask.",
@@ -121,8 +121,8 @@ internal fun QuantHybridScreen(
 
     Column(Modifier.fillMaxWidth().testTag("MODEL_FILTER"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         SectionLabel("Path 1 · Live on-device · under 2 ms · no LLM")
-        ArenaCard {
-            Text("Engine · S24 Ultra", color = c.textPrimary, fontWeight = FontWeight.SemiBold)
+        ArenaCard(accent = c.accentBlue) {
+            Text("Engine · S24 Ultra", color = c.textPrimary, fontWeight = FontWeight.Bold)
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Badge(modelBadge(tel.modelType), c.accentBlue, c.onAccentBlue)
                 Badge(execLabel(tel.execPath), c.surfaceAlt, c.textPrimary)
@@ -361,8 +361,18 @@ private fun StopPolicyCard() {
     val loss = ModelFilter.rawNetCents(0.50, 0.45)
     val wr = ModelFilter.breakEvenWinRate(win, loss) * 100.0
     val three = ModelFilter.rawNetCents(0.50, 0.53)
-    ArenaCard(Modifier.testTag("STOP_POLICY")) {
-        Text("Stop policy and fee break-even", color = c.textPrimary, fontWeight = FontWeight.SemiBold)
+    val maker = HftMathEngines.makerMaker()
+    val takerStop = HftMathEngines.makerInTakerStop()
+    val taker = HftMathEngines.takerTaker()
+    ArenaCard(Modifier.testTag("STOP_POLICY"), accent = c.spot) {
+        Text("Stop policy and fee break-even", color = c.textPrimary, fontWeight = FontWeight.Bold)
+        KpiGrid(
+            listOf(
+                Kpi("Maker / Maker", HftMathEngines.percentLabel(maker.pMin), c.up),
+                Kpi("Maker-in / Taker-stop", HftMathEngines.percentLabel(takerStop.pMin), c.spot),
+                Kpi("Taker / Taker", HftMathEngines.percentLabel(taker.pMin), c.down)
+            )
+        )
         Text("Policy ${ModelFilter.POLICY_VERSION}", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
         Text("Training target: net cents per contract = 100 × (sale − cost − entry fee − exit fee) / contracts. NO flips the directional features.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
         Text("At a 50¢ entry the 49¢/50¢ book is a 1¢ spread.", color = c.textPrimary, style = MaterialTheme.typography.bodySmall)
@@ -421,9 +431,29 @@ private fun HftEnginesCard() {
     val maker = HftMathEngines.makerMaker()
     val takerStop = HftMathEngines.makerInTakerStop()
     val taker = HftMathEngines.takerTaker()
-    ArenaCard(Modifier.testTag("HFT_ENGINES")) {
-        Text("5-Engine HFT Microstructure & Calculus Telemetry", color = c.textPrimary, fontWeight = FontWeight.SemiBold)
-        Text(if (live.ready) live.ticker.ifBlank { "live" } else "waiting for a BTC, ETH, or SOL quote", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+    val gatesPass = live.gates.isNotEmpty() && live.gates.all { it.pass }
+    ArenaCard(Modifier.testTag("HFT_ENGINES"), accent = c.accentBlue) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("8-engine HFT microstructure", color = c.textPrimary, fontWeight = FontWeight.Bold)
+                Text(if (live.ready) live.ticker.ifBlank { "live" } else "waiting for a BTC, ETH, or SOL quote", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+            }
+            when {
+                gatesPass -> ArenaBadge("${live.gates.size} gates PASS", ArenaTone.UP)
+                live.gates.any { !it.pass } -> ArenaBadge("gate fail", ArenaTone.DOWN)
+                else -> ArenaBadge("HFT", ArenaTone.HFT)
+            }
+        }
+        KpiGrid(
+            listOf(
+                Kpi("Student-t z", n4(live.z)),
+                Kpi("Fair", if (!live.fair.isFinite()) "—" else String.format(Locale.US, "%.1f%%", live.fair * 100.0), c.up),
+                Kpi("VAMP / r", "${n4(live.vamp)} / ${n4(live.reservation)}"),
+                Kpi("OFI5", n4(live.ofi5), if (live.ofi5 >= 0) c.up else c.down),
+                Kpi("CMDR", n4(live.cmdr)),
+                Kpi("zVWAP", n4(live.zVwap), c.spot)
+            )
+        )
         Text("Student-t ν=4.2", color = c.spot, style = MaterialTheme.typography.labelMedium)
         Text("z ${n4(live.z)} · fair ${n4(live.fair)} · Δ ${n4(live.delta)} · Γ ${n4(live.gamma)} · Θ ${n4(live.theta)} · σP ${n4(live.sigmaP)}", color = c.textPrimary, style = MaterialTheme.typography.bodySmall)
         Text("HJB DOS-MM", color = c.spot, style = MaterialTheme.typography.labelMedium)

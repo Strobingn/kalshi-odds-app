@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.domain.EtTime
 import com.dirk.kalshiodds.ui.charts.ChartBlock
+import com.dirk.kalshiodds.ui.charts.ChartStroke
 import com.dirk.kalshiodds.ui.charts.ChartEmptyState
 import com.dirk.kalshiodds.ui.charts.chartMoney
 import com.dirk.kalshiodds.ui.charts.chartSignTextColor
@@ -395,7 +396,7 @@ fun EtLineChart(
                 drawPath(
                     path, s.color,
                     style = Stroke(
-                        width = 2.5.dp.toPx(),
+                        width = ChartStroke.SERIES_DP.dp.toPx(),
                         cap = androidx.compose.ui.graphics.StrokeCap.Round,
                         pathEffect = if (s.dashed) PathEffect.dashPathEffect(floatArrayOf(10f, 8f)) else null
                     )

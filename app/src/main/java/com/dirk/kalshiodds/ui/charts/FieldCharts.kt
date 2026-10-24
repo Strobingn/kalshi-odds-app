@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -66,7 +67,7 @@ data class LineSeries(
     val name: String,
     val color: Color,
     val points: List<ChartShapes.Sample>,
-    val strokeDp: Float = 2.5f,
+    val strokeDp: Float = ChartStroke.SERIES_DP,
     val dashed: Boolean = false,
     val maxGapMs: Long? = null
 )
@@ -218,7 +219,7 @@ fun MultiLineChart(
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             drawn.forEach { s ->
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Box(Modifier.size(10.dp).background(s.color, RoundedCornerShape(2.dp)))
+                    Box(Modifier.size(9.dp).background(s.color, CircleShape))
                     Text(s.name, style = MaterialTheme.typography.labelSmall, color = c.textSecondary, maxLines = 1)
                 }
             }

@@ -38,6 +38,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import com.dirk.kalshiodds.ui.charts.ChartStroke
 import com.dirk.kalshiodds.ui.theme.DipTheme
 
 /**
@@ -173,7 +174,7 @@ fun BidChart(
                     }
                 }
                 if (started) {
-                    drawPath(path, color, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
+                    drawPath(path, color, style = Stroke(width = ChartStroke.SERIES_DP.dp.toPx(), cap = StrokeCap.Round))
                 }
             }
             line({ it.upBidCents }, colors.upButton)
@@ -258,7 +259,7 @@ private fun SpotPathCanvas(
                 val y = yOf(px)
                 if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
             }
-            drawPath(path, spotColor, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
+            drawPath(path, spotColor, style = Stroke(width = ChartStroke.SERIES_DP.dp.toPx(), cap = StrokeCap.Round))
         }
         val endPx = lastSpot ?: series.lastOrNull()?.second
         val endT = series.lastOrNull()?.first ?: t1
