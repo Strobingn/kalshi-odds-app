@@ -84,6 +84,16 @@ class AppContainer(context: Context) {
         resultsImpl as com.dirk.kalshiodds.data.local.archive.DataArchive
     val sessionId: String = java.util.UUID.randomUUID().toString()
     val dataPrefs = com.dirk.kalshiodds.data.prefs.DataPrefs(app)
+
+    /** Passphrase-encrypted copy of every setting and key in Downloads/ClaudeBitcoin, so a reinstall can restore them. */
+    val settingsBackup by lazy {
+        com.dirk.kalshiodds.data.backup.SettingsBackupManager(app, preferences, dataPrefs, extraSecrets, BuildConfig.VERSION_NAME)
+    }
+
+    /** Write the settings backup now if anything changed (off the main thread; no-op without a passphrase). */
+    fun backupSettingsSoon() {
+        supervisorScope.launch { runCatching { settingsBackup.auto() } }
+    }
     val importedModel = com.dirk.kalshiodds.prediction.ImportedModelStore(app)
     val resultsLog = RollingTextLog(File(app.filesDir, "results.log"))
     val resultsWriter = AsyncResultsWriter(resultsStore, resultsLog)
@@ -561,6 +571,7 @@ class AppContainer(context: Context) {
                     if (liveTuner.step().isNotEmpty()) llmSupervisor.noteExternalChange()
                 }
                 if (++tick % 15 == 0) runCatching { saveIndexHistory() }
+                if (tick % 600 == 30) runCatching { settingsBackup.auto() }
                 runCatching {
                     if (extraSecrets.supervisorEnabled && anyLlmKey) {
                         val now = System.currentTimeMillis()

@@ -47,6 +47,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 
 data class OddsUiState(
     val isLoading: Boolean = false,
@@ -250,7 +251,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                     if (sc !== _state.value.scalper || working != _state.value.scalperWorking) {
                         _state.update { it.copy(scalper = sc, scalperWorking = working) }
                     }
-                    delay(1_000L)
+                    delay(500L)
                 }
             }
         }
@@ -505,10 +506,10 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private suspend fun doRefresh(): MarketsSnapshot {
+    private suspend fun doRefresh(): MarketsSnapshot = withContext(Dispatchers.IO) {
         val s = _state.value.settings
         refreshExternal()
-        return repository.refresh(
+        repository.refresh(
             watchBtc = true,
             watchEth = false,
             watchSol = false,
@@ -1063,16 +1064,31 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         ticketSession.addManual(ticket)
     }
 
+    /**
+     * Live prices onto the cards and charts. The chart series are built off the main thread (1.20.7: they read the
+     * chart archive, which made every refresh wait on the database); a refresh that finds the snapshot replaced in
+     * the meantime is dropped, the next one comes within [SCORE_OVERLAY_THROTTLE_MS].
+     */
     private fun applyScoreOverlay(scores: Map<String, ScoringEngine.Score>) {
-        runCatching {
-            _state.update { s ->
-                val snap = s.snapshot ?: return@update s
-                s.copy(snapshot = attachHistory(snap.overlayScores(scores, s.settings.effectiveEdgeThresholdPp())))
+        viewModelScope.launch {
+            runCatching {
+                overlayMutex.withLock {
+                    val s0 = _state.value
+                    val snap = s0.snapshot ?: return@withLock
+                    val built = withContext(Dispatchers.Default) {
+                        attachHistory(snap.overlayScores(scores, s0.settings.effectiveEdgeThresholdPp()))
+                    }
+                    var applied = false
+                    _state.update { s -> if (s.snapshot === snap) { applied = true; s.copy(snapshot = built) } else s }
+                    if (applied) {
+                        scheduleRebuildTickets()
+                        refreshPositionMarks()
+                    }
+                }
             }
-            scheduleRebuildTickets()
-            refreshPositionMarks()
         }
     }
+    private val overlayMutex = kotlinx.coroutines.sync.Mutex()
 
     private fun scheduleRebuildTickets(immediate: Boolean = false) {
         ticketRebuildJob?.cancel()
@@ -1313,6 +1329,20 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** The last 8 settled windows of a series, read from the archive at most every 20 s (1.20.7). */
+    private val pastCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, List<Boolean>>>()
+
+    private fun pastSettled(series: String?): List<Boolean> {
+        val key = series ?: ""
+        val now = System.currentTimeMillis()
+        pastCache[key]?.let { (at, v) -> if (now - at in 0 until 20_000L) return v }
+        val v = runCatching {
+            container.archive.recentSettled(series, 8).map { it.result.equals("yes", true) }
+        }.getOrElse { emptyList() }
+        pastCache[key] = now to v
+        return v
+    }
+
     private fun attachHistory(snap: MarketsSnapshot): MarketsSnapshot {
         fun List<MarketUiModel>.withHist(): List<MarketUiModel> = map { raw ->
             val tick = runCatching { hub.scoring.book.lastTick(raw.ticker) }.getOrNull()
@@ -1345,10 +1375,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                     com.dirk.kalshiodds.chart.ChartDownsampler.CARD_POINTS
                 )
             }
-            val past = runCatching {
-                container.archive.recentSettled(com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(m.ticker), 8)
-                    .map { it.result.equals("yes", true) }
-            }.getOrElse { emptyList() }
+            val past = pastSettled(com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(m.ticker))
             val withOdds = if (merged.isEmpty() && m.oddsHistory.isEmpty()) m else m.copy(oddsHistory = merged.ifEmpty { m.oddsHistory })
             val withBids = if (bids.isEmpty() && withOdds.bidHistory.isEmpty()) withOdds else withOdds.copy(bidHistory = bids.ifEmpty { withOdds.bidHistory })
             if (past.isEmpty()) withBids else withBids.copy(pastSettlements = past)
@@ -1382,12 +1409,13 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
         const val RESTING_SELL_FIRST = "A limit sell is already resting on this window: cancel it first"
-        const val BASE_POLL_MS = 750L
-        const val JITTER_MS = 250L
-        const val MIN_POLL_MS = 500L
+        // 1.20.7: faster Kalshi REST polling (one markets call each; ~2.5 a second, far under Kalshi's read limit).
+        const val BASE_POLL_MS = 400L
+        const val JITTER_MS = 100L
+        const val MIN_POLL_MS = 300L
         const val INITIAL_BACKOFF_MS = 2_000L
         const val MAX_BACKOFF_MS = 60_000L
-        const val WS_METADATA_POLL_MS = 15_000L
-        const val SCORE_OVERLAY_THROTTLE_MS = 250L
+        const val WS_METADATA_POLL_MS = 3_000L
+        const val SCORE_OVERLAY_THROTTLE_MS = 150L
     }
 }

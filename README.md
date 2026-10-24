@@ -19,6 +19,22 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.20.7 (Claude branch): settings backup, faster polling and charts
+
+**Settings backup.** Upgrades already keep everything (same package, same signing key); only an uninstall wipes it.
+Data → Settings backup now keeps a copy of every setting outside the app: both DataStores (signal settings, data hub
+with the Supabase URL and key), the arena's preferences (knobs, engine, gate, paper record), the AI settings (minus
+the call log and chat), the on-phone LLM settings, and all keys (Kalshi live and demo, Groq, Cerebras, Gemini,
+Mistral, GitHub). The file is `Downloads/ClaudeBitcoin/claude-bitcoin-settings.dhset`, AES-256-GCM with a key from
+your passphrase (PBKDF2-SHA256, 120,000 rounds). It is rewritten every 10 minutes and when you leave the app, only
+when something changed. After a reinstall: type the passphrase, Restore settings, pick the file; the app restarts.
+
+**Faster.** Kalshi REST polling is 400 ms ± 100 (was 750 ± 250), and 3 s while the WebSocket is live (was 15 s); the
+background service's refresh is 15 s (was 45 s); a new window is looked for every 1.5 s (was 2.5 s). The cards'
+charts redraw up to every 150 ms (was 250), are built off the main thread with the archive reads cached, and have
+150 points (was 64). The Arena's live window and micro charts refresh 4 times a second (were once), its record twice
+a second, its trade list every 1.5 s and its trade charts every 4 s.
+
 ## 1.20.6 (Claude branch): the NPU graph is quantized
 
 On the phone the NPU refused the model ("graph nodes assigned to the default CPU EP, but fallback to CPU EP has been

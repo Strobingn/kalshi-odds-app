@@ -82,6 +82,7 @@ class KalshiOddsApp : Application() {
                 LiveSignalsKeepAlive.markUiInForeground(false)
                 runCatching { container.spotStream.release(CoinbaseSpotStream.OWNER_UI) }
                 runCatching { container.endSession() }
+                runCatching { container.backupSettingsSoon() }
             }
         })
         appScope.launch {

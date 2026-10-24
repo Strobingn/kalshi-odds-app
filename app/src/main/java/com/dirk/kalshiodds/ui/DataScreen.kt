@@ -57,6 +57,10 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
     val restoreCreds = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? -> uri?.let(viewModel::restoreCredentials) }
+    val restoreSettings = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? -> uri?.let(viewModel::restoreSettings) }
+    val backup by viewModel.settingsBackup.collectAsStateWithLifecycle()
 
     Scaffold(
         containerColor = colors.bg,
@@ -99,6 +103,55 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
 
             Section("Market-data recordings")
             RecordingsExportSection(onExport = viewModel::exportRecordings)
+
+            Section("Settings backup")
+            Text(
+                "Keeps every setting, the arena (knobs, engine, record), the AI switches and all keys (Kalshi, Groq, Cerebras, " +
+                    "Gemini, Mistral, Supabase) in Downloads/ClaudeBitcoin, encrypted with your passphrase. It updates on its own " +
+                    "every 10 minutes and when you leave the app. After a reinstall: type the passphrase, tap Restore settings, pick the file.",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+            Text(
+                when {
+                    !backup.on -> "Off"
+                    backup.error != null -> "On · last try failed: ${backup.error}"
+                    backup.lastMs != null -> "On · saved ${java.text.SimpleDateFormat("MMM d HH:mm", java.util.Locale.US).format(java.util.Date(backup.lastMs!!))} to ${backup.where}"
+                    else -> "On · next save within 10 minutes"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (backup.on && backup.error == null) colors.textPrimary else colors.textSecondary
+            )
+            OutlinedTextField(
+                value = state.settingsPass,
+                onValueChange = viewModel::setSettingsPass,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Settings passphrase (6+ characters)") },
+                visualTransformation = PasswordVisualTransformation(),
+                singleLine = true
+            )
+            Button(
+                onClick = viewModel::turnOnSettingsBackup,
+                enabled = state.settingsPass.length >= 6,
+                modifier = Modifier.fillMaxWidth().height(52.dp)
+            ) { Text(if (backup.on) "Change passphrase and back up" else "Turn on settings backup") }
+            if (backup.on) {
+                OutlinedButton(
+                    onClick = viewModel::backupSettingsNow,
+                    modifier = Modifier.fillMaxWidth().height(52.dp)
+                ) { Text("Back up now") }
+            }
+            OutlinedButton(
+                onClick = { restoreSettings.launch(arrayOf("*/*")) },
+                enabled = state.settingsPass.length >= 6,
+                modifier = Modifier.fillMaxWidth().height(52.dp)
+            ) { Text("Restore settings") }
+            if (backup.on) {
+                OutlinedButton(
+                    onClick = viewModel::turnOffSettingsBackup,
+                    modifier = Modifier.fillMaxWidth().height(52.dp)
+                ) { Text("Turn off settings backup") }
+            }
 
             Section("Back up Kalshi credentials")
             Text(

@@ -83,6 +83,7 @@ private const val PAGE = 200
 
 /** Closed trades the charts read (newest first from the trade file). */
 private const val CHART_TRADES = 3_000
+private const val LIVE_REFRESH_MS = 250L
 
 /** Trades in the rolling-edge average. */
 private const val ROLLING_TRADES = 30
@@ -119,19 +120,19 @@ fun ScalperResultsRoute(onBack: (() -> Unit)?, onOpenSettings: () -> Unit = {}) 
         val s = store ?: return@produceState
         s.checks.state.collect { value = com.dirk.kalshiodds.signal.scalper.ContractChecks.lines(it) }
     }
-    // The record changes many times a second while scalps close: read it once a second.
+    // The record changes many times a second while scalps close: read it twice a second (1.20.7, was once).
     val state by produceState(store?.ledger?.snapshot()?.withoutRetired() ?: ScalperState.fresh(), store) {
         val s = store ?: return@produceState
         while (true) {
-            value = s.ledger.snapshot().withoutRetired()
-            delay(1_000L)
+            value = withContext(Dispatchers.Default) { s.ledger.snapshot().withoutRetired() }
+            delay(500L)
         }
     }
     val trades by produceState(emptyList<ScalpTrade>(), store, limit) {
         val s = store ?: return@produceState
         while (true) {
             value = withContext(Dispatchers.IO) { runCatching { s.log.recent(limit).withoutRetired() }.getOrDefault(value) }
-            delay(3_000L)
+            delay(1_500L)
         }
     }
     // The charts read a longer slice of the trade file, less often.
@@ -139,24 +140,24 @@ fun ScalperResultsRoute(onBack: (() -> Unit)?, onOpenSettings: () -> Unit = {}) 
         val s = store ?: return@produceState
         while (true) {
             value = withContext(Dispatchers.IO) { runCatching { s.log.recent(CHART_TRADES).withoutRetired() }.getOrDefault(value) }
-            delay(10_000L)
+            delay(4_000L)
         }
     }
-    // The live window and its open positions, once a second.
+    // The live window and its open positions, four times a second (1.20.7, was once), read off the main thread.
     val scalper = container?.scalper
     val live by produceState<LiveWindow?>(null, scalper) {
         val sc = scalper ?: return@produceState
         while (true) {
-            value = runCatching { sc.liveWindow() }.getOrNull()
-            delay(1_000L)
+            value = withContext(Dispatchers.Default) { runCatching { sc.liveWindow() }.getOrNull() }
+            delay(LIVE_REFRESH_MS)
         }
     }
-    // The live window's book and index, second by second (the follower and micro charts).
+    // The live window's book and index (the follower and micro charts), as often.
     val liveMicro by produceState<com.dirk.kalshiodds.signal.scalper.micro.LiveMicro?>(null, scalper) {
         val sc = scalper ?: return@produceState
         while (true) {
-            value = runCatching { sc.liveMicro() }.getOrNull()
-            delay(1_000L)
+            value = withContext(Dispatchers.Default) { runCatching { sc.liveMicro() }.getOrNull() }
+            delay(LIVE_REFRESH_MS)
         }
     }
     val saveZip = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri: Uri? ->

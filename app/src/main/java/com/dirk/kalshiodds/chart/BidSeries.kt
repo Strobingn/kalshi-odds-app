@@ -25,8 +25,9 @@ data class BidSeries(
  * so spikes survive. Never allocates more than [maxPoints] + a small scratch.
  */
 object ChartDownsampler {
-    const val CARD_POINTS = 64
-    const val DETAIL_POINTS = 180
+    // 1.20.7: finer cards (a 15-minute window in ~6 s steps instead of ~14 s).
+    const val CARD_POINTS = 150
+    const val DETAIL_POINTS = 300
     const val MAX_RAW_POINTS = 720
 
     fun downsample(points: List<BidPoint>, maxPoints: Int = CARD_POINTS): List<BidPoint> {

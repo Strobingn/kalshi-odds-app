@@ -9,7 +9,7 @@ object LiveSignalsPolicy {
     const val PREFS_NAME = "diphunter_keepalive"
     const val PREFS_ENABLED_KEY = "live_signals_enabled"
 
-    const val METADATA_INTERVAL_MS = 45_000L
+    const val METADATA_INTERVAL_MS = 15_000L
     const val WATCHDOG_PERIOD_MINUTES = 15L
     const val WATCHDOG_SOON_SECONDS = 25L
     const val WAKELOCK_TAG = "diphunter:live-signals"

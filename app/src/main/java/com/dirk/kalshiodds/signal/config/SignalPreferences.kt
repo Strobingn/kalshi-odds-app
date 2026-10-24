@@ -165,6 +165,18 @@ class SignalPreferences(
     /** Bumped when credentials change so [settings] re-emits. */
     private val secretRevision = MutableStateFlow(0)
 
+    /** Every stored setting (the settings backup); the Kalshi key is not in here, it is in the secret store. */
+    suspend fun exportAll(): Map<String, Any?> =
+        com.dirk.kalshiodds.data.backup.SettingsBackup.fromPreferences(app.signalDataStore.data.first())
+
+    /** Put back a settings backup: the stored settings become exactly [values]. */
+    suspend fun importAll(values: Map<String, Any>) {
+        app.signalDataStore.edit { p ->
+            p.clear()
+            com.dirk.kalshiodds.data.backup.SettingsBackup.intoPreferences(p, values)
+        }
+    }
+
     val settings: Flow<SignalSettings> = app.signalDataStore.data
         .catch { emit(emptyPreferences()) }
         .map { it.toSettings() }

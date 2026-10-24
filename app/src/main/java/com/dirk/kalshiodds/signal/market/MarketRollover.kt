@@ -256,7 +256,7 @@ class MarketRollover(
     }
 
     companion object {
-        const val POLL_MS = 2_500L
+        const val POLL_MS = 1_500L
         /** First 429 backoff when Retry-After is absent (18:00 ET measure). */
         const val BACKOFF_START_MS = 2_000L
         const val POLL_CAP_MS = 10_000L

@@ -19,6 +19,18 @@ class ChartWindowService(
 ) {
     private val backfilled = HashSet<String>()
 
+    /** The archived part of a card's window, read at most every [STORED_TTL_MS]; the live book covers the gap (1.20.7). */
+    private val storedCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, List<BidPoint>>>()
+
+    private fun storedFor(ticker: String, start: Long, end: Long, now: Long): List<BidPoint> {
+        val key = "$ticker|$start|$end"
+        storedCache[key]?.let { (at, pts) -> if (now - at in 0 until STORED_TTL_MS) return pts }
+        val pts = archive.chartTicks(ticker, start, end, ChartSeriesMerge.MAX_WINDOW_POINTS).map { it.toBidPoint() }
+        if (storedCache.size > 32) storedCache.clear()
+        storedCache[key] = now to pts
+        return pts
+    }
+
     fun persist(
         ticker: String,
         tMs: Long,
@@ -48,6 +60,7 @@ class ChartWindowService(
     }
 
     fun persistPoints(ticker: String, points: List<BidPoint>, source: String = ChartTickRow.SOURCE_LIVE) {
+        storedCache.keys.removeIf { it.startsWith("$ticker|") }
         if (!CryptoMarkets.isCryptoTicker(ticker) || points.isEmpty()) return
         archive.insertChartTicks(points.map { ChartTickRow.fromBidPoint(ticker, it, source) })
     }
@@ -71,8 +84,7 @@ class ChartWindowService(
     ): List<BidPoint> {
         val end = market.closeTimeEpochMs ?: nowMs
         val start = end - WINDOW_MS
-        val stored = archive.chartTicks(market.ticker, start, end, ChartSeriesMerge.MAX_WINDOW_POINTS)
-            .map { it.toBidPoint() }
+        val stored = storedFor(market.ticker, start, end, nowMs)
         val live = runCatching { book.bidHistory(market.ticker) }.getOrElse { emptyList() }
         val merged = ChartSeriesMerge.merge(stored, live)
         val headed = ChartSeriesMerge.withLiveHead(
@@ -129,6 +141,7 @@ class ChartWindowService(
     companion object {
         const val WINDOW_MS = 900_000L
         const val RETAIN_MS = 3_600_000L
+        const val STORED_TTL_MS = 2_000L
 
         fun alignSpots(points: List<BidPoint>, spots: List<Pair<Long, Double>>): List<BidPoint> {
             if (points.isEmpty()) {

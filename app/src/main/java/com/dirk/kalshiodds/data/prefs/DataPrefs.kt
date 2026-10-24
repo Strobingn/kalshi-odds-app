@@ -37,6 +37,17 @@ data class DataHubSettings(
 class DataPrefs(context: Context) {
     private val app = context.applicationContext
 
+    /** Every stored setting (Supabase URL and key, sync) for the settings backup. */
+    suspend fun exportAll(): Map<String, Any?> =
+        com.dirk.kalshiodds.data.backup.SettingsBackup.fromPreferences(app.dataHubStore.data.first())
+
+    suspend fun importAll(values: Map<String, Any>) {
+        app.dataHubStore.edit { p ->
+            p.clear()
+            com.dirk.kalshiodds.data.backup.SettingsBackup.intoPreferences(p, values)
+        }
+    }
+
     val settings: Flow<DataHubSettings> = app.dataHubStore.data
         .catch { emit(emptyPreferences()) }
         .map { it.toSettings() }

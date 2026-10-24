@@ -145,7 +145,7 @@ class LiveSignalsKeepAliveTest {
         assertEquals("diphunter_live_signals_quiet", LiveSignalsPolicy.CHANNEL_ONGOING)
         assertTrue("diphunter_live_signals_ongoing" in LiveSignalsPolicy.CHANNELS_RETIRED)
         assertFalse(LiveSignalsPolicy.CHANNEL_ONGOING in LiveSignalsPolicy.CHANNELS_RETIRED)
-        assertEquals(45_000L, LiveSignalsPolicy.METADATA_INTERVAL_MS)
+        assertEquals(15_000L, LiveSignalsPolicy.METADATA_INTERVAL_MS)
         assertEquals(15L, LiveSignalsPolicy.WATCHDOG_PERIOD_MINUTES)
         assertTrue(LiveSignalsPolicy.WATCHDOG_SOON_SECONDS in 5L..60L)
     }

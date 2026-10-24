@@ -37,6 +37,7 @@ data class DataUiState(
     val supabaseKeyDraft: String = "",
     val days: Int = 30,
     val credPassphrase: String = "",
+    val settingsPass: String = "",
     val githubTokenDraft: String = "",
     val groqKeyDraft: String = "",
     val mistralKeyDraft: String = "",
@@ -223,6 +224,65 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setCredPassphrase(v: String) = _state.update { it.copy(credPassphrase = v) }
+
+    /** Settings backup (1.20.7): every setting and key, encrypted with a passphrase, kept in Downloads/ClaudeBitcoin. */
+    val settingsBackup: StateFlow<com.dirk.kalshiodds.data.backup.SettingsBackupManager.Status> = container.settingsBackup.status
+
+    fun setSettingsPass(v: String) = _state.update { it.copy(settingsPass = v) }
+
+    fun turnOnSettingsBackup() {
+        val pass = _state.value.settingsPass
+        viewModelScope.launch {
+            val msg = withContext(Dispatchers.IO) {
+                runCatching { container.settingsBackup.enable(pass) }.fold(
+                    { st -> st.error?.let { "Backup failed: $it" } ?: "Settings backed up to ${st.where}" },
+                    { it.message ?: "Backup failed" }
+                )
+            }
+            _state.update { it.copy(message = msg, settingsPass = "") }
+        }
+    }
+
+    fun backupSettingsNow() {
+        viewModelScope.launch {
+            val st = withContext(Dispatchers.IO) { container.settingsBackup.backupNow() }
+            _state.update { it.copy(message = st.error?.let { e -> "Backup failed: $e" } ?: "Settings backed up to ${st.where}") }
+        }
+    }
+
+    fun turnOffSettingsBackup() {
+        container.settingsBackup.disable()
+        _state.update { it.copy(message = "Automatic settings backup off (the file in Downloads stays)") }
+    }
+
+    /** Restore every setting and key from [uri] with the passphrase typed above, then restart the app. */
+    fun restoreSettings(uri: Uri) {
+        val pass = _state.value.settingsPass
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val bytes = getApplication<Application>().contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                        ?: error("Could not read that file")
+                    container.settingsBackup.restore(bytes, pass)
+                }
+            }
+            result.fold(
+                { msg ->
+                    _state.update { it.copy(message = msg, settingsPass = "") }
+                    kotlinx.coroutines.delay(1_500L)
+                    container.settingsBackup.restartApp()
+                },
+                { e ->
+                    val msg = when (e) {
+                        is com.dirk.kalshiodds.data.backup.SettingsBackup.WrongPassphrase -> "Wrong passphrase for that backup"
+                        is com.dirk.kalshiodds.data.backup.SettingsBackup.BadFile -> "That is not a Claude Bitcoin settings backup"
+                        else -> "Restore failed: ${e.message ?: e.javaClass.simpleName}"
+                    }
+                    _state.update { it.copy(message = msg) }
+                }
+            )
+        }
+    }
 
     fun setGithubTokenDraft(v: String) = _state.update { it.copy(githubTokenDraft = v) }
 

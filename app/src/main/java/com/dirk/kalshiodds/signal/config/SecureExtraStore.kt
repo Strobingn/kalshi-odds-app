@@ -26,6 +26,13 @@ class SecureExtraStore(context: Context) {
             prefs.edit().putString(KEY_GITHUB, value.trim()).commit()
         }
 
+    /** The settings backup's passphrase (Data → Settings backup), kept encrypted like the keys; blank = backup off. */
+    var backupPassphrase: String
+        get() = prefs.getString(KEY_BACKUP_PASS, "").orEmpty()
+        set(value) {
+            prefs.edit().putString(KEY_BACKUP_PASS, value).commit()
+        }
+
     /** Groq / Mistral (and Gemini, Cerebras below) keys for the AIs (signal/scalper/LlmSupervisor.kt). Encrypted like the rest. */
     var groqApiKey: String
         get() = prefs.getString(KEY_GROQ, "").orEmpty()
@@ -104,6 +111,7 @@ class SecureExtraStore(context: Context) {
         private const val PREFS_NAME = "diphunter_extra_secrets"
         private const val FALLBACK_NAME = "diphunter_extra_secrets_fallback"
         private const val KEY_GITHUB = "github_token"
+        private const val KEY_BACKUP_PASS = "settings_backup_passphrase"
         private const val KEY_GROQ = "groq_api_key"
         private const val KEY_MISTRAL = "mistral_api_key"
         private const val KEY_GEMINI = "gemini_api_key"
