@@ -19,6 +19,13 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.20.9 (Claude branch): TimesFM reads the whole window
+
+TimesFM already ran every 10 s all window long, but each run read only the last 512 seconds of the index: the ONNX
+graph's context is fixed at 512 points, and they were one second apart. They are now 2 s apart, so each run reads
+1,024 s (the whole 15-minute window and the two minutes before it) and its 128 steps reach 256 s ahead instead of
+128 s. Scalper 20 reads the forecast step for "30 s before the close" in 2-second steps.
+
 ## 1.20.8 (Claude branch): the NPU can reach the DSP
 
 The NPU still failed with "graph nodes assigned to the default CPU EP" after the graph was quantized, because the QNN

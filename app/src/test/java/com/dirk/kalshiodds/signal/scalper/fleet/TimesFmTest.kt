@@ -63,4 +63,19 @@ class TimesFmTest {
             assertTrue("mean error ${err / 64}", err / 64 < 1.0)
         }
     }
+
+    @Test
+    fun steppedCoversTheWholeWindowAtTwoSeconds() {
+        val sec = DoubleArray(TimesFm.CONTEXT * TimesFm.STEP_S) { if (it % 7 == 3) Double.NaN else it.toDouble() }
+        val st = TimesFm.stepped(sec)
+        assertEquals(TimesFm.CONTEXT, st.size)
+        // Each step keeps its last second's value; 1,024 s in, so a 900 s window fits with room to spare.
+        assertEquals(1.0, st[0], 0.0)
+        assertEquals((sec.size - 1).toDouble(), st.last(), 0.0)
+        assertTrue(TimesFm.CONTEXT * TimesFm.STEP_S >= 900)
+        // A step whose seconds are both missing stays missing; one missing second falls back to the other.
+        val gap = TimesFm.stepped(doubleArrayOf(Double.NaN, Double.NaN, 5.0, Double.NaN))
+        assertTrue(gap[0].isNaN())
+        assertEquals(5.0, gap[1], 0.0)
+    }
 }

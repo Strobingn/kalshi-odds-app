@@ -248,14 +248,15 @@ class FleetHub(
         val f = forecaster ?: return
         if (!f.ready) { note("TimesFM", false, "model not downloaded (AI → On-phone models)"); return }
         val now = System.currentTimeMillis()
-        val series = cf.series("BTC", now, TimesFm.CONTEXT)
+        // The whole window: 512 points 2 s apart (1,024 s), not just the last 512 seconds.
+        val series = TimesFm.stepped(cf.series("BTC", now, TimesFm.CONTEXT * TimesFm.STEP_S))
         // The index history is saved across app starts (AppContainer), so this wait is only after a long gap.
-        val have = series.count { it.isFinite() }
+        val have = series.count { it.isFinite() } * TimesFm.STEP_S
         if (have < MIN_FORECAST_S) { note("TimesFM", false, "waiting for ${MIN_FORECAST_S / 60} minutes of index ($have s so far)"); return }
         val t0 = System.nanoTime()
         val q = f.forecast(series) ?: run { note("TimesFM", false, "forecast failed"); return }
         forecast = q to now
-        note("TimesFM", true, "${f.name} · ${(System.nanoTime() - t0) / 1_000_000} ms · on ${have} s of index · 60 s median ${"%.1f".format(q.getOrNull(59)?.get(4) ?: Double.NaN)}")
+        note("TimesFM", true, "${f.name} · ${(System.nanoTime() - t0) / 1_000_000} ms · on ${have} s of index (2 s steps) · 60 s median ${"%.1f".format(q.getOrNull(60 / TimesFm.STEP_S - 1)?.get(4) ?: Double.NaN)}")
     }
 
     /** The slow loop: market quality 0–100 from the numbers, or from the LLM when one is set up. */
@@ -392,7 +393,7 @@ class FleetHub(
     }
 
     companion object {
-        /** Seconds of index TimesFM needs before its first forecast (the rest of its 512-point context is padded). */
+        /** Seconds of index TimesFM needs before its first forecast (the rest of its 512-point, 1,024-second context is padded). */
         const val MIN_FORECAST_S = 120
         private const val PREFS = "fleet_hub"
         private const val KEY_LEGS = "off_book_legs"

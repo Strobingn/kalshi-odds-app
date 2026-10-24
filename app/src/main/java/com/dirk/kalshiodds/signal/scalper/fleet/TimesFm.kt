@@ -96,6 +96,23 @@ class TimesFm(
 
     companion object {
         const val CONTEXT = 512
+        /**
+         * Seconds between the points it is given (1.20.9): 512 points 2 s apart cover 1,024 s, the whole 15-minute
+         * window and the two minutes before it, and its 128 steps reach 256 s ahead. The graph's context is fixed at
+         * 512 points, so one-second points could only ever cover the last 512 s.
+         */
+        const val STEP_S = 2
+
+        /** [perSecond] (oldest first, NaN for a second with no value) as one point per [STEP_S] s: each step's last value. */
+        fun stepped(perSecond: DoubleArray, step: Int = STEP_S): DoubleArray {
+            val n = perSecond.size / step
+            val off = perSecond.size - n * step
+            return DoubleArray(n) { i ->
+                var v = Double.NaN
+                for (j in 0 until step) { val x = perSecond[off + i * step + j]; if (x.isFinite()) v = x }
+                v
+            }
+        }
         const val HORIZON = 128
         const val CHANNELS = 10
         const val URL = "https://huggingface.co/bakshinghampalace/timesfm-2.5-200m-onnx/resolve/main/onnx/model_quantized.onnx"

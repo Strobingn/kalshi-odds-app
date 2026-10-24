@@ -463,7 +463,7 @@ fun FleetCard(
             }, labelWidth = 150.dp)
         }
         Text("TimesFM 2.5 (scalper 20)", fontWeight = FontWeight.SemiBold, color = c.textPrimary)
-        Text("Google's time-series model, 8-bit, 249 MB, runs on this phone's CPU every 10 s on the last 512 seconds of the index.", fontSize = 11.sp, color = c.textSecondary)
+        Text("Google's time-series model, 8-bit, 249 MB, runs every 10 s all window long. Each run reads the last 17 minutes of the index (512 points, 2 s apart: the whole 15-minute window) and forecasts 4 minutes ahead.", fontSize = 11.sp, color = c.textSecondary)
         when {
             timesFm.installed -> Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("✓ Downloaded", Modifier.weight(1f), color = c.up, fontSize = 12.sp)

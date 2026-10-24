@@ -683,8 +683,11 @@ object Fleet {
         val spot = v.spot ?: return emptyList()
         // The settlement averages the last minute: aim at its middle, 30 s before the close.
         val ahead = (v.tte - 30.0 + (v.nowMs - madeAt) / 1000.0).coerceAtLeast(1.0)
-        val step = min(ahead.toInt(), q.size).coerceAtLeast(1)
-        val extra = if (ahead > q.size) (spot * sd) * (spot * sd) * (ahead - q.size) else 0.0
+        // One forecast step is TimesFm.STEP_S seconds.
+        val stepS = TimesFm.STEP_S.toDouble()
+        val reach = q.size * stepS
+        val step = min(kotlin.math.ceil(ahead / stepS).toInt(), q.size).coerceAtLeast(1)
+        val extra = if (ahead > reach) (spot * sd) * (spot * sd) * (ahead - reach) else 0.0
         val p = FleetMath.probAboveFromQuantiles(q[step - 1], k, extra) ?: return emptyList()
         val out = ArrayList<FleetOrder>()
         for ((side, pm) in listOf("YES" to p, "NO" to 1 - p)) {
