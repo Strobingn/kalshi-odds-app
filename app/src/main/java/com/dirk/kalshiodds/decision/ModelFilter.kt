@@ -15,10 +15,21 @@ object ModelFilter {
     const val FEATURES = 26
     /** Entry scoring cadence. Stops do not use this clock. */
     const val ENTRY_CADENCE_MS = 250L
-    const val POLICY_VERSION = "p1|ceil=0.55|stop=sellable-bid|minStop=parent|trail=parent|cutoff=90s|fee=quadratic-0.07|size=1.0x"
+    const val POLICY_VERSION = "p1|ceil=0.55|high=0.65|vol=quiet|ofi=scaled-nonpositive|stop=sellable-bid|minStop=parent|trail=parent|cutoff=90s|fee=quadratic-0.07|size=1.0x"
     const val MIN_TRAIN = 40
     const val EMBARGO_MS = 900_000L
     const val DEFAULT_THRESHOLD = 0.55
+    /** Score band that lost after fees. A 0.55→0.57 nudge still lets it through. */
+    const val HIGH_SCORE = 0.65
+    /** Matches the journal "quiet vol" bucket. At or above this, 1-minute vol is not quiet. */
+    const val QUIET_VOL = 1.0
+    /** Training weight for normal and hot volume. Quiet rows stay at 1. */
+    const val NONQUIET_WEIGHT = 0.25
+    /** Training weight for the losing high-score regime. Dropped, not nudged. */
+    const val HIGH_SCORE_WEIGHT = 0.0
+    const val VOL_FEATURE = 7
+    const val OFI_FEATURE = 21
+    const val OFI_DEPTH_FEATURE = 22
     const val DEFAULT_EXIT_S = 90.0
     const val PRIOR_BIAS = 0.15
     private const val TICK_KEEP_MS = 30 * 60_000L
@@ -342,6 +353,8 @@ object ModelFilter {
         val eNet = if (learned) expectedNet(qScore) else coldNet(qScore, fair, ask, spread)
         val lgbm = QuantSession.predictNet(x)
         val score = if (twin.arm == Arm.LGBM) lgbm else qScore
+        val vol1m = if (x.size > VOL_FEATURE) x[VOL_FEATURE] else 0.0
+        val quietVol = vol1m < QUIET_VOL
         val pin = q.tauS <= 30.0 && x.size > 20 && x[20] >= 1.0
         val kelly = if (sizeMode == SizeMode.KELLY) {
             val gain = if (winN > 0) winSum / winN else 0.0
@@ -362,12 +375,15 @@ object ModelFilter {
         } else {
             eNet > 0.0 || (learned && (qScore >= threshold || eNet >= 0.01) && fair >= ask + 0.015)
         }
-        val enter = gate && priceOk && !pin
+        val highScore = learned && qScore > HIGH_SCORE
+        val enter = gate && priceOk && !pin && regimeAllows(qScore, vol1m, learned)
         val modelVersion = if (twin.arm == Arm.LGBM) "lgbm-${TreeEnsemble.TRAIN_TREES}x${TreeEnsemble.TRAIN_DEPTH}" else "logistic-l2"
         val reason = when {
             !priceOk && ask + 1e-9 < floor -> "below the ${ScalpFloors.cents(twin.parentId)}¢ floor"
             !priceOk -> "ask above 55¢ ceiling"
             pin -> "pin risk · taker off"
+            !quietVol -> "quiet-volume only · 1m vol ${fmt(vol1m)}"
+            highScore -> "high-score regime · ${fmt(qScore)} > ${fmt(HIGH_SCORE)}"
             twin.arm == Arm.LGBM && !gate -> "lgbm net ${fmt(lgbm)} ≤ 0"
             twin.arm == Arm.LOGISTIC && !gate -> "expected net ${fmt(eNet)} ≤ 0"
             else -> "enter · ${twin.arm.name.lowercase()} · E[net] ${fmt(if (twin.arm == Arm.LGBM) lgbm else eNet)} · size ${fmt(scalar)}×"
@@ -469,7 +485,8 @@ object ModelFilter {
         x[0] = (tau / 900.0).coerceIn(0.0, 1.5)
         x[1] = (fair - 0.5) * 100.0
         x[2] = (fair - 0.5) * 4.0
-        x[7] = 2.0
+        // No measured 1-minute book on a reconstructed close. 0 is "not hot", not a normal-vol print.
+        x[7] = 0.0
         x[10] = entry
         x[11] = entry - 0.5
         x[13] = 0.01
@@ -520,7 +537,11 @@ object ModelFilter {
             val w = if (train.size >= MIN_TRAIN) fit(train) else null
             for (j in i until end) {
                 val s = sorted[j]
-                val entered = w?.let { sigmoid(it.second + dot(it.first, s.x)) > DEFAULT_THRESHOLD } ?: false
+                val entered = w?.let {
+                    val p = sigmoid(it.second + dot(it.first, s.x))
+                    val vol = s.x.getOrElse(VOL_FEATURE) { 0.0 }
+                    p > DEFAULT_THRESHOLD && regimeAllows(p, vol, learned = true)
+                } ?: false
                 used += s to entered
             }
             i = end
@@ -727,11 +748,15 @@ object ModelFilter {
         if (train.size < MIN_TRAIN || train.size - treeFitN < 25) return
         val xs = ArrayList<DoubleArray>(train.size)
         val ys = DoubleArray(train.size)
+        val sw = DoubleArray(train.size)
         for (i in train.indices) {
-            xs += train[i].x
-            ys[i] = netCentsPerContract(train[i].netUsd, train[i].contracts)
+            val sample = train[i]
+            xs += sample.x
+            ys[i] = netCentsPerContract(sample.netUsd, sample.contracts)
+            val score = sigmoid(bias + dot(weights, sample.x))
+            sw[i] = sampleWeight(sample.x.getOrElse(VOL_FEATURE) { 0.0 }, score)
         }
-        QuantSession.fitPayoff(xs, ys)
+        QuantSession.fitPayoff(xs, ys, sw)
         treeFitN = train.size
     }
 
@@ -761,18 +786,59 @@ object ModelFilter {
 
     private fun fit(rows: List<Sample>): Pair<DoubleArray, Double> {
         val w = DoubleArray(FEATURES)
+        val prior = priorWeights()
+        w[OFI_FEATURE] = prior[OFI_FEATURE]
+        w[OFI_DEPTH_FEATURE] = prior[OFI_DEPTH_FEATURE]
         var b = 0.0
         val lr = 0.05
         repeat(30) {
             for (s in rows) {
                 val p = sigmoid(b + dot(w, s.x))
                 val y = if (s.netUsd > 0.0) 1.0 else 0.0
-                val err = y - p
+                val vol = s.x.getOrElse(VOL_FEATURE) { 0.0 }
+                val err = (y - p) * sampleWeight(vol, p)
                 b += lr * err
-                for (i in 0 until FEATURES) w[i] = (w[i] + lr * err * s.x[i]).coerceIn(-4.0, 4.0)
+                for (i in 0 until FEATURES) {
+                    var next = w[i] + lr * err * s.x.getOrElse(i) { 0.0 }
+                    if (i == OFI_FEATURE || i == OFI_DEPTH_FEATURE) next = next.coerceAtMost(0.0)
+                    w[i] = next.coerceIn(-4.0, 4.0)
+                }
             }
         }
+        w[OFI_FEATURE] = w[OFI_FEATURE].coerceAtMost(0.0)
+        w[OFI_DEPTH_FEATURE] = w[OFI_DEPTH_FEATURE].coerceAtMost(0.0)
         return w to b
+    }
+
+    /**
+     * Quiet volume and, once the logistic is trained, modest confidence.
+     * Cold start still follows the fee residual: the prior score is not a calibrated confidence.
+     */
+    fun regimeAllows(qScore: Double, vol1m: Double, learned: Boolean): Boolean {
+        if (vol1m >= QUIET_VOL) return false
+        if (learned && qScore > HIGH_SCORE) return false
+        return true
+    }
+
+    /** Offline sample weight. High-score rows are dropped. Normal and hot volume are down-weighted. */
+    fun sampleWeight(vol1m: Double, score: Double): Double {
+        var weight = 1.0
+        if (vol1m >= QUIET_VOL) weight *= NONQUIET_WEIGHT
+        if (score > HIGH_SCORE) weight *= HIGH_SCORE_WEIGHT
+        return weight
+    }
+
+    /** Test seam. Does not run from a quote. */
+    fun installWeightsForTest(next: DoubleArray, nextBias: Double, trained: Int) = synchronized(lock) {
+        val w = DoubleArray(FEATURES)
+        for (i in w.indices) w[i] = next.getOrElse(i) { 0.0 }
+        weights = w
+        bias = nextBias
+        trainedN = trained.coerceAtLeast(0)
+        if (trainedN >= MIN_TRAIN) {
+            if (winN <= 0) { winN = 1; winSum = 0.05 }
+            if (lossN <= 0) { lossN = 1; lossSum = 0.05 }
+        }
     }
 
     private fun featureArray(q: ScalpRule.Quote, side: String, fair: Double, ask: Double): DoubleArray {
@@ -828,8 +894,8 @@ object ModelFilter {
             val la = last.mid + last.spread / 2.0
             HftSignals.ofi(pb, prev.bidSz, pa, prev.askSz, lb, last.bidSz, la, last.askSz)
         } else 0.0
-        x[21] = flow
-        x[22] = HftSignals.ofiOverDepth(flow, q.yesBidSize ?: 0.0, q.yesAskSize ?: 0.0)
+        x[OFI_FEATURE] = HftSignals.ofiFeature(flow)
+        x[OFI_DEPTH_FEATURE] = HftSignals.ofiOverDepth(flow, q.yesBidSize ?: 0.0, q.yesAskSize ?: 0.0)
         val window = row.filter { q.nowMs - it.atMs in 0..60_000L }
         x[23] = HftSignals.vwapZ(window.map { it.mid }, window.map { (it.bidSz + it.askSz).coerceAtLeast(1.0) })
         x[24] = HftSignals.crossCorr()
@@ -893,7 +959,9 @@ object ModelFilter {
         w[16] = 0.25
         w[19] = 0.60
         w[20] = -2.0
-        w[22] = 0.25
+        // Losers carried the higher raw OFI. Scaled flow can only pull the score down.
+        w[OFI_FEATURE] = -0.35
+        w[OFI_DEPTH_FEATURE] = -0.10
         w[23] = 0.15
         return w
     }

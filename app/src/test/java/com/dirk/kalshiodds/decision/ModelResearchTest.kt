@@ -49,7 +49,9 @@ class ModelResearchTest {
             log("h$i", score = 0.80, features = DoubleArray(ModelFilter.FEATURES), outcome = -0.30)
         }
         val page = ResearchCompanion.journalOf(rows, 0.55)
-        assertTrue(page.suggestions.joinToString(), page.suggestions.any { it.contains("Raise the threshold") && it.contains("0.57") })
+        val text = page.suggestions.joinToString()
+        assertTrue(text, text.contains("0.65") && text.contains("Drop"))
+        assertFalse(text, text.contains("Raise the threshold"))
     }
 
     @Test fun journalSuggestsShrinkingTheFeatureLosersCarry() {

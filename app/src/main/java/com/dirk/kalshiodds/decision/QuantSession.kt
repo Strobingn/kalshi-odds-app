@@ -115,8 +115,8 @@ object QuantSession {
         forest.predict(x)
     }
 
-    fun fitPayoff(xs: List<DoubleArray>, ys: DoubleArray) = synchronized(lock) {
-        val fit = TreeEnsemble.fit(xs, ys, regression = true)
+    fun fitPayoff(xs: List<DoubleArray>, ys: DoubleArray, sampleWeight: DoubleArray? = null) = synchronized(lock) {
+        val fit = TreeEnsemble.fit(xs, ys, regression = true, sampleWeight = sampleWeight)
         if (fit.treeCount > 0) lgbm = fit
     }
 

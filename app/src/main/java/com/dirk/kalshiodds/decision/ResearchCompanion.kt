@@ -100,7 +100,7 @@ object ResearchCompanion {
     fun retrain(nowMs: Long): String = ModelFilter.retrainOffline(nowMs)
 
     fun volRegime(vol1m: Double): String = when {
-        vol1m < 1.0 -> "quiet vol"
+        vol1m < ModelFilter.QUIET_VOL -> "quiet vol"
         vol1m < 5.0 -> "normal vol"
         else -> "hot vol"
     }
@@ -128,8 +128,8 @@ object ResearchCompanion {
         val out = ArrayList<String>(3)
         val high = regimes.firstOrNull { it.group == "Score" && it.name == "score > 0.65" }
         if (high != null && high.n >= 4 && high.netUsd < 0.0) {
-            val next = (threshold + 0.02).coerceAtMost(0.80)
-            out += "Raise the threshold from ${fmt(threshold)} to ${fmt(next)}. High scores lost ${money(high.netUsd)} over ${high.n} closes."
+            val nudged = (threshold + 0.02).coerceAtMost(0.80)
+            out += "Drop scores above ${fmt(ModelFilter.HIGH_SCORE)}. Nudging the gate from ${fmt(threshold)} to ${fmt(nudged)} leaves that losing regime in. High scores lost ${money(high.netUsd)} over ${high.n} closes."
         }
         val quiet = regimes.firstOrNull { it.name == "quiet vol" }
         val hot = regimes.firstOrNull { it.name == "hot vol" }
@@ -153,7 +153,10 @@ object ResearchCompanion {
                 }
             }
             if (worstName.isNotEmpty()) {
-                out += "Shrink the $worstName weight. Losers carried a higher $worstName (${fmt(worstGap)} above winners)."
+                val scale = if (worstName == "ofi" || worstName == "ofiOverDepth") {
+                    " OFI is scaled into (-1, 1) and its weight cannot go positive, so a raw contract gap cannot reward the side that lost."
+                } else ""
+                out += "Shrink the $worstName weight. Losers carried a higher $worstName (${fmt(worstGap)} above winners).$scale"
             }
         }
         if (out.isEmpty()) out += "No tweak stands out yet. Retrain offline after more closes, or leave the threshold at ${fmt(threshold)}."
