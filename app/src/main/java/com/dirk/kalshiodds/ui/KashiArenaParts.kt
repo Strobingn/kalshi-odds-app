@@ -10,11 +10,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -38,6 +36,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.dirk.kalshiodds.ui.theme.ArenaChromeColors
 import com.dirk.kalshiodds.ui.theme.DipTheme
 import java.util.Locale
 
@@ -47,19 +46,14 @@ import java.util.Locale
  * so FieldOps reds and greens are unchanged. Light mode keeps the palette.
  */
 internal object ArenaChrome {
-    private val bgDark = Color(0xFF0B0F17)
-    private val surfaceDark = Color(0xFF131A26)
-    private val surfaceAltDark = Color(0xFF1B2434)
-    private val borderDark = Color(0xFF263248)
-
     @Composable
     private fun dark(): Boolean = DipTheme.colors.bg.luminance() < 0.5f
 
-    @Composable fun page(): Color = if (dark()) bgDark else DipTheme.colors.bg
-    @Composable fun surface(): Color = if (dark()) surfaceDark else DipTheme.colors.surface
-    @Composable fun surfaceAlt(): Color = if (dark()) surfaceAltDark else DipTheme.colors.surfaceAlt
-    @Composable fun border(): Color = if (dark()) borderDark else DipTheme.colors.border
-    @Composable fun well(): Color = if (dark()) bgDark else DipTheme.colors.bg
+    @Composable fun page(): Color = if (dark()) ArenaChromeColors.BgDark else DipTheme.colors.bg
+    @Composable fun surface(): Color = if (dark()) ArenaChromeColors.SurfaceDark else DipTheme.colors.surface
+    @Composable fun surfaceAlt(): Color = if (dark()) ArenaChromeColors.SurfaceAltDark else DipTheme.colors.surfaceAlt
+    @Composable fun border(): Color = if (dark()) ArenaChromeColors.BorderDark else DipTheme.colors.border
+    @Composable fun well(): Color = if (dark()) ArenaChromeColors.BgDark else DipTheme.colors.bg
 }
 
 /**
@@ -90,19 +84,30 @@ internal fun ArenaCard(
     content: @Composable () -> Unit
 ) {
     val shape = ArenaUi.CARD_SHAPE
-    Row(
+    // Box + fillMaxHeight avoids parent intrinsic measure (breaks Paparazzi on SubcomposeLayout).
+    Box(
         modifier
             .fillMaxWidth()
             .clip(shape)
             .background(ArenaChrome.surface())
             .border(1.dp, ArenaChrome.border(), shape)
-            .height(IntrinsicSize.Min)
     ) {
-        if (accent != null) Box(Modifier.width(4.dp).fillMaxHeight().background(accent))
         Column(
-            Modifier.weight(1f).padding(ArenaUi.CARD_PAD),
+            Modifier
+                .fillMaxWidth()
+                .padding(start = if (accent != null) 4.dp else 0.dp)
+                .padding(ArenaUi.CARD_PAD),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) { content() }
+        if (accent != null) {
+            Box(
+                Modifier
+                    .align(Alignment.CenterStart)
+                    .fillMaxHeight()
+                    .width(4.dp)
+                    .background(accent)
+            )
+        }
     }
 }
 
