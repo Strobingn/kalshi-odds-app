@@ -173,6 +173,12 @@ object LlmProviders {
     /** Lower rank is tried first after the provider Dirk selected. Paid ids sort last and are then dropped. */
     fun freeFallbackRank(id: String): Int = FREE_IDS.indexOf(id).let { if (it < 0) FREE_IDS.size + 1 else it }
 
+    /**
+     * Cloud slots need a saved key. The on-device model is keyless: a blank key is not "missing",
+     * and it is not a hop in the Groq → Mistral → Gemini chain.
+     */
+    fun requiresApiKey(id: String): Boolean = id != BUILTIN
+
     /** Short name for the key field. The spec label keeps the "(free)" marker. */
     fun shortLabel(id: String): String = when (id) {
         MISTRAL -> "Mistral"

@@ -323,6 +323,25 @@ class AiWindowWatchTest {
         assertTrue(chat.messages.value.any { it.role == ChatMessage.AI })
     }
 
+    @Test fun builtinFollowsAgainInsideTheCloudPaceAndDoesNotAskForAKey() {
+        provider = LlmProviders.BUILTIN
+        var calls = 0
+        val seen = ArrayList<String>()
+        val store = AiWatchStore()
+        val w = watcher(MemoryScalpControls(), store) { ep, _ ->
+            calls++
+            seen += ep.provider
+            reply("""{"adjustments":[]}""")
+        }
+        w.tick()
+        nowMs += 1_000
+        snap = snap.copy(fingerprint = "fp-again")
+        w.tick()
+        assertEquals(2, calls)
+        assertEquals(listOf(LlmProviders.BUILTIN, LlmProviders.BUILTIN), seen)
+        assertFalse(store.notice.value.contains("API key"))
+    }
+
     @Test fun promptIsSideNeutralAndQuietMarketsShareAFingerprint() {
         assertTrue(AiWatchPrompt.SYSTEM.contains("side-neutral"))
         assertTrue(AiWatchPrompt.SYSTEM.contains("Do not prefer UP"))

@@ -73,6 +73,7 @@ fun AiChatScreen(viewModel: OddsViewModel) {
         if (pendingAsk != null && chat != null && !busy) com.dirk.kalshiodds.decision.insights.AskAiWhy.take()?.let(onSend)
     }
     val endpoint = settings?.chatEndpoint()
+    val showApiKey = settings?.providerId?.let { com.dirk.kalshiodds.llm.LlmProviders.requiresApiKey(it) } ?: true
     val live = container?.aiWatch?.live?.collectAsStateWithLifecycle()?.value
     val liveOn = container?.aiWatch?.config?.collectAsStateWithLifecycle()?.value?.liveFeed ?: true
     val watch = container?.aiWatch
@@ -81,7 +82,7 @@ fun AiChatScreen(viewModel: OddsViewModel) {
         companionQuotas({ store.callsFor(it, "", now) }, { store.dailyCap(it, "") })
     }
     AiChatContent(
-        messages = messages, busy = busy, strategyStatus = status, hasKey = ready, providerLabel = providerLabel,
+        messages = messages, busy = busy, strategyStatus = status, hasKey = ready, showApiKey = showApiKey, providerLabel = providerLabel,
         initialKey = endpoint?.apiKey.orEmpty(), initialModel = endpoint?.model.orEmpty(), initialBase = endpoint?.baseUrl.orEmpty(),
         onSaveKey = { k, m, b -> settings?.saveSlot(settings.providerId, k, m, b) },
         onSend = onSend,
@@ -97,6 +98,7 @@ fun AiChatScreen(viewModel: OddsViewModel) {
 @Composable
 fun AiChatContent(
     messages: List<ChatMessage>, busy: Boolean, strategyStatus: String, hasKey: Boolean,
+    showApiKey: Boolean = true,
     initialKey: String = "", initialModel: String = "", initialBase: String = "",
     providerLabel: String = "",
     onSaveKey: (String, String, String) -> Unit = { _, _, _ -> }, onSend: (String) -> Unit = {},
@@ -157,7 +159,7 @@ fun AiChatContent(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
             if (live != null) AiLiveFeedCard(live, liveOn, onLiveFeed)
         }
-        if (showKey) KeyFields(initialKey, initialModel, initialBase, providerLabel) { k, m, b -> onSaveKey(k, m, b); showKey = false }
+        if (showKey) KeyFields(initialKey, initialModel, initialBase, providerLabel, showApiKey) { k, m, b -> onSaveKey(k, m, b); showKey = false }
 
         LazyColumn(state = list, modifier = Modifier.weight(1f).fillMaxWidth().testTag("AI_MESSAGES"),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -274,12 +276,14 @@ private fun LiveMiniChart(live: com.dirk.kalshiodds.llm.AiLiveSnapshot) {
 private fun fmtPx(v: Double?) = v?.takeIf { it.isFinite() }?.let { String.format(Locale.US, "$%,.2f", it) } ?: "—"
 
 @Composable
-private fun KeyFields(k0: String, m0: String, b0: String, providerLabel: String = "", onSave: (String, String, String) -> Unit) {
+private fun KeyFields(k0: String, m0: String, b0: String, providerLabel: String = "", showApiKey: Boolean = true, onSave: (String, String, String) -> Unit) {
     var key by remember { mutableStateOf(k0) }; var model by remember { mutableStateOf(m0) }; var base by remember { mutableStateOf(b0) }
     val c = DipTheme.colors
     Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         if (providerLabel.isNotBlank()) Text("Chat and window watcher: $providerLabel. Change provider in Settings.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
-        OutlinedTextField(key, { key = it }, label = { Text("LLM API key (stored encrypted on this phone)") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
+        if (showApiKey) {
+            OutlinedTextField(key, { key = it }, label = { Text("LLM API key (stored encrypted on this phone)") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth().testTag("AI_CHAT_KEY_FIELD"))
+        }
         OutlinedTextField(model, { model = it }, label = { Text("Model") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(base, { base = it }, label = { Text("API base URL (OpenAI-compatible)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         TextButton(onClick = { onSave(key, model, base) }) { Text("Save key settings") }

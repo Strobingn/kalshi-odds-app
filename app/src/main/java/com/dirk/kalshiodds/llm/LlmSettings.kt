@@ -10,11 +10,8 @@ import androidx.security.crypto.MasterKeys
  * stored only in EncryptedSharedPreferences (never committed, never synced). OpenAI-compatible endpoint;
  * defaults to Groq (llama-3.1-8b-instant). xAI stays available as a paid slot. The LLM never reaches any real-order path.
  */
-class LlmSettings(context: Context) {
-    private val prefs: SharedPreferences? = runCatching {
-        EncryptedSharedPreferences.create("scalper_llm", MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC), context.applicationContext,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV, EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM)
-    }.getOrNull()
+class LlmSettings internal constructor(private val prefs: SharedPreferences?) {
+    constructor(context: Context) : this(openEncrypted(context))
 
     init { migrateGroqDefault() }
 
@@ -100,6 +97,16 @@ class LlmSettings(context: Context) {
     }
 
     companion object {
+        private fun openEncrypted(context: Context): SharedPreferences? = runCatching {
+            EncryptedSharedPreferences.create(
+                "scalper_llm",
+                MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC),
+                context.applicationContext,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+        }.getOrNull()
+
         const val KEY_MIGRATED_GROQ_1035 = "migrated_groq_default_1035"
         const val DEFAULT_PROVIDER = LlmProviders.GROQ
         const val DEFAULT_BASE = "https://api.groq.com/openai/v1"
