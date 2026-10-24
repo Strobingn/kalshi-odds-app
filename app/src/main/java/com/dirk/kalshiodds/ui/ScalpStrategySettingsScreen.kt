@@ -116,14 +116,14 @@ internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: Sc
                         StrategyKnob("Stop loss", settings.stopCents ?: if (controls.manual) controls.stopCents else ((spec.stop ?: ScalpV2.stopFor(spec.base)) * 100).roundToInt(), 1..99, "KNOB_STOP", { "$it¢" }) { set(settings.copy(stopCents = it)) }
                     }
                     StrategyKnob("Trailing stop", settings.trailCents ?: if (controls.peakTrailEnabled) controls.peakTrailCents else if (controls.manual) controls.trailCents else (spec.trail * 100).roundToInt(), 1..20, "KNOB_TRAIL", { "$it¢" }) { set(settings.copy(trailCents = it)) }
-                    StrategyKnob("Open at once, per side", settings.maxOpenPerSide, 1..20, "KNOB_MAXOPEN") { set(settings.copy(maxOpenPerSide = it)) }
+                    StrategyKnob("Open at once, per side", settings.maxOpenPerSide, 0..20, "KNOB_MAXOPEN", { if (it == 0) "unlimited" else "$it" }) { set(settings.copy(maxOpenPerSide = it)) }
                     StrategyKnob("Lowest price it buys", low, floor..high, "KNOB_MIN", { "$it¢" }) { set(settings.copy(minEntryCents = it.coerceAtLeast(floor))) }
                     StrategyKnob("Highest price it buys", high, low..priceHi, "KNOB_MAX", { "$it¢" }) { set(settings.copy(maxEntryCents = it)) }
                     StrategyKnob("Entry checks every", settings.cadenceSeconds, 0..30, "KNOB_CADENCE", { if (it == 0) "Live" else "$it s" }) { set(settings.copy(cadenceSeconds = it)) }
                     StrategyKnob("Take profit after fees", settings.takeProfitCents ?: if (controls.manual) controls.takeProfitCents else 0, 0..99, "KNOB_TARGET", { if (it == 0) "Off" else "$it¢ / ct" }) { set(settings.copy(takeProfitCents = it)) }
                     StrategyKnob("Maximum hold", settings.maxHoldSeconds ?: controls.maxHoldSeconds, 0..3600, "KNOB_HOLD", { if (it == 0) "No timer" else "$it s" }) { set(settings.copy(maxHoldSeconds = it)) }
                     Text("Applies only to this V2 strategy. Overrides take priority over global and learned defaults; a chosen price floor also keeps the inherited ceiling from falling below it. Filled positions keep their saved stops. Entry checks never slow protective exits.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
-                    Text("55¢ buy ceiling · stop loss always active · total trade count stays unlimited unless you set a global limit. Until minute limits new entries; the final-minute exit policy still applies. Open-position limits do not create extra entry signals.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+                    Text("55¢ buy ceiling · stop loss always active · contracts and re-entries per 15-minute window stay unlimited unless you set a limit. Each new entry still needs a fresh trigger. Until minute limits new entries; the final-minute exit policy still applies. Open-at-once is unlimited at 0 and does not create extra entry signals.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
                 }
                 else -> {
                     StrategyKnob("Until minute", settings.untilMinute, 1..14, "KNOB_UNTIL", { "minute $it" }) { set(settings.copy(untilMinute = it)) }

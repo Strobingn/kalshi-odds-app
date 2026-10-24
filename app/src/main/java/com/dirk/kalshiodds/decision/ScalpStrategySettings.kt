@@ -8,7 +8,7 @@ data class ScalpStrategySettings(
     val contracts: Int? = null, val minEntryCents: Int = 1, val maxEntryCents: Int? = null,
     val stopLossPercent: Int? = null, val trailCents: Int? = null, val stopCents: Int? = null,
     val takeProfitCents: Int? = null, val maxHoldSeconds: Int? = null,
-    val untilMinute: Int = 14, val cadenceSeconds: Int = 0, val maxOpenPerSide: Int = 1,
+    val untilMinute: Int = 14, val cadenceSeconds: Int = 0, val maxOpenPerSide: Int = 0,
     /** Research strategies: edge needed after fees (¢/contract). */
     val edgeCents: Int? = null,
     /** "AI learns": the strategy gently moves its own slider from its own paper results. Manual changes reset the baseline. */
@@ -22,7 +22,7 @@ data class ScalpStrategySettings(
             maxEntryCents = high, stopLossPercent = stopLossPercent?.coerceIn(1, 99), trailCents = trailCents?.coerceIn(1, 20),
             stopCents = stopCents?.coerceIn(1, 99), takeProfitCents = takeProfitCents?.coerceIn(0, 99),
             maxHoldSeconds = maxHoldSeconds?.coerceIn(0, 3600), untilMinute = untilMinute.coerceIn(1, 14),
-            cadenceSeconds = cadenceSeconds.coerceIn(0, 30), maxOpenPerSide = maxOpenPerSide.coerceIn(1, 20))
+            cadenceSeconds = cadenceSeconds.coerceIn(0, 30), maxOpenPerSide = maxOpenPerSide.coerceIn(0, 20))
     }
     fun plan(base: ScalpV2.Plan): ScalpV2.Plan = base.copy(spec = base.spec.copy(
         // A user-specified floor outranks an inherited learned ceiling; never buy below that floor.

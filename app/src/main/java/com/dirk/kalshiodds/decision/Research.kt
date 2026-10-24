@@ -64,13 +64,13 @@ object Research {
     data class Params(
         val edgeCents: Double = 2.0, val lateMinS: Int = 180, val lateMaxS: Int = 300,
         val lateLoCents: Int = 80, val lateHiCents: Int = 95, val makerEdgeCents: Double = 3.0,
-        val kellyFraction: Double = 0.25, val windowCapUsd: Double = 100.0, val clip: Int = 10,
+        val kellyFraction: Double = 0.25, val windowCapUsd: Double = 0.0, val clip: Int = 10,
         val kellyBankrollUsd: Double = 1000.0
     ) {
         fun normalized() = copy(edgeCents = edgeCents.coerceIn(0.0, 20.0), lateMinS = lateMinS.coerceIn(30, 600),
             lateMaxS = lateMaxS.coerceIn(lateMinS.coerceIn(30, 600), 900), lateLoCents = lateLoCents.coerceIn(50, 98),
             lateHiCents = lateHiCents.coerceIn(lateLoCents.coerceIn(50, 98), 99), makerEdgeCents = makerEdgeCents.coerceIn(0.0, 20.0),
-            kellyFraction = kellyFraction.coerceIn(0.0, 1.0), windowCapUsd = windowCapUsd.coerceIn(1.0, 100_000.0), clip = clip.coerceIn(1, 500), kellyBankrollUsd = kellyBankrollUsd.coerceIn(10.0, 1_000_000.0))
+            kellyFraction = kellyFraction.coerceIn(0.0, 1.0), windowCapUsd = windowCapUsd.coerceIn(0.0, 100_000.0), clip = clip.coerceIn(1, 500), kellyBankrollUsd = kellyBankrollUsd.coerceIn(10.0, 1_000_000.0))
     }
 
     /** Kalshi taker fee for [n] contracts at [p]: ceil(0.07·C·P·(1−P)) cents. */

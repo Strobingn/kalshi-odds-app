@@ -80,7 +80,7 @@ object ScalpModels {
         V2_FORECAST_RIDE("v2-fcride", "v2 · Forecast ride", V2_BLURB),
         /** Kalshi Scalper: the one LLM paper strategy (needs an API key in Settings). Same hard rules, enforced in code. */
         /** Kalshi Scalper 1.0.2 Research strategies: exempt from the 3¢ trail / window-start / >95% rules. BTC, paper only. */
-        R_LATE("r-late", "Research · Late favourite settle", "Last 3–5 min, buys 80–95¢ when BRTI settlement-aware fair beats price by 10–21¢ after the taker fee; holds to settlement; one side per window. A price slider replaces the band. Size is unchanged. Paper only."),
+        R_LATE("r-late", "Research · Late favourite settle", "Last 3–5 min, buys 80–95¢ when BRTI settlement-aware fair beats price by 10–21¢ after the taker fee; holds to settlement. Contracts and re-entries per 15-minute window are unlimited unless you set a limit; each entry still needs a fresh trigger. A price slider replaces the band. Size is unchanged. Paper only."),
         R_HOLD("r-hold", "Research · Fair-value hold", "Buys whenever fair value beats price after entry fee and expected exit fee by the edge; sells only if bid beats fair + exit fee or fair falls below entry − fee; else holds to settlement."),
         R_MAKER("r-maker", "Research · Passive maker entry", "Rests a paper bid at fair − edge; fills only when the market trades through; logs 5 s / 30 s drift after the fill; holds to settlement."),
         R_KELLY("r-kelly", "Research · Kelly-sized fair value", "Same entry gate and exits as Fair-value hold; size = quarter-Kelly (p − c)/(1 − c) of a reference bankroll, capped per window."),
@@ -155,8 +155,8 @@ object ScalpModels {
         // 1.0.14: tweaked paper copies of the two money makers (own ids, own cards).
         FAIR_T1("fair-t1", "Fair-gap tweak 1 · gap 12¢ · TP +10¢", "Fair-gap entries at gap ≥ 12¢ after fee (original 14¢), take profit +10¢ (original +12¢), stop 8¢, turn-down 15¢, from 5 min left. Paper only."),
         FAIR_T2("fair-t2", "Fair-gap tweak 2 · gap 16¢ · TP +14¢", "Fair-gap entries at gap ≥ 16¢ after fee (original 14¢), take profit +14¢ (original +12¢), stop 8¢, turn-down 15¢, from 5 min left. Paper only."),
-        R_LATE_T1("r-late-t1", "Research · Late favourite tight", "r-late copy, tighter: 3–4 min left, 26–42¢, BRTI fair beats price by 12–21¢ after the taker fee; holds to settlement; one side per window. Paper only."),
-        R_LATE_T2("r-late-t2", "Research · Late favourite loose", "r-late copy: 3–6 min left, 22–42¢, BRTI fair beats price by 10–23¢ after the taker fee; holds to settlement; one side per window. Paper only."),
+        R_LATE_T1("r-late-t1", "Research · Late favourite tight", "r-late copy, tighter: 3–4 min left, 26–42¢, BRTI fair beats price by 12–21¢ after the taker fee; holds to settlement. Re-entries per 15-minute window are unlimited unless you set a limit; each entry still needs a fresh trigger. Paper only."),
+        R_LATE_T2("r-late-t2", "Research · Late favourite loose", "r-late copy: 3–6 min left, 22–42¢, BRTI fair beats price by 10–23¢ after the taker fee; holds to settlement. Re-entries per 15-minute window are unlimited unless you set a limit; each entry still needs a fresh trigger. Paper only."),
         /** 10-21 ranking: recorded variant ids that are not an older model code. Only these twelve run. */
         G14("g14-t12-s08-d15-w300", "Fair-gap", "Fair-gap gap ≥ 14¢, target +12¢, stop 8¢, turn-down 15¢, from 5 min left. Paper only."),
         SF16F("sf16f", "sf16 Late fav base", ShockFav.v("sf16").summary()),
@@ -631,6 +631,8 @@ object ForecastScalp {
     const val EXIT_BEFORE_CLOSE_S = 30.0
     const val TAKE_PROFIT = 0.90
     const val HARD_FLIP = -0.03
+    /** Early reversal must be a real turn. A forecast still near zero is not an exit. */
+    const val REVERSAL_DEADBAND_USD = 0.01
     const val ENTRY_LIMIT_TTL_MS = 2_000L
     const val SAFETY = 0.005
     /** 0.3.61 per-bet stop (¢ below entry at the bid). Not studied in bt61 → widest level. */
@@ -646,7 +648,16 @@ object ForecastScalp {
         else -> null
     }
 
-    /** Entry: band, spread, edge > spread + entry fee + exit fee (1-ct rounded) + 0.5¢. */
+    /**
+     * Round-trip hurdle in dollars: spread plus the 1-contract entry fee and the 1-contract exit fee.
+     * [wantsEntry] adds [marginUsd] on top. This is not the 0.5¢ static safety margin by itself.
+     */
+    fun minEntryEdgeUsd(spread: Double, ask: Double): Double {
+        val px = ask.coerceIn(0.01, 0.99)
+        val fee = ScalpRule.orderFee(1, px)
+        return spread.coerceAtLeast(0.0) + fee + fee
+    }
+
     /** 0.3.54: predicted move must beat the full round trip (spread + entry fee + exit fee) by [marginUsd]. */
     /** Default band for [code]. Fade is 40–49¢. Ride stays 40–60¢. A price slider replaces either edge. */
     fun entryBand(code: String, s: ScalpStrategySettings?): Pair<Double, Double> {
@@ -658,14 +669,14 @@ object ForecastScalp {
 
     fun wantsEntry(mid: Double, spread: Double, ask: Double, move: Double, tauS: Double, marginUsd: Double = SAFETY, bandLo: Double = BAND_LO, bandHi: Double = BAND_HI): Boolean =
         ScalpRule.buyPriceOk(ask) && mid in bandLo..bandHi && spread <= MAX_SPREAD + 1e-9 && tauS >= MIN_TAU_ENTRY_S &&
-            move > spread + 2 * ScalpRule.orderFee(1, ask) + marginUsd
+            move > minEntryEdgeUsd(spread, ask) + marginUsd.coerceAtLeast(0.0)
 
-    /** Exit when the forecast for the held side turns (below one exit fee), flips hard, TP, horizon reached, or close. */
+    /** Exit when the forecast for the held side turns through the deadband, flips hard, TP, horizon reached, or close. */
     /** [sideForecast] NaN = no fresh forecast: forecast-based exits are skipped (hold until fresh data). */
     fun wantsExit(sideForecast: Double, bid: Double, heldS: Double, horizonS: Int, tauS: Double): String? = when {
         bid >= TAKE_PROFIT - 1e-9 -> "take profit ≥ 90¢"
         !sideForecast.isNaN() && sideForecast < HARD_FLIP -> "forecast flipped hard"
-        !sideForecast.isNaN() && sideForecast < ScalpRule.orderFee(1, bid) -> "forecast turned (move < exit fee)"
+        !sideForecast.isNaN() && sideForecast <= -REVERSAL_DEADBAND_USD -> "forecast turned (move < exit fee)"
         !sideForecast.isNaN() && horizonS > 0 && heldS >= horizonS -> "horizon reached"
         tauS < EXIT_BEFORE_CLOSE_S -> "exit before close"
         else -> null
