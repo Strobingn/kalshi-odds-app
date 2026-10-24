@@ -29,4 +29,30 @@ class ScalpWindowScreenshotTest {
     @Test fun waitingWindow() { paparazzi.snapshot("scalp_live_strategy_waiting") {
         KalshiOddsTheme(darkTheme = true, colorStyle = ColorStyles.FIELDOPS) { ScalpAlgoContent(ScalpAlgoDetail(model = ScalpModels.Model.V2_SF41)) }
     } }
+
+    @Test fun settleExtremesKeepLastPricesReadable() {
+        val ticker = "KXBTC15M-26OCT241300-00"
+        val close = ScalpTicker.closeMs(ticker) ?: (1_700_000_000_000L + 900_000L)
+        val start = close - 900_000L
+        val points = (0..90).map { i ->
+            val up = 42f + (57.9f * i / 90f)
+            BidPoint(start + i * 10_000L, up, 100f - up)
+        }
+        val buy = ScalpTrade(
+            "up", ticker, "YES", ScalpState.OPEN, start + 120_000L, 0.48, 0.55,
+            contracts = 8, entryPrice = 0.48, entryAtMs = start + 130_000L,
+            ruleVersion = "v|v2-sf41|P"
+        )
+        val sell = ScalpFills.sell(buy.copy(id = "dn", side = "NO", signalAsk = 0.40, entryPrice = 0.40), start + 400_000L, 4, 1.2, 0.04)
+            .copy(state = ScalpState.CLOSED, closedAtMs = start + 400_000L, netUsd = -1.05)
+        val chart = ScalpWindowChartData(ticker, close, close, close, points, listOf(buy, sell))
+        paparazzi.snapshot("scalp_window_settle_extremes") {
+            KalshiOddsTheme(darkTheme = true, colorStyle = ColorStyles.FIELDOPS) {
+                ScalpWindowChart(
+                    ScalpAlgoDetail(model = ScalpModels.Model.V2_SF41, chart = chart, followLive = true),
+                    title = "Active window"
+                )
+            }
+        }
+    }
 }

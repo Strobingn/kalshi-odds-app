@@ -190,7 +190,15 @@ class TreeEnsemble private constructor(
          * On-device forest. [TRAIN_TREES] shallow trees, depth [TRAIN_DEPTH].
          * Rows are walked in order (no shuffle) so a retrain is repeatable.
          */
-        fun fit(xs: List<DoubleArray>, ys: DoubleArray, trees: Int = TRAIN_TREES, depth: Int = TRAIN_DEPTH, lr: Double = 0.15, regression: Boolean = false): TreeEnsemble {
+        fun fit(
+            xs: List<DoubleArray>,
+            ys: DoubleArray,
+            trees: Int = TRAIN_TREES,
+            depth: Int = TRAIN_DEPTH,
+            lr: Double = 0.15,
+            regression: Boolean = false,
+            sampleWeight: DoubleArray? = null
+        ): TreeEnsemble {
             require(trees in MIN_TREES..MAX_TREES) { "tree count $trees outside $MIN_TREES..$MAX_TREES" }
             require(depth in 1..MAX_DEPTH) { "depth $depth exceeds $MAX_DEPTH" }
             if (xs.size < 8 || ys.size != xs.size) return EMPTY
@@ -210,13 +218,18 @@ class TreeEnsemble private constructor(
                 val grad = DoubleArray(n)
                 val hess = DoubleArray(n)
                 for (r in 0 until n) {
-                    if (regression) {
-                        grad[r] = ys[rows[r]] - pred[r]
-                        hess[r] = 1.0
+                    val src = rows[r]
+                    val sw = sampleWeight?.getOrElse(src) { 1.0 } ?: 1.0
+                    if (sw <= 0.0) {
+                        grad[r] = 0.0
+                        hess[r] = 0.0
+                    } else if (regression) {
+                        grad[r] = (ys[src] - pred[r]) * sw
+                        hess[r] = sw
                     } else {
                         val p = 1.0 / (1.0 + exp(-pred[r].coerceIn(-20.0, 20.0)))
-                        grad[r] = ys[rows[r]] - p
-                        hess[r] = p * (1.0 - p)
+                        grad[r] = (ys[src] - p) * sw
+                        hess[r] = p * (1.0 - p) * sw
                     }
                 }
                 val treeSpecs = ArrayList<Spec>(8)

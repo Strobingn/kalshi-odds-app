@@ -78,6 +78,23 @@ object HftSignals {
         return (ofi / d).coerceIn(-5.0, 5.0)
     }
 
+    /**
+     * Contract-count unit for [ofiFeature]. Closed losers carried about 248 contracts
+     * more raw OFI than winners; that gap was entering the logit unscaled.
+     */
+    const val OFI_UNIT = 80.0
+
+    /**
+     * Bound a Cont increment to (-1, 1). Sign is kept. A 248-contract gap stays
+     * under 1, so it cannot saturate the logistic weight on one update.
+     */
+    fun ofiFeature(raw: Double): Double {
+        if (!raw.isFinite() || raw == 0.0) return 0.0
+        val mag = kotlin.math.abs(raw)
+        val scaled = mag / (OFI_UNIT + mag)
+        return if (raw > 0.0) scaled else -scaled
+    }
+
     /** Trailing VWAP change, in standard deviations of the same window. Above 2 is the momentum flag. */
     fun vwapZ(prices: List<Double>, sizes: List<Double>): Double {
         if (prices.size < 4 || prices.size != sizes.size) return 0.0

@@ -204,6 +204,92 @@ class ModelFilterTest {
         assertFalse(exit.contains("decide("))
     }
 
+    @Test fun ofiFeatureBoundsTheContractGapAndThePriorCannotRewardIt() {
+        assertEquals(0.0, HftSignals.ofiFeature(0.0), 0.0)
+        assertEquals(0.0, HftSignals.ofiFeature(Double.NaN), 0.0)
+        val gap = HftSignals.ofiFeature(248.0)
+        assertTrue("248 contracts scaled to $gap", gap in 0.5..0.99)
+        assertEquals(-gap, HftSignals.ofiFeature(-248.0), 1e-12)
+        assertTrue(kotlin.math.abs(HftSignals.ofiFeature(10_000.0)) < 1.0)
+        assertTrue(gap < 248.0 / 10.0)
+        val (w, _) = ModelFilter.weightCopy()
+        assertTrue(w[ModelFilter.OFI_FEATURE] < 0.0)
+        assertTrue(w[ModelFilter.OFI_DEPTH_FEATURE] <= 0.0)
+        assertEquals(-0.35, w[ModelFilter.OFI_FEATURE], 1e-9)
+    }
+
+    @Test fun liveOfiFeatureIsScaledBeforeTheLogit() {
+        val now = 1_700_000_000_000L
+        val first = quote(now, bid = 0.40, ask = 0.42).copy(yesBidSize = 10.0, yesAskSize = 10.0)
+        val second = quote(now + 1_000L, bid = 0.41, ask = 0.42).copy(yesBidSize = 258.0, yesAskSize = 10.0)
+        ModelFilter.observe(first)
+        ModelFilter.observe(second)
+        val raw = HftSignals.ofi(0.40, 10.0, 0.42, 10.0, 0.41, 258.0, 0.42, 10.0)
+        assertTrue(kotlin.math.abs(raw) > 200.0)
+        val x = ModelFilter.features(second, "YES", 0.50, 0.42)
+        val scaled = x[ModelFilter.OFI_FEATURE]
+        assertTrue("scaled $scaled from raw $raw", scaled in 0.5..0.99)
+        assertTrue(scaled < kotlin.math.abs(raw) / 10.0)
+    }
+
+    @Test fun sampleWeightDropsHighScoresAndDownWeightsHotVolume() {
+        assertEquals(1.0, ModelFilter.sampleWeight(0.2, 0.60), 0.0)
+        assertEquals(0.0, ModelFilter.sampleWeight(0.2, 0.80), 0.0)
+        assertEquals(ModelFilter.NONQUIET_WEIGHT, ModelFilter.sampleWeight(ModelFilter.QUIET_VOL, 0.50), 0.0)
+        assertEquals(0.0, ModelFilter.sampleWeight(3.0, 0.90), 0.0)
+        assertTrue(ModelFilter.regimeAllows(0.60, 0.2, learned = true))
+        assertFalse(ModelFilter.regimeAllows(0.80, 0.2, learned = true))
+        assertTrue(ModelFilter.regimeAllows(0.90, 0.0, learned = false))
+        assertFalse(ModelFilter.regimeAllows(0.50, 2.0, learned = false))
+    }
+
+    @Test fun learnedTwinsSkipHighScoresAndHotVolumeButKeepModestQuietEntries() {
+        val logistic = ModelFilter.TWINS.first { it.arm == ModelFilter.Arm.LOGISTIC }
+        val lgbm = ModelFilter.TWINS.first { it.arm == ModelFilter.Arm.LGBM }
+        val zeros = DoubleArray(ModelFilter.FEATURES)
+        ModelFilter.installWeightsForTest(zeros, kotlin.math.ln(0.80 / 0.20), ModelFilter.MIN_TRAIN)
+        val highLog = ModelFilter.decide(logistic, quote(), "YES", 0.20, 0.55)
+        val highTree = ModelFilter.decide(lgbm, quote(now = 1_700_000_000_500L), "YES", 0.20, 0.55)
+        assertFalse(highLog.enter)
+        assertTrue(highLog.reason, highLog.reason.contains("high-score"))
+        assertFalse(highTree.enter)
+        assertTrue(highTree.reason, highTree.reason.contains("high-score"))
+        ModelFilter.resetForTest()
+        ModelFilter.installWeightsForTest(zeros, kotlin.math.ln(0.60 / 0.40), ModelFilter.MIN_TRAIN)
+        val modest = ModelFilter.decide(logistic, quote(), "YES", 0.20, 0.55)
+        val modestTree = ModelFilter.decide(lgbm, quote(now = 1_700_000_000_500L), "YES", 0.20, 0.55)
+        assertTrue(modest.reason, modest.enter)
+        assertTrue(modest.score in 0.55..ModelFilter.HIGH_SCORE)
+        assertTrue(modestTree.reason, modestTree.enter)
+        ModelFilter.resetForTest()
+        val now = 1_700_000_000_000L
+        repeat(8) { i ->
+            val spot = if (i % 2 == 0) 100_000.0 else 100_200.0
+            ModelFilter.observe(quote(now + i * 2_000L, spot = spot))
+        }
+        val hot = ModelFilter.decide(logistic, quote(now + 20_000L), "YES", 0.20, 0.55)
+        assertFalse(hot.enter)
+        assertTrue(hot.reason, hot.reason.contains("quiet-volume"))
+        val hotTree = ModelFilter.decide(lgbm, quote(now + 21_000L), "YES", 0.20, 0.55)
+        assertFalse(hotTree.enter)
+        assertTrue(hotTree.reason, hotTree.reason.contains("quiet-volume"))
+    }
+
+    @Test fun retrainCannotLearnAPositiveOfiWeight() {
+        val now = 1_700_000_000_000L
+        repeat(48) { i ->
+            val x = DoubleArray(ModelFilter.FEATURES)
+            val win = i % 2 == 0
+            x[ModelFilter.OFI_FEATURE] = if (win) 0.95 else 0.05
+            ModelFilter.onClosed("sf41-logistic", if (win) 0.40 else -0.30, 700.0, now + i * 1_000L, x)
+        }
+        ModelFilter.retrainOffline(now + 48_000L + ModelFilter.EMBARGO_MS + 10_000L)
+        val (w, _) = ModelFilter.weightCopy()
+        assertTrue("ofi ${w[ModelFilter.OFI_FEATURE]}", w[ModelFilter.OFI_FEATURE] <= 0.0)
+        assertTrue(w[ModelFilter.OFI_DEPTH_FEATURE] <= 0.0)
+        assertTrue(QuantSession.trainedTrees() in TreeEnsemble.MIN_TREES..TreeEnsemble.MAX_TREES)
+    }
+
     @Test fun lgbmGateIsPredictedNetPayoff() {
         val twin = ModelFilter.TWINS.first { it.arm == ModelFilter.Arm.LGBM }
         val d = ModelFilter.decide(twin, quote(), "YES", 0.20, 0.55)
