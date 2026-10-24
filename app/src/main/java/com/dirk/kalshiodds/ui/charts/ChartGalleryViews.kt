@@ -300,7 +300,7 @@ fun CumulativeDepthChart(series: List<ChartGallery.DepthSeries>, modifier: Modif
                     path,
                     color,
                     style = Stroke(
-                        width = 2.5.dp.toPx(),
+                        width = ChartStroke.SERIES_DP.dp.toPx(),
                         cap = StrokeCap.Round,
                         pathEffect = if (s.bid) null else PathEffect.dashPathEffect(floatArrayOf(10.dp.toPx(), 6.dp.toPx()))
                     )

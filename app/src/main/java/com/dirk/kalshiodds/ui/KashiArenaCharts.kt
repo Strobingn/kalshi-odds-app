@@ -15,6 +15,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.decision.ScalpModels
+import com.dirk.kalshiodds.ui.charts.ChartStroke
 import com.dirk.kalshiodds.ui.theme.ArenaColors
 import com.dirk.kalshiodds.ui.theme.DipTheme
 import kotlin.math.abs
@@ -46,7 +47,7 @@ internal fun ArenaProfitChart(points: List<KashiArenaData.Point>, compact: Boole
         drawLine(c.border, Offset(0f, y(0.0)), Offset(size.width, y(0.0)))
         val path = Path().apply { points.forEachIndexed { i, p -> if (i == 0) moveTo(x(p), y(p.net)) else lineTo(x(p), y(p.net)) } }
         val wash = Path().apply { moveTo(x(points.first()), y(0.0)); points.forEach { lineTo(x(it), y(it.net)) }; lineTo(x(points.last()), y(0.0)); close() }
-        drawPath(wash, color.copy(alpha = .10f)); drawPath(path, color, style = Stroke(2.dp.toPx()))
+        drawPath(wash, color.copy(alpha = .10f)); drawPath(path, color, style = Stroke(ChartStroke.SERIES_DP.dp.toPx()))
         val end = points[selected ?: points.lastIndex]
         if (selected != null) drawLine(c.textSecondary, Offset(x(end), 0f), Offset(x(end), size.height))
         drawCircle(color, 3.dp.toPx(), Offset(x(end), y(end.net)))
@@ -72,7 +73,7 @@ internal fun ArenaRaceChart(st: ScalpTabState, rows: List<ScalpModels.Row>) {
         drawLine(c.border, Offset(0f, y(0.0)), Offset(size.width, y(0.0)))
         curves.forEachIndexed { i, (_, points) ->
             val path = Path(); points.forEachIndexed { j, p -> val x = ((p.atMs - from).toDouble() / span * size.width).toFloat(); if (j == 0) path.moveTo(x, y(p.net)) else path.lineTo(x, y(p.net)) }
-            drawPath(path, colors[i], style = Stroke(2.dp.toPx()))
+            drawPath(path, colors[i], style = Stroke(ChartStroke.SERIES_DP.dp.toPx()))
         }
     }
     curves.forEachIndexed { i, (model, points) -> Text("● ${model.label} · ${ScalpTabCopy.money(points.last().net)}", color = colors[i], style = MaterialTheme.typography.labelSmall) }

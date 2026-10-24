@@ -18,6 +18,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.dirk.kalshiodds.KalshiOddsApp
 import com.dirk.kalshiodds.decision.*
 import com.dirk.kalshiodds.ui.charts.ChartGallery
 import com.dirk.kalshiodds.ui.charts.ChartSeries
@@ -58,14 +60,23 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
     // Ledger scan for the analysis charts. The LazyColumn builder is not a composable, so the
     // subscription lives here and starts only while the Analysis tab is selected.
     val chartHistory = if (tab == KashiArenaTab.ANALYSIS) rememberScalpChartHistory() else null
-    LazyColumn(Modifier.fillMaxSize().background(c.bg), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LazyColumn(Modifier.fillMaxSize().background(ArenaChrome.page()), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (aiPanel != null) item(key = "ai-watch") { AiWatchPanel(aiPanel, onAiFollows) }
         item(key = "arena-header") {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            val windowLive = st.arenaChart.ticker.isNotEmpty() && st.arenaChart.nowMs < st.arenaChart.closeMs
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Column(Modifier.weight(1f)) {
                     Text("Scalping arena", color = c.textPrimary, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                    Text("BITCOIN · PAPER", color = c.spot, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                    Text(
+                        "BITCOIN · PAPER ONLY",
+                        color = c.spot,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.4.sp
+                    )
                 }
+                ArenaBadge("PAPER", ArenaTone.SPOT)
+                ArenaBadge(if (windowLive) "LIVE" else "WINDOW", if (windowLive) ArenaTone.LIVE else ArenaTone.HFT)
                 IconButton(onClick = onSettings) { Icon(Icons.Outlined.Tune, "Scalping settings", tint = c.accentBlue) }
             }
         }
@@ -102,6 +113,7 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
         when (tab) {
             KashiArenaTab.OVERVIEW -> {
                 item(key = "hero") { ArenaSummary(rows, st.algoToday.values.filter { it.model in models }, active.size) }
+                item(key = "micro") { HftMicroRibbon() }
                 item(key = "model-filter") { ModelFilterCard(onOpenQuant = { tabName = KashiArenaTab.QUANT.name }) }
                 item(key = "curve") { ArenaCard {
                     Text("Running profit", color = c.textPrimary, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
@@ -120,7 +132,7 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
                     DailyNetBars(daily, Modifier.fillMaxWidth())
                 } }
                 item(key = "live") {
-                    ScalpWindowChart(ScalpAlgoDetail(chart = st.arenaChart.copy(trades = windowTrades)), title = "Live window", extras = extras) { id -> windowTrades.firstOrNull { it.id == id }?.let { ScalpModels.modelOf(it)?.let(onOpen) } }
+                    ScalpWindowChart(ScalpAlgoDetail(chart = st.arenaChart.copy(trades = windowTrades)), title = "AI live window", extras = extras) { id -> windowTrades.firstOrNull { it.id == id }?.let { ScalpModels.modelOf(it)?.let(onOpen) } }
                 }
                 item(key = "top-header") { ArenaSectionHeader("Top strategies", "See all") { tabName = KashiArenaTab.STRATEGIES.name } }
                 items(rows.filter { it.roundTrips > 0 }.sortedByDescending { it.netUsd }.take(5), key = { "top-${it.model.code}" }) { r -> ArenaStrategyRow(r, st) { onOpen(r.model) } }
@@ -224,7 +236,21 @@ internal fun ArenaSummary(rows: List<ScalpModels.Row>, today: Collection<ScalpMo
         "won ${ScalpTabCopy.money(rows.sumOf { it.grossWinUsd })} · lost ${ScalpTabCopy.money(rows.sumOf { it.grossLossUsd })} · fees $${String.format(java.util.Locale.US, "%.2f", rows.sumOf { it.feesUsd })}",
         listOf(Kpi("Trades", "$n"), Kpi("Win rate", ScalpTabCopy.pct(if (n > 0) wins.toDouble() / n else null)), Kpi("W / L", "$wins / ${rows.sumOf { it.losses }}"),
             Kpi("Today · ET", ScalpTabCopy.money(today.sumOf { it.netUsd }), pnlColor(today.sumOf { it.netUsd })),
-            Kpi("Open now", "$open"), Kpi("Open P&L", ScalpTabCopy.money(rows.sumOf { it.unrealizedUsd }), pnlColor(rows.sumOf { it.unrealizedUsd }))))
+            Kpi("Open now", "$open"), Kpi("Open P&L", ScalpTabCopy.money(rows.sumOf { it.unrealizedUsd }), pnlColor(rows.sumOf { it.unrealizedUsd }))),
+        trailing = { PaperCashBadge() })
+}
+
+/** Paper book cash only. Absent when the app container is not up. */
+@Composable
+private fun PaperCashBadge() {
+    val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as? KalshiOddsApp ?: return
+    val book = remember(app) { runCatching { app.container.paper.book }.getOrNull() } ?: return
+    val paper by book.state.collectAsState()
+    ArenaBadge(
+        "Paper cash " + String.format(java.util.Locale.US, "$%,.2f", paper.cashUsd) +
+            " · Open " + String.format(java.util.Locale.US, "$%,.2f", paper.openStakeUsd),
+        ArenaTone.UP
+    )
 }
 
 @Composable
@@ -235,7 +261,13 @@ internal fun ArenaStrategyRow(row: ScalpModels.Row, st: ScalpTabState, onOpen: (
     ArenaCard(modifier = Modifier.clickable(onClick = onOpen), accent = if (row.roundTrips > 0) pnlColor(row.netUsd) else c.border) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(row.model.label, color = c.textPrimary, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(row.model.label, color = c.textPrimary, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                    when {
+                        row.model in ScalpModels.HFT -> ArenaBadge("HFT", ArenaTone.HFT)
+                        !ScalpModels.isResearch(row.model) -> ArenaBadge("WIN", ArenaTone.WIN)
+                    }
+                }
                 if (ScalpModels.isResearch(row.model)) Text("RESEARCH", color = c.spot, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                 Text("${row.roundTrips} trades · ${ScalpTabCopy.pct(row.winRate)} won · ${row.open} open", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
                 if (row.roundTrips > 0) Text("Gross ${ScalpTabCopy.money(row.netUsd + row.feesUsd)} · fees ${ScalpTabCopy.money(-row.feesUsd)} · net ${ScalpTabCopy.money(row.netUsd)}", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
@@ -285,7 +317,8 @@ internal fun ArenaStrategyRow(row: ScalpModels.Row, st: ScalpTabState, onOpen: (
 internal fun ArenaTradeCard(t: ScalpTrade, bid: Double?, onOpen: () -> Unit) {
     val c = DipTheme.colors
     ArenaCard(modifier = Modifier.clickable(onClick = onOpen), accent = t.netUsd?.let { pnlColor(it) } ?: c.border) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            ArenaBadge(if (t.side.equals("NO", true)) "DOWN" else "UP", if (t.side.equals("NO", true)) ArenaTone.DOWN else ArenaTone.UP)
             Text(t.algoLabel, color = c.textPrimary, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f), maxLines = 2)
             Text(t.netUsd?.let(ScalpTabCopy::money) ?: t.unrealizedUsd(bid)?.let(ScalpTabCopy::money) ?: "—", color = pnlColor(t.netUsd ?: t.unrealizedUsd(bid) ?: 0.0), style = ArenaUi.mono(MaterialTheme.typography.titleMedium))
         }

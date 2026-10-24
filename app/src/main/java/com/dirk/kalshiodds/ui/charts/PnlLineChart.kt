@@ -74,6 +74,6 @@ private fun DrawScope.drawPnl(pts: List<Double>, color: Color, zeroColor: Color,
         moveTo(x(0), zero); pts.forEachIndexed { i, v -> lineTo(x(i), y(v)) }; lineTo(x(pts.lastIndex), zero); close()
     }
     drawPath(fill, color.copy(alpha = 0.15f))
-    drawPath(line, color, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round))
+    drawPath(line, color, style = Stroke(width = ChartStroke.SERIES_DP.dp.toPx(), cap = StrokeCap.Round))
     drawCircle(color, 3.dp.toPx(), Offset(x(pts.lastIndex), y(pts.last())))
 }
