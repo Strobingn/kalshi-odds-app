@@ -345,8 +345,9 @@ class AiWindowWatcher(
         // On-device freeze/bench runs every poll, before any chat-LLM wait.
         runCatching { autoBench() }
         runCatching { localTune() }
-        val epNow = runCatching { endpoint() }.getOrNull() ?: return
-        val ep = if (epNow.provider != LlmProviders.BUILTIN && !epNow.usable) LlmProviders.builtinEndpoint() else epNow
+        val ep = runCatching { endpoint() }.getOrNull() ?: return
+        // Built-in is only used when selected. Do not swap in on-device when a cloud key is missing
+        // (#205: Built-in stays outside Groq → Mistral → Gemini fallthrough).
         if (!store.autoAllowed(ep.provider, ep.model)) {
             store.setNotice("")
             return
