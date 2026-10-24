@@ -19,6 +19,21 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.20.4 (Claude branch): paper fills only what the book shows; Explain is facts only
+
+- **Depth-aware paper fills** (`BookFill.kt`): a buy-now order walks the offers the book shows, cheapest first, at
+  most 5¢ above the ask, and fills no more than is offered there (36,000 contracts against 2,992 offered now fills
+  2,992 plus whatever sits within 5¢). Stops, time-outs and final-window sales walk the bids the same way; what the
+  bids cannot take is sold 5¢ under the bid. Each piece pays the taker fee at its own price. With no sizes from the
+  book, 3,500 contracts are assumed at the ask (the arena's unknown queue). The Paper AI's bets fill the same way.
+  Legs on other markets shrink with a partial fill.
+- **Explain this trade, facts only**: no AI-written paragraph any more. It lists the strategy's rule from the code,
+  the entry and the book it saw (and flags an order bigger than the ask showed), the price moves (marked when they
+  are not part of the rule), the exit, the result and the strategy's whole record. It says plainly that one trade
+  cannot show skill or luck, and that the settings shown are today's.
+- **Daily review**: told to say only what the numbers show, with no causes, skill or luck.
+- **On-phone LLM** sampling temperature 0.8 (was 0.3).
+
 ## 1.20.2 (Claude branch): TimesFM no longer waits 5 minutes after every app start
 
 The Bitcoin settlement index's one-second history lived only in memory, so every app start (or restart by

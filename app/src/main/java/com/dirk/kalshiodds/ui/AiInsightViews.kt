@@ -296,11 +296,11 @@ fun ExplainDialog(ui: ExplainUi, onClose: () -> Unit) {
                     )
                     if (book.isNotEmpty()) Text("At entry: " + book.joinToString(" · "), fontSize = 11.sp, color = c.textSecondary)
                 }
-                Text("AI explanation", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = c.textSecondary)
+                Text("What happened · facts only", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = c.textSecondary)
                 if (ui.running && ui.text.isBlank()) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                if (ui.text.isNotBlank()) Text(ui.text, fontSize = 13.sp, color = c.textPrimary)
+                for (line in ui.text.lines().filter { it.isNotBlank() }) Text("• $line", fontSize = 12.sp, color = c.textPrimary)
                 ui.error?.let { Text("No explanation: $it", fontSize = 12.sp, color = c.down) }
-                if (ui.source.isNotBlank()) Text("Written by ${ui.source}", fontSize = 10.sp, color = c.textSecondary)
+                if (ui.source.isNotBlank()) Text("From ${ui.source}", fontSize = 10.sp, color = c.textSecondary)
                 for (r in f.rules.take(3)) Text("• $r", fontSize = 10.sp, color = c.textSecondary)
             }
         },

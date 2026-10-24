@@ -780,15 +780,26 @@ class ScalperEngine(
         context: ScalpContext? = null,
         contracts: Int? = null,
         targetPrice: Double? = null,
-        predictionCents: Double = 0.0
+        predictionCents: Double = 0.0,
+        /**
+         * The offers on this side, (price, contracts), from the book. The order fills only against them, at most
+         * [BookFill.MAX_SLIP] above the ask; null = the book shows no sizes, so [Config.unknownQueue] is assumed at the ask.
+         */
+        askLevels: List<Pair<Double, Double>>? = null
     ): List<ScalpEvent> {
         require(strategy.taker || strategy.hybrid) { "${strategy.name} rests a bid: use post" }
         val t = tuning.tuned(strategy)
         if (!inBand(t, askPrice)) return emptyList()
         val want = if (PrintGrid.isYes(side)) "YES" else "NO"
         if (workingFor(strategy, ticker, want) >= t.maxPerSide) return emptyList()
-        val price = round4(askPrice)
-        val size = contracts?.takeIf { it > 0 } ?: t.contracts
+        val wanted = contracts?.takeIf { it > 0 } ?: t.contracts
+        val hi = if (t.ownBand) t.entryMax else config.maxPrice
+        val fill = BookFill.buy(
+            askLevels?.takeIf { it.isNotEmpty() } ?: listOf(askPrice to config.unknownQueue),
+            wanted, config.feeRate, limit = kotlin.math.min(askPrice + BookFill.MAX_SLIP, hi)
+        ) ?: return emptyList()
+        val price = round4(fill.avgPrice)
+        val size = fill.contracts
         val order = ScalpOrder(
             id = nextId++,
             strategy = strategy,
@@ -796,7 +807,7 @@ class ScalperEngine(
             side = want,
             price = price,
             contracts = size,
-            entryFeeUsd = KalshiFee.total(size, price, config.feeRate),
+            entryFeeUsd = fill.feeUsd,
             queueAhead = 0.0,
             queueKnown = true,
             postedAtMs = nowMs,
@@ -885,7 +896,9 @@ class ScalperEngine(
         bidYes: Double?,
         bidNo: Double?,
         /** Seconds to the window's close; a scalp of a strategy with [ScalpStrategy.flattenSeconds] is sold inside them. */
-        secondsLeft: Int? = null
+        secondsLeft: Int? = null,
+        /** The bids on a side ("YES"/"NO"), best first; a sale walks them. Null = [Config.unknownQueue] assumed at the bid. */
+        bidLevels: (String) -> List<Pair<Double, Double>>? = { null }
     ): List<ScalpEvent> {
         val list = byTicker[ticker] ?: return emptyList()
         if (list.isEmpty()) return emptyList()
@@ -911,8 +924,8 @@ class ScalperEngine(
             val flat = o.strategy.flattenSeconds
             if (!o.strategy.hold && flat > 0 && secondsLeft != null && secondsLeft <= flat) {
                 it.remove()
-                val fee = if (bid > 0.0) KalshiFee.total(o.contracts, bid, config.feeRate) else 0.0
-                events += ScalpEvent.Closed(close(w, bid, ExitKind.TIMEOUT, feeUsd = fee, nowMs = nowMs))
+                val f = sellAtBid(o, bid, bidLevels)
+                events += ScalpEvent.Closed(close(w, f.avgPrice, ExitKind.TIMEOUT, feeUsd = f.feeUsd, nowMs = nowMs))
                 continue
             }
             if (t.trail && bid > w.peakBid) w.peakBid = bid
@@ -921,9 +934,9 @@ class ScalperEngine(
             val timedOut = !o.strategy.hold && nowMs - filledAt >= t.timeoutMs
             if (stopped || timedOut) {
                 it.remove()
-                val fee = if (bid > 0.0) KalshiFee.total(o.contracts, bid, config.feeRate) else 0.0
+                val f = sellAtBid(o, bid, bidLevels)
                 events += ScalpEvent.Closed(
-                    close(w, bid, if (stopped) ExitKind.STOP else ExitKind.TIMEOUT, feeUsd = fee, nowMs = nowMs)
+                    close(w, f.avgPrice, if (stopped) ExitKind.STOP else ExitKind.TIMEOUT, feeUsd = f.feeUsd, nowMs = nowMs)
                 )
             }
         }
@@ -974,6 +987,14 @@ class ScalperEngine(
         val lo = if (t.ownBand) t.entryMin else config.minPrice
         val hi = if (t.ownBand) t.entryMax else config.maxPrice
         return price >= lo - EPS && price <= hi + EPS
+    }
+
+    /** A taker sale of the whole order into the bids shown (the rest at the walk's floor). */
+    private fun sellAtBid(o: ScalpOrder, bid: Double, bidLevels: (String) -> List<Pair<Double, Double>>?): BookFill.Fill {
+        if (bid <= 0.0) return BookFill.Fill(o.contracts, 0.0, 0.0)
+        val levels = runCatching { bidLevels(o.side) }.getOrNull()?.takeIf { it.isNotEmpty() } ?: listOf(bid to config.unknownQueue)
+        val f = BookFill.sell(levels, o.contracts, config.feeRate, floorPrice = bid - BookFill.MAX_SLIP)
+        return f.copy(avgPrice = round4(f.avgPrice))
     }
 
     private fun makerFee(contracts: Int, price: Double): Double {

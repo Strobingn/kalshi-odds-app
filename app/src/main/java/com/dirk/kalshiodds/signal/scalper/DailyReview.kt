@@ -71,6 +71,7 @@ Use only the numbers given; never invent any. Write four short paragraphs, under
 2. What made money and what lost, by strategy, minute of the window and price band.
 3. The ML scalper: did its predicted cents match what its trades made (the bins)?
 4. Two concrete things to test tomorrow, each a setting or a filter, each tied to a number above.
+Say only what the numbers show. Do not guess why the market moved, do not call anything skill or luck, and do not tell a story about why a strategy entered beyond its rule; if the numbers cannot answer something, say so.
 Plain words, no headings, no tables. Paper only: never advise real-money trades."""
 
     fun stats(day: String, trades: List<ScalpTrade>): DayStats {

@@ -100,7 +100,9 @@ class PaperAi(
     private val persistMemory: (String) -> Unit = {},
     initialMemory: PaperAiMemory = PaperAiMemory(),
     /** Told of each bet, skip, rejection and settlement, for the AI tab. */
-    private val onEvent: (String, JsonObject) -> Unit = { _, _ -> }
+    private val onEvent: (String, JsonObject) -> Unit = { _, _ -> },
+    /** The offers on (ticker, "YES"/"NO"), (price, contracts), cheapest first; null = the book shows no sizes. */
+    private val depth: (String, String) -> List<Pair<Double, Double>>? = { _, _ -> null }
 ) {
     private val lock = Any()
     private val json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
@@ -182,8 +184,19 @@ class PaperAi(
             journal("rejected", buildJsonObject { put("ticker", ticker); put("why", "ask $askCents outside $MIN_ASK_CENTS..$MAX_ASK_CENTS") })
             return note("rejected $decision on $ticker: ask ${askCents ?: "unknown"}c is outside $MIN_ASK_CENTS-$MAX_ASK_CENTS")
         }
-        val contracts = ((obj["contracts"] as? JsonPrimitive)?.doubleOrNull ?: 1.0).roundToInt().coerceAtLeast(1)
-        val price = askCents / 100.0
+        val asked = ((obj["contracts"] as? JsonPrimitive)?.doubleOrNull ?: 1.0).roundToInt().coerceAtLeast(1)
+        // The bet fills only against the offers the book shows (at most 5¢ above the ask, never over the 85¢ cap).
+        val top = askCents / 100.0
+        val fill = BookFill.buy(
+            runCatching { depth(ticker, decision) }.getOrNull()?.takeIf { it.isNotEmpty() } ?: listOf(top to UNKNOWN_DEPTH),
+            asked, KalshiFee.TAKER_COEFFICIENT, limit = minOf(top + BookFill.MAX_SLIP, MAX_ASK_CENTS / 100.0)
+        )
+        if (fill == null) {
+            journal("rejected", buildJsonObject { put("ticker", ticker); put("why", "nothing offered at or under ${MAX_ASK_CENTS}c") })
+            return note("rejected $decision on $ticker: nothing offered at or under ${MAX_ASK_CENTS.toInt()}c")
+        }
+        val contracts = fill.contracts
+        val price = Math.round(fill.avgPrice * 10_000.0) / 10_000.0
         val bull = (obj["bull_case"] as? JsonPrimitive)?.contentOrNull?.take(300)?.takeIf { it.isNotBlank() }
         val bear = (obj["bear_case"] as? JsonPrimitive)?.contentOrNull?.take(300)?.takeIf { it.isNotBlank() }
 
@@ -197,14 +210,15 @@ class PaperAi(
         val bet = synchronized(lock) {
             PaperBet(
                 id = nextId++, ticker = ticker, side = decision, price = price, contracts = contracts,
-                feeUsd = KalshiFee.total(contracts, price), openedMs = nowMs(), confidence = conf, reason = reason,
+                feeUsd = fill.feeUsd, openedMs = nowMs(), confidence = conf, reason = reason,
                 fairCents = fairSide?.let { Math.round(it * 10.0) / 10.0 }, chanceCents = Math.round(chance * 10.0) / 10.0,
                 bullCase = bull, bearCase = bear
             ).also { bets = (bets + it).takeLast(KEEP_BETS); save() }
         }
         journal("bet", json.encodeToJsonElement(PaperBet.serializer(), bet) as JsonObject)
         _record.value = synchronized(lock) { recordLine() }
-        return note("bet $decision x$contracts on $ticker at ${askCents}c ($conf%): $reason")
+        val partial = if (contracts < asked) " (asked $asked; the book showed $contracts)" else ""
+        return note("bet $decision x$contracts$partial on $ticker at ${Math.round(price * 1000.0) / 10.0}c ($conf%): $reason")
     }
 
     /**
@@ -297,6 +311,8 @@ class PaperAi(
         const val ENTRY_UNTIL_S = 880
         const val MIN_ASK_CENTS = 10.0
         const val MAX_ASK_CENTS = 85.0
+        /** Contracts assumed at the ask when the book shows no sizes (the arena's unknown queue). */
+        const val UNKNOWN_DEPTH = 3_500.0
         /** No upper limit on contracts a bet (you asked 2026-10-23). */
         const val MAX_CONTRACTS = Int.MAX_VALUE
         const val KEEP_BETS = 300

@@ -392,7 +392,13 @@ class AppContainer(context: Context) {
                     .decodeFromString(com.dirk.kalshiodds.signal.scalper.PaperAiMemory.serializer(), it)
             }
         }.getOrNull() ?: com.dirk.kalshiodds.signal.scalper.PaperAiMemory(),
-        onEvent = eventsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.PAPER)
+        onEvent = eventsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.PAPER),
+        depth = { ticker, side ->
+            val top = scoring.book.topOfBook(ticker)
+            val ask = (if (side == "YES") top?.yesAsk else top?.noAsk)
+            ask?.let { com.dirk.kalshiodds.signal.scalper.BookFill.askLevels(scoring.book.snapshotBook(ticker), side, it) }
+                ?: ask?.let { a -> (if (side == "YES") top?.yesAskQty else top?.noAskQty)?.takeIf { it > 0 }?.let { listOf(a to it) } }
+        }
     )
 
     /** The chat screen: one thread per AI, history kept on the phone. */
@@ -446,10 +452,10 @@ class AppContainer(context: Context) {
     /** "Explain this trade" on the arena's trade cards. */
     val explain = com.dirk.kalshiodds.llm.ExplainSession(
         scope = insightScope,
-        writer = aiWriter,
         log = scalperStore.log,
         model = { scalperStore.model },
-        tuned = { st -> runCatching { scalperStore.tuning.tuned(st) }.getOrNull() }
+        tuned = { st -> runCatching { scalperStore.tuning.tuned(st) }.getOrNull() },
+        record = { name -> scalperStore.ledger.snapshot().stats(name) }
     )
 
     /** Write the daily review by itself once a day (AI → Reviews switch). */

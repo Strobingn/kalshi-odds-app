@@ -162,7 +162,8 @@ class LocalLlm(
         system: String,
         user: String,
         maxTokens: Int = 512,
-        temperature: Float = 0.3f,
+        /** Sampling temperature of the on-phone model (0.8 since 1.20.4, asked for 2026-10-24; was 0.3). */
+        temperature: Float = TEMPERATURE,
         nCtx: Int = DEFAULT_CTX,
         onText: (String) -> Unit = {}
     ): Result<LocalAnswer> = jobLock.withLock {
@@ -353,6 +354,8 @@ class LocalLlm(
     companion object {
         const val DEFAULT_CTX = 4096
         private const val SEED = 42
+        /** The on-phone model's sampling temperature. */
+        const val TEMPERATURE = 0.8f
 
         fun sha256(f: File): String {
             val md = MessageDigest.getInstance("SHA-256")

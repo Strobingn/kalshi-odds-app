@@ -569,7 +569,11 @@ class PaperScalper(
         val top = topOfBook(ticker)
         val bidYes = top?.yesBid ?: grid.yesBid(s).takeIf { !it.isNaN() }
         val bidNo = top?.noBid ?: grid.yesAsk(s).takeIf { !it.isNaN() }?.let { 1.0 - it }
-        return engine.onClock(ticker, nowMs, bidYes, bidNo, PrintGrid.SECONDS - s)
+        val book = runCatching { bookLevels(ticker) }.getOrNull()
+        return engine.onClock(ticker, nowMs, bidYes, bidNo, PrintGrid.SECONDS - s) { side ->
+            val top = if (side == "YES") bidYes else bidNo
+            top?.let { BookFill.bidLevels(book, side, it) }
+        }
     }
 
     /**
@@ -836,7 +840,8 @@ class PaperScalper(
                         val gx = gateX(ask)
                         if (gx != null && !gate!!.allows(st.name, gx)) continue
                         val bought = engine.buyNow(
-                            st, ticker, side, ask, { sd, px -> offerQueue(ticker, sd, px) }, nowMs, seen(null)
+                            st, ticker, side, ask, { sd, px -> offerQueue(ticker, sd, px) }, nowMs, seen(null),
+                            askLevels = askLevelsFor(ticker, side, ask, if (bookOk) askQty else null)
                         )
                         if (bought.isNotEmpty() && (st.opening || st == ScalpStrategy.LATE_EDGE)) {
                             onceDone.getOrPut(ticker) { HashSet() }.add(st)
@@ -925,13 +930,20 @@ class PaperScalper(
                 if (o.taker) {
                     val bought = engine.buyNow(
                         st, ticker, o.side, o.price, { sd, px -> offerQueue(ticker, sd, px) }, nowMs, ctx,
-                        contracts = o.contracts, targetPrice = o.exitPrice, predictionCents = edgeCents
+                        contracts = o.contracts, targetPrice = o.exitPrice, predictionCents = edgeCents,
+                        askLevels = askLevelsFor(ticker, o.side, o.price, if (o.side == "YES") view.yesAskQty else view.noAskQty)
                     )
+                    // Filled less than asked (the book was thinner): the legs on other markets shrink with it.
+                    val got = (bought.firstOrNull() as? ScalpEvent.Posted)?.order?.contracts ?: o.contracts
+                    val legs = if (got >= o.contracts || o.contracts <= 0) o.offBook else o.offBook.mapNotNull { leg ->
+                        val c = (leg.contracts.toLong() * got / o.contracts).toInt()
+                        if (c <= 0) null else leg.copy(contracts = c, feeUsd = leg.feeUsd * c / leg.contracts)
+                    }
                     if (bought.isNotEmpty()) {
                         if (gx != null) (bought.first() as? ScalpEvent.Posted)?.let { gate!!.remember(it.order.id, st.name, gx) }
                         opened[st.ordinal]++
                         lastOpen[st.ordinal] = nowMs
-                        for (leg in o.offBook) runCatching { feed.openOffBook(st, leg, o.note, nowMs) }
+                        for (leg in legs) runCatching { feed.openOffBook(st, leg, o.note, nowMs) }
                     }
                     events += bought
                 } else {
@@ -961,6 +973,14 @@ class PaperScalper(
         val target = 1.0 - price
         return levels.firstOrNull { abs(it.first - target) <= ScalperEngine.TICK_EPS }?.second ?: 0.0
     }
+
+    /**
+     * The offers a buy-now order on [side] walks: the book's levels when it agrees with the quote, else the size
+     * shown at the ask ([topQty]), else null (the engine assumes its unknown queue).
+     */
+    private fun askLevelsFor(ticker: String, side: String, ask: Double, topQty: Double?): List<Pair<Double, Double>>? =
+        BookFill.askLevels(runCatching { bookLevels(ticker) }.getOrNull(), side, ask)
+            ?: topQty?.takeIf { it.isFinite() && it > 0.0 }?.let { listOf(ask to it) }
 
     /** A micro scalper's main trigger when nobody has set one (dollars or a fraction, as the rule reads it). */
     private fun microDefault(st: ScalpStrategy): Double = when (st) {

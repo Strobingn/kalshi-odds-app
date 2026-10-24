@@ -34,10 +34,9 @@ data class TradeFacts(
 )
 
 /**
- * Builds the facts and the prompt for "Explain this trade" (the arena's trade cards). The words come from an LLM
- * ([com.dirk.kalshiodds.llm.AiWriter]: the on-phone model first); every number in the prompt comes from the trade
- * file, the order file and the model, so the explanation is grounded in what happened. Pure apart from what it is
- * handed.
+ * Builds "Explain this trade" (the arena's trade cards). Since 1.20.4 there is no AI-written story: every line
+ * comes from the trade file, the order file (the book it saw), the strategy's own rule in code and its record, so
+ * nothing is guessed. [prompt] is the same facts as plain text (the Copy button). Pure apart from what it is handed.
  */
 object TradeExplainer {
 
@@ -74,6 +73,76 @@ object TradeExplainer {
             }
         }
         return f
+    }
+
+    /** Strategies whose rule reads the side's 10 s / 30 s / 60 s price moves (for every other one they are only logged). */
+    private val USES_MOVES: Set<ScalpStrategy> by lazy {
+        setOf(
+            ScalpStrategy.DIP_HUNTER, ScalpStrategy.DIP_HUNTER_REST, ScalpStrategy.MOMENTUM_SNIPER, ScalpStrategy.MOMENTUM_SNIPER_REST,
+            ScalpStrategy.EXTREME_REVERSION, ScalpStrategy.EXTREME_REVERSION_REST, ScalpStrategy.MOMENTUM_HOLD,
+            ScalpStrategy.TREND_PULLBACK, ScalpStrategy.STEADY_CLIMB, ScalpStrategy.PANIC_FADE, ScalpStrategy.LATE_COMEBACK,
+            ScalpStrategy.LATE_TIEBREAK, ScalpStrategy.OPENING_DRIVE
+        )
+    }
+
+    /**
+     * The explanation, one fact a line: what the strategy's rule looks for (from the code), the entry with the book it
+     * saw, the exit, the result, and the strategy's whole record ([record], its ledger stats) — never a guess about
+     * why the market moved or whether the trade was skill.
+     */
+    fun story(f: TradeFacts, record: ScalpStats? = null): List<String> {
+        val t = f.trade
+        val st = ScalpStrategy.values().firstOrNull { it.name == t.strategy }
+        val out = ArrayList<String>()
+        st?.let { out += "What its rule looks for: ${ArenaTable.signal(it)}" }
+        val took = t.entryFeeUsd > 0.0
+        val at = f.enteredSecond?.let { " at ${it / 60}:${"%02d".format(Locale.US, it % 60)} into the window" }.orEmpty()
+        out += "Entry: bought ${ScalperResults.sideLabel(t.side)} x${t.contracts} at ${cents(t.entry)}$at " +
+            (if (took) "by paying the ask (taker fee ${money(t.entryFeeUsd).removePrefix("+")})." else "with a resting bid that sellers filled (no fee).")
+        f.order?.let { o ->
+            val book = listOfNotNull(
+                o.bid?.let { b -> "bid ${cents(b)}" + (o.bidQty?.let { " (${it.roundToInt()} contracts)" } ?: "") },
+                o.ask?.let { a -> "ask ${cents(a)}" + (o.askQty?.let { " (${it.roundToInt()} contracts)" } ?: "") }
+            )
+            if (book.isNotEmpty()) out += "Book when it posted: ${book.joinToString(", ")}."
+            val q = o.askQty
+            if (took && q != null && q > 0 && t.contracts > q) {
+                out += "The order was ${t.contracts} contracts, ${fmt1(t.contracts / q)}× what the ask showed. Paper orders before " +
+                    "1.20.4 filled in full at the ask whatever the book showed, so a result this size is overstated; " +
+                    "from 1.20.4 an order fills only against the offers shown."
+            }
+            val moves = listOfNotNull(o.move10?.let { "${signedCents(it)} in 10 s" }, o.move30?.let { "${signedCents(it)} in 30 s" })
+            if (moves.isNotEmpty()) {
+                out += "The side's price had moved ${moves.joinToString(" and ")}" +
+                    if (st != null && st !in USES_MOVES) " (logged with every order; not part of this strategy's rule)." else "."
+            }
+        }
+        if (st == ScalpStrategy.ML_REST && f.modelCents != null) {
+            out += "Model: expected ${fmt2(f.modelCents)}c a contract" + (f.modelChance?.let { ", ${pct(it)} chance to make money" } ?: "") +
+                "; it posts at ${fmt2(f.modelTheta ?: 0.0)}c or more."
+            f.pushes.take(3).takeIf { it.isNotEmpty() }?.let { top ->
+                out += "Inputs that moved the model most: " + top.joinToString("; ") {
+                    "${it.label} ${fmtValue(it.name, it.value)} (${if (it.push >= 0) "+" else ""}${fmt3(it.push)})"
+                } + "."
+            }
+        } else if (st == ScalpStrategy.ML_REST && f.modelNote != null) {
+            out += "Model breakdown: not available (${f.modelNote})."
+        }
+        val exit = when {
+            t.kind == "SETTLED" && t.exit >= 0.5 -> "held to the close and settled at \$1 (its side won)"
+            t.kind == "SETTLED" -> "held to the close and settled at \$0 (its side lost)"
+            else -> "${ScalperResults.kindLabel(t.kind).lowercase(Locale.US)} at ${cents(t.exit)}"
+        }
+        out += "Exit: $exit, ${f.holdSeconds} s after the entry."
+        out += "Result: ${money(t.pnlUsd)} net after ${money(t.feesUsd).removePrefix("+")} fees (${fmt1(f.pnlCentsPerContract)}c a contract)."
+        out += if (record != null && record.closed > 0) {
+            "One trade says nothing about skill or luck. ${ScalperResults.strategyLabel(t.strategy)} so far: ${record.closed} trades, " +
+                "${pct(record.wins.toDouble() / record.closed)} won, ${money(record.pnlUsd)} net (${money(record.pnlUsd / record.closed)} a trade)."
+        } else {
+            "One trade says nothing about skill or luck; judge the strategy on its whole record (Arena → its page)."
+        }
+        out += "The settings listed are today's; they may have changed since this trade."
+        return out
     }
 
     val SYSTEM = """You explain one closed PAPER scalp from a Bitcoin-only Kalshi 15-minute UP/DOWN app to its owner.

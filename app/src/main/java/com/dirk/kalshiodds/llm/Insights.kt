@@ -38,36 +38,25 @@ data class ExplainUi(
  */
 class ExplainSession(
     private val scope: CoroutineScope,
-    private val writer: AiWriter,
     private val log: ScalpTradeLog,
     private val model: () -> ScalperModel?,
-    private val tuned: (ScalpStrategy) -> Tuned?
+    private val tuned: (ScalpStrategy) -> Tuned?,
+    /** The strategy's whole record (ledger stats), for the last line. */
+    private val record: (String) -> com.dirk.kalshiodds.signal.scalper.ScalpStats? = { null }
 ) {
     private val _state = MutableStateFlow<ExplainUi?>(null)
     val state: StateFlow<ExplainUi?> = _state.asStateFlow()
     private var job: Job? = null
-    private val done = LinkedHashMap<String, ExplainUi>()
 
+    /** Facts only (1.20.4): the trade file, the book it saw, the rule in code and the strategy's record. No AI story. */
     fun explain(t: ScalpTrade) {
         val key = "${t.run}-${t.id}"
         job?.cancel()
-        synchronized(done) { done[key] }?.let { _state.value = it; return }
         job = scope.launch(Dispatchers.IO) {
             val st = ScalpStrategy.values().firstOrNull { it.name == t.strategy }
             val facts = TradeExplainer.facts(t, runCatching { log.orderFor(t) }.getOrNull(), model(), st?.let { tuned(it) })
-            _state.value = ExplainUi(key, facts)
-            val r = writer.write(TradeExplainer.SYSTEM, TradeExplainer.prompt(facts), MAX_TOKENS) { partial ->
-                _state.update { s -> if (s?.key == key) s.copy(text = partial) else s }
-            }
-            val final = r.fold(
-                { w -> ExplainUi(key, facts, w.text, running = false, source = w.source) },
-                { e -> ExplainUi(key, facts, _state.value?.takeIf { it.key == key }?.text.orEmpty(), running = false, error = e.message ?: "no answer") }
-            )
-            if (final.error == null) synchronized(done) {
-                done[key] = final
-                while (done.size > CACHE) done.remove(done.keys.first())
-            }
-            _state.update { s -> if (s?.key == key) final else s }
+            val lines = TradeExplainer.story(facts, runCatching { record(t.strategy) }.getOrNull())
+            _state.value = ExplainUi(key, facts, lines.joinToString("\n"), running = false, source = SOURCE)
         }
     }
 
@@ -77,8 +66,7 @@ class ExplainSession(
     }
 
     companion object {
-        const val MAX_TOKENS = 260
-        const val CACHE = 50
+        const val SOURCE = "the trade file, the book it saw, the strategy's rule and its record (no AI)"
     }
 }
 

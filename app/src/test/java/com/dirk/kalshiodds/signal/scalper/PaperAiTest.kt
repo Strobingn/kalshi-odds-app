@@ -19,8 +19,10 @@ class PaperAiTest {
         }
     }
 
-    private fun ai(answer: String?, f: () -> JsonObject = feed(), calls: IntArray = IntArray(1)) =
-        PaperAi(chat = LlmChat { _, _, _ -> calls[0]++; answer }, feed = f)
+    private fun ai(
+        answer: String?, f: () -> JsonObject = feed(), calls: IntArray = IntArray(1),
+        depth: (String, String) -> List<Pair<Double, Double>>? = { _, _ -> null }
+    ) = PaperAi(chat = LlmChat { _, _, _ -> calls[0]++; answer }, feed = f, depth = depth)
 
     @Test
     fun betsAtTheAskWithTheFeeAndSettlesOnTheResult() {
@@ -57,9 +59,14 @@ class PaperAiTest {
         val cheap = ai("""{"decision":"YES","reason":"long shot"}""", feed(yesAsk = 4.0))
         assertTrue(cheap.tick().startsWith("rejected"))
         assertTrue(cheap.openBets().isEmpty())
-        val big = ai("""{"decision":"YES","contracts":25000,"confidence":70,"reason":"all in"}""")
+        // No cap on what it asks for, but it gets only what the book offers (here 30,000 at 55–56¢).
+        val big = ai("""{"decision":"YES","contracts":25000,"confidence":70,"reason":"all in"}""", depth = { _, _ -> listOf(0.55 to 20_000.0, 0.56 to 10_000.0) })
         big.tick()
         assertEquals(25000, big.openBets().single().contracts)
+        assertEquals((20_000 * 0.55 + 5_000 * 0.56) / 25_000, big.openBets().single().price, 1e-4)
+        val thin = ai("""{"decision":"YES","contracts":25000,"confidence":70,"reason":"all in"}""", depth = { _, _ -> listOf(0.55 to 2_992.0) })
+        assertTrue(thin.tick().contains("asked 25000; the book showed 2992"))
+        assertEquals(2992, thin.openBets().single().contracts)
     }
 
     @Test
