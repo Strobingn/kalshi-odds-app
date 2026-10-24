@@ -19,6 +19,14 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.20.8 (Claude branch): the NPU can reach the DSP
+
+The NPU still failed with "graph nodes assigned to the default CPU EP" after the graph was quantized, because the QNN
+HTP backend never started: its driver opens the Hexagon DSP through the phone's `libcdsprpc.so`, and an app that
+targets Android 12 or newer cannot load a vendor library unless the manifest asks for it with
+`<uses-native-library>`. The manifest now declares it (optional, so every phone still installs). If the NPU still
+cannot open, the error now says whether that library loaded and names the chip.
+
 ## 1.20.7 (Claude branch): settings backup, faster polling and charts
 
 **Settings backup.** Upgrades already keep everything (same package, same signing key); only an uninstall wipes it.

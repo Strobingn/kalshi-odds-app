@@ -24,6 +24,12 @@
         android:usesCleartextTraffic="false"
         android:enableOnBackInvokedCallback="true">
 
+        <!-- The NPU (QNN HTP): its driver talks to the Hexagon DSP through the phone's libcdsprpc.so. Apps that target
+             Android 12+ cannot load a vendor library unless it is declared here; without it the HTP backend never
+             starts and every node falls to the CPU ("fallback to CPU EP has been explicitly disabled"). Optional, so
+             phones without it still install. -->
+        <uses-native-library android:name="libcdsprpc.so" android:required="false" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

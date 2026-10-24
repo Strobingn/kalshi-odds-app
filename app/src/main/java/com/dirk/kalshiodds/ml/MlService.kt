@@ -85,10 +85,20 @@ internal class MlBinder(private val ctx: Context) : Binder() {
             }
             MlEngine.NPU -> {
                 check(NpuTrees.isSnapdragon()) { "not a Snapdragon phone (${NpuTrees.chipName()})" }
-                val t = NpuTrees.open(
-                    ctx.assets.open(ScalperModel.NPU_ASSET_NAME).use { it.readBytes() }, json, model, onNpu = true,
-                    nativeLibraryDir = ctx.applicationInfo?.nativeLibraryDir.orEmpty()
-                )
+                // The DSP library the NPU driver needs: say so plainly when the phone will not hand it to the app.
+                ctx.applicationInfo?.nativeLibraryDir?.takeIf { it.isNotBlank() }?.let { dir ->
+                    runCatching { android.system.Os.setenv("ADSP_LIBRARY_PATH", NpuTrees.dspLibraryPath(dir), true) }
+                }
+                val dsp = runCatching { System.loadLibrary("cdsprpc") }.exceptionOrNull()
+                val t = try {
+                    NpuTrees.open(
+                        ctx.assets.open(ScalperModel.NPU_ASSET_NAME).use { it.readBytes() }, json, model, onNpu = true,
+                        nativeLibraryDir = ctx.applicationInfo?.nativeLibraryDir.orEmpty()
+                    )
+                } catch (e: Throwable) {
+                    val why = if (dsp != null) "; the phone's DSP library libcdsprpc.so did not load (${dsp.message})" else ""
+                    throw IllegalStateException("${e.message ?: e.javaClass.simpleName}$why on ${NpuTrees.chipName()}", e)
+                }
                 // One real row through it before saying it is open.
                 t.margin(model.probeRows(1).first())
                 trees = t; run = t::margin
