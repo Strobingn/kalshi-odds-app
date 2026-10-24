@@ -155,7 +155,8 @@ class AppContainer(context: Context) {
             askLlm = { prompt ->
                 writerLlm.chat(listOf("system" to "You score trading conditions. Reply with JSON only.", "user" to prompt))
             },
-            forecaster = com.dirk.kalshiodds.signal.scalper.fleet.TimesFm(timesFmDownload.file)
+            // TimesFM's ONNX session runs in the ML process (com.dirk.kalshiodds.ml.MlService), never in this one.
+            forecaster = com.dirk.kalshiodds.signal.scalper.fleet.TimesFm(timesFmDownload.file, runner = scalperStore.ml.timesFm)
         ).also { hub -> hub.onLegEvents = { ev -> scalper.bookOffBook(ev) } }
     }
 

@@ -170,6 +170,15 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
     private val _modelReport = MutableStateFlow<ModelReport?>(null)
     val modelReport: StateFlow<ModelReport?> = _modelReport.asStateFlow()
 
+    /** Where the ML scalper's trees run (your choice), and why the ML process stopped last. */
+    private val _mlEngine = MutableStateFlow(container.scalperStore.mlEngine)
+    val mlEngine: StateFlow<com.dirk.kalshiodds.signal.scalper.MlEngine> = _mlEngine.asStateFlow()
+    val mlNote: String? get() = container.scalperStore.ml.lastDeath
+    fun setMlEngine(e: com.dirk.kalshiodds.signal.scalper.MlEngine) {
+        _mlEngine.value = e
+        container.scalperStore.setMlEngine(e)
+    }
+
     /** The 20-scalper fleet: each scalper's record, the feeds, TimesFM and the legs open on other venues. */
     data class FleetUi(
         val rows: List<FleetRow> = emptyList(),

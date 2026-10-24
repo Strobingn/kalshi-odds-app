@@ -1081,42 +1081,39 @@ class ScalperStore(context: Context) {
     val model: ScalperModel? = modelBytes?.let { b -> runCatching { ScalperModel.parse(String(b, Charsets.UTF_8)) }.getOrNull() }
 
     /**
-     * The same trees on ONNX Runtime ([OnnxTrees]), opened off the main thread. [ScalperModel.predict] switches to it
-     * once it has matched the Kotlin trees, and stays on the Kotlin trees if the file is missing, stale or fails.
+     * ONNX Runtime and the NPU run in their own process ([com.dirk.kalshiodds.ml.MlService]); this is the app's side.
+     * A native crash there ends only that process, and the trees go on in Kotlin.
      */
+    val ml = com.dirk.kalshiodds.ml.MlClient(context.applicationContext)
+
+    /** The engine the trees run on now (null = the Kotlin trees). */
     @Volatile
     private var engine: ModelEngines.Opened? = null
+    private val engineLock = Any()
+
+    /** Where you chose the ML scalper's trees run (AI → ML scalper model): Kotlin, ONNX Runtime (CPU) or the NPU. */
+    val mlEngine: MlEngine get() = MlEngine.of(prefs.getString(ML_ENGINE_KEY, null))
+
+    /** Choose where the trees run; it is opened (and checked against the trees) off the main thread. */
+    fun setMlEngine(choice: MlEngine) {
+        prefs.edit().putString(ML_ENGINE_KEY, choice.name).apply()
+        applyEngine(choice)
+    }
+
+    private fun applyEngine(choice: MlEngine) {
+        val m = model ?: return
+        Thread({
+            synchronized(engineLock) {
+                engine?.let { runCatching { it.close() } }
+                engine = null
+                engine = ModelEngines.use(m, choice, open = { e -> ml.openTrees(e) })
+                for (e in m.engines) android.util.Log.i("ScalperModel", "${e.name}: ${e.note} · open ${e.openMs} ms · ${e.warmMicros} µs")
+            }
+        }, "scalper-engines").apply { isDaemon = true }.start()
+    }
 
     init {
-        val m = model
-        val json = modelBytes
-        if (m != null && json != null) {
-            Thread({
-                // If opening ONNX Runtime ever takes the app down, the next start of this version runs the Kotlin
-                // trees instead of crashing again (the flag is set before the open and cleared once it finished).
-                val version = com.dirk.kalshiodds.BuildConfig.VERSION_CODE
-                if (prefs.getInt(ENGINES_OPENING_KEY, -1) == version) {
-                    m.markKotlin("skipped: opening ONNX Runtime stopped the app last time (this version)")
-                    android.util.Log.w("ScalperModel", "ONNX Runtime skipped: it stopped the app on the last start")
-                    return@Thread
-                }
-                prefs.edit().putInt(ENGINES_OPENING_KEY, version).commit()
-                runCatching {
-                    engine = ModelEngines.choose(
-                        m,
-                        // 1.19.1: the NPU build of ONNX Runtime (QNN) is out of the app; the phone would not start with it.
-                        npu = { throw IllegalStateException("off: the NPU build stopped the app from starting (1.19.0)") },
-                        cpu = {
-                            val bytes = context.assets.open(ScalperModel.ONNX_ASSET_NAME).use { it.readBytes() }
-                            val t = OnnxTrees.open(bytes, json, m.features)
-                            ModelEngines.Opened("ONNX Runtime (CPU)", t::predict, t::close)
-                        }
-                    )
-                }.onFailure { e -> m.markKotlin("engines not loaded: ${e.message ?: e.javaClass.simpleName}") }
-                prefs.edit().remove(ENGINES_OPENING_KEY).remove(NPU_OPENING_KEY).commit()
-                for (e in m.engines) android.util.Log.i("ScalperModel", "${e.name}: ${e.note} · open ${e.openMs} ms · ${e.warmMicros} µs")
-            }, "scalper-engines").apply { isDaemon = true }.start()
-        }
+        if (model != null && modelBytes != null) applyEngine(mlEngine)
     }
 
     private fun load(): ScalperState {
@@ -1137,6 +1134,7 @@ class ScalperStore(context: Context) {
         const val KNOBS_KEY = "strategy_settings_json"
         const val CHECKS_KEY = "contract_checks_json"
         const val GATE_KEY = "online_gate_json"
+        const val ML_ENGINE_KEY = "ml_engine"
         const val GATE_ON_KEY = "online_gate_on"
         /** The app version that was opening the NPU; still set at start = that open crashed. */
         const val NPU_OPENING_KEY = "npu_opening_version"

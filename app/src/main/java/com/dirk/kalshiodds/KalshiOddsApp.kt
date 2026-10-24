@@ -35,6 +35,8 @@ class KalshiOddsApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // The ML process (ONNX Runtime and the NPU, ml.MlService) needs none of the app: no container, no services.
+        if (isMlProcess()) return
         runCatching { CrashBreadcrumb.install(this) }
         container = AppContainer(this)
         runCatching { container.lastOrderError.clearStaleLifecycleNotice() }
@@ -113,6 +115,12 @@ class KalshiOddsApp : Application() {
             }
         }
     }
+
+    private fun isMlProcess(): Boolean = runCatching {
+        val name = if (android.os.Build.VERSION.SDK_INT >= 28) getProcessName()
+        else java.io.File("/proc/self/cmdline").readText().trim { it <= ' ' }
+        name.endsWith(":ml")
+    }.getOrDefault(false)
 
     private suspend fun firstLaunchSync() {
         val hub = runCatching { container.dataPrefs.hydrate() }.getOrNull() ?: return

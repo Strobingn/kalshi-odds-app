@@ -19,6 +19,17 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.20.5 (Claude branch): choose Kotlin, ONNX CPU or the NPU; ONNX Runtime in its own process
+
+- **AI → ML scalper model → "Run the model on"**: Kotlin / ONNX CPU / NPU (Snapdragon QNN HTP). Default ONNX CPU.
+  Whatever you pick is checked against the Kotlin trees on every split before it is used.
+- **ONNX Runtime is back on its QNN build, in a separate process** (`ml/MlService.kt`, `android:process=":ml"`). The
+  app's own process never loads it (1.18/1.19 did, and the phone would not start). The trees and TimesFM run there
+  through binder calls (`ml/MlClient.kt`); if that process crashes, the app keeps going on the Kotlin trees and the
+  card says why. The ML process starts no app services (KalshiOddsApp skips everything there).
+- Measured on the phone before this change: Kotlin trees 30 µs, ONNX CPU 55 µs a prediction. The NPU and the
+  separate process each add a hop, so for a model this small neither is faster; the switch is there to compare.
+
 ## 1.20.4 (Claude branch): paper fills only what the book shows; Explain is facts only
 
 - **Depth-aware paper fills** (`BookFill.kt`): a buy-now order walks the offers the book shows, cheapest first, at

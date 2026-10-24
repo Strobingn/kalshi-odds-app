@@ -27,35 +27,40 @@ import kotlin.math.sqrt
  * preprocess.ts`, `postprocess.ts`): normalise, run the series and its negation, average with the quantile flip,
  * rebuild quantiles from the continuous head, fix crossings, de-normalise.
  */
-class TimesFm(private val file: File, private val threads: Int = 2) : Forecaster, AutoCloseable {
-    private var env: OrtEnvironment? = null
-    private var session: OrtSession? = null
-    private val lock = Any()
+class TimesFm(
+    private val file: File,
+    private val threads: Int = 2,
+    /** Where the ONNX session runs: here ([LocalRunner], the tests and the ML process) or the app's ML process. */
+    private val runner: Runner = LocalRunner()
+) : Forecaster, AutoCloseable {
 
-    override val name: String = "TimesFM 2.5 (8-bit)"
-    override val ready: Boolean get() = file.isFile && file.length() == SIZE
-
-    private fun open(): OrtSession = synchronized(lock) {
-        session ?: run {
-            val e = OrtEnvironment.getEnvironment()
-            val opts = OrtSession.SessionOptions().apply {
-                setIntraOpNumThreads(threads)
-                setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
-            }
-            opts.use { e.createSession(file.absolutePath, it) }.also { env = e; session = it }
-        }
+    /** One ONNX pass: (point, qspread), each [2][128][10]; null when the session gave nothing. Throws on failure. */
+    interface Runner : AutoCloseable {
+        fun run(file: File, threads: Int, inputs: FloatArray, masks: FloatArray): Pair<Array<Array<FloatArray>>, Array<Array<FloatArray>>>?
+        override fun close() {}
     }
 
-    /** Quantiles q10..q90 per step ahead (128 steps), or null when the model is missing or fails. */
-    override fun forecast(series: DoubleArray): Array<DoubleArray>? = runCatching {
-        if (!ready) return null
-        val prep = prepare(series) ?: return null
-        val s = open()
-        val e = env!!
-        val shape = longArrayOf(2, CONTEXT.toLong())
-        val (point, qspread) = synchronized(lock) {
-            OnnxTensor.createTensor(e, FloatBuffer.wrap(prep.inputs), shape).use { x ->
-                OnnxTensor.createTensor(e, FloatBuffer.wrap(prep.masks), shape).use { m ->
+    /** The session in this process. The app's main process never uses it (it goes through [com.dirk.kalshiodds.ml.MlClient]). */
+    class LocalRunner : Runner {
+        private var env: OrtEnvironment? = null
+        private var session: OrtSession? = null
+        private var openPath: String? = null
+        private val lock = Any()
+
+        override fun run(file: File, threads: Int, inputs: FloatArray, masks: FloatArray): Pair<Array<Array<FloatArray>>, Array<Array<FloatArray>>>? = synchronized(lock) {
+            val s = session?.takeIf { openPath == file.absolutePath } ?: run {
+                runCatching { session?.close() }
+                val e = OrtEnvironment.getEnvironment()
+                val opts = OrtSession.SessionOptions().apply {
+                    setIntraOpNumThreads(threads)
+                    setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+                }
+                opts.use { e.createSession(file.absolutePath, it) }.also { env = e; session = it; openPath = file.absolutePath }
+            }
+            val e = env!!
+            val shape = longArrayOf(2, CONTEXT.toLong())
+            OnnxTensor.createTensor(e, FloatBuffer.wrap(inputs), shape).use { x ->
+                OnnxTensor.createTensor(e, FloatBuffer.wrap(masks), shape).use { m ->
                     s.run(mapOf("inputs" to x, "masks" to m)).use { r ->
                         @Suppress("UNCHECKED_CAST")
                         val p = r.get("point").get().value as Array<Array<FloatArray>>
@@ -66,11 +71,25 @@ class TimesFm(private val file: File, private val threads: Int = 2) : Forecaster
                 }
             }
         }
+
+        override fun close() {
+            synchronized(lock) { runCatching { session?.close() }; session = null; openPath = null }
+        }
+    }
+
+    override val name: String = "TimesFM 2.5 (8-bit)"
+    override val ready: Boolean get() = file.isFile && file.length() == SIZE
+
+    /** Quantiles q10..q90 per step ahead (128 steps), or null when the model is missing or fails. */
+    override fun forecast(series: DoubleArray): Array<DoubleArray>? = runCatching {
+        if (!ready) return null
+        val prep = prepare(series) ?: return null
+        val (point, qspread) = runner.run(file, threads, prep.inputs, prep.masks) ?: return null
         postprocess(point, qspread, prep.mu, prep.sigma, prep.positive).map { row -> DoubleArray(9) { row[it + 1] } }.toTypedArray()
     }.getOrNull()
 
     override fun close() {
-        synchronized(lock) { runCatching { session?.close() }; session = null }
+        runCatching { runner.close() }
     }
 
     class Prepared(val inputs: FloatArray, val masks: FloatArray, val mu: Double, val sigma: Double, val positive: Boolean)

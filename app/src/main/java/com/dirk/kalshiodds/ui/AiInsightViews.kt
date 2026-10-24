@@ -314,9 +314,42 @@ fun ExplainDialog(ui: ExplainUi, onClose: () -> Unit) {
 // ---------------------------------------------------------------- the ML scalper model (Dashboard tab)
 
 @Composable
-fun ModelReportCard(r: ModelReport) {
+fun ModelReportCard(
+    r: ModelReport,
+    /** Where you chose the trees run, and how to change it; null hides the switch (screenshots). */
+    choice: com.dirk.kalshiodds.signal.scalper.MlEngine? = null,
+    onChoose: ((com.dirk.kalshiodds.signal.scalper.MlEngine) -> Unit)? = null,
+    /** Why the ML process stopped last, if it did. */
+    mlNote: String? = null
+) {
     val c = DipTheme.colors
     AiCard(r.title, "${r.features} features · ${r.trees} trees" + (r.maxDepth?.let { " · depth ≤ $it" } ?: "") + " · runs on ${r.engine}") {
+        if (choice != null && onChoose != null) {
+            Text("Run the model on", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = c.textSecondary)
+            androidx.compose.foundation.layout.Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                for (e in com.dirk.kalshiodds.signal.scalper.MlEngine.values()) {
+                    androidx.compose.material3.FilterChip(
+                        selected = e == choice,
+                        onClick = { onChoose(e) },
+                        label = {
+                            Text(
+                                when (e) {
+                                    com.dirk.kalshiodds.signal.scalper.MlEngine.KOTLIN -> "Kotlin"
+                                    com.dirk.kalshiodds.signal.scalper.MlEngine.ONNX_CPU -> "ONNX CPU"
+                                    com.dirk.kalshiodds.signal.scalper.MlEngine.NPU -> "NPU"
+                                }
+                            )
+                        },
+                        modifier = Modifier.testTag("ML_ENGINE_${e.name}")
+                    )
+                }
+            }
+            Text(
+                "ONNX and the NPU run in their own process, so a crash there cannot stop the app; if it stops, the Kotlin trees take over.",
+                fontSize = 10.sp, color = c.textSecondary
+            )
+            mlNote?.let { Text("Last: $it", fontSize = 10.sp, color = c.down) }
+        }
         Text(r.tested, fontSize = 11.sp, color = c.textSecondary)
         Text(r.testLine, fontSize = 12.sp, color = c.textPrimary)
         if (r.engines.isNotEmpty()) {

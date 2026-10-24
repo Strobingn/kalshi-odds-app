@@ -95,6 +95,7 @@ fun AiScreen(vm: AiViewModel) {
     val reviews by vm.reviewList.collectAsStateWithLifecycle()
     val autoReview by vm.autoReview.collectAsStateWithLifecycle()
     val report by vm.modelReport.collectAsStateWithLifecycle()
+    val mlEngine by vm.mlEngine.collectAsStateWithLifecycle()
     val fleet by vm.fleet.collectAsStateWithLifecycle()
     val timesFm by vm.timesFm.collectAsStateWithLifecycle()
     val pickModel = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -109,7 +110,7 @@ fun AiScreen(vm: AiViewModel) {
                 AiDashboardContent(dash, onOpenKeys = { section = 2 }, onLiveTuner = vm::setLiveTuner, onGate = vm::setGate)
                 report?.let {
                     Spacer(Modifier.height(12.dp))
-                    ModelReportCard(it)
+                    ModelReportCard(it, choice = mlEngine, onChoose = vm::setMlEngine, mlNote = vm.mlNote)
                 }
                 Spacer(Modifier.height(12.dp))
                 FleetCard(

@@ -16,8 +16,8 @@ android {
         applicationId = "com.dirk.kalshiodds.claude"
         minSdk = 26
         targetSdk = 35
-        versionCode = 81
-        versionName = "1.20.4"
+        versionCode = 82
+        versionName = "1.20.5"
         // In-app update check (ui/AppUpdate.kt): the Build APK run that made
         // this APK. 0 / "local" when built outside GitHub Actions.
         buildConfigField(
@@ -107,6 +107,10 @@ android {
         // llama.cpp picks its CPU backend by opening the variant files in nativeLibraryDir, so they must be extracted.
         jniLibs {
             useLegacyPackaging = true
+            // QNN runtime: keep the HTP (NPU) backend for Snapdragon 8 Gen 2 and newer (Hexagon V73, V75, V79, V81).
+            excludes += listOf(
+                "**/libQnnDsp*.so", "**/libQnnHtpV68*.so", "**/libQnnHtpV69*.so", "**/libQnnGpu.so"
+            )
         }
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -161,9 +165,9 @@ dependencies {
     // On-device ML
     implementation("org.tensorflow:tensorflow-lite:2.14.0")
     // ONNX Runtime: runs the scalper's trees (assets/scalper_model.onnx). The JVM build runs the same model in unit tests.
-    // ONNX Runtime, CPU build. 1.19.1: back from onnxruntime-android-qnn 1.29.0 (the Snapdragon NPU build and its
-    // ~170 MB of Qualcomm libraries), which 1.18.0 / 1.19.0 shipped and the phone would not start with.
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.31.0")
+    // ONNX Runtime with the QNN execution provider (CPU and the Snapdragon NPU), arm64 only. 1.18/1.19 loaded it in the
+    // app's own process and the phone would not start; since 1.20.5 it is loaded only in the ML process (ml.MlService).
+    implementation("com.microsoft.onnxruntime:onnxruntime-android-qnn:1.29.0")
 
     // Persistence + encrypted API-key storage (never commit secrets)
     implementation("androidx.datastore:datastore-preferences:1.1.1")
@@ -177,7 +181,7 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.10.0")
 
     testImplementation("junit:junit:4.13.2")
-    testImplementation("com.microsoft.onnxruntime:onnxruntime:1.31.0")
+    testImplementation("com.microsoft.onnxruntime:onnxruntime:1.29.0")
     // Real org.json for JVM unit tests (Android stubs JSONObject by default).
     testImplementation("org.json:json:20240303")
     testImplementation("org.robolectric:robolectric:4.14.1")

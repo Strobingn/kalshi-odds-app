@@ -46,6 +46,12 @@
                 android:resource="@xml/update_paths" />
         </provider>
 
+        <!-- ONNX Runtime and the Snapdragon NPU in their own process: a native crash there cannot stop the app. -->
+        <service
+            android:name=".ml.MlService"
+            android:exported="false"
+            android:process=":ml" />
+
         <service
             android:name=".signal.service.LiveSignalsService"
             android:exported="false"
