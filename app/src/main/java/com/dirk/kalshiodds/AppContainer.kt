@@ -235,6 +235,37 @@ class AppContainer(context: Context) {
     /** Kalshi's CF Benchmarks settlement index (Live signals WebSocket). */
     val cfIndex = com.dirk.kalshiodds.signal.external.CfIndexBook().also { scoring.cfIndex = it }
 
+    /**
+     * The Bitcoin index's one-second history, saved every 15 s and put back on start, so closing or restarting the
+     * app does not empty it (TimesFM, the volatility and the final-minute average need the last minutes at once).
+     */
+    private val cfHistoryFile = File(app.filesDir, "cf_index_btc.csv")
+
+    private fun restoreIndexHistory() {
+        val f = cfHistoryFile
+        if (!f.isFile) return
+        val pts = f.readLines().mapNotNull { line ->
+            val a = line.split(',')
+            val sec = a.getOrNull(0)?.toLongOrNull() ?: return@mapNotNull null
+            val v = a.getOrNull(1)?.toDoubleOrNull() ?: return@mapNotNull null
+            sec to v
+        }
+        val n = cfIndex.restore("BTC", pts, System.currentTimeMillis())
+        android.util.Log.i("CfIndexBook", "restored $n s of BTC index")
+    }
+
+    private fun saveIndexHistory() {
+        val pts = cfIndex.export("BTC")
+        if (pts.isEmpty()) return
+        val tmp = File(cfHistoryFile.parentFile, cfHistoryFile.name + ".tmp")
+        tmp.bufferedWriter().use { w -> for ((sec, v) in pts) { w.write("$sec,$v"); w.newLine() } }
+        if (!tmp.renameTo(cfHistoryFile)) { cfHistoryFile.delete(); tmp.renameTo(cfHistoryFile) }
+    }
+
+    init {
+        runCatching { restoreIndexHistory() }
+    }
+
     /** Coinbase prints kept like the index, for the arena's fair price while the index is stale. */
     val coinbaseIndex = com.dirk.kalshiodds.signal.external.CfIndexBook()
 
@@ -517,10 +548,12 @@ class AppContainer(context: Context) {
         // early when the window does something worth a fresh look.
         supervisorScope.launch {
             kotlinx.coroutines.delay(3_000L)
+            var tick = 0
             while (true) {
                 runCatching {
                     if (liveTuner.step().isNotEmpty()) llmSupervisor.noteExternalChange()
                 }
+                if (++tick % 15 == 0) runCatching { saveIndexHistory() }
                 runCatching {
                     if (extraSecrets.supervisorEnabled && anyLlmKey) {
                         val now = System.currentTimeMillis()

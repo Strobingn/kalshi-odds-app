@@ -173,6 +173,28 @@ class CfIndexBook {
         ring.lastOrNull { it.first <= sec }?.takeIf { sec - it.first <= 5L }?.second
     }
 
+    /** The one-second history of [asset], oldest first (epoch second, value): what is saved across app starts. */
+    fun export(asset: String): List<Pair<Long, Double>> = synchronized(lock) {
+        history[asset.uppercase()]?.toList().orEmpty()
+    }
+
+    /**
+     * Put back a saved one-second history (the app was closed or restarted): only seconds within [HISTORY_S] of
+     * [nowMs] and older than anything already live are kept, so a live print always wins. Returns the seconds restored.
+     */
+    fun restore(asset: String, points: List<Pair<Long, Double>>, nowMs: Long): Int = synchronized(lock) {
+        val ring = history.getOrPut(asset.uppercase()) { ArrayDeque() }
+        val nowSec = nowMs / 1000L
+        val firstLive = ring.firstOrNull()?.first ?: Long.MAX_VALUE
+        val keep = points.asSequence()
+            .filter { (sec, v) -> v.isFinite() && v > 0.0 && sec >= nowSec - HISTORY_S && sec <= nowSec && sec < firstLive }
+            .sortedBy { it.first }
+            .distinctBy { it.first }
+            .toList()
+        for (i in keep.indices.reversed()) ring.addFirst(keep[i])
+        keep.size
+    }
+
     fun clear() = synchronized(lock) {
         latest.clear()
         history.clear()

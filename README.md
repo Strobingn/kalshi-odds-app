@@ -19,6 +19,13 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.20.2 (Claude branch): TimesFM no longer waits 5 minutes after every app start
+
+The Bitcoin settlement index's one-second history lived only in memory, so every app start (or restart by
+Android) emptied it and TimesFM waited 5 minutes for enough of it. The last hour of it is now saved every 15 s
+(`filesDir/cf_index_btc.csv`) and put back on start; TimesFM starts from 2 minutes of index instead of 5 (the rest of
+its 512-second context is padded). The volatility estimate and the final-minute average get the same warm start.
+
 ## 1.20.1 (Claude branch): three micro scalpers retired after the replay
 
 The arena replay of the 12 recorded days (2026-09-28 → 10-16, 913 windows, run 40005335840) on their defaults:
