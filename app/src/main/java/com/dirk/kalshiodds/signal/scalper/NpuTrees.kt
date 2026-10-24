@@ -9,7 +9,9 @@ import java.nio.FloatBuffer
  * The scalper's trees on the Snapdragon NPU: `assets/scalper_model_npu.onnx` (written by
  * `tools/research/scalp/export_npu.py`) on ONNX Runtime's QNN execution provider, HTP backend (the Hexagon NPU).
  *
- * The NPU has no tree operator and computes in fp16, so the graph never sees a raw feature or a leaf value: it takes
+ * The NPU has no tree operator and runs only quantized graphs (1.20.6: every tensor is QuantizeLinear / DequantizeLinear
+ * with scale 1, 8- or 16-bit; a float graph made the QNN EP leave its MatMuls to the CPU, which this session forbids),
+ * so the graph never sees a raw feature or a leaf value: it takes
  * each feature's split bin ([ScalperModel.bins], small whole numbers, exact in fp16) and returns which leaf every tree
  * lands in; [ScalperModel.marginFromLeaves] adds those leaves in double. The answer is the Kotlin trees' to the bit,
  * and [ScalperModel.attachOnnx] checks that on every split before the app uses it.

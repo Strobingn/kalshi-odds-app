@@ -1,4 +1,5 @@
-"""The NPU graph (scalper_model_npu.onnx) must pick the very leaves the JSON trees pick, in fp32 and in fp16.
+"""The NPU graph (scalper_model_npu.onnx) must pick the very leaves the JSON trees pick, and be fully quantized (QDQ),
+which is what the Snapdragon HTP NPU runs.
 
     pip install numpy onnx onnxruntime
     PYTHONPATH=tools/research/scalp python3 tools/research/scalp/test_export_npu.py
@@ -31,21 +32,6 @@ def run_cpu(path, b):
     return np.vstack([s.run(["leaf"], {"bins": b[i:i + 1]})[0] for i in range(len(b))])
 
 
-def run_fp16(model_proto, b):
-    """The same graph with every number rounded to fp16 at every step: what the NPU's fp16 math can do at worst."""
-    w = {i.name: numpy_helper.to_array(i) for i in model_proto.graph.initializer}
-    h = lambda v: np.asarray(v, dtype=np.float16)
-    nt, _, ni = w["shape3"]
-    out = []
-    for r in b:
-        t = h(h(r[None, :]).astype(np.float32) @ h(w["A"]).astype(np.float32))
-        go = h(np.clip(h(h(w["K1"]) - t), 0, 1))
-        p = h(np.matmul(go.reshape(nt, 1, ni).astype(np.float32), h(w["C"]).astype(np.float32)))
-        hit = h(np.maximum(h(1.0 - np.abs(h(p - h(w["D"])))), 0))
-        out.append(hit.reshape(1, -1).astype(np.float32))
-    return np.vstack(out)
-
-
 def main():
     raw = open(JSON, "rb").read()
     model = json.loads(raw)
@@ -55,7 +41,22 @@ def main():
     assert props["source_sha256"] == hashlib.sha256(raw).hexdigest(), "scalper_model_npu.onnx is from another scalper_model.json: rerun export_npu.py"
     assert props["features"] == ",".join(model["features"])
     ops = {n.op_type for n in shipped.graph.node}
-    assert ops <= {"MatMul", "Sub", "Abs", "Clip", "Relu", "Reshape"}, f"an op the NPU path was not built for: {ops}"
+    assert ops <= {"MatMul", "Sub", "Abs", "Relu", "Reshape", "QuantizeLinear", "DequantizeLinear"}, f"an op the NPU path was not built for: {ops}"
+    # Every compute node reads only dequantized tensors (or shape constants) and feeds only a QuantizeLinear: QDQ units.
+    produced = {o: n for n in shipped.graph.node for o in n.output}
+    consumers = {}
+    for n in shipped.graph.node:
+        for i in n.input:
+            consumers.setdefault(i, []).append(n)
+    for n in shipped.graph.node:
+        if n.op_type in ("QuantizeLinear", "DequantizeLinear"):
+            continue
+        for i in n.input:
+            if i in ("shape3", "shape_out"):
+                continue
+            assert i in produced and produced[i].op_type == "DequantizeLinear", f"{n.op_type} reads {i} not from a DequantizeLinear"
+        for o in n.output:
+            assert all(c.op_type == "QuantizeLinear" for c in consumers.get(o, [])) and consumers.get(o), f"{n.op_type} output {o} is not quantized"
     assert all(o.domain in ("", "ai.onnx") for o in shipped.opset_import), "no ai.onnx.ml ops on the NPU"
 
     fx = json.load(open(PARITY))
@@ -73,15 +74,12 @@ def main():
     got_cpu = export_npu.margin_from_leaf(model, run_cpu(NPU, b))
     assert np.array_equal(got_cpu, want), f"fp32 graph: worst {np.max(np.abs(got_cpu - want))}"
 
-    got_16 = export_npu.margin_from_leaf(model, run_fp16(shipped, b))
-    assert np.array_equal(got_16, want), f"fp16 graph: worst {np.max(np.abs(got_16 - want))}"
-
     with tempfile.TemporaryDirectory() as d:
         fresh = os.path.join(d, "n.onnx")
         export_npu.main(JSON, fresh)
         assert onnx.load(fresh).SerializeToString() == shipped.SerializeToString(), "a fresh export differs from the shipped file"
 
-    print(f"ok: {len(x)} rows ({len(x_rec)} recorded, {len(x_edge)} on the splits, 1 all missing) pick the trees' leaves exactly, fp32 and fp16")
+    print(f"ok: {len(x)} rows ({len(x_rec)} recorded, {len(x_edge)} on the splits, 1 all missing) pick the trees' leaves exactly through the quantized graph")
 
 
 if __name__ == "__main__":

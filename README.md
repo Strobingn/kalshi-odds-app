@@ -19,6 +19,15 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.20.6 (Claude branch): the NPU graph is quantized
+
+On the phone the NPU refused the model ("graph nodes assigned to the default CPU EP, but fallback to CPU EP has been
+explicitly disabled"): QNN's HTP backend runs only quantized graphs, and lists MatMul only for 8/16-bit integer
+inputs, so the float32 graph's MatMuls were left to the CPU. `export_npu.py` now writes every tensor as
+QuantizeLinear / DequantizeLinear with scale 1 (opset 21; bins and differences in 16 bits, tables and 0/1 masks in
+8 bits). Every value is a small whole number, so it is exact: all 3,125 test rows pick the trees' leaves, and the
+test checks that every compute node sits in a QDQ unit. The file is 207 KB (was 800 KB).
+
 ## 1.20.5 (Claude branch): choose Kotlin, ONNX CPU or the NPU; ONNX Runtime in its own process
 
 - **AI → ML scalper model → "Run the model on"**: Kotlin / ONNX CPU / NPU (Snapdragon QNN HTP). Default ONNX CPU.

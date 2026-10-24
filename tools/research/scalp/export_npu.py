@@ -11,9 +11,10 @@ would move a feature across a split. So this graph never sees a raw feature valu
 - Out: `leaf`, float32 [1, T * L]. For tree t, slot l is 1 for the leaf the row lands in, else 0.
   The app adds those leaves' values in double, in tree order, so the sum is the Kotlin trees' sum to the last bit.
 
-Graph (all static shapes; ops: MatMul, Sub, Abs, Clip, Relu, Reshape):
+Graph (all static shapes; ops: MatMul, Sub, Abs, Relu, Reshape, each wrapped in QuantizeLinear / DequantizeLinear
+with scale 1, because the HTP NPU runs only quantized graphs; every value is a small whole number, so it is exact):
   T    = bins @ A                      A [F, T*I]: one 1 per split column, picking that split's feature
-  go   = Clip(K1 - T, 0, 1)            K1 = split's bin index + 1; 1 = go left (bins <= k)
+  go   = Relu(K1 - T) - Relu(K1 - T - 1)   K1 = split's bin index + 1; 1 = go left (bins <= k)
   P    = Reshape(go, [T,1,I]) @ C      C [T, I, L]: +1 if the leaf is under the split's left child, -1 right
   leaf = Relu(1 - |P - D|)             D [T, 1, L]: left turns on the leaf's path; padding slots D = -100
 Padding: trees with fewer splits or leaves get zero columns (A, C) and leaf slots that can never be 1.
@@ -29,7 +30,7 @@ import numpy as np
 import onnx
 from onnx import TensorProto, helper, numpy_helper
 
-OPSET = 17
+OPSET = 21
 PAD_D = -100.0
 
 
@@ -107,28 +108,65 @@ def build(model: dict, source_sha256: str) -> onnx.ModelProto:
     if max(len(x) for x in e) + 1 > 2048:
         raise ValueError("a feature has more split points than fp16 counts exactly")
 
+    # Every tensor is quantized (QDQ, scale 1): the HTP NPU runs quantized graphs only, and every number here is a
+    # small whole number, so the quantization is exact as long as each one stays inside its type's range.
+    max_bin = max(len(x) for x in e)  # bins and K1 are 0..max_bin (+1)
+    if max_bin + 1 > 32767:
+        raise ValueError("too many split points for 16-bit bins")
+    if ni > 127 or nl > 255:
+        raise ValueError("trees too big for the 8-bit tables")
+    zp_u16 = 32768
+
     init = [
-        numpy_helper.from_array(a, "A"),
-        numpy_helper.from_array(k1, "K1"),
-        numpy_helper.from_array(c, "C"),
-        numpy_helper.from_array(d, "D"),
-        numpy_helper.from_array(np.array(0.0, dtype=np.float32), "zero"),
-        numpy_helper.from_array(np.array(1.0, dtype=np.float32), "one"),
+        numpy_helper.from_array(a.astype(np.uint8), "A_q"),
+        numpy_helper.from_array(k1.astype(np.uint16), "K1_q"),
+        numpy_helper.from_array((c + 1).astype(np.uint8), "C_q"),            # -1, 0, +1 -> 0, 1, 2 (zero point 1)
+        numpy_helper.from_array((d + 128).astype(np.uint8), "D_q"),          # 0..ni and -100 -> 128.. and 28 (zero point 128)
+        numpy_helper.from_array(np.array([1], dtype=np.uint8), "one_q"),
+        numpy_helper.from_array(np.array(1.0, dtype=np.float32), "s1"),
+        numpy_helper.from_array(np.array(0, dtype=np.uint8), "z8"),
+        numpy_helper.from_array(np.array(1, dtype=np.uint8), "z8_1"),
+        numpy_helper.from_array(np.array(128, dtype=np.uint8), "z8_128"),
+        numpy_helper.from_array(np.array(0, dtype=np.uint16), "z16"),
+        numpy_helper.from_array(np.array(zp_u16, dtype=np.uint16), "z16_mid"),
         numpy_helper.from_array(np.array([nt, 1, ni], dtype=np.int64), "shape3"),
         numpy_helper.from_array(np.array([1, nt * nl], dtype=np.int64), "shape_out"),
     ]
-    nodes = [
-        helper.make_node("MatMul", ["bins", "A"], ["t"]),
-        helper.make_node("Sub", ["K1", "t"], ["k_minus_t"]),
-        helper.make_node("Clip", ["k_minus_t", "zero", "one"], ["go"]),
-        helper.make_node("Reshape", ["go", "shape3"], ["go3"]),
-        helper.make_node("MatMul", ["go3", "C"], ["p"]),
-        helper.make_node("Sub", ["p", "D"], ["p_minus_d"]),
-        helper.make_node("Abs", ["p_minus_d"], ["dist"]),
-        helper.make_node("Sub", ["one", "dist"], ["one_minus"]),
-        helper.make_node("Relu", ["one_minus"], ["hit"]),
-        helper.make_node("Reshape", ["hit", "shape_out"], ["leaf"]),
-    ]
+    nodes = []
+
+    def dq(src, zp, out):
+        nodes.append(helper.make_node("DequantizeLinear", [src, "s1", zp], [out]))
+        return out
+
+    def q(src, zp, out):
+        nodes.append(helper.make_node("QuantizeLinear", [src, "s1", zp], [out]))
+        return out
+
+    def op(kind, ins, name, zp):
+        """One quantized node unit: float op on dequantized inputs, its output quantized with [zp] and dequantized again."""
+        nodes.append(helper.make_node(kind, ins, [name + "_f"]))
+        return dq(q(name + "_f", zp, name + "_q"), zp, name)
+
+    # In: the bins, as 16-bit (0..max_bin).
+    b = dq(q("bins", "z16", "bins_q"), "z16", "bins_dq")
+    a_f = dq("A_q", "z8", "A")
+    k1_f = dq("K1_q", "z16", "K1")
+    c_f = dq("C_q", "z8_1", "C")
+    d_f = dq("D_q", "z8_128", "D")
+    one_f = dq("one_q", "z8", "one")
+    t = op("MatMul", [b, a_f], "t", "z16")                           # 0..max_bin
+    y = op("Sub", [k1_f, t], "k_minus_t", "z16_mid")                  # -max_bin..max_bin+1
+    pos = op("Relu", [y], "pos", "z16")                               # max(y, 0)
+    y1 = op("Sub", [y, one_f], "k_minus_t_1", "z16_mid")
+    pos1 = op("Relu", [y1], "pos1", "z16")                            # max(y - 1, 0)
+    go = op("Sub", [pos, pos1], "go", "z8")                           # clip(y, 0, 1): 0 or 1
+    go3 = op("Reshape", [go, "shape3"], "go3", "z8")
+    p = op("MatMul", [go3, c_f], "p", "z8_128")                       # -ni..ni
+    pd = op("Sub", [p, d_f], "p_minus_d", "z16_mid")                  # -ni-? .. ni+100
+    dist = op("Abs", [pd], "dist", "z8")                              # 0..ni+100
+    om = op("Sub", [one_f, dist], "one_minus", "z16_mid")             # 1-dist
+    hit = op("Relu", [om], "hit", "z8")                               # 1 on the leaf, else 0
+    op("Reshape", [hit, "shape_out"], "leaf", "z8")
     g = helper.make_graph(
         nodes, "scalper_trees_npu",
         [helper.make_tensor_value_info("bins", TensorProto.FLOAT, [1, nf])],
@@ -136,7 +174,7 @@ def build(model: dict, source_sha256: str) -> onnx.ModelProto:
         init,
     )
     m = helper.make_model(g, producer_name="kalshi-odds-app export_npu.py", opset_imports=[helper.make_opsetid("", OPSET)])
-    m.ir_version = 8
+    m.ir_version = 10
     for key, val in (
         ("source_sha256", source_sha256), ("features", ",".join(feats)),
         ("trees", str(nt)), ("splits", str(ni)), ("leaves", str(nl)),
