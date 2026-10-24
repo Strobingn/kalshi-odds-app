@@ -232,7 +232,7 @@ object ScalpModels {
     private val RAW_ALL: List<Model> = Model.values().toList()
     private val KEPT_CODES: Set<String> = ALL.map { it.code }.toSet()
     val REMOVED_CODES: Set<String> = RAW_ALL.map { it.code }.filter { it !in KEPT_CODES }.toSet()
-    fun isRemoved(code: String?): Boolean = code != null && code !in KEPT_CODES
+    fun isRemoved(code: String?): Boolean = code != null && code !in KEPT_CODES && !TwentyScalperFleet.isFleet(code)
     /** 0.3.65: v2 copy of an original model (null when none, e.g. sf29 or a v2 itself). */
     fun v2Of(m: Model): Model? = V2_BY_ORIG[m]
     fun originalOf(v2: Model): Model? = ORIG_BY_CODE[ScalpV2.baseOf(v2.code)]?.takeIf { isV2(v2) }
@@ -246,7 +246,8 @@ object ScalpModels {
     private val RAW_BY_CODE: Map<String, Model> by lazy { RAW_ALL.associateBy { it.code } }
     fun canonicalScalperId(id: String): String = KeptScalpers.canonical(id)
     /** Card label. Unknown and removed variant ids stay readable and do not throw. */
-    fun labelFor(variantId: String): String = modelByCode(variantId)?.label ?: KeptScalpers.REMOVED_LABEL
+    fun labelFor(variantId: String): String =
+        modelByCode(variantId)?.label ?: TwentyScalperFleet.labelOf(variantId) ?: KeptScalpers.REMOVED_LABEL
     private fun mergeStat(a: ScalpStat?, b: ScalpStat): ScalpStat {
         if (a == null) return b
         return a.copy(

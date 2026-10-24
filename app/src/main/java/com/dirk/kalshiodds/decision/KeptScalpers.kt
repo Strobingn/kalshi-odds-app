@@ -83,6 +83,12 @@ object KeptScalpers {
         Spec("iv-smile", "IV smile", "Options smile versus the Kalshi book. Paper only.", Kind.FAIR, "iv-smile")
     )
     val HFT_IDS: Set<String> = HFT.map { it.id }.toSet()
+
+    /**
+     * s01–s20 paper fleet. The twelve winners in [ALL] stay on the board.
+     * This list does not replace them and does not place a live order.
+     */
+    val FLEET: List<TwentyScalperFleet.Spec> get() = TwentyScalperFleet.ALL
     private val BY_ID: Map<String, Spec> = ALL.associateBy { it.id }
 
     /** ShockFav family codes allowed to open a new paper trade. */
