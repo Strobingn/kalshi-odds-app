@@ -392,11 +392,12 @@ class AiWindowWatcher(
             return
         }
         if (snap.windowKey.isBlank()) { store.setNotice(""); return }
-        if (!selected.usable) {
+        if (LlmProviders.requiresApiKey(selected.provider) && !selected.usable) {
             store.setNotice("AI follow: no API key for ${LlmProviders.spec(selected.provider).label}")
             return
         }
-        if (!llmDueNow()) return
+        // Cloud providers keep the 120s floor. The on-device model is not paced and needs no key.
+        if (LlmProviders.requiresApiKey(selected.provider) && !llmDueNow()) return
         val result = AiAutoCalls.callFree(
             selected = selected,
             slots = runCatching { alternates() }.getOrDefault(emptyList()),

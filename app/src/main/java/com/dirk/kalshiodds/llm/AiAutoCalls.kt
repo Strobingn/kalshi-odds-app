@@ -21,6 +21,7 @@ object AiAutoCalls {
 
     fun paceLabel(auto: Boolean, ep: LlmEndpoint, quota: FreeQuota?): String {
         if (!auto) return "Auto pace: off"
+        if (!LlmProviders.requiresApiKey(ep.provider)) return "Auto pace: unlimited on-device"
         if (quota == null) return "Auto pace: at most every 60s"
         val models = LlmProviders.paceModels(ep)
         val raw = if (models.size >= 2) quota.perModelPaceMs / 2 else quota.perModelPaceMs
@@ -62,6 +63,7 @@ object AiAutoCalls {
         val selectedFree = LlmProviders.freeFamily(selected.provider, selected.model)
         if (!selectedFree && (!allowed(selected) || !selected.usable)) return null
         val tail = if (!selectedFree) emptyList() else slots.asSequence()
+            .filter { LlmProviders.requiresApiKey(it.provider) }
             .filter { it.usable && it.provider != selected.provider }
             .filter { LlmProviders.freeFamily(it.provider, it.model) && allowed(it) }
             .distinctBy { it.provider }
@@ -134,7 +136,10 @@ object AiAutoCalls {
         var soonest: Wait? = null
         var sawFree = false
         for (ep in endpoints) {
-            if (!ep.usable || !allowed(ep) || !LlmProviders.freeFamily(ep.provider, ep.model)) continue
+            if (!allowed(ep)) continue
+            // Built-in is unlimited and keyless. It is not waiting on a cloud key or a cloud pace.
+            if (!LlmProviders.requiresApiKey(ep.provider)) return null
+            if (!ep.usable || !LlmProviders.freeFamily(ep.provider, ep.model)) continue
             sawFree = true
             val quota = quotaOf(ep) ?: continue
             val hold = pacer.hold(ep.provider, LlmProviders.paceModels(ep), quota, nowMs, tokens) ?: return null

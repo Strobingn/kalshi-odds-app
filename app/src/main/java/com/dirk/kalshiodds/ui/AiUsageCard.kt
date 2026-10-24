@@ -25,6 +25,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -171,19 +172,22 @@ fun AiUsageSettingsCard(store: AiWatchStore, settings: LlmSettings) {
         if (!lastSwitch.isNullOrBlank()) {
             Text("Last provider switch: $lastSwitch", color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         }
+        // Cloud only. Built-in LiteRT-LM has no key, so a blank slot is not a missing key.
         // Keyed on the saved slot, not the text being typed, so the field does not vanish on the first keystroke.
-        if (slot.apiKey.isBlank()) {
+        val needsKey = LlmProviders.requiresApiKey(provider)
+        if (needsKey && slot.apiKey.isBlank()) {
             Text(
                 "No ${LlmProviders.shortLabel(provider)} API key saved yet.",
                 color = colors.error,
-                style = MaterialTheme.typography.bodySmall
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.testTag("AI_PROVIDER_KEY_WARNING")
             )
             OutlinedTextField(
                 key, { key = it },
                 label = { Text(LlmProviders.keyPrompt(provider)) },
                 visualTransformation = PasswordVisualTransformation(),
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth().testTag("AI_PROVIDER_KEY_PROMPT")
             )
         }
         Text(callsTodayLine(store, active.provider, active.model), color = colors.onSurface, style = MaterialTheme.typography.bodySmall)
@@ -242,13 +246,15 @@ fun AiUsageSettingsCard(store: AiWatchStore, settings: LlmSettings) {
                 }
             }
         }
-        OutlinedTextField(
-            key, { key = it },
-            label = { Text("${LlmProviders.spec(provider).label} API key (encrypted on this phone)") },
-            visualTransformation = PasswordVisualTransformation(),
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
+        if (needsKey) {
+            OutlinedTextField(
+                key, { key = it },
+                label = { Text("${LlmProviders.spec(provider).label} API key (encrypted on this phone)") },
+                visualTransformation = PasswordVisualTransformation(),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().testTag("AI_PROVIDER_KEY_FIELD")
+            )
+        }
         OutlinedTextField(model, { model = it }, label = { Text("Model") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(base, { base = it }, label = { Text("API base URL (OpenAI-compatible, https)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         Text("$ / 1M tokens", color = colors.onSurface, fontWeight = FontWeight.SemiBold)
