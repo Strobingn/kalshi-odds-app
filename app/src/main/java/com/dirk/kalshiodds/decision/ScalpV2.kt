@@ -66,15 +66,28 @@ object ScalpV2 {
     fun stopPercent(t: ScalpTrade): Double = savedNumber(t.note, "v2stopPct", 20.0).coerceIn(1.0, 99.0)
     fun percentStopPrice(entry: Double, percent: Double): Double = entry * (1.0 - percent / 100.0)
     /**
+     * Smallest stop distance. A 1¢ bid under the ask at the fill is the spread, not a loss.
+     * Wider configured stops stay wider.
+     */
+    fun minStopDistanceUsd(spread: Double, entryFee: Double): Double =
+        maxOf(0.03, spread.coerceAtLeast(0.0) + entryFee.coerceAtLeast(0.0) + 0.01)
+
+    /**
      * Percent stop always cuts a loser. The trail banks a winner only when the
      * exit is net-positive after both taker fees. A 3¢ give-back from the entry
      * bid on a 12¢ fill loses the spread plus the fee and is not an exit.
+     * The percent distance is floored by [minStopDistanceUsd].
      */
-    fun peakExit(entry: Double, percent: Double, peakBid: Double, bid: Double, trail: Double, contracts: Int = CLIP): String? = when {
-        bid <= percentStopPrice(entry, percent) + 1e-9 -> "V2 stop loss ${Math.round(percent)}% below fill"
+    fun peakExit(entry: Double, percent: Double, peakBid: Double, bid: Double, trail: Double, contracts: Int = CLIP, spread: Double = 0.01): String? {
+        val px = entry.coerceIn(0.01, 0.99)
+        val fee = ScalpRule.feePerContract(contracts.coerceAtLeast(1), px)
+        val dist = maxOf(entry * (percent / 100.0), minStopDistanceUsd(spread, fee))
+        return when {
+        bid <= entry - dist + 1e-9 -> "V2 stop loss ${Math.round(percent)}% below fill"
         bid <= peakBid - trail + 1e-9 && ScalpRule.netAfterFees(entry, bid, contracts.coerceAtLeast(1)) > 1e-9 ->
             "V2 trail ${Math.round(trail * 100)}¢ below peak bid"
         else -> null
+        }
     }
 
     /** v2 dip copies. A 20% stop on a 14–20¢ fill is 3–4¢, inside the spread and the fee. */
@@ -102,8 +115,9 @@ object ScalpV2 {
     fun dipStopDistance(entry: Double, contracts: Int, stopCents: Int, spread: Double = 0.01): Double {
         val px = entry.coerceIn(0.01, 0.99)
         val n = contracts.coerceAtLeast(1)
-        val fees = ScalpRule.feePerContract(n, px) + ScalpRule.feePerContract(n, px)
-        return maxOf(stopCents / 100.0, spread + fees)
+        val entryFee = ScalpRule.feePerContract(n, px)
+        val fees = entryFee + ScalpRule.feePerContract(n, px)
+        return maxOf(stopCents / 100.0, spread + fees, minStopDistanceUsd(spread, entryFee))
     }
 
     fun dipExit(entry: Double, bid: Double, peak: Double, trail: Double, stopDistance: Double, contracts: Int): String? {
@@ -254,10 +268,15 @@ object ScalpV2 {
     fun armed(entry: Double, bid: Double, stop: Double, n: Int = CLIP): Boolean = ScalpRule.netAfterFees(entry, bid, n.coerceAtLeast(1)) >= stop - 1e-9
 
     /** Exit reason or null. [wasArmed] persists across quotes (peak tracked by the caller). */
-    fun exit(entry: Double, stop: Double, peakBid: Double, bid: Double, wasArmed: Boolean, n: Int = CLIP, trail: Double = TRAIL, armThreshold: Double = stop, netGain: Double? = null): String? = when {
-        bid <= stopPrice(entry, stop) + 1e-9 -> "stop −${Math.round(stop * 100)}¢"
+    fun exit(entry: Double, stop: Double, peakBid: Double, bid: Double, wasArmed: Boolean, n: Int = CLIP, trail: Double = TRAIL, armThreshold: Double = stop, netGain: Double? = null, spread: Double = 0.01): String? {
+        val px = entry.coerceIn(0.01, 0.99)
+        val fee = ScalpRule.feePerContract(n.coerceAtLeast(1), px)
+        val dist = maxOf(stop, minStopDistanceUsd(spread, fee))
+        return when {
+        bid <= stopPrice(entry, dist) + 1e-9 -> "stop −${Math.round(dist * 100)}¢"
         (wasArmed || (netGain?.let { it >= armThreshold - 1e-9 } ?: armed(entry, bid, armThreshold, n))) && bid <= peakBid - trail + 1e-9 -> "v2 trail ${Math.round(trail * 100)}¢ off peak after +${Math.round(armThreshold * 100)}¢ net"
         else -> null
+        }
     }
 
     data class Compare(val v2: ScalpModels.Model, val original: ScalpModels.Model, val v2Row: ScalpModels.Row, val origRow: ScalpModels.Row, val status: String)

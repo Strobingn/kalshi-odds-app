@@ -87,6 +87,9 @@ class ReleaseGate0356Test {
         assertNull(ForecastScalp.wantsExit(Double.NaN, 0.55, 900.0, 300, 600.0))
         assertEquals("take profit ≥ 90¢", ForecastScalp.wantsExit(Double.NaN, 0.92, 10.0, 300, 600.0))
         assertEquals("exit before close", ForecastScalp.wantsExit(Double.NaN, 0.55, 10.0, 300, 20.0))
-        assertEquals("forecast turned (move < exit fee)", ForecastScalp.wantsExit(0.0, 0.55, 10.0, 300, 600.0))
+        assertNull(ForecastScalp.wantsExit(0.0, 0.55, 10.0, 300, 600.0))
+        assertNull(ForecastScalp.wantsExit(0.005, 0.55, 10.0, 300, 600.0))
+        assertNull(ForecastScalp.wantsExit(-0.009, 0.55, 10.0, 300, 600.0))
+        assertEquals("forecast turned (move < exit fee)", ForecastScalp.wantsExit(-0.01, 0.55, 10.0, 300, 600.0))
     }
 }

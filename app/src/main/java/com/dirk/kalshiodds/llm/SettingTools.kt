@@ -45,7 +45,7 @@ object SettingTools {
         "dipCents" to d(0.0, 30.0), "stopLossPercent" to i(1, 99), // peak-trail knobs omitted: execution hard-codes the 3¢ trail
         "research.edgeCents" to d(0.0, 20.0), "research.lateMinS" to i(30, 600), "research.lateMaxS" to i(30, 900),
         "research.lateLoCents" to i(50, 98), "research.lateHiCents" to i(50, 99), "research.makerEdgeCents" to d(0.0, 20.0),
-        "research.kellyFraction" to d(0.0, 1.0), "research.windowCapUsd" to d(1.0, 100_000.0), "research.clip" to i(1, 500),
+        "research.kellyFraction" to d(0.0, 1.0), "research.windowCapUsd" to d(0.0, 100_000.0), "research.clip" to i(1, 500),
         "research.kellyBankrollUsd" to d(10.0, 1_000_000.0, "paper bankroll"))
 
     /** Per-strategy fields: `strategy.<code>.<field>`. cadenceSeconds is the strategy's re-entry cooldown. */
@@ -53,7 +53,7 @@ object SettingTools {
         "enabled" to b, "aiLearns" to b, "contracts" to i(1, 1000), "minEntryCents" to i(1, 99), "maxEntryCents" to i(1, 99),
         "stopLossPercent" to i(1, 99), "trailCents" to i(1, 20), "stopCents" to i(1, 99), "takeProfitCents" to i(0, 99),
         "maxHoldSeconds" to i(0, 3600), "untilMinute" to i(1, 14), "cadenceSeconds" to i(0, 30, "cooldown"),
-        "maxOpenPerSide" to i(1, 20), "edgeCents" to i(0, 30))
+        "maxOpenPerSide" to i(0, 20), "edgeCents" to i(0, 30))
 
     private val ALIASES = mapOf("bankroll" to "research.kellyBankrollUsd", "kellyBankrollUsd" to "research.kellyBankrollUsd")
 

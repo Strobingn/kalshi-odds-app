@@ -62,14 +62,16 @@ object LeadForecaster {
     fun features(mid: Double, mid60Ago: Double?, imb: Double, lead: Double, strike: Double, sigmaPerSec: Double,
                  tauS: Double, leadAt: (Int) -> Double?): DoubleArray? {
         if (!(lead > 0 && strike > 0 && sigmaPerSec > 0)) return null
-        val tau = tauS.coerceAtLeast(1.0)
-        val z = sigmaPerSec * sqrt(tau)
+        // Settlement averages the last ~60s, so z uses the same effective tau as ScalpRule.fairYes.
+        // Time-left stays on raw tau: predict() skips the intercept and x[6].
+        val tauEff = ScalpRule.effectiveTauSeconds(tauS)
+        val z = sigmaPerSec * sqrt(tauEff)
         val d = (ln(lead / strike) / z).coerceIn(-4.0, 4.0)
         val fair = phiCdf(d)
         val phi = exp(-d * d / 2) / sqrt(2 * Math.PI)
         val x = DoubleArray(11)
         x[0] = 1.0; x[1] = mid60Ago?.let { mid - it } ?: 0.0; x[2] = imb; x[3] = mid - 0.5; x[4] = fair - mid
-        x[5] = d / 4; x[6] = tau / 900.0
+        x[5] = d / 4; x[6] = tauS.coerceAtLeast(0.0) / 900.0
         listOf(5, 15, 30, 60).forEachIndexed { i, k ->
             x[7 + i] = leadAt(k)?.takeIf { it > 0 }?.let { (phi * ln(lead / it) / z).coerceIn(-0.5, 0.5) } ?: 0.0
         }

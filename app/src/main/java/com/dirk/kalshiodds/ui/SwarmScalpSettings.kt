@@ -113,8 +113,8 @@ fun SwarmScalpSettingsContent(initial: ScalpControls, onBack: () -> Unit = {}, o
             } }
             item { SwarmCard("Research strategies (shared)") {
                 val r = draft.research
-                Text("Window exposure cap: $${Math.round(r.windowCapUsd)} across all Research strategies", color = c.textPrimary, style = MaterialTheme.typography.bodyMedium)
-                androidx.compose.material3.Slider(value = r.windowCapUsd.toFloat(), onValueChange = { draft = draft.copy(research = r.copy(windowCapUsd = Math.round(it).toDouble())) }, valueRange = 10f..2000f)
+                Text("Window exposure cap: ${if (r.windowCapUsd <= 0.0) "$0 unlimited" else "$${Math.round(r.windowCapUsd)}"} across all Research strategies. Contracts and re-entries per 15-minute window are unlimited unless you set a limit. Each new entry still needs a fresh trigger.", color = c.textPrimary, style = MaterialTheme.typography.bodyMedium)
+                androidx.compose.material3.Slider(value = r.windowCapUsd.toFloat().coerceIn(0f, 2000f), onValueChange = { draft = draft.copy(research = r.copy(windowCapUsd = Math.round(it).toDouble())) }, valueRange = 0f..2000f)
                 Text("Kelly fraction: ${Math.round(r.kellyFraction * 100)}% of Kelly · reference bankroll $${Math.round(r.kellyBankrollUsd)}", color = c.textPrimary, style = MaterialTheme.typography.bodyMedium)
                 androidx.compose.material3.Slider(value = r.kellyFraction.toFloat(), onValueChange = { draft = draft.copy(research = r.copy(kellyFraction = Math.round(it * 20) / 20.0)) }, valueRange = 0.05f..1f)
                 Text("Maker bid sits ${Math.round(r.makerEdgeCents)}¢ below fair value", color = c.textPrimary, style = MaterialTheme.typography.bodyMedium)
