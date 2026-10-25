@@ -70,6 +70,9 @@ object DosMmEngine {
 }
 
 class HftBook {
+    /** Side + scalper code. A non-null reason refuses the open before inventory moves. */
+    var lossPause: (side: String, code: String) -> String? = { _, _ -> null }
+
     private class Sample(val t: Long, val px: Double, val sz: Double)
     private class Pos(
         val trade: ScalpTrade,
@@ -362,6 +365,7 @@ class HftBook {
         m: Mkt, id: String, side: String, px: Double, n: Int, mFee: Double, q: ScalpRule.Quote, fair: Double, newId: () -> String, note: String
     ): ScalpTrade? {
         if (m.pos[id] != null || n < 1 || px <= 0.01 || px >= 0.99) return null
+        if (lossPause(side, id) != null) return null
         val feeTotal = HftMathEngines.fee(n, px, mFee) * n
         val t = ScalpTrade(
             id = newId(),

@@ -280,6 +280,15 @@ internal fun ScalpWindowChart(d: ScalpAlgoDetail, onWindow: (String) -> Unit = {
                 Text("$sideName · ${markerName(m.kind)} · ${m.qty.takeIf { it > 0 }?.let { "$it ct · " }.orEmpty()}${ScalpTabCopy.cents(m.price)} · ${com.dirk.kalshiodds.domain.EtTime.clockSec(m.recordedAtMs)}", color = c.textPrimary, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall)
             }
             data.error?.let { Text(it, color = c.down, style = MaterialTheme.typography.bodySmall) }
+            data.sidePauseLine()?.let {
+                Text(
+                    it,
+                    color = c.down,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.testTag("window_side_pause")
+                )
+            }
             WindowPaperPnl(data)
             if (markers.isNotEmpty()) {
                 WindowTimeline(

@@ -654,7 +654,8 @@ class ScalpBook(
                 val mine = mineAll.filter { it.variantId == p.id }.map { old -> changed.firstOrNull { it.id == old.id } ?: old }
                 if (q.nowMs >= q.closeMs) continue
                 val window = ScalpModels.windowKeyOf(q.ticker)
-                // A new clip on every trigger. An open or in-flight clip does not block the next one.
+                // A new clip on every fresh trigger. An open clip does not block the next one.
+                // WindowLossGate in save() is what stops a side that is already losing this window.
                 val free = listOf("YES", "NO")
                 val (sig, skip) = ScalpRule.strategySignal(q, tuned(p, ScalpModels.modelOf(p).code), free, recent)
                 if (sig == null) { clearTrigger(p.id, q.ticker); gates.block(modelCode, window, skip) }
@@ -713,6 +714,9 @@ class ScalpBook(
             if (liveExtras && coin == ShockFav.TRADE_COIN) changed += enterModelFair(q, recent)
         }
         if (liveExtras) {
+            val pause = sidePause(q)
+            hft.lossPause = pause
+            fleet.lossPause = pause
             val hftCoin = ScalpParams.coinOf(q.ticker)
             if (hftCoin == "BTC" || hftCoin == "ETH" || hftCoin == "SOL") {
                 changed += hft.onQuote(q, bankrollUsd(), idFactory)
@@ -720,10 +724,28 @@ class ScalpBook(
             }
             changed += fleet.onQuote(q, bankrollUsd(), idFactory)
         }
-        changed.forEach { save(it) }
+        val dropped = HashSet<String>()
+        changed.forEach { t -> if (!save(t)) dropped += t.id }
         unlatchClosed(changed)
         if (changed.any { it.state == ScalpState.CLOSED }) maybeTune(q.nowMs)
-        changed.filter { it.isPrimary }
+        changed.filter { it.isPrimary && it.id !in dropped }
+    }
+
+    /**
+     * Price and fair-gap still decide the signal. This is the side brake:
+     * new paper clips stop once that side's own window is losing. A null
+     * reason means the side may re-enter, including after a winning close.
+     */
+    private fun sidePause(q: ScalpRule.Quote): (String, String) -> String? {
+        val window = ScalpModels.windowKeyOf(q.ticker)
+        val cfg = controls.state.value
+        return { side, code ->
+            val why = WindowLossGate.evaluate(
+                _all.value, q.ticker, side, q.bid(side), cfg.windowSideLossUsd, cfg.windowAdverseFills
+            ).reason
+            if (why != null && code.isNotBlank()) gates.block(code, window, why)
+            why
+        }
     }
 
     /** Fair-gap, dip, and v2 nudges. Same fee-rounded fills as the parent. Open clips do not block the next signal. */
@@ -2126,7 +2148,7 @@ class ScalpBook(
     fun importRestored(rows: List<ScalpTrade>): Int = synchronized(lock) {
         val have = _all.value.map { it.id }.toHashSet()
         val add = rows.filter { it.id !in have }.distinctBy { it.id }
-        add.forEach { save(it) }
+        add.forEach { save(it, gateNewEntry = false) }
         add.size
     }
 
@@ -2223,8 +2245,21 @@ class ScalpBook(
         return t.copy(ruleVersion = t.ruleVersion.removeSuffix("|P") + "|S", note = (t.note + "; " + BENCH_SHADOW).trimStart(';', ' '))
     }
 
-    private fun save(tIn: ScalpTrade) {
+    /** @return false when a new clip was refused by [WindowLossGate] and not stored. */
+    private fun save(tIn: ScalpTrade, gateNewEntry: Boolean = true): Boolean {
         val prev = _all.value.firstOrNull { it.id == tIn.id }
+        if (gateNewEntry && prev == null && (tIn.state == ScalpState.PENDING_ENTRY || tIn.state == ScalpState.OPEN)) {
+            val mark = _marks.value[tIn.ticker.uppercase()]
+            val cfg = controls.state.value
+            val why = WindowLossGate.evaluate(
+                _all.value, tIn.ticker, tIn.side, mark?.bid(tIn.side), cfg.windowSideLossUsd, cfg.windowAdverseFills
+            ).reason
+            if (why != null) {
+                val code = ScalpModels.modelOf(tIn)?.code ?: tIn.variantId
+                gates.block(code, ScalpModels.windowKeyOf(tIn.ticker), why)
+                return false
+            }
+        }
         val incoming = if (prev == null) guardNewEntry(tIn) else tIn
         val tf = if (prev == null && incoming.state == ScalpState.PENDING_ENTRY) fairGapEntryFilter(settingsEntryFilter(incoming)) else incoming
         // Bench after the live entry gates, so the shadow book only holds entries the scalper would really have taken.
@@ -2254,6 +2289,7 @@ class ScalpBook(
                 else -> listOf(t) + pc
             }
         }
+        return true
     }
 
     private fun unlatchClosed(batch: List<ScalpTrade>) {
