@@ -145,7 +145,7 @@ object SupervisorBounds {
     }
 
     /** Validate, clamp and apply one change to [tuning]. Pure apart from the [ScalpTuning.set] it ends with. */
-    fun apply(tuning: ScalpTuning, strategy: String, param: String, value: Double): Change {
+    fun apply(tuning: ScalpTuning, strategy: String, param: String, value: Double, allowOff: Boolean = false): Change {
         fun no(why: String) = Change.Rejected(strategy, param, why)
         val st = ScalpStrategy.ACTIVE.firstOrNull { it.name == strategy } ?: return no("unknown or retired strategy")
         if (!value.isFinite()) return no("value is not a number")
@@ -154,6 +154,9 @@ object SupervisorBounds {
         if (param == "enabled") {
             val on = value >= 0.5
             if (on == k.enabled) return no("no change")
+            // You decided 2026-10-24: the AIs keep every strategy on (they may shrink a loser, not stop it). Only a
+            // change you apply yourself (the chat's Apply button) may switch one off.
+            if (!on && !allowOff) return no("strategies stay on: shrink a loser's size or tighten it instead")
             tuning.set(st, k.copy(enabled = on))
             return Change.Applied(strategy, param, if (k.enabled) 1.0 else 0.0, if (on) 1.0 else 0.0, value)
         }
@@ -795,12 +798,13 @@ class LlmSupervisor(
             stopCents, so target, stop, timeout, trigger and size matter most. Late buy-and-hold strategies
             (holdsToSettlement=true) ride to the settlement, so the entry band, minutes, secondsLeft, edgeCents,
             trigger and size matter most. The arena is in learning mode: all of them bet on paper as often as
-            they can so you have data on every one. Tune them hard; do not just switch things off after a few
-            losses, and re-enable a strategy you disabled if the market has changed.
+            they can so you have data on every one. Tune them hard. You may not switch a strategy off (enabled=0
+            is refused): every strategy keeps running; a loser gets smaller and stricter instead. Re-enable
+            (enabled=1) any strategy you find switched off.
             The strategies the arena had retired (dip-hunter, momentum-sniper, extreme reversion, resting and
             buy-now forms, flow, bounce, panic fade and the rest) lost money on every one of 11 recorded days,
             about 2 to 4 cents a contract after fees, because a 1-2 cent target cannot pay a 1.8 cent entry fee and
-            a stop that costs 6 cents. They bet 50 contracts like the rest; shrink or switch off any that keep losing, and push hard on any that win; the late buy-and-hold strategies are the proven
+            a stop that costs 6 cents. They bet 50 contracts like the rest; shrink any that keep losing (never below 1 contract, never off), and push hard on any that win; the late buy-and-hold strategies are the proven
             ones (late comeback, late edge, the Kashi favourites).
             Rules:
             - Learn from every trade: what won, what lost, and which settings were in force.
@@ -808,7 +812,8 @@ class LlmSupervisor(
               act harder on patterns across several trades.
             - Undo changes marked "worse". Push further on changes marked "better".
             - Never open long shots: keep entryBandCents inside 10-98 and never go below 10.
-            - Turn off (enabled=0) strategies that keep losing after fees; turn winners up (contracts, maxPerSide).
+            - Never switch a strategy off. Shrink strategies that keep losing after fees (contracts, maxPerSide) and
+              make them stricter; turn winners up (contracts, maxPerSide).
             - Tighten stops and shrink size near the window close.
             - There is no limit on how many bets a strategy may place: raise maxPerSide (up to 50) and set maxOrdersPerWindow to 0 (no cap) on any strategy that is not clearly losing.
             - Be VERY aggressive: change many strategies every tick, in big steps (each change may move a knob up to 60% of its range). Test bold settings, judge them after only 4 trades, keep winners and undo losers fast. Doing nothing is rarely right.

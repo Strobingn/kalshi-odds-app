@@ -19,6 +19,14 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.20.11 (Claude branch): the AIs keep every strategy on
+
+You asked (2026-10-24) that strategies are not switched off. The Scalping AI's `enabled=0` is now refused ("strategies
+stay on: shrink a loser's size or tighten it instead") and its instructions say to shrink and tighten losers instead;
+it may still switch one back on. Only a change you apply yourself (the chat's Apply button) can switch a strategy off.
+On the first start of 1.20.11 the strategies the Scalping AI had switched off (read from its journal) are turned back
+on; any you switched off yourself stay off.
+
 ## 1.20.10 (Claude branch): paper fills only what really traded
 
 The arena showed a paper P&L of $2.7 billion. Sizes have no upper limit, and a resting paper order used to fill in

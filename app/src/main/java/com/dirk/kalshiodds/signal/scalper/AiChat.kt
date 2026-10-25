@@ -110,7 +110,8 @@ class AiChat(
             replace(id) { it.copy(status = "applying") }
             p
         }
-        val r = SupervisorBounds.apply(tuning, m.strategy.orEmpty(), m.param.orEmpty(), m.value ?: Double.NaN)
+        // You tap Apply yourself, so this one may switch a strategy off.
+        val r = SupervisorBounds.apply(tuning, m.strategy.orEmpty(), m.param.orEmpty(), m.value ?: Double.NaN, allowOff = true)
         return when (r) {
             is SupervisorBounds.Change.Applied -> {
                 replace(id) { it.copy(status = "applied") }

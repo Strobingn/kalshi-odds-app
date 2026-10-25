@@ -14,6 +14,28 @@ class SupervisorLog(
     private val io: Executor = Executors.newSingleThreadExecutor { r -> Thread(r, "supervisor-log").apply { isDaemon = true } },
     private val maxBytes: Long = 2_000_000L
 ) {
+    /**
+     * Strategies the Scalping AI switched off and did not switch back on, from its journal (both files, oldest
+     * first). Blocking file read: call it off the main thread.
+     */
+    fun turnedOffByAi(): Set<String> {
+        val off = LinkedHashSet<String>()
+        for (name in listOf("supervisor_journal.1.jsonl", "supervisor_journal.jsonl")) {
+            val f = File(dir, name)
+            if (!f.isFile) continue
+            runCatching {
+                f.forEachLine { line ->
+                    if (!line.contains("\"enabled\"") || !line.contains("\"applied\"")) return@forEachLine
+                    val o = runCatching { org.json.JSONObject(line) }.getOrNull() ?: return@forEachLine
+                    if (o.optString("event") != "applied" || o.optString("param") != "enabled") return@forEachLine
+                    val st = o.optString("strategy").takeIf { it.isNotBlank() } ?: return@forEachLine
+                    if (o.optDouble("new", 1.0) < 0.5) off += st else off -= st
+                }
+            }
+        }
+        return off
+    }
+
     fun append(kind: String, line: String) {
         io.execute {
             runCatching {

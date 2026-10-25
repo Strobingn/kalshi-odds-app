@@ -74,12 +74,32 @@ class LlmSupervisorTest {
     }
 
     @Test
-    fun aStrategyCanBeSwitchedOffAndOn() {
+    fun theAiMayNotSwitchAStrategyOffButMaySwitchItBackOn() {
         val t = ScalpTuning()
-        applied(SupervisorBounds.apply(t, st.name, "enabled", 0.0))
+        // You decided 2026-10-24: strategies stay on.
+        assertTrue(SupervisorBounds.apply(t, st.name, "enabled", 0.0) is SupervisorBounds.Change.Rejected)
+        assertTrue(t.tuned(st).enabled)
+        // Your own Apply (the chat) may switch one off, and the AI may turn it back on.
+        applied(SupervisorBounds.apply(t, st.name, "enabled", 0.0, allowOff = true))
         assertFalse(t.tuned(st).enabled)
         applied(SupervisorBounds.apply(t, st.name, "enabled", 1.0))
         assertTrue(t.tuned(st).enabled)
+    }
+
+    @Test
+    fun theJournalTellsWhichStrategiesTheAiLeftOff() {
+        val dir = java.nio.file.Files.createTempDirectory("journal").toFile()
+        java.io.File(dir, "supervisor_journal.1.jsonl").writeText(
+            "{\"event\":\"applied\",\"strategy\":\"BOUNCE\",\"param\":\"enabled\",\"old\":1.0,\"new\":0.0}\n"
+        )
+        java.io.File(dir, "supervisor_journal.jsonl").writeText(
+            "{\"event\":\"applied\",\"strategy\":\"LONG_SHOT\",\"param\":\"enabled\",\"old\":1.0,\"new\":0.0}\n" +
+                "{\"event\":\"rejected\",\"strategy\":\"RANGE_FLOOR\",\"param\":\"enabled\"}\n" +
+                "{\"event\":\"applied\",\"strategy\":\"BOUNCE\",\"param\":\"enabled\",\"old\":0.0,\"new\":1.0}\n" +
+                "{\"event\":\"applied\",\"strategy\":\"QUIET_MAKER\",\"param\":\"contracts\",\"new\":0.0}\n"
+        )
+        assertEquals(setOf("LONG_SHOT"), SupervisorLog(dir).turnedOffByAi())
+        dir.deleteRecursively()
     }
 
     private fun closed(id: Long, postedAt: Long, closedAt: Long, pnl: Double) = ClosedScalp(

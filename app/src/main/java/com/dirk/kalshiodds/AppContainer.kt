@@ -315,6 +315,7 @@ class AppContainer(context: Context) {
     }
     /** Every provider, in rotation order. */
     private val ALL_LLM = com.dirk.kalshiodds.signal.scalper.LlmProvider.NAMES.keys.toList()
+    private val KEY_AI_OFFS_RESTORED = "ai_offs_restored_v1"
 
     /** The saved key of provider [n] ("groq", "cerebras", "gemini", "mistral"). */
     fun llmKey(n: String): String = when (n) {
@@ -533,6 +534,20 @@ class AppContainer(context: Context) {
             llmSupervisor.onClosed(it)
             liveTuner.onClosed(it)
             closesSinceTick.incrementAndGet()
+        }
+        // 1.20.11: the AIs no longer switch strategies off. Once, turn back on the ones the Scalping AI had switched off
+        // (from its journal); strategies you switched off yourself stay off.
+        supervisorScope.launch {
+            if (supervisorPrefs.getBoolean(KEY_AI_OFFS_RESTORED, false)) return@launch
+            runCatching {
+                val tuning = scalperStore.tuning
+                for (name in supervisorLog.turnedOffByAi()) {
+                    val st = com.dirk.kalshiodds.signal.scalper.ScalpStrategy.values().firstOrNull { it.name == name } ?: continue
+                    val k = tuning.knobs(st)
+                    if (!k.enabled) tuning.set(st, k.copy(enabled = true))
+                }
+                supervisorPrefs.edit().putBoolean(KEY_AI_OFFS_RESTORED, true).apply()
+            }
         }
         // Scalping AI: every 60 s, and early (at most every 20 s) on a new window, a fast move or a run of closed trades.
         supervisorScope.launch {
