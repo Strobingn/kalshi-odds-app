@@ -136,9 +136,12 @@ object Research {
 
     /**
      * "AI learns": after every close, move several sliders. The step scales with that trade's P&L.
-     * Winners loosen (higher ceiling, lower floor down to the strategy floor, bigger clip).
-     * Losers tighten and shrink. It never freezes or benches. A manual edit clears [ScalpStrategySettings.aiBaseCents]
-     * and the next close starts from the values the owner set.
+     * Winners loosen (higher ceiling, lower floor down to the strategy floor, bigger clip, longer entry window).
+     * Losers tighten and shrink, but the buy band stays at least [AiLearnBounds.MIN_BAND_CENTS] wide
+     * (or the strategy's whole book, when that is narrower), until-minute stays at or above
+     * [AiLearnBounds.UNTIL_FLOOR] unless Dirk already set it lower, and a percent stop stays at or above
+     * [AiLearnBounds.STOP_PCT_FLOOR] the same way. It never freezes or benches. A manual edit clears
+     * [ScalpStrategySettings.aiBaseCents] and the next close starts from the values the owner set.
      */
     fun learn(code: String, s: ScalpStrategySettings, net: Double, defaultMaxCents: Int): ScalpStrategySettings {
         if (!s.aiLearns || !net.isFinite()) return s
@@ -171,7 +174,7 @@ object Research {
         } else {
             val cur = max ?: defaultMaxCents
             val base = s.aiBaseCents ?: cur
-            val nx = if (winner) minOf(cur + step, base + 12, ceil) else maxOf(cur - step, base - 20, ScalpFloors.minCeilingCents(code))
+            val nx = AiLearnBounds.nextMax(code, cur, base, min, step, winner)
             if (nx != cur) notes += "highest buy ${cur}¢ → ${nx}¢"
             max = nx
         }
@@ -182,16 +185,23 @@ object Research {
             contracts = clip1
             notes += "clip $clip0 → $clip1"
         }
-        val min1 = if (winner) (min - step).coerceAtLeast(floor) else (min + 1).coerceAtMost(((max ?: ceil) - 1).coerceAtLeast(floor))
+        val highForMin = max ?: ceil
+        val min1 = AiLearnBounds.nextMin(code, min, highForMin, step, winner)
         if (min1 != min) {
             min = min1
             notes += "lowest buy ${min0}¢ → ${min1}¢"
         }
-        val until1 = if (winner) (until + 1).coerceAtMost(14) else (until - 1).coerceAtLeast(1)
-        if (until1 != until) until = until1
+        val until1 = AiLearnBounds.nextUntil(until, winner)
+        if (until1 != until) {
+            notes += "until minute $until → $until1"
+            until = until1
+        }
         if (!isResearch(code) && stopPct != null && stopPct > 0) {
-            val nsp = if (winner) (stopPct + 1).coerceAtMost(40) else (stopPct - 1).coerceAtLeast(1)
-            if (nsp != stopPct) stopPct = nsp
+            val nsp = AiLearnBounds.nextStopPct(stopPct, winner)
+            if (nsp != stopPct) {
+                notes += "stop $stopPct% → $nsp%"
+                stopPct = nsp
+            }
         }
         val money = String.format(java.util.Locale.US, "%+.2f", net)
         val why = if (winner) "winner" else "loser"

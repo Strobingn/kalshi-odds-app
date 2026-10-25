@@ -1,5 +1,7 @@
 package com.dirk.kalshiodds.decision
 
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -144,5 +146,48 @@ class SavedScalpControlsTest {
         b.recordOutcome("v2-sf42", trade.copy(id = "second", netUsd = -.20))
         assertEquals(2, b.feedback("v2-sf42").trades)
         b.close()
+    }
+
+    @Test fun collapsedAiLearnPrefsRepairOnceOnOpen() {
+        val ctx = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = ctx.getSharedPreferences("kashi_v2_controls", Context.MODE_PRIVATE)
+        prefs.edit().clear().commit()
+        val shot = ScalpStrategySettings(
+            minEntryCents = 34, maxEntryCents = 35, untilMinute = 1, stopLossPercent = 1,
+            takeProfitCents = 15, aiLearns = true, aiN = 22, aiBaseCents = 55, aiNet = -1.2,
+            aiNote = "AI kept settings (loser -0.05)"
+        )
+        val hand = ScalpStrategySettings(
+            minEntryCents = 30, maxEntryCents = 32, untilMinute = 2, stopLossPercent = 3,
+            takeProfitCents = 15, aiLearns = true
+        ).manual()
+        val saved = ScalpControls(strategySettings = mapOf("sf42" to shot, "sf41" to shot, "sf43" to hand))
+        prefs.edit()
+            .putBoolean(ScalpAutoBenchMigration.FLAG, true)
+            .putBoolean(ScalpAutoBenchMigration.FLAG_1028, true)
+            .putString("settings", Json.encodeToString(saved))
+            .commit()
+        val loaded = SavedScalpControls(ctx)
+        val sf42 = loaded.state.value.settings("sf42")
+        assertEquals(25, sf42.minEntryCents)
+        assertEquals(35, sf42.maxEntryCents)
+        assertEquals(AiLearnBounds.UNTIL_FLOOR, sf42.untilMinute)
+        assertEquals(AiLearnBounds.STOP_PCT_FLOOR, sf42.stopLossPercent)
+        assertEquals(15, sf42.takeProfitCents)
+        val sf41 = loaded.state.value.settings("sf41")
+        assertTrue(sf41.maxEntryCents!! - sf41.minEntryCents >= AiLearnBounds.bandRoom("sf41"))
+        assertTrue(sf41.untilMinute >= AiLearnBounds.UNTIL_FLOOR)
+        val sf43 = loaded.state.value.settings("sf43")
+        assertEquals(30, sf43.minEntryCents)
+        assertEquals(32, sf43.maxEntryCents)
+        assertEquals(2, sf43.untilMinute)
+        assertEquals(3, sf43.stopLossPercent)
+        assertTrue(prefs.getBoolean(ScalpAutoBenchMigration.FLAG_BAND, false))
+        loaded.close()
+        val again = SavedScalpControls(ctx)
+        assertEquals(25, again.state.value.settings("sf42").minEntryCents)
+        assertEquals(35, again.state.value.settings("sf42").maxEntryCents)
+        assertEquals(2, again.state.value.settings("sf43").untilMinute)
+        again.close()
     }
 }

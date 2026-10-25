@@ -175,12 +175,17 @@ class MemoryScalpControls(initial: ScalpControls = ScalpControls()) : ScalpContr
  * [FLAG] was the 1.0.24 pass. [FLAG_1028] runs again because new -v1/-v2/-v3 ids
  * were still frozen after that flag had already been set. Force trade / Force bench
  * are not touched. A stored 1¢ floor is raised in [ScalpControls.normalized].
+ * [FLAG_BAND] rewrites AI-owned rows whose buy band, until-minute, or stop collapsed.
  */
 object ScalpAutoBenchMigration {
     const val FLAG = "autobench_cleared_1024"
     const val FLAG_1028 = "trading_default_1028"
+    const val FLAG_BAND = "ai_learn_band_1026"
 
     fun apply(saved: ScalpControls): ScalpControls = saved.copy(autoBench = false, aiBench = emptySet()).normalized()
+
+    /** Load-time repair. A hand-set narrow band is not AI-owned and is left alone. */
+    fun repairLearnedBands(saved: ScalpControls): ScalpControls = AiLearnBounds.repairAll(saved).normalized()
 }
 
 /**
@@ -194,13 +199,16 @@ class SavedScalpControls(context: Context, private val flushDelayMs: Long = 1_00
     override val state = MutableStateFlow(read())
     private fun read(): ScalpControls {
         val raw = runCatching { json.decodeFromString<ScalpControls>(prefs.getString("settings", "{}")!!) }.getOrDefault(ScalpControls())
-        val already = prefs.getBoolean(ScalpAutoBenchMigration.FLAG, false) &&
+        val legacy = prefs.getBoolean(ScalpAutoBenchMigration.FLAG, false) &&
             prefs.getBoolean(ScalpAutoBenchMigration.FLAG_1028, false)
-        if (already) return raw.normalized()
-        val next = ScalpAutoBenchMigration.apply(raw)
+        val bandDone = prefs.getBoolean(ScalpAutoBenchMigration.FLAG_BAND, false)
+        if (legacy && bandDone) return raw.normalized()
+        val migrated = if (legacy) raw else ScalpAutoBenchMigration.apply(raw)
+        val next = ScalpAutoBenchMigration.repairLearnedBands(migrated)
         prefs.edit()
             .putBoolean(ScalpAutoBenchMigration.FLAG, true)
             .putBoolean(ScalpAutoBenchMigration.FLAG_1028, true)
+            .putBoolean(ScalpAutoBenchMigration.FLAG_BAND, true)
             .putString("settings", json.encodeToString(next))
             .apply()
         return next
