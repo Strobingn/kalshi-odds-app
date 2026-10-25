@@ -2,6 +2,7 @@ package com.dirk.kalshiodds.release
 
 import com.dirk.kalshiodds.data.local.paper.ScalpSchema
 import com.dirk.kalshiodds.decision.AutopilotMinStake
+import com.dirk.kalshiodds.decision.PaperClip
 import com.dirk.kalshiodds.decision.InMemoryScalpPersistence
 import com.dirk.kalshiodds.decision.ScalpBook
 import com.dirk.kalshiodds.decision.ScalpParams
@@ -154,7 +155,8 @@ class ReleaseGate0338Test {
         val t = b.at(t0).single()
         assertEquals(ScalpState.OPEN, t.state)
         assertEquals(0.36, t.entryPrice!!, 1e-12)
-        assertEquals(ScalpRule.orderFee(10, 0.36), t.entryFeeUsd, 1e-12)
+        assertTrue(t.contracts >= PaperClip.MIN)
+        assertEquals(ScalpRule.orderFee(t.contracts, 0.36), t.entryFeeUsd, 1e-12)
     }
 
     @Test
@@ -168,8 +170,10 @@ class ReleaseGate0338Test {
         b2.onQuote(q(t0, 0.34, 0.35), enabled = true)
         b2.onQuote(q(t0 + 3_000L, 0.34, 0.35, askSize = 4.0), enabled = true)
         val partial = b2.at(t0).single()
+        // A 4-lot touch still fills. It does not shrink the paper clip.
         assertEquals(ScalpState.OPEN, partial.state)
-        assertEquals(4, partial.contracts)
+        assertTrue(partial.contracts >= PaperClip.MIN)
+        assertTrue(partial.contracts > 4)
     }
 
     @Test
@@ -185,7 +189,9 @@ class ReleaseGate0338Test {
         b.onQuote(q(t0 + 9_000L, 0.51, 0.52), enabled = true)
         val t = b.at(t0).single()
         assertEquals(ScalpState.CLOSED, t.state)
-        val expected = 10 * 0.51 - ScalpRule.orderFee(10, 0.51) - (10 * 0.35 + ScalpRule.orderFee(10, 0.35))
+        val n = t.contracts
+        assertTrue(n >= PaperClip.MIN)
+        val expected = n * 0.51 - ScalpRule.orderFee(n, 0.51) - (n * 0.35 + ScalpRule.orderFee(n, 0.35))
         assertEquals(expected, t.netUsd!!, 1e-9)
         assertTrue(t.entryFeeUsd > 0.0 && t.exitFeeUsd > 0.0)
         val s = ScalpStats.summary(b.legacy())
@@ -207,10 +213,12 @@ class ReleaseGate0338Test {
         b.onQuote(q(t0 + 12_000L, 0.50, 0.51, bidSize = 100.0), enabled = true)
         val done = b.at(t0).single()
         assertEquals(ScalpState.CLOSED, done.state)
-        val expectedProceeds = 4 * 0.51 + 6 * 0.50
+        val rest = done.contracts - 4
+        assertTrue(rest > 0)
+        val expectedProceeds = 4 * 0.51 + rest * 0.50
         assertEquals(expectedProceeds, done.proceedsUsd, 1e-9)
-        assertEquals(com.dirk.kalshiodds.signal.trade.KalshiFee.sweepFee(listOf(4 to 0.51, 6 to 0.50)), done.exitFeeUsd, 1e-9)
-        assertTrue(done.exitFeeUsd <= ScalpRule.orderFee(4, 0.51) + ScalpRule.orderFee(6, 0.50) + 1e-9)
+        assertEquals(com.dirk.kalshiodds.signal.trade.KalshiFee.sweepFee(listOf(4 to 0.51, rest to 0.50)), done.exitFeeUsd, 1e-9)
+        assertTrue(done.exitFeeUsd <= ScalpRule.orderFee(4, 0.51) + ScalpRule.orderFee(rest, 0.50) + 1e-9)
     }
 
     @Test
@@ -246,7 +254,9 @@ class ReleaseGate0338Test {
         b.settle("KXBTC15M-26OCT091015-15", "yes", close + 10_000L)
         val t = b.at(t0).single()
         assertEquals(ScalpState.CLOSED, t.state)
-        assertEquals(10 * 1.0 - (10 * 0.35 + ScalpRule.orderFee(10, 0.35)), t.netUsd!!, 1e-9)
+        val n = t.contracts
+        assertTrue(n >= PaperClip.MIN)
+        assertEquals(n * 1.0 - (n * 0.35 + ScalpRule.orderFee(n, 0.35)), t.netUsd!!, 1e-9)
     }
 
     @Test

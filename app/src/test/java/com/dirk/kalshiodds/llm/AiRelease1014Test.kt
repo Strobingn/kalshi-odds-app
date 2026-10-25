@@ -2,6 +2,7 @@ package com.dirk.kalshiodds.llm
 
 import com.dirk.kalshiodds.decision.AiBench
 import com.dirk.kalshiodds.decision.KeptScalpers
+import com.dirk.kalshiodds.decision.PaperClip
 import com.dirk.kalshiodds.decision.MemoryScalpControls
 import com.dirk.kalshiodds.decision.PaperTape
 import com.dirk.kalshiodds.decision.ScalpControls
@@ -68,9 +69,17 @@ class AiRelease1014Test {
         assertEquals(entry.min, StrategyAlgo.step(entry.min, entry.min - 25, entry)!!, 0.0)
         assertEquals(entry.max, StrategyAlgo.step(entry.max, entry.max + 25, entry)!!, 0.0)
         val size = StrategyAlgo.knob(controls, code, "contracts")!!
+        assertEquals(PaperClip.MIN.toDouble(), size.min, 0.0)
         val current = StrategyAlgo.current(controls, code, size)
-        assertEquals(current + 1.0, StrategyAlgo.step(current, current + 40, size)!!, 0.0)
+        // Default cap sits on the paper floor, so a +40 proposal cannot step past that ceiling.
+        assertEquals(minOf(current + size.step, size.max), StrategyAlgo.step(current, current + 40, size)!!, 0.0)
         assertTrue(size.max <= StrategyAlgo.contractCap(controls).toDouble() + 1e-9)
+        val roomy = ScalpControls(contracts = 120)
+        val room = StrategyAlgo.knob(roomy, code, "contracts")!!
+        val at = StrategyAlgo.current(roomy, code, room)
+        assertTrue(at + room.step <= room.max)
+        assertEquals(at + room.step, StrategyAlgo.step(at, at + 40, room)!!, 0.0)
+        assertTrue(room.max <= StrategyAlgo.contractCap(roomy).toDouble() + 1e-9)
     }
 
     @Test fun manualForceTradeWinsAndFreezeKeepsTheStrategy() {

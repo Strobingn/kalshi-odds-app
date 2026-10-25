@@ -21,7 +21,9 @@ class UnlimitedWindowEntriesTest {
             book.onQuote(quote(start + i * 3_000L, yesBid = 0.34, yesAsk = 0.35, spot = 101_000.0), true)
         }
         val steady = book.snapshot().count { it.variantId == KeptScalpers.FAIR_ID && it.state != ScalpState.NO_FILL }
-        assertTrue("steady clips $steady", steady >= 6)
+        // Each open 50-lot is about $2 under the bid, so the −$8 window gate pauses before six can stack.
+        assertTrue("steady clips $steady", steady >= 4)
+        assertTrue(book.gateLine(KeptScalpers.FAIR_ID)!!.contains("UP paused"))
         // Sell the open clip while the bid is still through the target, then buy again.
         var at = start + 24_000L
         book.onQuote(quote(at, yesBid = 0.48, yesAsk = 0.49, spot = 101_000.0), true)

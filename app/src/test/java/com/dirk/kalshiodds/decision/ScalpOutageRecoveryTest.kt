@@ -21,9 +21,11 @@ class ScalpOutageRecoveryTest {
         val now = currentClose - 600_000L
         assertTrue(now > previousClose)
 
+        val clip = PaperClip.MIN
         val orphanCost = 10 * 0.50 + ScalpRule.orderFee(10, 0.50)
-        val nextCost = 10 * 0.35 + ScalpRule.orderFee(10, 0.35)
-        val bankroll = orphanCost + nextCost / 2.0
+        val nextCost = clip * 0.35 + ScalpRule.orderFee(clip, 0.35)
+        // One fresh clip fits after the orphan leaves the book. Both together do not.
+        val bankroll = maxOf(orphanCost, nextCost) + minOf(orphanCost, nextCost) / 2.0
         val orphan = ScalpTrade(
             id = "before-outage", ticker = previous, side = "YES", state = ScalpState.OPEN,
             signalAtMs = previousClose - 400_000L, signalAsk = 0.50, fairAtSignal = 0.55,
