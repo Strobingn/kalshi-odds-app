@@ -436,6 +436,8 @@ object TwentyScalperFleet {
         @Volatile var perpBasis: Double? = null
         @Volatile var macroZ: Double? = null
         @Volatile var timesFmYes: Double? = null
+        /** Side + scalper code. A non-null reason refuses the open before inventory moves. */
+        var lossPause: (side: String, code: String) -> String? = { _, _ -> null }
 
         private class Sample(val t: Long, val px: Double)
         private class OpenPos(val trade: ScalpTrade, val entry: Double, val atMs: Long, val cost: Double)
@@ -698,6 +700,7 @@ object TwentyScalperFleet {
 
         private fun open(m: Mkt, q: ScalpRule.Quote, id: String, gate: Gate, newId: () -> String): ScalpTrade? {
             if (m.pos[id] != null || gate.contracts < 1) return null
+            if (lossPause(gate.side, id) != null) return null
             val px = gate.avgFill
             if (px <= 0.01 || px >= 0.99) return null
             val n = gate.contracts

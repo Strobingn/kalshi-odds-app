@@ -6,7 +6,9 @@ import com.dirk.kalshiodds.decision.*
 data class ScalpWindowChartData(
     val ticker: String = "", val closeMs: Long = 0, val nowMs: Long = 0,
     val bookAtMs: Long? = null, val points: List<BidPoint> = emptyList(),
-    val trades: List<ScalpTrade> = emptyList(), val error: String? = null
+    val trades: List<ScalpTrade> = emptyList(), val error: String? = null,
+    val sideLossFloorUsd: Double = WindowLossGate.DEFAULT_LOSS_USD,
+    val adverseFillCap: Int = WindowLossGate.DEFAULT_ADVERSE_FILLS
 ) {
     val startMs get() = closeMs - 900_000L
     enum class Kind { SIGNAL, ORDER, BUY, SELL, SETTLEMENT, LEGACY_EXIT }
@@ -29,6 +31,20 @@ data class ScalpWindowChartData(
     }.sortedBy { it.atMs }
     /** UP and DOWN markers together. Same rows [markers] returns, one side at a time. */
     fun allMarkers(): List<Marker> = (markers("YES") + markers("NO")).sortedWith(compareBy({ it.atMs }, { it.id }))
+
+    /**
+     * Sides [WindowLossGate] would refuse on the rows drawn here.
+     * "UP paused: window −$12.40" when that side is through the floor or the losing streak.
+     */
+    fun sidePauseLine(): String? {
+        if (closeMs <= startMs && trades.isEmpty()) return null
+        val parts = listOf("YES", "NO").mapNotNull { side ->
+            WindowLossGate.evaluate(
+                trades, ticker, side, bid(side), sideLossFloorUsd, adverseFillCap, primaryOnly = false
+            ).reason
+        }
+        return parts.joinToString(" · ").ifBlank { null }
+    }
 
     /**
      * One side has markers and the other does not. The missing side's ask is the complement of the

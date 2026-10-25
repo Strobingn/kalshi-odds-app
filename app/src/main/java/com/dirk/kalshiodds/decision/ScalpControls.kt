@@ -41,7 +41,15 @@ data class ScalpControls(
      */
     val algo: Map<String, Map<String, Double>> = emptyMap(),
     /** 1.0.14 strategies the AI watcher has benched. Force trade / Force bench in [benchOverrides] still win. */
-    val aiBench: Set<String> = emptySet()
+    val aiBench: Set<String> = emptySet(),
+    /**
+     * Paper side brake for the current 15-minute market. Zero disables that leg.
+     * A side at or under this loss (realized plus open mark) takes no new clips.
+     * The other side, and a side back above the floor, still re-enter.
+     */
+    val windowSideLossUsd: Double = WindowLossGate.DEFAULT_LOSS_USD,
+    /** Leading losing closes on one side before that side stops new clips. Zero disables. */
+    val windowAdverseFills: Int = WindowLossGate.DEFAULT_ADVERSE_FILLS
 ) {
     fun settings(code: String): ScalpStrategySettings =
         ScalpParamSanity.settings(code, strategySettings[code] ?: ScalpStrategySettings())
@@ -55,6 +63,8 @@ data class ScalpControls(
         dipCents = dipCents.takeIf { it.isFinite() }?.coerceIn(0.0, 30.0) ?: 0.0,
         benchWindow = benchWindow.coerceIn(5, 500), slipCents = slipCents.takeIf { it.isFinite() }?.coerceIn(0.0, 10.0) ?: 1.0,
         bigLossUsd = bigLossUsd.takeIf { it.isFinite() }?.coerceIn(0.5, 10_000.0) ?: 5.0,
+        windowSideLossUsd = windowSideLossUsd.takeIf { it.isFinite() }?.coerceIn(0.0, 100_000.0) ?: WindowLossGate.DEFAULT_LOSS_USD,
+        windowAdverseFills = windowAdverseFills.coerceIn(0, 100),
         // 1.0.24 and again here: automatic bench and AI bench never come back. Only Force bench stops a scalper.
         autoBench = false,
         aiBench = emptySet()).let { clean ->
