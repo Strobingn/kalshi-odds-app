@@ -155,4 +155,29 @@ class TwentyScalperFleetTest {
         val stale = staleBook.onQuote(quote(250L), true).filter { TwentyScalperFleet.isFleet(it.variantId) }
         assertTrue(stale.isEmpty())
     }
+
+    @Test fun fleetReserveUsesTheFlooredClip() {
+        val now = 1_700_000_000_000L
+        val sig = HftMathEngines.perSecVol(0.0075)
+        val q = ScalpRule.Quote(
+            ticker = "KXBTC15M-26OCT181200-00",
+            nowMs = now,
+            closeMs = now + 400_000L,
+            bookAtMs = now,
+            yesBid = 0.39,
+            yesBidSize = 100.0,
+            yesAsk = 0.40,
+            yesAskSize = 100.0,
+            spot = 101_000.0,
+            strike = 100_000.0,
+            sigmaPerSec = sig
+        )
+        fun cost(rows: List<ScalpTrade>) = rows.sumOf { (it.entryPrice ?: 0.0) * it.contracts + it.entryFeeUsd }
+        val room = TwentyScalperFleet.FleetBook().onQuote(q, 25.0) { "room" }
+        assertTrue(room.joinToString { "${it.variantId} ${it.contracts}" }, room.isNotEmpty())
+        assertTrue(room.all { it.contracts >= PaperClip.MIN })
+        assertTrue(cost(room) <= 25.0 + 1e-6)
+        val poor = TwentyScalperFleet.FleetBook().onQuote(q, 12.0) { "poor" }
+        assertTrue(poor.joinToString { it.variantId }, poor.isEmpty())
+    }
 }

@@ -1208,6 +1208,9 @@ class ScalpBook(
                 val n = PaperClip.taker(admitted.n, gn.toDouble())
                 val px = if (n == gn) usd / gn else ask
                 val fee = if (n == gn) fee0 else ScalpRule.orderFee(n, px)
+                val stake = controls.state.value.maxStakeUsd
+                if (stake > 0.0 && px * n + fee > stake + 1e-9) continue
+                if (px.isFinite() && n * px + fee > bankrollUsd() + 1.0) continue
                 gates.entered(code, ScalpModels.windowKeyOf(q.ticker))
                 val cap = if (admitted.capped) String.format(Locale.US, " (green %d capped at clip %d)", greenClip, admitted.clip) else ""
                 changed += t.copy(state = ScalpState.OPEN, contracts = n, entryPrice = px, entryFeeUsd = fee, entryAtMs = q.nowMs,
@@ -1738,9 +1741,10 @@ class ScalpBook(
             gates.block(twin.id, window, d.reason)
             return null
         }
-        val n = PaperClip.sized(ModelFilter.sized(maxOf(twin.clip, PaperClip.MIN), d.scalar, maxOf(twin.clip, PaperClip.MIN)))
+        val clip = maxOf(twin.clip, PaperClip.MIN)
+        val n = PaperClip.sized(ModelFilter.sized(clip, d.scalar, clip))
         val floor = ScalpFloors.cents(twin.parentId) / 100.0
-        val blocked = ScalpParamSanity.entryBlock(sig.side, sig.ask, n, floor, bankrollUsd(), twin.clip)
+        val blocked = ScalpParamSanity.entryBlock(sig.side, sig.ask, n, floor, bankrollUsd(), clip)
         val lesson = FairGapTune.lessonAllowed(q, sig.side, sig.ask, sig.fair, n, variantId = twin.id, open = _all.value)
         if (FairGapTune.stackingBlocked(twin.id, q, sig.side, sig.ask, _all.value)) {
             gates.block(twin.id, window, FairGapTune.STACK_GUARD)
@@ -2827,6 +2831,8 @@ class ScalpBook(
                         val n = PaperClip.taker(sp.clip, walked.toDouble())
                         val avg = if (n == walked) usd / walked else ask
                         val fee = if (n == walked) fee0 else ScalpRule.orderFee(n, avg)
+                        if (n <= 0) continue
+                        if (cfg.maxStakeUsd > 0.0 && avg * n + fee > cfg.maxStakeUsd + 1e-9) continue
                         controls.recordEntry(q.nowMs); openCount++; openByModelSide[sideKey] = (openByModelSide[sideKey] ?: 0) + 1
                         gates.entered(code, ScalpModels.windowKeyOf(key))
                         out += t.copy(state = ScalpState.OPEN, contracts = n, entryPrice = avg, entryFeeUsd = fee, entryAtMs = q.nowMs,

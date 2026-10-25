@@ -489,13 +489,16 @@ object TwentyScalperFleet {
                     val ladder = q.askLadder(sig.side).map { Level(it.first, it.second) }
                     val gate = evaluate(sig.side, sig.pWin, ladder, age, bankroll)
                     if (!gate.pass) continue
-                    val cost = gate.avgFill * gate.contracts + gate.feeUsd
+                    val booked = PaperClip.sized(gate.contracts)
+                    if (booked < 1) continue
+                    val fee = quadraticFeeUsd(booked, gate.avgFill)
+                    val cost = gate.avgFill * booked + fee
                     if (spent + cost > bankroll + 1e-9) continue
                     val openN = m.pos.count { it.strategyId == spec.id && it.trade.side == sig.side }
                     val clock = "$ticker|${spec.id}|${sig.side}"
                     if (!PaperReentry.allowed(openN, lastClipMs[clock], q.nowMs)) continue
                     spent += cost
-                    intents += InternalRouter.Intent(spec.id, ticker, sig.side, gate.avgFill, gate.contracts, gate.netEv) to gate
+                    intents += InternalRouter.Intent(spec.id, ticker, sig.side, gate.avgFill, booked, gate.netEv) to gate
                 }
             }
             val kept = InternalRouter.admit(intents.map { it.first }).map { it.id }.toSet()
