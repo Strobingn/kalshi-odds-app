@@ -28,7 +28,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 
-/** Paper-book charts for Live, Scorecard, History, and Data. The read runs on [Dispatchers.IO]. */
+/**
+ * Paper charts for Live, Scorecard, History, and Data. The read runs on [Dispatchers.IO].
+ * Scalper paper lives on the scalp book. The autopilot ledger is included when it has fills,
+ * and it is not the only source: an empty ledger used to leave every Data card on "No trades yet".
+ */
 @Composable
 fun PaperRichCharts(place: String) {
     val context = LocalContext.current
@@ -40,11 +44,14 @@ fun PaperRichCharts(place: String) {
                 runCatching {
                     val app = context.applicationContext as? KalshiOddsApp ?: return@runCatching null
                     val snap = app.container.paper.book.snapshot()
-                    val key = "paper|${snap.postResetFills.size}|${snap.fills.size}|${snap.openCount}|${snap.lifetimeRealizedPnlUsd}|${snap.cashUsd}"
+                    val scalps = app.container.scalp.chartScalps()
+                    val stamp = scalps.maxOfOrNull { it.closedAtMs ?: it.entryAtMs ?: it.signalAtMs } ?: 0L
+                    val net = scalps.sumOf { it.netUsd ?: 0.0 }
+                    val key = "paper|${snap.postResetFills.size}|${snap.fills.size}|${snap.openCount}|${snap.lifetimeRealizedPnlUsd}|${snap.cashUsd}|scalp|${scalps.size}|$stamp|$net"
                     val hit = RichChartCache.get(key) as? Pair<RichChartLoader.PaperPack, RichTradeMath.Report>
                     if (hit != null) return@runCatching hit
                     val fills = snap.postResetFills.ifEmpty { snap.fills }
-                    val built = RichChartLoader.paper(fills)
+                    val built = RichChartLoader.paperActivity(fills, scalps)
                     val stats = RichTradeMath.report(built.trades, System.currentTimeMillis())
                     (built to stats).also { RichChartCache.put(key, it) }
                 }.getOrNull()
@@ -71,7 +78,7 @@ fun PaperRichCharts(place: String) {
             fontWeight = FontWeight.Bold
         )
         Text(
-            "Paper only. The autopilot and manual paper ledger, not live orders. Several fills in one window add up. Times are US Eastern.",
+            "Paper only. Scalp paper round trips and open clips, plus the autopilot ledger. Not live orders. Several fills in one window add up. Times are US Eastern.",
             color = colors.textSecondary,
             style = MaterialTheme.typography.bodySmall
         )

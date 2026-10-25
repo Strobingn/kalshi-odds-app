@@ -1,6 +1,7 @@
 package com.dirk.kalshiodds.ui.charts.rich
 
 import com.dirk.kalshiodds.decision.KeptScalpers
+import com.dirk.kalshiodds.decision.ScalpTrade
 import com.dirk.kalshiodds.signal.paper.PaperFill
 
 /**
@@ -45,8 +46,21 @@ object RichChartLoader {
         return ScalpPack(kept, capped, compare, counts)
     }
 
-    fun paper(fills: List<PaperFill>, max: Int = RichTradeMath.MAX_ROWS): PaperPack {
-        val (kept, capped) = RichTradeMath.cap(fills.mapNotNull { RichTradeMath.fromPaper(it) }, max)
+    fun paper(fills: List<PaperFill>, max: Int = RichTradeMath.MAX_ROWS): PaperPack =
+        paperActivity(fills, emptyList(), max)
+
+    /**
+     * Autopilot fills plus scalp paper rows. An empty autopilot book is not an empty chart
+     * when [scalps] has a closed round trip or an open clip. Shadows never arrive here as trades.
+     */
+    fun paperActivity(
+        fills: List<PaperFill>,
+        scalps: List<ScalpTrade>,
+        max: Int = RichTradeMath.MAX_ROWS
+    ): PaperPack {
+        val rows = fills.mapNotNull { RichTradeMath.fromPaper(it) } +
+            scalps.mapNotNull { RichTradeMath.fromScalpActivity(it) }
+        val (kept, capped) = RichTradeMath.cap(rows, max)
         return PaperPack(kept, capped)
     }
 }
