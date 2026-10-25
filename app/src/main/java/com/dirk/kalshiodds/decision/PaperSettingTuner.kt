@@ -9,7 +9,8 @@ import kotlin.math.roundToInt
  * It loosens and enlarges only a scalper that is net-positive after fees over at least
  * [LOOSEN_MIN] recent closes. A loser gets tighter and a smaller clip.
  * It never loosens a loser, never benches, never pauses, and never moves a setting the owner just edited.
- * Steps scale with recent P&L. The strategy floor and the sane ask ceiling are hard stops.
+ * Steps scale with recent P&L. The strategy floor, the sane ask ceiling, and [AiLearnBounds]
+ * (buy-band width, until-minute, stop) are hard stops. A 1¢ band or minute 1 is not a tighter setting.
  */
 object PaperSettingTuner {
     /** Recent closes required before a positive net may loosen or enlarge a clip. */
@@ -52,6 +53,9 @@ object PaperSettingTuner {
             val view = controls.settings(tape.code)
             val floor = ScalpFloors.cents(tape.code)
             val ceil = ScalpFloors.ceilingCents(tape.code)
+            val max0 = view.maxEntryCents ?: ceil
+            val min0 = view.minEntryCents.coerceAtLeast(floor)
+            val band = AiLearnBounds.enforcedBand(tape.code, min0, max0)
             val why = if (winner) {
                 String.format(Locale.US, "winner net %+.2f win %.0f%% · loosen so it trades more", net, wr * 100.0)
             } else {
@@ -64,11 +68,19 @@ object PaperSettingTuner {
                 val lo: Int
                 val hi: Int
                 when (field) {
-                    "minEntryCents" -> { lo = floor; hi = (ceil - 1).coerceAtLeast(floor) }
-                    "maxEntryCents" -> { lo = ScalpFloors.minCeilingCents(tape.code); hi = ceil }
+                    "minEntryCents" -> {
+                        lo = floor
+                        hi = (max0 - band).coerceAtLeast(lo)
+                    }
+                    "maxEntryCents" -> {
+                        hi = ceil
+                        val loBound = maxOf(ScalpFloors.minCeilingCents(tape.code), (min0 + band).coerceAtMost(ceil))
+                        lo = loBound.coerceAtMost(hi)
+                    }
                     "contracts" -> { lo = 1; hi = ScalpVariants.clipOf(tape.code) ?: 100 }
-                    "untilMinute" -> { lo = 1; hi = 14 }
-                    "stopCents", "stopLossPercent" -> { lo = 1; hi = 48 }
+                    "untilMinute" -> { lo = AiLearnBounds.untilLo(view.untilMinute); hi = AiLearnBounds.UNTIL_CEILING }
+                    "stopCents" -> { lo = AiLearnBounds.stopCentsLo(view.stopCents ?: 8); hi = 48 }
+                    "stopLossPercent" -> { lo = AiLearnBounds.stopPctLo(view.stopLossPercent ?: 20); hi = 48 }
                     "takeProfitCents" -> { lo = 0; hi = 40 }
                     "maxHoldSeconds" -> { lo = 0; hi = 900 }
                     "edgeCents" -> { lo = 0; hi = 30 }
@@ -79,23 +91,28 @@ object PaperSettingTuner {
                 if (old == null && field == "maxEntryCents" && clamped == ceil && !winner) return
                 out += Change(tape.code, field, old?.toString() ?: "default", clamped.toString(), why)
             }
-            val max0 = view.maxEntryCents ?: ceil
-            val min0 = view.minEntryCents
             val clip0 = view.contracts ?: ScalpParamSanity.builtinClip(tape.code)
+            val nextMax = AiLearnBounds.nextMax(tape.code, max0, max0, min0, step, winner)
             if (winner) {
-                put("maxEntryCents", view.maxEntryCents, max0 + step)
-                put("minEntryCents", min0, min0 - step)
+                put("maxEntryCents", view.maxEntryCents, nextMax)
+                put("minEntryCents", min0, AiLearnBounds.nextMin(tape.code, min0, nextMax, step, true))
                 put("contracts", view.contracts, clip0 + step)
-                put("untilMinute", view.untilMinute, view.untilMinute + 1)
+                put("untilMinute", view.untilMinute, AiLearnBounds.nextUntil(view.untilMinute, true))
                 put("takeProfitCents", view.takeProfitCents, (view.takeProfitCents ?: 0) + step)
                 if ("edgeCents" in fields) put("edgeCents", view.edgeCents, (view.edgeCents ?: Research.defaultEdge(tape.code)) - step)
             } else {
-                put("maxEntryCents", view.maxEntryCents ?: max0, max0 - step)
-                put("minEntryCents", min0, min0 + 1)
+                put("maxEntryCents", view.maxEntryCents ?: max0, nextMax)
+                put("minEntryCents", min0, AiLearnBounds.nextMin(tape.code, min0, nextMax, step, false))
                 put("contracts", view.contracts, clip0 - step)
-                put("untilMinute", view.untilMinute, view.untilMinute - 1)
-                if (view.stopCents != null || "stopCents" in fields) put("stopCents", view.stopCents ?: 8, (view.stopCents ?: 8) - 1)
-                if ("stopLossPercent" in fields && view.stopCents == null) put("stopLossPercent", view.stopLossPercent ?: 20, (view.stopLossPercent ?: 20) - 1)
+                put("untilMinute", view.untilMinute, AiLearnBounds.nextUntil(view.untilMinute, false))
+                if (view.stopCents != null || "stopCents" in fields) {
+                    val curStop = view.stopCents ?: 8
+                    put("stopCents", view.stopCents, AiLearnBounds.nextStopCents(curStop, false))
+                }
+                if ("stopLossPercent" in fields && view.stopCents == null) {
+                    val curPct = view.stopLossPercent ?: 20
+                    put("stopLossPercent", view.stopLossPercent, AiLearnBounds.nextStopPct(curPct, false))
+                }
                 if ("edgeCents" in fields) put("edgeCents", view.edgeCents, (view.edgeCents ?: Research.defaultEdge(tape.code)) + step)
             }
         }
