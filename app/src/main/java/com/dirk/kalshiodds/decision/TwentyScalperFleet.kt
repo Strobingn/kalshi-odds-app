@@ -428,8 +428,9 @@ object TwentyScalperFleet {
     }
 
     /**
-     * Paper book for the fleet. One open clip per scalper per ticker.
-     * External inputs stay null on the live path, so those scalpers do not trade.
+     * Paper book for the fleet. Several clips may be open on one scalper and side.
+     * [PaperReentry] spaces them. External inputs stay null on the live path, so
+     * those scalpers do not trade. [lossPause] is the window loss brake.
      */
     class FleetBook {
         @Volatile var polyYesAsk: Double? = null
@@ -440,7 +441,7 @@ object TwentyScalperFleet {
         var lossPause: (side: String, code: String) -> String? = { _, _ -> null }
 
         private class Sample(val t: Long, val px: Double)
-        private class OpenPos(val trade: ScalpTrade, val entry: Double, val atMs: Long, val cost: Double)
+        private class OpenPos(val strategyId: String, val trade: ScalpTrade, val entry: Double, val atMs: Long, val cost: Double)
         private class Mkt {
             val mids = ArrayDeque<Sample>()
             val spots = ArrayDeque<Sample>()
@@ -451,10 +452,11 @@ object TwentyScalperFleet {
             var flowSign = 0
             var flip = false
             var updates = 0
-            val pos = HashMap<String, OpenPos>()
+            val pos = ArrayList<OpenPos>()
         }
 
         private val books = HashMap<String, Mkt>()
+        private val lastClipMs = HashMap<String, Long>()
         private val coinRet = HashMap<String, ArrayDeque<Double>>()
         private val coinPx = HashMap<String, Sample>()
         private var prevCorr = 0.0
@@ -479,7 +481,6 @@ object TwentyScalperFleet {
                 var spent = openCost()
                 for (spec in ALL) {
                     if (!listedOn(spec.id, ticker)) continue
-                    if (m.pos[spec.id] != null) continue
                     val sig = signal(spec.id, ctx)
                     if (sig == null) {
                         if (spec.externalStub || spec.id == "s14-brti-nowcast" && ctx.cfFairYes == null) stubbed += spec.id
@@ -490,6 +491,9 @@ object TwentyScalperFleet {
                     if (!gate.pass) continue
                     val cost = gate.avgFill * gate.contracts + gate.feeUsd
                     if (spent + cost > bankroll + 1e-9) continue
+                    val openN = m.pos.count { it.strategyId == spec.id && it.trade.side == sig.side }
+                    val clock = "$ticker|${spec.id}|${sig.side}"
+                    if (!PaperReentry.allowed(openN, lastClipMs[clock], q.nowMs)) continue
                     spent += cost
                     intents += InternalRouter.Intent(spec.id, ticker, sig.side, gate.avgFill, gate.contracts, gate.netEv) to gate
                 }
@@ -506,7 +510,7 @@ object TwentyScalperFleet {
             return out
         }
 
-        private fun openCost(): Double = books.values.sumOf { it.pos.values.sumOf { p -> p.cost } }
+        private fun openCost(): Double = books.values.sumOf { book -> book.pos.sumOf { p -> p.cost } }
 
         private fun contextOf(q: ScalpRule.Quote, m: Mkt): SignalCtx {
             val bid = q.yesBid ?: 0.5
@@ -684,30 +688,40 @@ object TwentyScalperFleet {
 
         private fun exitOpen(m: Mkt, q: ScalpRule.Quote): List<ScalpTrade> {
             val out = ArrayList<ScalpTrade>()
-            val ids = m.pos.keys.toList()
-            for (id in ids) {
-                val pos = m.pos[id] ?: continue
-                val bid = q.bid(pos.trade.side) ?: continue
-                if (bid <= 0.01 || bid >= 0.99) continue
+            val keep = ArrayList<OpenPos>()
+            for (pos in m.pos) {
+                val bid = q.bid(pos.trade.side)
+                if (bid == null || bid <= 0.01 || bid >= 0.99) {
+                    keep += pos
+                    continue
+                }
                 val held = (q.nowMs - pos.atMs) / 1000.0
+                val id = pos.strategyId
                 val terminal = id.startsWith("s01") || id.startsWith("s02") || id.startsWith("s03") || id.startsWith("s04")
                 val net = bid - pos.entry - quadraticFeeUsd(1, bid) - quadraticFeeUsd(1, pos.entry)
                 val flatten = if (terminal) q.tauS <= 1.5 else q.tauS <= 8.0
-                if (flatten || net >= 0.04 || held >= 120.0) out += close(m, id, bid, q.nowMs, if (flatten) "fleet flatten" else "fleet exit")
+                if (flatten || net >= 0.04 || held >= 120.0) out += closeTrade(pos, bid, q.nowMs, if (flatten) "fleet flatten" else "fleet exit")
+                else keep += pos
             }
+            m.pos.clear()
+            m.pos.addAll(keep)
             return out
         }
 
         private fun open(m: Mkt, q: ScalpRule.Quote, id: String, gate: Gate, newId: () -> String): ScalpTrade? {
-            if (m.pos[id] != null || gate.contracts < 1) return null
+            if (gate.contracts < 1) return null
             if (lossPause(gate.side, id) != null) return null
+            val ticker = q.ticker.uppercase()
+            val clock = "$ticker|$id|${gate.side}"
+            val openN = m.pos.count { it.strategyId == id && it.trade.side == gate.side }
+            if (!PaperReentry.allowed(openN, lastClipMs[clock], q.nowMs)) return null
             val px = gate.avgFill
             if (px <= 0.01 || px >= 0.99) return null
             val n = gate.contracts
             val fee = quadraticFeeUsd(n, px)
             val t = ScalpTrade(
                 id = newId(),
-                ticker = q.ticker.uppercase(),
+                ticker = ticker,
                 side = gate.side,
                 state = ScalpState.OPEN,
                 signalAtMs = q.nowMs,
@@ -720,12 +734,13 @@ object TwentyScalperFleet {
                 note = "paper fleet $id · ev ${"%.4f".format(gate.netEv)} · slip ${"%.4f".format(gate.slippage)} · no live order",
                 ruleVersion = "${ScalpRule.VERSION}|$id|P"
             )
-            m.pos[id] = OpenPos(t, px, q.nowMs, px * n + fee)
+            m.pos += OpenPos(id, t, px, q.nowMs, px * n + fee)
+            lastClipMs[clock] = q.nowMs
+            while (lastClipMs.size > 4_000) lastClipMs.remove(lastClipMs.keys.first())
             return t
         }
 
-        private fun close(m: Mkt, id: String, exitPx: Double, at: Long, reason: String): ScalpTrade {
-            val pos = m.pos.remove(id) ?: error("missing $id")
+        private fun closeTrade(pos: OpenPos, exitPx: Double, at: Long, reason: String): ScalpTrade {
             val t = pos.trade
             val n = t.contracts
             val px = exitPx.coerceIn(0.01, 0.99)

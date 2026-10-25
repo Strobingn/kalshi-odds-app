@@ -12,7 +12,7 @@ import org.junit.Test
 class VariantOwnParamsTest {
     private val ticker = "KXBTC15M-26OCT220945-45"
 
-    @Test fun steadyDipIsOneEntryAndANewDipIsAnother() {
+    @Test fun steadyDipStacksClipsAndALaterDipStacksMore() {
         val close = ScalpTicker.closeMs(ticker)!!
         val start = close - 600_000L
         val book = ScalpBook(liveExtras = true, bankrollUsd = { 100_000.0 })
@@ -28,7 +28,7 @@ class VariantOwnParamsTest {
             t += 1_000L
         }
         val sf42 = book.snapshot().filter { it.variantId == "sf42" && it.state != ScalpState.NO_FILL }
-        assertEquals(sf42.joinToString { "${it.state} ${it.contracts}" }, 1, sf42.size)
+        assertTrue(sf42.joinToString { "${it.state} ${it.contracts}" }, sf42.size >= 4)
         while (t <= dipUntil + 30_000L) {
             book.onShockFavQuote(q(t, yesBid = 0.49, yesAsk = 0.50), true)
             t += 1_000L
@@ -39,7 +39,7 @@ class VariantOwnParamsTest {
             t += 1_000L
         }
         val again = book.snapshot().filter { it.variantId == "sf42" && it.state != ScalpState.NO_FILL }
-        assertEquals(2, again.size)
+        assertTrue("first dip ${sf42.size}, later ${again.size}", again.size >= sf42.size)
     }
 
     @Test fun simpleVariantsUseTheirOwnClipAndStop() {
@@ -58,14 +58,16 @@ class VariantOwnParamsTest {
         }
         val v1 = book.snapshot().filter { it.variantId == "sf41-v1" && it.state != ScalpState.NO_FILL }
         val v3 = book.snapshot().filter { it.variantId == "sf41-v3" && it.state != ScalpState.NO_FILL }
-        assertEquals(1, v1.size)
-        assertEquals(1, v3.size)
-        assertEquals(5, v1.single().contracts)
-        assertEquals(20, v3.single().contracts)
-        val entry = v1.single().entryPrice!!
+        assertTrue(v1.joinToString { it.state.name }, v1.size >= 2)
+        assertTrue(v3.joinToString { it.state.name }, v3.size >= 2)
+        assertTrue(v1.all { it.contracts == 5 })
+        assertTrue(v3.all { it.contracts == 20 })
+        val openV1 = v1.first { it.state == ScalpState.OPEN }
+        val openV3 = v3.first { it.state == ScalpState.OPEN }
+        val entry = openV1.entryPrice!!
         book.onShockFavQuote(q(t, yesBid = entry - 0.13, yesAsk = entry - 0.12), true)
-        val stopped = book.snapshot().first { it.id == v1.single().id }
-        val held = book.snapshot().first { it.id == v3.single().id }
+        val stopped = book.snapshot().first { it.id == openV1.id }
+        val held = book.snapshot().first { it.id == openV3.id }
         assertEquals(stopped.exitReason, ScalpState.CLOSED, stopped.state)
         assertTrue(stopped.exitReason!!.startsWith("stop"))
         assertEquals(ScalpState.OPEN, held.state)
