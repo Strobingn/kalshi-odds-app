@@ -110,13 +110,12 @@ class ReleaseGate0340MultiStrategyTest {
 
     @Test
     fun totalOpenCostNeverExceedsPaperBankroll() {
-        // One 10-contract clip at 35¢ costs $3.50 + $0.16 fee. 0.3.50: each of six models gets bankroll/6;
-        // a $5 bankroll (slice $0.83) fits none, $40 (slice $5, eighths since 0.3.53) fits one clip per model.
+        // A paper clip is at least 50 contracts. At 35¢ that is about $18, so a $5 bankroll fits none.
         val t = close - 700_000L
         val tiny = book(bankroll = 5.0)
         tiny.onQuote(q(t, 0.44, 0.45), true)
         tiny.onQuote(q(t + 30_000L, 0.34, 0.35), true)
-        assertEquals(1, tiny.snapshot().count { it.variantId !in com.dirk.kalshiodds.decision.ScalpParams.FAIR_TWEAKS.map { t -> t.id } }) // 0.3.54: shared bankroll — $5 free cash covers exactly one $3.66 clip
+        assertEquals(0, tiny.snapshot().count { it.variantId !in com.dirk.kalshiodds.decision.ScalpParams.FAIR_TWEAKS.map { t -> t.id } }) // 50-lot clip does not fit $5
         val broke = book(bankroll = 3.0)
         broke.onQuote(q(t, 0.44, 0.45), true)
         broke.onQuote(q(t + 30_000L, 0.34, 0.35), true)

@@ -173,9 +173,24 @@ object HomeSummaryCopy {
     const val NOTIFY_TITLE = "Paper summary · today ET"
     const val SETTINGS_SHOWN = 4
 
-    fun displayName(scalperId: String): String =
-        ScalpModels.modelByCode(com.dirk.kalshiodds.decision.KeptScalpers.canonical(scalperId))?.code
-            ?: com.dirk.kalshiodds.decision.KeptScalpers.REMOVED_LABEL
+    /**
+     * Name for a best/worst row. Live board ids keep their short code.
+     * Fleet, variant, and catalog ids keep the name this build still has for them.
+     * An id this build has never named stays as that id. It is not called "removed strategy":
+     * that phrase is only true when the user actually dropped a scalper, and Home cannot see that
+     * from a missing lookup.
+     */
+    fun displayName(scalperId: String): String {
+        val id = com.dirk.kalshiodds.decision.KeptScalpers.canonical(scalperId.trim())
+        if (id.isEmpty()) return "unknown strategy"
+        ScalpModels.modelByCode(id)?.let { return it.code }
+        com.dirk.kalshiodds.decision.TwentyScalperFleet.labelOf(id)?.let { return it }
+        com.dirk.kalshiodds.decision.ScalpVariants.of(id)?.let { return it.label }
+        com.dirk.kalshiodds.decision.KeptScalpers.spec(id)?.let { return it.label }
+        com.dirk.kalshiodds.decision.KeptScalpers.HFT.firstOrNull { it.id == id }?.let { return it.label }
+        ScalpModels.archivedLabel(id)?.let { return it }
+        return id
+    }
 
     fun tradeCount(n: Int): String = if (n == 1) "1 trade" else "$n trades"
 

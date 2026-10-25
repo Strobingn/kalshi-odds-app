@@ -64,13 +64,13 @@ object Research {
     data class Params(
         val edgeCents: Double = 2.0, val lateMinS: Int = 180, val lateMaxS: Int = 300,
         val lateLoCents: Int = 80, val lateHiCents: Int = 95, val makerEdgeCents: Double = 3.0,
-        val kellyFraction: Double = 0.25, val windowCapUsd: Double = 0.0, val clip: Int = 10,
+        val kellyFraction: Double = 0.25, val windowCapUsd: Double = 0.0, val clip: Int = PaperClip.MIN,
         val kellyBankrollUsd: Double = 1000.0
     ) {
         fun normalized() = copy(edgeCents = edgeCents.coerceIn(0.0, 20.0), lateMinS = lateMinS.coerceIn(30, 600),
             lateMaxS = lateMaxS.coerceIn(lateMinS.coerceIn(30, 600), 900), lateLoCents = lateLoCents.coerceIn(50, 98),
             lateHiCents = lateHiCents.coerceIn(lateLoCents.coerceIn(50, 98), 99), makerEdgeCents = makerEdgeCents.coerceIn(0.0, 20.0),
-            kellyFraction = kellyFraction.coerceIn(0.0, 1.0), windowCapUsd = windowCapUsd.coerceIn(0.0, 100_000.0), clip = clip.coerceIn(1, 500), kellyBankrollUsd = kellyBankrollUsd.coerceIn(10.0, 1_000_000.0))
+            kellyFraction = kellyFraction.coerceIn(0.0, 1.0), windowCapUsd = windowCapUsd.coerceIn(0.0, 100_000.0), clip = clip.coerceIn(PaperClip.MIN, 500), kellyBankrollUsd = kellyBankrollUsd.coerceIn(10.0, 1_000_000.0))
     }
 
     /** Kalshi taker fee for [n] contracts at [p]: ceil(0.07·C·P·(1−P)) cents. */
@@ -178,9 +178,9 @@ object Research {
             if (nx != cur) notes += "highest buy ${cur}¢ → ${nx}¢"
             max = nx
         }
-        val clip0 = contracts ?: ScalpParamSanity.builtinClip(code)
-        val clipCap = ScalpVariants.clipOf(code) ?: 100
-        val clip1 = if (winner) (clip0 + step).coerceAtMost(clipCap) else (clip0 - step).coerceAtLeast(1)
+        val clip0 = PaperClip.sized(contracts ?: ScalpParamSanity.builtinClip(code))
+        val clipCap = maxOf(ScalpVariants.clipOf(code) ?: 100, 100, clip0)
+        val clip1 = if (winner) (clip0 + step).coerceAtMost(clipCap) else (clip0 - step).coerceAtLeast(PaperClip.MIN)
         if (clip1 != clip0) {
             contracts = clip1
             notes += "clip $clip0 → $clip1"

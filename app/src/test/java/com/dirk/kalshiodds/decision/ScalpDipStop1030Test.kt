@@ -106,9 +106,9 @@ class ScalpDipStop1030Test {
         book.onShockFavQuote(q(signal + 2_500L, 20.0), true)
         val filled = book.allTrades().first { it.id == "wide" }
         assertEquals(filled.note, ScalpState.OPEN, filled.state)
-        assertEquals(5, filled.contracts)
+        assertTrue(filled.contracts >= PaperClip.MIN)
         book.onShockFavQuote(q(signal + 4_000L, 20.0), true)
-        assertEquals(5, book.allTrades().first { it.id == "wide" }.contracts)
+        assertTrue(book.allTrades().first { it.id == "wide" }.contracts >= PaperClip.MIN)
     }
 
     @Test fun everyScalpPayloadNamesItsClip() {

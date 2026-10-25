@@ -102,7 +102,12 @@ object AiLearnBounds {
         var stopPct = s.stopLossPercent
         var stopC = s.stopCents
         var target = s.takeProfitCents
+        var contracts = s.contracts
         var changed = false
+        if (contracts != null && contracts < PaperClip.MIN) {
+            contracts = PaperClip.MIN
+            changed = true
+        }
         val high = (max ?: ceil).coerceIn(floor + 1, ceil)
         if (high - min < band) {
             val lowered = (high - band).coerceAtLeast(floor)
@@ -149,7 +154,8 @@ object AiLearnBounds {
             stopLossPercent = stopPct,
             stopCents = stopC,
             takeProfitCents = target,
-            aiNote = "AI repaired collapsed sliders · buy $min–${shownHigh}¢ · until minute $until"
+            contracts = contracts,
+            aiNote = "AI repaired collapsed sliders · buy $min–${shownHigh}¢ · until minute $until · clip ${contracts ?: PaperClip.MIN}"
         )
     }
 

@@ -47,7 +47,7 @@ object ScalpParamSanity {
             stopCents = stop,
             stopLossPercent = stopPct,
             takeProfitCents = target,
-            contracts = s.contracts?.coerceIn(1, 500),
+            contracts = s.contracts?.let { PaperClip.sized(it).coerceAtMost(500) },
             untilMinute = s.untilMinute.coerceIn(1, 14),
             maxHoldSeconds = s.maxHoldSeconds?.coerceIn(0, 900),
             edgeCents = s.edgeCents?.coerceIn(0, 30)
@@ -79,10 +79,13 @@ object ScalpParamSanity {
      * It cannot grow past the variant's own clip (sf42-v1 is 5, not 8). Green size is not a clip.
      */
     fun ownClip(code: String, explicit: Int? = null): Int {
-        val builtin = builtinClip(code)
-        val chosen = (explicit ?: builtin).coerceIn(1, 500)
+        val raw = (explicit ?: builtinClip(code)).coerceIn(1, 500)
+        // A hand-set size at or above the paper floor is the clip, even when the variant
+        // was designed smaller. A saved 1 is not a clip: it is lifted to the floor.
+        if (explicit != null && explicit >= PaperClip.MIN) return explicit.coerceAtMost(500)
         val variantCap = ScalpVariants.clipOf(code)
-        return if (variantCap != null) minOf(chosen, variantCap) else chosen
+        val capped = if (variantCap != null) minOf(raw, variantCap) else raw
+        return PaperClip.sized(capped)
     }
 
     /** Algo column for the sync payload. Every live scalper names its clip. */

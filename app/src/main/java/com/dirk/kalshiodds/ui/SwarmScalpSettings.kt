@@ -103,7 +103,7 @@ fun SwarmScalpSettingsContent(initial: ScalpControls, onBack: () -> Unit = {}, o
                 SwarmToggle("Use my parameters", draft.manual) { draft = draft.copy(manual = it) }
                 Text(if (draft.manual) "Your values override adaptive entry/target settings and legacy exits when peak mode is off." else "Strategy entries and learned adjustments are active. Peak-mode exits are controlled above.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
                 SwarmNumber("Maximum entry price (¢)", draft.maxAskCents.toDouble(), 1.0..50.0, draft.manual, ::number) { draft = draft.copy(maxAskCents = it.toInt()) }
-                SwarmNumber("Contracts per entry", draft.contracts.toDouble(), 1.0..1000.0, draft.manual, ::number) { draft = draft.copy(contracts = it.toInt()) }
+                SwarmNumber("Contracts per entry", draft.contracts.toDouble(), PaperClip.MIN.toDouble()..1000.0, draft.manual, ::number) { draft = draft.copy(contracts = it.toInt()) }
                 SwarmNumber("Stop-loss distance (¢)", draft.stopCents.toDouble(), 1.0..99.0, draft.manual && !draft.peakTrailEnabled, ::number) { draft = draft.copy(stopCents = it.toInt()) }
                 SwarmNumber("Net take-profit (¢/contract; 0 = off)", draft.takeProfitCents.toDouble(), 0.0..99.0, draft.manual, ::number) { draft = draft.copy(takeProfitCents = it.toInt()) }
                 SwarmNumber("Trailing distance (¢)", draft.trailCents.toDouble(), 1.0..20.0, draft.manual && !draft.peakTrailEnabled, ::number) { draft = draft.copy(trailCents = it.toInt()) }
@@ -124,7 +124,7 @@ fun SwarmScalpSettingsContent(initial: ScalpControls, onBack: () -> Unit = {}, o
             } }
             item { SwarmCard("Sizing and optional limits") {
                 Text("Winners bet bigger: ${draft.greenContracts} contracts per trade once a scalper is net positive after fees (20+ closes), filled by walking real book depth", color = c.textPrimary, style = MaterialTheme.typography.bodyMedium)
-                androidx.compose.material3.Slider(value = draft.greenContracts.toFloat(), onValueChange = { draft = draft.copy(greenContracts = Math.round(it)) }, valueRange = 1f..200f)
+                androidx.compose.material3.Slider(value = draft.greenContracts.toFloat(), onValueChange = { draft = draft.copy(greenContracts = Math.round(it)) }, valueRange = PaperClip.MIN.toFloat()..500f)
                 SwarmNumber("Max stake including fee ($; 0 = no cap)", draft.maxStakeUsd, 0.0..100000.0, true, ::number) { draft = draft.copy(maxStakeUsd = it) }
                 SwarmNumber("Entries per hour (0 = unlimited)", draft.maxTradesPerHour.toDouble(), 0.0..10000.0, true, ::number) { draft = draft.copy(maxTradesPerHour = it.toInt()) }
                 SwarmNumber("Open positions (0 = unlimited)", draft.maxOpen.toDouble(), 0.0..1000.0, true, ::number) { draft = draft.copy(maxOpen = it.toInt()) }

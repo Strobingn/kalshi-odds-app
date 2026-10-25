@@ -29,13 +29,13 @@ object StrategyAlgo {
     private fun cents(key: String, label: String, min: Double, max: Double, step: Double = 1.0) =
         AlgoKnob(key, label, min, max, step)
 
-    private fun size(cap: Int) = AlgoKnob("contracts", "size", 1.0, cap.toDouble().coerceIn(1.0, 500.0), 1.0)
+    private fun size(cap: Int) = AlgoKnob("contracts", "size", PaperClip.MIN.toDouble(), maxOf(cap, PaperClip.MIN).toDouble().coerceAtMost(500.0), 1.0)
     private fun hold(maxS: Double = 900.0, step: Double = 30.0) = AlgoKnob("maxHoldSeconds", "max hold", 0.0, maxS, step)
     private val stop = cents("stopCents", "stop distance", 1.0, 48.0)
     private val tp = cents("takeProfitCents", "take profit", 0.0, 48.0)
 
-    /** Largest paper clip the AI may set: the wider of the two paper size caps, never a live size. */
-    fun contractCap(c: ScalpControls): Int = maxOf(c.contracts, c.greenContracts).coerceIn(1, 500)
+    /** Largest paper clip the AI may set: the wider of the two paper size caps, never a live size, never under the paper floor. */
+    fun contractCap(c: ScalpControls): Int = maxOf(c.contracts, c.greenContracts, PaperClip.MIN).coerceIn(PaperClip.MIN, 500)
 
     fun knobs(c: ScalpControls, code: String): List<AlgoKnob> {
         if (code == "v2-llm" || ScalpModels.modelByCode(code) == null) return emptyList()
@@ -132,12 +132,13 @@ object StrategyAlgo {
      */
     fun clip(c: ScalpControls, code: String?, fallback: Int): Int {
         val cap = contractCap(c)
-        if (code.isNullOrBlank()) return fallback.coerceIn(1, cap)
+        if (code.isNullOrBlank()) return PaperClip.sized(fallback).coerceAtMost(cap).coerceAtLeast(PaperClip.MIN)
         val explicit = c.strategySettings[code]?.contracts
         if (explicit != null) return ScalpParamSanity.ownClip(code, explicit)
         val own = ScalpParamSanity.ownClip(code, null)
         val algo = c.algo[code]?.get("contracts")?.takeIf { it.isFinite() }?.roundToInt()
-        return minOf((algo ?: fallback).coerceIn(1, cap), own).coerceAtLeast(1)
+        val chosen = minOf((algo ?: fallback).coerceIn(1, cap), own)
+        return PaperClip.sized(chosen).coerceAtMost(maxOf(own, PaperClip.MIN))
     }
 
     /** Numeric overlay for an original strategy. Does not change the params id the book uses to match open trades. */

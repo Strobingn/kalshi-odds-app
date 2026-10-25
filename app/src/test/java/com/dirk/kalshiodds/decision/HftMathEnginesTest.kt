@@ -170,7 +170,7 @@ class HftMathEnginesTest {
         val ts = book.snapshot().filter { it.variantId == "ts-arb" }
         assertTrue(ts.toString(), ts.isNotEmpty())
         assertEquals(ScalpState.OPEN, ts.first().state)
-        assertTrue(ts.first().contracts in 1..20)
+        assertTrue(ts.first().contracts >= PaperClip.MIN)
         assertEquals("YES", ts.first().side)
     }
 

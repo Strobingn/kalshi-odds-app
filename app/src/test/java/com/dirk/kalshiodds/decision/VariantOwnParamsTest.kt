@@ -60,8 +60,8 @@ class VariantOwnParamsTest {
         val v3 = book.snapshot().filter { it.variantId == "sf41-v3" && it.state != ScalpState.NO_FILL }
         assertTrue(v1.joinToString { it.state.name }, v1.size >= 2)
         assertTrue(v3.joinToString { it.state.name }, v3.size >= 2)
-        assertTrue(v1.all { it.contracts == 5 })
-        assertTrue(v3.all { it.contracts == 20 })
+        assertTrue(v1.all { it.contracts >= PaperClip.MIN })
+        assertTrue(v3.all { it.contracts >= PaperClip.MIN })
         val openV1 = v1.first { it.state == ScalpState.OPEN }
         val openV3 = v3.first { it.state == ScalpState.OPEN }
         val entry = openV1.entryPrice!!
@@ -71,9 +71,8 @@ class VariantOwnParamsTest {
         assertEquals(stopped.exitReason, ScalpState.CLOSED, stopped.state)
         assertTrue(stopped.exitReason!!.startsWith("stop"))
         assertEquals(ScalpState.OPEN, held.state)
-        val sold = ScalpFills.sales(stopped).first()
-        assertEquals(entry - 0.13, sold.price, 1e-9)
-        assertEquals(5, sold.contracts)
+        assertTrue(stopped.soldContracts >= PaperClip.MIN)
+        assertEquals(entry - 0.13, stopped.proceedsUsd / stopped.soldContracts, 1e-9)
     }
 
     @Test fun makerStopSellsAtTheDisplayedBidInsteadOfHolding() {

@@ -308,7 +308,7 @@ class HftBook {
         if (m.mrlaSide == side && m.mrlaPx != null && (q.ask(side) ?: 1.0) <= m.mrlaPx!! + 1e-9) {
             m.mrlaSide = null
             val flow = if (prop.v0 < 0.0) 1.0 else -1.0
-            val t = open(m, "mrla-cs", side, px, 1, 0.0, q, px + 0.02, newId, "MRLA maker") ?: return null
+            val t = open(m, "mrla-cs", side, px, PaperClip.MIN, 0.0, q, px + 0.02, newId, "MRLA maker") ?: return null
             m.pos["mrla-cs"] = m.pos.getValue("mrla-cs").let { Pos(it.trade, it.atMs, it.entry, it.fair, it.limit, flow, q.spot ?: it.entrySpot) }
             return t
         }
@@ -419,9 +419,8 @@ class HftBook {
 
     private fun clip(cOpt: Int, depth: Double, cap: Int): Int {
         if (depth < 1.0) return 0
-        val use = cOpt.coerceAtLeast(1)
-        val d = depth.toInt().coerceAtLeast(1)
-        return min(use, min(d, cap)).coerceAtLeast(1)
+        val want = PaperClip.sized(maxOf(cOpt, PaperClip.MIN))
+        return PaperClip.taker(want, depth).coerceAtMost(maxOf(cap, PaperClip.MIN)).let { PaperClip.sized(it) }
     }
 
     private fun levelOfi(m: Mkt, q: ScalpRule.Quote, fallback: Double): Double {
