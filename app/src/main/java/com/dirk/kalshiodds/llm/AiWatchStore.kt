@@ -299,7 +299,7 @@ class AiWatchStore(private val file: File? = null) {
     fun addAdjustment(a: AiAdjustment) = synchronized(lock) {
         log += a
         while (log.size > AiAdjustmentLog.MAX) log.removeAt(0)
-        _adjustments.value = log.asReversed()
+        publishAdjustments()
         persist()
     }
 
@@ -329,9 +329,18 @@ class AiWatchStore(private val file: File? = null) {
 
     private fun publishConfig() { _config.value = AiWatchConfig(follows, intervalMs, budgetUsd, liveFeed, autoCalls) }
 
+    /**
+     * Newest first, detached from [log]. [asReversed] is a live view: composition walks it
+     * with a reverse iterator, and a background [addAdjustment] or [record] bumps the backing
+     * ArrayList's modCount and crashes the main thread with ConcurrentModificationException.
+     */
+    private fun publishAdjustments() {
+        _adjustments.value = log.reversed()
+    }
+
     private fun publishSummary() {
         _summary.value = LlmPrices.summarize(usage.toList(), LlmPrices.withDefaults(priceTable), System.currentTimeMillis())
-        _adjustments.value = log.asReversed()
+        publishAdjustments()
     }
 
     private fun load() {

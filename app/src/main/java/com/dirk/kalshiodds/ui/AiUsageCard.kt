@@ -115,8 +115,10 @@ fun rememberAiWatchPanel(store: AiWatchStore?): AiWatchPanelModel? {
     val cap = cfg.budgetOrNull()
     val spent = store.todaySpend(now)
     val shown = if (cfg.followsWindow && cap != null && spent + 1e-9 >= cap) LlmUsageText.budgetNotice(spent, cap) else notice
-    val bars = log.groupingBy { it.scalper }.eachCount().entries.sortedByDescending { it.value }.take(8).map { it.key to it.value }
-    return AiWatchPanelModel(cfg.followsWindow, LlmUsageText.todayLine(summary), shown, log.map { AiAdjustmentLog.line(it) }, bars)
+    // Copy before grouping or mapping. A reversed view of a mutable log CMEs when a writer appends mid-frame.
+    val rows = ArrayList(log)
+    val bars = rows.groupingBy { it.scalper }.eachCount().entries.sortedByDescending { it.value }.take(8).map { it.key to it.value }
+    return AiWatchPanelModel(cfg.followsWindow, LlmUsageText.todayLine(summary), shown, rows.map { AiAdjustmentLog.line(it) }, bars)
 }
 
 /** Settings card: usage, budget, provider, and the price table. FieldOps card on the settings page. */

@@ -25,7 +25,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -113,7 +117,9 @@ internal fun QuantHybridScreen(
     var aiNote by remember { mutableStateOf("") }
     var journalNote by remember { mutableStateOf("") }
     var retrainNote by remember { mutableStateOf("") }
+    var retraining by remember { mutableStateOf(false) }
     var journal by remember { mutableStateOf<ResearchCompanion.Journal?>(null) }
+    val scope = rememberCoroutineScope()
     val cards = remember(rev) { ModelFilter.cards() }
     fun sessionJournal(): ResearchCompanion.Journal {
         syncFromStore()
@@ -339,14 +345,36 @@ internal fun QuantHybridScreen(
             if (journalNote.isNotBlank()) Text(journalNote, color = c.textPrimary, style = MaterialTheme.typography.bodyMedium)
             OutlinedButton(
                 onClick = {
-                    syncFromStore()
-                    retrainNote = ResearchCompanion.retrain(System.currentTimeMillis())
-                    if (journal != null) journal = sessionJournal()
-                    rev++
+                    if (retraining) return@OutlinedButton
+                    retraining = true
+                    retrainNote = "Retraining…"
+                    val now = System.currentTimeMillis()
+                    val refreshJournal = journal != null
+                    scope.launch {
+                        try {
+                            val note = withContext(Dispatchers.Default) {
+                                syncFromStore()
+                                ResearchCompanion.retrain(now)
+                            }
+                            retrainNote = note
+                            if (refreshJournal) journal = sessionJournal()
+                            rev++
+                        } finally {
+                            retraining = false
+                        }
+                    }
                 },
+                enabled = !retraining,
                 modifier = Modifier.testTag("RESEARCH_RETRAIN")
-            ) { Text("Retrain offline") }
-            if (retrainNote.isNotBlank()) Text(retrainNote, color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+            ) { Text(if (retraining) "Retraining…" else "Retrain offline") }
+            if (retrainNote.isNotBlank()) {
+                Text(
+                    retrainNote,
+                    color = c.textSecondary,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.testTag("RESEARCH_RETRAIN_NOTE")
+                )
+            }
         }
 
         StopPolicyCard()

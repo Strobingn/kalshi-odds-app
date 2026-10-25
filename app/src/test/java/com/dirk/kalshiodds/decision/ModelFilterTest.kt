@@ -10,6 +10,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.abs
 
 class ModelFilterTest {
@@ -273,6 +276,33 @@ class ModelFilterTest {
         val hotTree = ModelFilter.decide(lgbm, quote(now + 21_000L), "YES", 0.20, 0.55)
         assertFalse(hotTree.enter)
         assertTrue(hotTree.reason, hotTree.reason.contains("quiet-volume"))
+    }
+
+    @Test fun offlineRetrainDoesNotHoldTheLockAcrossFit() {
+        val failure = AtomicReference<Throwable>()
+        ModelFilter.retrainComputeHook = {
+            val acquired = CountDownLatch(1)
+            Thread {
+                try {
+                    ModelFilter.threshold()
+                } catch (t: Throwable) {
+                    failure.set(t)
+                } finally {
+                    acquired.countDown()
+                }
+            }.start()
+            assertTrue("ModelFilter lock held across offline fit", acquired.await(3, TimeUnit.SECONDS))
+        }
+        try {
+            repeat(48) { i ->
+                ModelFilter.onClosed("sf41-logistic", if (i % 2 == 0) 0.2 else -0.2, 700.0, 1_700_000_000_000L + i * 60_000L, DoubleArray(ModelFilter.FEATURES))
+            }
+            val note = ModelFilter.retrainOffline(1_700_000_000_000L + 48 * 60_000L + ModelFilter.EMBARGO_MS)
+            assertTrue(note, note.contains("Retrained offline"))
+            assertTrue(failure.get()?.toString(), failure.get() == null)
+        } finally {
+            ModelFilter.retrainComputeHook = null
+        }
     }
 
     @Test fun retrainCannotLearnAPositiveOfiWeight() {
