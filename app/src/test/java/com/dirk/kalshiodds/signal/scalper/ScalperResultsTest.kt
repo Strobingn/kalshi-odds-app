@@ -32,11 +32,11 @@ class ScalperResultsTest {
         // 1. ML scalp, +1¢ on 10 contracts, no fee: +$0.10 at 2 s.
         ledger.apply(listOf(e.post(ScalpStrategy.ML_REST, t, "YES", 0.50, 50.0, 0.40, 0.28, 0L,
             ScalpContext(0.50, 0.51, 50.0, 800.0, 0.01, -0.02, floatArrayOf(0.505f, 0.01f, Float.NaN)))!!))
-        ledger.apply(e.onTrade(t, false, 0.49, 1.0, 1_000L, noQueue))
-        ledger.apply(e.onTrade(t, true, 0.52, 1.0, 2_000L, noQueue))
+        ledger.apply(e.onTrade(t, false, 0.49, 10.0, 1_000L, noQueue))
+        ledger.apply(e.onTrade(t, true, 0.52, 10.0, 2_000L, noQueue))
         // 2. ML scalp stopped at 45¢: −$0.50 − fee.
         ledger.apply(listOf(e.post(ScalpStrategy.ML_REST, t, "YES", 0.50, 3_000.0, 0.40, -1.4, 3_000L)!!))
-        ledger.apply(e.onTrade(t, false, 0.49, 1.0, 4_000L, noQueue))
+        ledger.apply(e.onTrade(t, false, 0.49, 10.0, 4_000L, noQueue))
         ledger.apply(e.onClock(t, 5_000L, 0.45, 0.54))
         // 3. Dip-hunter buys DOWN at 40¢ and times out at 40¢: two fees.
         ledger.apply(e.buyNow(ScalpStrategy.DIP_HUNTER, t, "NO", 0.40, noQueue, 6_000L))
@@ -108,7 +108,7 @@ class ScalperResultsTest {
         for (i in 0 until 2_000) {
             val at = i * 60_000L
             big.apply(e.buyNow(ScalpStrategy.DIP_HUNTER, t, "YES", 0.50, noQueue, at))
-            big.apply(e.onTrade(t, true, 0.53, 1.0, at + 1_000L, noQueue))
+            big.apply(e.onTrade(t, true, 0.53, 10.0, at + 1_000L, noQueue))
             total += 0.20 - KalshiFee.total(10, 0.50)
         }
         val c = big.snapshot()

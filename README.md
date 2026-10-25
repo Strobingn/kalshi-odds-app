@@ -19,6 +19,16 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.20.10 (Claude branch): paper fills only what really traded
+
+The arena showed a paper P&L of $2.7 billion. Sizes have no upper limit, and a resting paper order used to fill in
+full on any print through its price (or once the size ahead of it traded), so an order of hundreds of millions of
+contracts "filled" off a 5-contract print and settled at $1 each. A paper order is not in the real book, so now it
+gets only contracts that really traded: a print through its price gives it that print's size, a print at its price
+counts once the size ahead has traded. When its wait runs out (or the window closes) a bid that got part of its size
+holds that part; a target offer that sold part of the position averages it with the stop, time-out or settlement price
+of the rest. Taker buys already walked the shown book. The old record keeps its numbers until the arena is reset.
+
 ## 1.20.9 (Claude branch): TimesFM reads the whole window
 
 TimesFM already ran every 10 s all window long, but each run read only the last 512 seconds of the index: the ONNX

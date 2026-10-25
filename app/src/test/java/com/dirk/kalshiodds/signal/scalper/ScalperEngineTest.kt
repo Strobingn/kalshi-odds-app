@@ -38,7 +38,45 @@ class ScalperEngineTest {
     fun aPrintThroughThePriceFillsAtOnceWhateverTheQueue() {
         val e = ScalperEngine()
         e.post(ScalpStrategy.ML_REST, t, "YES", 0.50, 5_000.0, 0.4, -1.7, 0L)
-        assertTrue(e.onTrade(t, false, 0.49, 1.0, 1_000L, noQueue).single() is ScalpEvent.Filled)
+        assertTrue(e.onTrade(t, false, 0.49, 10.0, 1_000L, noQueue).single() is ScalpEvent.Filled)
+    }
+
+    @Test
+    fun aPaperBidGetsOnlyTheContractsThatReallyTraded() {
+        // 1.20.10: a 1,000,000,000-contract paper bid used to fill whole on a 5-contract print through its price.
+        val e = ScalperEngine()
+        e.post(ScalpStrategy.ML_REST, t, "YES", 0.50, 0.0, 0.4, 0.4, 0L, contracts = 1_000_000_000)
+        assertTrue(e.onTrade(t, false, 0.49, 5.0, 1_000L, noQueue).isEmpty())
+        assertTrue(e.onTrade(t, false, 0.50, 7.0, 2_000L, noQueue).isEmpty())
+        // The wait runs out: it holds the 12 that traded, not a billion.
+        val f = e.onClock(t, 20_001L, 0.50, 0.49).single() as ScalpEvent.Filled
+        assertEquals(12, f.order.contracts)
+        assertEquals(12.0, e.inventory(ScalpStrategy.ML_REST, t), 0.0)
+    }
+
+    @Test
+    fun aPartlyFilledBidHoldsItsPartAndAPartlySoldTargetAveragesTheExit() {
+        val e = ScalperEngine()
+        e.post(ScalpStrategy.ML_REST, t, "YES", 0.50, 0.0, 0.4, 0.4, 0L)
+        e.onTrade(t, false, 0.49, 4.0, 1_000L, noQueue)
+        val f = e.onClock(t, 20_001L, 0.50, 0.49).single() as ScalpEvent.Filled
+        assertEquals(4, f.order.contracts)
+        // Its 51¢ offer sells 3 of the 4, then the bid falls to the stop: the last one goes at 46¢ with the fee.
+        assertTrue(e.onTrade(t, true, 0.52, 3.0, 21_000L, noQueue).isEmpty())
+        val c = closed(e.onClock(t, 22_000L, 0.46, 0.53))
+        assertEquals(ExitKind.STOP, c.kind)
+        assertEquals((3 * 0.51 + 0.46) / 4, c.exitPrice, 1e-4)
+        assertEquals(3 * 0.01 + (0.46 - 0.50) - KalshiFee.total(1, 0.46), c.pnlUsd, 1e-3)
+    }
+
+    @Test
+    fun aBidPartlyFilledAtTheCloseSettlesItsPart() {
+        val e = ScalperEngine()
+        e.post(ScalpStrategy.FLOW_FADE, t, "YES", 0.50, 0.0, 0.0, 0.0, 0L)
+        e.onTrade(t, false, 0.49, 6.0, 1_000L, noQueue)
+        val c = closed(e.settle(t, "yes", 5_000L))
+        assertEquals(6, c.order.contracts)
+        assertEquals(6 * 0.50, c.pnlUsd, 1e-9)
     }
 
     @Test
@@ -186,12 +224,12 @@ class ScalperEngineTest {
         // ML scalp from the front of the queue: wins 10¢.
         val a = e.post(ScalpStrategy.ML_REST, t, "YES", 0.50, 50.0, 0.40, 0.28, 0L)!!
         ledger.apply(listOf(a))
-        ledger.apply(e.onTrade(t, false, 0.49, 1.0, 1_000L, noQueue))
-        ledger.apply(e.onTrade(t, true, 0.52, 1.0, 2_000L, noQueue))
+        ledger.apply(e.onTrade(t, false, 0.49, 10.0, 1_000L, noQueue))
+        ledger.apply(e.onTrade(t, true, 0.52, 10.0, 2_000L, noQueue))
         // ML scalp from deep in the queue, expected to lose there: stopped out.
         val b = e.post(ScalpStrategy.ML_REST, t, "YES", 0.50, 3_000.0, 0.40, -1.4, 3_000L)!!
         ledger.apply(listOf(b))
-        ledger.apply(e.onTrade(t, false, 0.49, 1.0, 4_000L, noQueue))
+        ledger.apply(e.onTrade(t, false, 0.49, 10.0, 4_000L, noQueue))
         ledger.apply(e.onClock(t, 5_000L, 0.45, 0.54))
         // A dip-hunter buy that times out.
         ledger.apply(e.buyNow(ScalpStrategy.DIP_HUNTER, t, "NO", 0.40, noQueue, 6_000L))

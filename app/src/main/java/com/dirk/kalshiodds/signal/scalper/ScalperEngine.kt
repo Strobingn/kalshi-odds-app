@@ -657,7 +657,13 @@ class ScalperEngine(
         val maxPrice: Double = PrintGrid.MAX_PRICE
     )
 
-    private class Working(val order: ScalpOrder) {
+    private class Working(var order: ScalpOrder) {
+        /** Contracts of a resting entry bid filled so far (1.20.10: never more than really traded; whole contracts count). */
+        var gotD = 0.0
+        val got: Int get() = kotlin.math.floor(gotD + 1e-9).toInt().coerceAtMost(order.contracts)
+        /** Contracts of the position already sold at the target offer. */
+        var soldD = 0.0
+        val sold: Int get() = kotlin.math.floor(soldD + 1e-9).toInt().coerceAtMost(order.contracts)
         /** Best bid seen since the fill: where a trailing stop hangs from. */
         var peakBid = order.price
         /** Maker fee charged when a resting entry bid filled (0 while makers are free). */
@@ -852,29 +858,49 @@ class ScalperEngine(
             if (w.resting) {
                 if (nowMs - o.postedAtMs > tuning.tuned(o.strategy).entryWaitMs(config.entryWaitMs)) {
                     it.remove()
-                    events += ScalpEvent.Unfilled(o)
+                    // Partly filled: what it got becomes the position; nothing: the bid is gone.
+                    if (w.got > 0) {
+                        events += fill(w, nowMs) { sd, px -> exitQueue(sd, px) }
+                    } else {
+                        it.remove()
+                        events += ScalpEvent.Unfilled(o)
+                    }
                     continue
                 }
                 // Our bid is hit by takers selling our side, i.e. buying the other one.
                 if (takerYes == yes) continue
+                // A paper bid is not in the real book, so it gets only contracts that really traded (1.20.10): a print
+                // through its price gives it that print's size; a print at its price counts once the size ahead of
+                // it has traded. Before, any such print filled the whole order, whatever its size.
                 val through = sidePrice < o.price - TICK_EPS
-                if (abs(sidePrice - o.price) <= TICK_EPS) w.traded += contracts
-                if (through || w.traded >= o.queueAhead + o.contracts) {
-                    w.filledAtMs = nowMs
-                    w.makerEntryFee = makerFee(o.contracts, o.price)
-                    w.exitPrice = o.targetPrice ?: round4(o.price + tuning.tuned(o.strategy).targetDollars)
-                    val shown = if (o.queueKnown) exitQueue(o.side, w.exitPrice) else null
-                    w.exitQueue = shown?.takeIf { q -> q.isFinite() && q >= 0.0 } ?: config.unknownQueue
-                    events += ScalpEvent.Filled(o, nowMs)
+                val add = when {
+                    through -> contracts
+                    abs(sidePrice - o.price) <= TICK_EPS -> {
+                        val before = (w.traded - o.queueAhead).coerceAtLeast(0.0)
+                        w.traded += contracts
+                        (w.traded - o.queueAhead).coerceAtLeast(0.0) - before
+                    }
+                    else -> 0.0
                 }
+                if (add > 0.0) w.gotD = (w.gotD + add).coerceAtMost(o.contracts.toDouble())
+                if (w.got >= o.contracts) events += fill(w, nowMs) { sd, px -> exitQueue(sd, px) }
             } else {
                 // A hold has no offer: it waits for the settlement.
                 if (o.strategy.hold) continue
                 // Our offer is lifted by takers buying our side.
                 if (takerYes != yes) continue
                 val through = sidePrice > w.exitPrice + TICK_EPS
-                if (abs(sidePrice - w.exitPrice) <= TICK_EPS) w.exitTraded += contracts
-                if (through || w.exitTraded >= w.exitQueue + o.contracts) {
+                val add = when {
+                    through -> contracts
+                    abs(sidePrice - w.exitPrice) <= TICK_EPS -> {
+                        val before = (w.exitTraded - w.exitQueue).coerceAtLeast(0.0)
+                        w.exitTraded += contracts
+                        (w.exitTraded - w.exitQueue).coerceAtLeast(0.0) - before
+                    }
+                    else -> 0.0
+                }
+                if (add > 0.0) w.soldD = (w.soldD + add).coerceAtMost(o.contracts.toDouble())
+                if (w.sold >= o.contracts) {
                     it.remove()
                     events += ScalpEvent.Closed(
                         close(w, w.exitPrice, ExitKind.TARGET, feeUsd = makerFee(o.contracts, w.exitPrice), nowMs = nowMs)
@@ -910,8 +936,12 @@ class ScalperEngine(
             val filledAt = w.filledAtMs
             if (filledAt == null) {
                 if (nowMs - o.postedAtMs > tuning.tuned(o.strategy).entryWaitMs(config.entryWaitMs)) {
-                    it.remove()
-                    events += ScalpEvent.Unfilled(o)
+                    if (w.got > 0) {
+                        events += fill(w, nowMs) { _, _ -> null }
+                    } else {
+                        it.remove()
+                        events += ScalpEvent.Unfilled(o)
+                    }
                 }
                 continue
             }
@@ -924,7 +954,7 @@ class ScalperEngine(
             val flat = o.strategy.flattenSeconds
             if (!o.strategy.hold && flat > 0 && secondsLeft != null && secondsLeft <= flat) {
                 it.remove()
-                val f = sellAtBid(o, bid, bidLevels)
+                val f = sellAtBid(o, o.contracts - w.sold, bid, bidLevels)
                 events += ScalpEvent.Closed(close(w, f.avgPrice, ExitKind.TIMEOUT, feeUsd = f.feeUsd, nowMs = nowMs))
                 continue
             }
@@ -934,7 +964,7 @@ class ScalperEngine(
             val timedOut = !o.strategy.hold && nowMs - filledAt >= t.timeoutMs
             if (stopped || timedOut) {
                 it.remove()
-                val f = sellAtBid(o, bid, bidLevels)
+                val f = sellAtBid(o, o.contracts - w.sold, bid, bidLevels)
                 events += ScalpEvent.Closed(
                     close(w, f.avgPrice, if (stopped) ExitKind.STOP else ExitKind.TIMEOUT, feeUsd = f.feeUsd, nowMs = nowMs)
                 )
@@ -950,6 +980,8 @@ class ScalperEngine(
         val list = byTicker.remove(ticker) ?: return emptyList()
         val events = ArrayList<ScalpEvent>(list.size)
         for (w in list) {
+            // A bid that got part of its size before the close holds that part.
+            if (w.resting && w.got > 0) events += fill(w, nowMs) { _, _ -> null }
             val o = w.order
             if (w.resting) {
                 events += ScalpEvent.Unfilled(o)
@@ -989,12 +1021,28 @@ class ScalperEngine(
         return price >= lo - EPS && price <= hi + EPS
     }
 
-    /** A taker sale of the whole order into the bids shown (the rest at the walk's floor). */
-    private fun sellAtBid(o: ScalpOrder, bid: Double, bidLevels: (String) -> List<Pair<Double, Double>>?): BookFill.Fill {
-        if (bid <= 0.0) return BookFill.Fill(o.contracts, 0.0, 0.0)
+    /** A taker sale of [n] contracts of the order into the bids shown (the rest at the walk's floor). */
+    private fun sellAtBid(o: ScalpOrder, n: Int, bid: Double, bidLevels: (String) -> List<Pair<Double, Double>>?): BookFill.Fill {
+        if (n <= 0) return BookFill.Fill(0, bid.coerceAtLeast(0.0), 0.0)
+        if (bid <= 0.0) return BookFill.Fill(n, 0.0, 0.0)
         val levels = runCatching { bidLevels(o.side) }.getOrNull()?.takeIf { it.isNotEmpty() } ?: listOf(bid to config.unknownQueue)
-        val f = BookFill.sell(levels, o.contracts, config.feeRate, floorPrice = bid - BookFill.MAX_SLIP)
+        val f = BookFill.sell(levels, n, config.feeRate, floorPrice = bid - BookFill.MAX_SLIP)
         return f.copy(avgPrice = round4(f.avgPrice))
+    }
+
+    /**
+     * A resting entry becomes a position with what it got: all of it, or (when its wait ran out or the window closed)
+     * the part that filled, the order resized to it.
+     */
+    private fun fill(w: Working, nowMs: Long, exitQueue: (side: String, price: Double) -> Double?): ScalpEvent.Filled {
+        if (w.got < w.order.contracts) w.order = w.order.copy(contracts = w.got)
+        val o = w.order
+        w.filledAtMs = nowMs
+        w.makerEntryFee = makerFee(o.contracts, o.price)
+        w.exitPrice = o.targetPrice ?: round4(o.price + tuning.tuned(o.strategy).targetDollars)
+        val shown = if (o.queueKnown) exitQueue(o.side, w.exitPrice) else null
+        w.exitQueue = shown?.takeIf { q -> q.isFinite() && q >= 0.0 } ?: config.unknownQueue
+        return ScalpEvent.Filled(o, nowMs)
     }
 
     private fun makerFee(contracts: Int, price: Double): Double {
@@ -1002,10 +1050,17 @@ class ScalperEngine(
         return if (rate > 0.0 && price > 0.0 && price < 1.0) KalshiFee.total(contracts, price, rate) else 0.0
     }
 
-    /** [feeUsd] is the exit's fee; a resting entry's maker fee is added to it. */
-    private fun close(w: Working, exitPrice: Double, kind: ExitKind, feeUsd: Double, nowMs: Long): ClosedScalp {
+    /**
+     * [exitPrice] is what the contracts not yet sold at the target went for; the ones the target offer already sold
+     * count at its price, and the scalp's exit is their average. [feeUsd] is the exit's fee; a resting entry's maker
+     * fee is added to it.
+     */
+    private fun close(w: Working, restPrice: Double, kind: ExitKind, feeUsd: Double, nowMs: Long): ClosedScalp {
         val o = w.order
         val fees = feeUsd + w.makerEntryFee
+        val sold = w.sold.coerceAtMost(o.contracts)
+        val exitPrice = if (sold <= 0 || o.contracts <= 0) restPrice
+            else round4((sold * w.exitPrice + (o.contracts - sold) * restPrice) / o.contracts)
         return ClosedScalp(
             order = o,
             exitPrice = exitPrice,

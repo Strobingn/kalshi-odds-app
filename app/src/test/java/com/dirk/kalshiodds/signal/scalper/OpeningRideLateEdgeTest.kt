@@ -134,8 +134,8 @@ class OpeningRideLateEdgeTest {
             val e = ScalperEngine()
             e.makerFeeRate = rate
             e.post(ScalpStrategy.ML_REST, t, "YES", 0.50, 50.0, 0.4, 0.3, 0L)
-            e.onTrade(t, false, 0.49, 1.0, 1_000L, noQueue)
-            return e.onTrade(t, true, 0.52, 1.0, 2_000L, noQueue).filterIsInstance<ScalpEvent.Closed>().single().scalp
+            e.onTrade(t, false, 0.49, 10.0, 1_000L, noQueue)
+            return e.onTrade(t, true, 0.52, 10.0, 2_000L, noQueue).filterIsInstance<ScalpEvent.Closed>().single().scalp
         }
         assertEquals("free while Kalshi says quadratic", 0.10, scalp(0.0).pnlUsd, 1e-9)
         val paid = scalp(KalshiFee.MAKER_COEFFICIENT)
