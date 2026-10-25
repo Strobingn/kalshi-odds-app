@@ -653,6 +653,7 @@ object ModelFilter {
         controlNo = 0.0
         controlFresh = -1L
         QuantSession.resetForTest()
+        retrainComputeHook = null
     }
 
     fun scorecards(): List<Scorecard> = synchronized(lock) {
@@ -735,56 +736,131 @@ object ModelFilter {
 
     fun weightCopy(): Pair<DoubleArray, Double> = synchronized(lock) { weights.copyOf() to bias }
 
-    /** Offline refit from logged closes. No network. */
-    fun retrainOffline(nowMs: Long): String = synchronized(lock) {
-        retrainLocked(nowMs)
-        if (trainedN < MIN_TRAIN) "Need $MIN_TRAIN closed samples outside the 15-minute embargo. Have $trainedN."
-        else "Retrained offline on $trainedN samples."
+    /**
+     * Test seam. Runs on the offline compute path after the sample snapshot is taken and
+     * before the fit, while [lock] is not held. Null in production.
+     */
+    @Volatile
+    internal var retrainComputeHook: (() -> Unit)? = null
+
+    /** True only on the unlocked offline compute path. Keeps [retrainComputeHook] off the quote-path lock. */
+    private val offlineRetrain = ThreadLocal<Boolean>()
+
+    /**
+     * Offline refit from logged closes. No network.
+     * The fit and walk-forward run outside [lock] so a click cannot pin the main thread,
+     * and scalp workers can still score while the math runs.
+     */
+    fun retrainOffline(nowMs: Long): String {
+        offlineRetrain.set(true)
+        try {
+            repeat(3) {
+                val snap = synchronized(lock) { samples.toList() to treeFitN }
+                val math = computeRetrain(snap.first, nowMs, snap.second)
+                val xs = math.treeXs
+                val ys = math.treeYs
+                val sw = math.treeSw
+                if (xs != null && ys != null && sw != null) QuantSession.fitPayoff(xs, ys, sw)
+                val applied = synchronized(lock) {
+                    if (!sameSampleEnds(snap.first)) return@synchronized false
+                    applyRetrain(nowMs, math, fitTrees = false)
+                    true
+                }
+                if (applied) return retrainMessage(math.trained)
+            }
+            synchronized(lock) { retrainLocked(nowMs) }
+            val trained = synchronized(lock) { trainedN }
+            return retrainMessage(trained)
+        } finally {
+            offlineRetrain.set(false)
+        }
+    }
+
+    private fun retrainMessage(trained: Int): String =
+        if (trained < MIN_TRAIN) "Need $MIN_TRAIN closed samples outside the 15-minute embargo. Have $trained."
+        else "Retrained offline on $trained samples."
+
+    private fun sameSampleEnds(snap: List<Sample>): Boolean {
+        if (samples.size != snap.size) return false
+        if (snap.isEmpty()) return true
+        return samples.first() === snap.first() && samples.last() === snap.last()
     }
 
     private fun decisionId(twinId: String, atMs: Long, side: String) = "mf:$twinId:$atMs:$side"
 
-    private fun maybeFitTrees(train: List<Sample>) {
-        if (train.size < MIN_TRAIN || train.size - treeFitN < 25) return
-        val xs = ArrayList<DoubleArray>(train.size)
-        val ys = DoubleArray(train.size)
-        val sw = DoubleArray(train.size)
-        for (i in train.indices) {
-            val sample = train[i]
-            xs += sample.x
-            ys[i] = netCentsPerContract(sample.netUsd, sample.contracts)
-            val score = sigmoid(bias + dot(weights, sample.x))
-            sw[i] = sampleWeight(sample.x.getOrElse(VOL_FEATURE) { 0.0 }, score)
-        }
-        QuantSession.fitPayoff(xs, ys, sw)
-        treeFitN = train.size
+    private class RetrainMath(
+        val trained: Int,
+        val weights: DoubleArray,
+        val bias: Double,
+        val stamp: Boolean,
+        val buckets: List<Pair<String, Double>>,
+        val treeXs: List<DoubleArray>?,
+        val treeYs: DoubleArray?,
+        val treeSw: DoubleArray?
+    )
+
+    /** Caller holds [lock]. Quote-path and store retrain stay inside the lock they already own. */
+    private fun retrainLocked(nowMs: Long) {
+        applyRetrain(nowMs, computeRetrain(samples.toList(), nowMs, treeFitN))
     }
 
-    private fun retrainLocked(nowMs: Long) {
+    private fun computeRetrain(rows: List<Sample>, nowMs: Long, fittedTrees: Int): RetrainMath {
+        if (offlineRetrain.get() == true) retrainComputeHook?.invoke()
         val cutoff = nowMs - EMBARGO_MS
-        val train = samples.filter { it.closeMs < cutoff }
-        trainedN = train.size
+        val train = rows.filter { it.closeMs < cutoff }
         if (train.size < MIN_TRAIN) {
-            weights = priorWeights()
-            bias = PRIOR_BIAS
-            return
+            return RetrainMath(train.size, priorWeights(), PRIOR_BIAS, false, emptyList(), null, null, null)
         }
-        val fit = fit(train)
-        weights = fit.first
-        bias = fit.second
+        val fitted = fit(train)
+        val w = fitted.first
+        val b = fitted.second
+        val buckets = ArrayList<Pair<String, Double>>()
+        for ((sample, entered) in walkForward(rows)) {
+            if (!entered) continue
+            buckets += bucketOf(sample.tauS) to sample.netUsd
+        }
+        var xs: ArrayList<DoubleArray>? = null
+        var ys: DoubleArray? = null
+        var sw: DoubleArray? = null
+        if (train.size - fittedTrees >= 25) {
+            xs = ArrayList(train.size)
+            ys = DoubleArray(train.size)
+            sw = DoubleArray(train.size)
+            for (i in train.indices) {
+                val sample = train[i]
+                xs.add(sample.x)
+                ys[i] = netCentsPerContract(sample.netUsd, sample.contracts)
+                val score = sigmoid(b + dot(w, sample.x))
+                sw[i] = sampleWeight(sample.x.getOrElse(VOL_FEATURE) { 0.0 }, score)
+            }
+        }
+        return RetrainMath(train.size, w, b, true, buckets, xs, ys, sw)
+    }
+
+    /** Caller holds [lock]. [fitTrees] is false when the offline path already called [QuantSession.fitPayoff]. */
+    private fun applyRetrain(nowMs: Long, math: RetrainMath, fitTrees: Boolean = true) {
+        trainedN = math.trained
+        weights = math.weights
+        bias = math.bias
+        if (!math.stamp) return
         lastTrainMs = nowMs
-        maybeFitTrees(train)
+        val xs = math.treeXs
+        val ys = math.treeYs
+        val sw = math.treeSw
+        if (xs != null && ys != null && sw != null && math.trained - treeFitN >= 25) {
+            if (fitTrees) QuantSession.fitPayoff(xs, ys, sw)
+            treeFitN = math.trained
+        }
         bucketNet.clear()
         bucketN.clear()
-        for ((sample, entered) in walkForward(samples)) {
-            if (!entered) continue
-            val name = bucketOf(sample.tauS)
-            bucketNet[name] = (bucketNet[name] ?: 0.0) + sample.netUsd
+        for ((name, net) in math.buckets) {
+            bucketNet[name] = (bucketNet[name] ?: 0.0) + net
             bucketN[name] = (bucketN[name] ?: 0) + 1
         }
     }
 
     private fun fit(rows: List<Sample>): Pair<DoubleArray, Double> {
+        if (offlineRetrain.get() == true) retrainComputeHook?.invoke()
         val w = DoubleArray(FEATURES)
         val prior = priorWeights()
         w[OFI_FEATURE] = prior[OFI_FEATURE]

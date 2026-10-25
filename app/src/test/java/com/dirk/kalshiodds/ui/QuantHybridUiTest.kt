@@ -8,6 +8,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -19,10 +20,13 @@ import com.dirk.kalshiodds.decision.ModelFilter
 import com.dirk.kalshiodds.decision.QuantSession
 import com.dirk.kalshiodds.llm.ChatMessage
 import com.dirk.kalshiodds.ui.theme.KalshiOddsTheme
+import android.os.Looper
 import org.junit.After
 import org.junit.Before
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
+import java.util.concurrent.atomic.AtomicReference
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -180,6 +184,30 @@ class QuantHybridUiTest {
         compose.onNodeWithTag("AI_MODE_CHAT").performClick()
         compose.waitForIdle()
         compose.onNodeWithText("Paper strategy: needs key", substring = true).assertExists()
+    }
+
+    @Test fun retrainClickFitsOffTheMainThread() {
+        val ranOn = AtomicReference<Thread>()
+        ModelFilter.retrainComputeHook = { ranOn.compareAndSet(null, Thread.currentThread()) }
+        try {
+            compose.setContent {
+                KalshiOddsTheme(darkTheme = true) {
+                    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                        QuantHybridScreen()
+                    }
+                }
+            }
+            compose.onNodeWithTag("RESEARCH_RETRAIN").performScrollTo().performClick()
+            compose.waitUntil(5_000) { ranOn.get() != null }
+            assertNotEquals(Looper.getMainLooper().thread, ranOn.get())
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithText("closed samples", substring = true).fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.onNodeWithTag("RESEARCH_RETRAIN_NOTE").assertExists()
+            compose.onNodeWithText("Retrain offline").assertExists()
+        } finally {
+            ModelFilter.retrainComputeHook = null
+        }
     }
 
     private fun log(id: String, score: Double, entered: Boolean, net: Double, timeLeft: Double) = ModelFilter.LogRow(

@@ -59,4 +59,19 @@ class AnrDispatcherGuardTest {
         assertTrue(app.contains("detectDiskWrites()"))
         assertTrue(app.contains("BuildConfig.DEBUG"))
     }
+
+    @Test fun quantRetrainClickLeavesTheMainThread() {
+        val ui = source("src/main/java/com/dirk/kalshiodds/ui/QuantHybridScreen.kt")
+        val click = ui.substringAfter("var retraining").substringBefore("StopPolicyCard")
+        assertTrue(click.contains("withContext(Dispatchers.Default)"))
+        assertTrue(click.contains("ResearchCompanion.retrain"))
+        assertFalse(click.contains("retrainNote = ResearchCompanion.retrain"))
+        assertTrue(click.contains("enabled = !retraining"))
+        val filter = source("src/main/java/com/dirk/kalshiodds/decision/ModelFilter.kt")
+        val offline = filter.substringAfter("fun retrainOffline").substringBefore("private fun retrainMessage")
+        val computeAt = offline.indexOf("computeRetrain")
+        val firstLock = offline.indexOf("synchronized(lock)")
+        val secondLock = offline.indexOf("synchronized(lock)", firstLock + 1)
+        assertTrue(computeAt in (firstLock + 1) until secondLock)
+    }
 }
