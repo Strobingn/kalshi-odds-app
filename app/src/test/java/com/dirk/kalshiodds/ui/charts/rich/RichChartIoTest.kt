@@ -27,6 +27,9 @@ class RichChartIoTest {
         val ui = source("src/main/java/com/dirk/kalshiodds/ui/PaperRichCharts.kt")
         val io = ui.substringAfter("withContext(Dispatchers.IO)")
         assertTrue(io.contains("snapshot()"))
+        assertTrue(io.contains("chartScalps()"))
+        assertTrue(io.contains("paperActivity"))
+        assertFalse(io.contains("predictionLedger"))
         assertTrue(ui.contains("Dispatchers.IO"))
         assertFalse(ui.substringBefore("withContext(Dispatchers.IO)").contains("snapshot()"))
     }

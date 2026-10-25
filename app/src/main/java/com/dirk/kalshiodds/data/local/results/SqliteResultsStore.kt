@@ -1570,6 +1570,17 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
     }.getOrDefault(emptyList())
 
     /**
+     * Data-tab source. [loadScalps] is closed-only, so open clips come from the active page.
+     * Shadows stay out. This does not read the prediction ledger.
+     */
+    override fun chartScalps(limit: Int): List<com.dirk.kalshiodds.decision.ScalpTrade> = runCatching {
+        val cap = limit.coerceIn(1, 12_000)
+        val open = loadActiveScalps().filter { it.isPrimary && it.state != com.dirk.kalshiodds.decision.ScalpState.NO_FILL }
+        val closed = closedScalpsForCharts(0L, cap)
+        (open + closed).distinctBy { it.id }
+    }.getOrDefault(emptyList())
+
+    /**
      * Recent closed scalps for heatmaps, side bars, and family stacks.
      * The note is omitted. Shadows (`|S`) stay out so they do not crowd the limit.
      */

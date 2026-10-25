@@ -197,6 +197,49 @@ object RichTradeMath {
         )
     }
 
+    /**
+     * One primary paper scalp for the Data charts. Closed round trips keep their net.
+     * Open and pending clips stay open so exposure and bet size draw before the window settles.
+     * [ScalpTrade.fairAtSignal] is the picked-side probability. Shadows and no-fills are not trades.
+     */
+    fun fromScalpActivity(t: ScalpTrade): Trade? {
+        if (!t.isPrimary || t.state == ScalpState.NO_FILL) return null
+        val chance = sideProb(t.fairAtSignal)
+        if (t.state == ScalpState.CLOSED) {
+            val closed = fromScalp(t) ?: return null
+            return closed.copy(predicted = chance, confidence = chance, ticker = t.ticker)
+        }
+        if (t.state != ScalpState.OPEN && t.state != ScalpState.PENDING_EXIT && t.state != ScalpState.PENDING_ENTRY) {
+            return null
+        }
+        val contracts = t.contracts.coerceAtLeast(0)
+        val price = t.entryPrice?.takeIf { it.isFinite() && it in 0.0..1.0 }
+            ?: t.signalAsk.takeIf { it.isFinite() && it in 0.0..1.0 }
+        if (contracts <= 0 || price == null) return null
+        val entryAt = t.entryAtMs ?: t.signalAtMs
+        val left = ScalpTicker.closeMs(t.ticker)?.let { (it - entryAt) / 1000.0 }?.takeIf { it.isFinite() }
+        return Trade(
+            id = t.id,
+            closedAtMs = entryAt,
+            entryAtMs = entryAt,
+            netUsd = 0.0,
+            feeUsd = 0.0,
+            sideUp = isUp(t.side),
+            entryPrice = price,
+            contracts = contracts,
+            secondsLeft = left,
+            holdMs = null,
+            exit = ExitBucket.OTHER,
+            predicted = chance,
+            confidence = chance,
+            won = false,
+            stakeUsd = price * contracts,
+            scalperId = ScalpModels.scalperIdOf(t)?.let(ScalpModels::canonicalScalperId),
+            open = true,
+            ticker = t.ticker
+        )
+    }
+
     fun fromPaper(f: PaperFill): Trade? {
         if (f.outcome?.equals("void", ignoreCase = true) == true) return null
         val price = f.limitPrice.takeIf { it.isFinite() && it in 0.0..1.0 }
@@ -311,7 +354,7 @@ object RichTradeMath {
             daily = daily(closed),
             calibration = calibration(closed),
             brier = brier(closed),
-            byConfidence = bandSplits(closed, CONF_ORDER) { confidenceBand(it.confidence) },
+            byConfidence = bandSplits(unique, CONF_ORDER) { confidenceBand(it.confidence) },
             exposure = exposure(unique, nowMs),
             sizeBins = countSplits(unique, SIZE_ORDER) { sizeBand(it.contracts) },
             openCount = openCount,
@@ -655,6 +698,10 @@ object RichTradeMath {
         contracts <= 50 -> "26–50"
         else -> "≥51"
     }
+
+    /** Picked-side model probability. Zero and percents above 1 are not a stored chance. */
+    private fun sideProb(fair: Double): Double? =
+        fair.takeIf { it.isFinite() && it > 0.0 && it <= 1.0 }
 
     private fun unitProb(raw: Double?): Double? {
         val v = raw?.takeIf { it.isFinite() } ?: return null

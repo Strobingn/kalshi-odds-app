@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.ui.charts.rich
 
+import com.dirk.kalshiodds.decision.InMemoryScalpPersistence
 import com.dirk.kalshiodds.decision.KeptScalpers
 import com.dirk.kalshiodds.decision.ScalpModels
 import com.dirk.kalshiodds.decision.ScalpRule
@@ -10,6 +11,7 @@ import com.dirk.kalshiodds.signal.paper.PaperFill
 import com.dirk.kalshiodds.ui.charts.rich.RichTradeMath.ExitBucket
 import com.dirk.kalshiodds.ui.charts.rich.RichTradeMath.Trade
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -507,6 +509,68 @@ class RichTradeMathTest {
         val pack = RichChartLoader.paper(listOf(fill, fill.copy(id = "o", settled = false, pnlUsd = null)))
         assertEquals(2, pack.trades.size)
         assertEquals(1.5 + fee(10, 0.40), RichTradeMath.report(pack.trades, 9_000L).summary.grossUsd, 1e-9)
+    }
+
+    @Test fun dataChartsFillFromScalpPaperWhenTheAutopilotBookIsEmpty() {
+        val ticker = "KXBTC15M-26OCT201500-00"
+        val close = ScalpTicker.closeMs(ticker)!!
+        val closed = ScalpTrade(
+            id = "closed-up",
+            ticker = ticker,
+            side = "YES",
+            state = ScalpState.CLOSED,
+            signalAtMs = close - 700_000L,
+            signalAsk = 0.40,
+            fairAtSignal = 0.72,
+            contracts = 20,
+            entryPrice = 0.40,
+            entryAtMs = close - 600_000L,
+            closedAtMs = close - 100_000L,
+            netUsd = -1.20,
+            exitReason = ScalpRule.ExitReason.STOP.label,
+            ruleVersion = "1|sf16|P"
+        )
+        val open = closed.copy(
+            id = "open-down",
+            side = "NO",
+            state = ScalpState.OPEN,
+            fairAtSignal = 0.64,
+            contracts = 8,
+            entryPrice = 0.33,
+            entryAtMs = close - 400_000L,
+            closedAtMs = null,
+            netUsd = null,
+            exitReason = null
+        )
+        val shadow = closed.copy(id = "shadow", ruleVersion = "1|sf16|S")
+        val noFill = closed.copy(id = "none", state = ScalpState.NO_FILL, netUsd = null, closedAtMs = null)
+        val store = InMemoryScalpPersistence()
+        store.seed(listOf(closed, open, shadow, noFill))
+        val rows = store.chartScalps()
+        assertEquals(setOf("closed-up", "open-down"), rows.map { it.id }.toSet())
+        val report = RichTradeMath.report(
+            RichChartLoader.paperActivity(emptyList(), rows).trades,
+            close
+        )
+        assertEquals(1, report.summary.n)
+        assertEquals(-1.20, report.summary.netUsd, 1e-9)
+        assertTrue(report.equity.isNotEmpty())
+        assertEquals(setOf("70–80%", "60–70%"), report.byConfidence.map { it.label }.toSet())
+        assertEquals(-1.20, report.byConfidence.single { it.label == "70–80%" }.up, 1e-9)
+        assertTrue(report.exposure.isNotEmpty())
+        assertTrue(report.exposure.last().value > 0.0)
+        assertEquals(1, report.openCount)
+        val sizes = report.sizeBins.associateBy { it.label }
+        assertEquals(1, sizes.getValue("11–25").n)
+        assertEquals(1, sizes.getValue("6–10").n)
+        val quiet = RichTradeMath.report(RichChartLoader.paperActivity(emptyList(), emptyList()).trades, close)
+        assertEquals(0, quiet.summary.n)
+        assertEquals(0, quiet.openCount)
+        assertTrue(quiet.byConfidence.isEmpty())
+        assertTrue(quiet.exposure.isEmpty())
+        assertTrue(quiet.sizeBins.isEmpty())
+        assertFalse(rows.any { !it.isPrimary })
+        assertNull(RichTradeMath.fromScalpActivity(closed.copy(fairAtSignal = 0.0))!!.confidence)
     }
 
     private fun plusMinutes(local: String, minutes: Int): String {

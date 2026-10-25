@@ -203,8 +203,9 @@ fun RichReportCharts(
                 }
             }
             FieldCard {
-                ChartBlock("P&L by confidence", note(n, "Model confidence. UP and DOWN together.")) {
-                    SideBars(report.byConfidence, emptyText = confidenceNote(n, report.byConfidence), contentLabel = "P and L by confidence")
+                val confidenceN = report.byConfidence.sumOf { it.n }
+                ChartBlock("P&L by confidence", note(confidenceN, "Model confidence. UP and DOWN together.")) {
+                    SideBars(report.byConfidence, emptyText = confidenceNote(confidenceN, report.byConfidence), contentLabel = "P and L by confidence")
                 }
             }
             FieldCard {
@@ -593,8 +594,11 @@ private fun brierNote(n: Int, points: List<RichTradeMath.Sample>): String = when
     else -> "n=$n · cumulative"
 }
 
-private fun confidenceNote(n: Int, bins: List<RichTradeMath.Split>): String =
-    if (n <= 0) "No trades yet" else if (bins.isEmpty()) "n=$n · no confidence stored" else "n=$n"
+private fun confidenceNote(n: Int, bins: List<RichTradeMath.Split>): String = when {
+    bins.isNotEmpty() -> "n=${bins.sumOf { it.n }}"
+    n <= 0 -> "No trades yet"
+    else -> "n=$n · no confidence stored"
+}
 
 private fun exposureNote(report: RichTradeMath.Report): String = when {
     report.exposure.isEmpty() && report.summary.n == 0 && report.openCount == 0 -> "No trades yet"

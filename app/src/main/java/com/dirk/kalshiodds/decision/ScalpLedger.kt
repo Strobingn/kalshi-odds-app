@@ -99,6 +99,19 @@ interface ScalpPersistence {
     /** Newest [limitWindows] windows' per-scalper aggregates. */
     fun loadWindows(limitWindows: Int = 48): List<ScalpWindowAgg> = emptyList()
     fun pageTrades(scalperId: String, afterClosedAtMs: Long?, afterId: String?, limit: Int): List<ScalpTrade> = emptyList()
+    /**
+     * Paper rows for the Data charts. Open and pending clips, plus the newest closed primary
+     * round trips. Shadows and no-fills stay out. The prediction ledger is not a source.
+     */
+    fun chartScalps(limit: Int = 4_000): List<ScalpTrade> {
+        val cap = limit.coerceIn(1, 12_000)
+        val open = loadActiveScalps().filter { it.isPrimary && it.state != ScalpState.NO_FILL }
+        val closed = loadScalps().asSequence()
+            .filter { it.isPrimary && it.state == ScalpState.CLOSED && it.netUsd?.isFinite() == true }
+            .take(cap)
+            .toList()
+        return (open + closed).distinctBy { it.id }
+    }
     fun windowTrades(scalperId: String, ticker: String): List<ScalpTrade> = emptyList()
     fun windowPrimaryTrades(ticker: String, limit: Int = 600): List<ScalpTrade> = emptyList()
     fun unsyncedClosed(limit: Int): List<ScalpTrade> = emptyList()

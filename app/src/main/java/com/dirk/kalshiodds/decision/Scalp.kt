@@ -2336,6 +2336,8 @@ class ScalpBook(
     fun loadDailySince(dayEtInclusive: String) = store.loadDailySince(dayEtInclusive)
     fun pageTrades(scalperId: String, afterClosedAtMs: Long? = null, afterId: String? = null, limit: Int = 50) =
         store.pageTrades(scalperId, afterClosedAtMs, afterId, limit)
+    /** Open clips plus closed primary paper round trips. Off the main thread. */
+    fun chartScalps(limit: Int = 4_000) = store.chartScalps(limit)
     fun windowTrades(scalperId: String, ticker: String) = store.windowTrades(scalperId, ticker)
     fun windowPrimaryTrades(ticker: String) = store.windowPrimaryTrades(ticker)
     fun unsyncedClosed(limit: Int) = store.unsyncedClosed(limit)
