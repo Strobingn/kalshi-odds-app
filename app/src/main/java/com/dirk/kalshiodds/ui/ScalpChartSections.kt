@@ -49,8 +49,9 @@ fun rememberKnobTicks(): List<ChartGallery.KnobTick> {
     }
     val log by (store?.adjustments ?: kotlinx.coroutines.flow.flowOf(emptyList<AiAdjustment>()))
         .collectAsStateWithLifecycle(emptyList())
-    return remember(log) {
-        ChartGallery.knobTicks(log.map { ChartGallery.KnobTick(it.atMs, it.scalper, it.setting, it.oldValue, it.newValue) })
+    val rows = ArrayList(log)
+    return remember(rows) {
+        ChartGallery.knobTicks(rows.map { ChartGallery.KnobTick(it.atMs, it.scalper, it.setting, it.oldValue, it.newValue) })
     }
 }
 
