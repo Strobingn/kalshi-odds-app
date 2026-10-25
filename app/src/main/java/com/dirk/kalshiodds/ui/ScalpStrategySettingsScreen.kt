@@ -99,7 +99,7 @@ internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: Sc
             when {
                 ScalpModels.isResearch(model) -> {
                     StrategyKnob("Edge needed after fees", settings.edgeCents ?: Research.defaultEdge(model.code), 0..30, "KNOB_EDGE", { "$it¢" }) { set(settings.copy(edgeCents = it)) }
-                    StrategyKnob("Contracts an order", settings.contracts ?: controls.research.clip, 1..1000, "KNOB_CONTRACTS") { set(settings.copy(contracts = it)) }
+                    StrategyKnob("Contracts an order", PaperClip.sized(settings.contracts ?: controls.research.clip), PaperClip.MIN..1000, "KNOB_CONTRACTS") { set(settings.copy(contracts = it)) }
                     val lateShown = if (Research.isLate(model.code)) Research.lateBand(model.code, null) else null
                     val researchMin = maxOf(floor, if (settings.minEntryCents > 1) settings.minEntryCents else lateShown?.let { Math.round(it.lo * 100).toInt() } ?: settings.minEntryCents)
                     val researchMax = settings.maxEntryCents ?: lateShown?.let { Math.round(it.hi * 100).toInt() } ?: 99
@@ -109,7 +109,7 @@ internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: Sc
                 }
                 ScalpModels.isV2(model) -> {
                     StrategyKnob("Until minute", settings.untilMinute, 1..14, "KNOB_UNTIL", { "minute $it" }) { set(settings.copy(untilMinute = it)) }
-                    StrategyKnob("Contracts an order", settings.contracts ?: if (controls.manual) controls.contracts else spec.clip, 1..1000, "KNOB_CONTRACTS") { set(settings.copy(contracts = it)) }
+                    StrategyKnob("Contracts an order", PaperClip.sized((settings.contracts ?: if (controls.manual) controls.contracts else spec.clip).coerceAtLeast(1)), PaperClip.MIN..1000, "KNOB_CONTRACTS") { set(settings.copy(contracts = it)) }
                     if (controls.peakTrailEnabled) {
                         StrategyKnob("Stop loss below fill", settings.stopLossPercent ?: controls.stopLossPercent, 1..99, "KNOB_STOP", { "$it%" }) { set(settings.copy(stopLossPercent = it)) }
                     } else {

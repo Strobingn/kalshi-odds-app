@@ -717,7 +717,7 @@ object TwentyScalperFleet {
             if (!PaperReentry.allowed(openN, lastClipMs[clock], q.nowMs)) return null
             val px = gate.avgFill
             if (px <= 0.01 || px >= 0.99) return null
-            val n = gate.contracts
+            val n = PaperClip.sized(gate.contracts)
             val fee = quadraticFeeUsd(n, px)
             val t = ScalpTrade(
                 id = newId(),

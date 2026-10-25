@@ -52,7 +52,7 @@ class ScalpRetune1021Test {
 
     @Test fun settleHoldFloorAndLateBandsKeepManualSliders() {
         assertEquals(180, Research.Params().lateMinS)
-        assertEquals(10, Research.Params().clip)
+        assertEquals(PaperClip.MIN, Research.Params().clip)
         assertEquals(80, Research.Params().lateLoCents)
         assertEquals(95, Research.Params().lateHiCents)
         assertEquals(FairGapTune.Band(0.80, 0.95), Research.lateBand(Research.LATE, null))

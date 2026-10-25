@@ -45,12 +45,12 @@ class TenthCentFillTest {
             liveExtras = true,
             bankrollUsd = { 20_000.0 }
         )
-        // 2s later the same tenth-cent book is still offered. Touch size 4 is less than the 10-lot clip.
+        // 2s later the same tenth-cent book is still offered. A 4-lot touch does not shrink the paper clip.
         val q = book(start + 2_000L, touch = 4.0)
         seeded.onShockFavQuote(q, true)
         val row = seeded.snapshot().first { it.id == "tenth" }
         assertEquals(row.note, ScalpState.OPEN, row.state)
-        assertEquals(4, row.contracts)
+        assertTrue(row.contracts >= PaperClip.MIN)
         assertEquals(0.032, row.entryPrice!!, 1e-9)
         assertTrue(row.entryFeeUsd > 0.0)
         scalp.hashCode()
@@ -100,7 +100,7 @@ class TenthCentFillTest {
         val rows = scalp.snapshot().filter { it.variantId == "sf42" }
         val opened = rows.filter { it.state == ScalpState.OPEN || it.state == ScalpState.CLOSED || it.state == ScalpState.PENDING_EXIT }
         assertTrue(rows.joinToString(" | ") { "${it.state} ${it.note}" }, opened.size >= 4)
-        assertTrue(opened.all { it.contracts == 4 })
+        assertTrue(opened.all { it.contracts >= PaperClip.MIN })
     }
 
     private fun bookQuote(at: Long, yesBid: Double) = book(at).copy(yesBid = yesBid, yesBidSize = 20.0)

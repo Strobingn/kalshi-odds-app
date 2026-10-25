@@ -112,7 +112,14 @@ class HomeSummaryMathTest {
         assertEquals("1 trade", HomeSummaryCopy.tradeCount(1))
         assertEquals(HomeSummaryCopy.EMPTY_WINDOW, HomeSummaryCopy.windowLine(null))
         assertEquals("sf41", HomeSummaryCopy.displayName("sf41"))
-        assertEquals("removed strategy", HomeSummaryCopy.displayName("not-a-model"))
+        assertEquals("sf16f", HomeSummaryCopy.displayName("sf16"))
+        assertEquals("s05 Student-t tail", HomeSummaryCopy.displayName("s05-student-tail"))
+        val archived = HomeSummaryCopy.displayName("sf01")
+        assertTrue(archived.contains("sf01"))
+        assertFalse(archived.contains("removed"))
+        assertEquals("not-a-model", HomeSummaryCopy.displayName("not-a-model"))
+        assertEquals("unknown strategy", HomeSummaryCopy.displayName("  "))
+        assertFalse(HomeSummaryCopy.displayName("s05-student-tail").contains("removed"))
     }
 
     @Test fun todayEtSumsNetBestWorstAndSettingsOnThatDateOnly() {

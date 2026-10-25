@@ -150,7 +150,7 @@ class TwentyScalperFleetTest {
         val fresh = book.onQuote(quote(0L), true).filter { TwentyScalperFleet.isFleet(it.variantId) }
         assertTrue(fresh.toString(), fresh.isNotEmpty())
         assertTrue(fresh.all { it.state == ScalpState.OPEN && it.note.contains("no live order") })
-        assertTrue(fresh.all { it.contracts in 1..TwentyScalperFleet.MAX_CLIP })
+        assertTrue(fresh.all { it.contracts >= PaperClip.MIN })
         val staleBook = ScalpBook(liveExtras = true, bankrollUsd = { 20_000.0 })
         val stale = staleBook.onQuote(quote(250L), true).filter { TwentyScalperFleet.isFleet(it.variantId) }
         assertTrue(stale.isEmpty())

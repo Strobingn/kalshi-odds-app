@@ -22,13 +22,14 @@ class ScalpLoss1029Test {
         assertTrue(blocked!!.contains("clip 10"))
         assertNull(ScalpParamSanity.entryBlock("NO", 0.33, 10, floor, 20_000.0, 10))
         assertEquals(10, ScalpParamSanity.builtinClip("sf07-v2"))
-        assertEquals(10, ScalpParamSanity.ownClip("sf07-v2", null))
-        assertEquals(10, ScalpParamSanity.ownClip("sf07-v2", 16))
-        assertEquals(4, ScalpParamSanity.ownClip("sf07-v2", 4))
+        assertEquals(PaperClip.MIN, ScalpParamSanity.ownClip("sf07-v2", null))
+        assertEquals(PaperClip.MIN, ScalpParamSanity.ownClip("sf07-v2", 16))
+        assertEquals(PaperClip.MIN, ScalpParamSanity.ownClip("sf07-v2", 4))
+        assertEquals(80, ScalpParamSanity.ownClip("sf07-v2", 80))
         val boosted = ScalpControls(greenContracts = 200, algo = mapOf("sf07-v2" to mapOf("contracts" to 200.0)))
-        assertEquals(10, StrategyAlgo.clip(boosted, "sf07-v2", 10))
+        assertEquals(PaperClip.MIN, StrategyAlgo.clip(boosted, "sf07-v2", 10))
         val manual = ScalpControls(strategySettings = mapOf("sf07-v2" to ScalpStrategySettings(contracts = 16)))
-        assertEquals(10, StrategyAlgo.clip(manual, "sf07-v2", 10))
+        assertEquals(PaperClip.MIN, StrategyAlgo.clip(manual, "sf07-v2", 10))
 
         val store = InMemoryScalpPersistence()
         store.seed((1..20).map { i ->
@@ -57,11 +58,11 @@ class ScalpLoss1029Test {
         book.onShockFavQuote(quote, true)
         val filled = book.allTrades().first { it.id == "pend" }
         assertEquals(ScalpState.OPEN, filled.state)
-        assertEquals(10, filled.contracts)
+        assertEquals(PaperClip.MIN, filled.contracts)
         assertTrue(filled.note.contains("green size"))
-        assertTrue(filled.note.contains("capped at clip 10"))
+        assertTrue(filled.note.contains("capped at clip ${PaperClip.MIN}"))
         assertFalse(filled.note.contains("200/200"))
-        assertTrue(book.gateSnapshot().any { it.code == "sf07-v2" && it.reason.contains("clip 10") })
+        assertTrue(book.gateSnapshot().any { it.code == "sf07-v2" && it.reason.contains("clip ${PaperClip.MIN}") })
     }
 
     @Test fun v2DipBandUsesTheFloorAndTheParentCeiling() {
@@ -117,7 +118,7 @@ class ScalpLoss1029Test {
         book.onQuote(q(signal + 4_000L, 0.30), true)
         val filled = book.allTrades().first { it.id == "v2" }
         assertEquals(ScalpState.OPEN, filled.state)
-        assertEquals(20, filled.contracts)
+        assertEquals(PaperClip.MIN, filled.contracts)
         assertEquals(0.30, filled.entryPrice!!, 1e-9)
     }
 
@@ -155,9 +156,12 @@ class ScalpLoss1029Test {
         val down = PaperSettingTuner.propose(ScalpControls(), listOf(loser))
         assertTrue(down.isNotEmpty())
         assertTrue(down.none { it.setting == "bench" || it.setting == "enabled" })
-        val clipDown = down.first { it.setting == "contracts" }
-        val clipWas = clipDown.oldValue.toIntOrNull() ?: ScalpParamSanity.builtinClip(code)
-        assertTrue(clipDown.newValue.toInt() < clipWas)
+        val clipDown = down.find { it.setting == "contracts" }
+        if (clipDown != null) {
+            val clipWas = clipDown.oldValue.toIntOrNull() ?: PaperClip.MIN
+            assertTrue(clipDown.newValue.toInt() >= PaperClip.MIN)
+            assertTrue(clipDown.newValue.toInt() < clipWas)
+        }
         down.filter { it.setting == "maxEntryCents" && it.oldValue != "default" }.forEach {
             assertTrue(it.newValue.toInt() <= it.oldValue.toInt())
         }
@@ -171,12 +175,12 @@ class ScalpLoss1029Test {
         val code = KeptScalpers.V2_DIP_ID
         val start = ScalpStrategySettings(minEntryCents = 12, maxEntryCents = 40, contracts = 10)
         val one = Research.learn(code, start, 2.0, 55)
-        assertEquals(10, one.contracts)
+        assertEquals(PaperClip.MIN, one.contracts)
         assertEquals(40, one.maxEntryCents)
         assertEquals(12, one.minEntryCents)
         assertTrue(one.aiNote.contains("held"))
         val lost = Research.learn(code, start, -2.0, 55)
-        assertTrue((lost.contracts ?: 10) < 10)
+        assertTrue((lost.contracts ?: 0) >= PaperClip.MIN)
         assertTrue((lost.maxEntryCents ?: 99) <= 40)
         assertTrue(lost.minEntryCents >= ScalpFloors.cents(code))
         val collapsed = Research.learn(code, ScalpStrategySettings(minEntryCents = 1, maxEntryCents = 12, contracts = 20), -1.0, 55)

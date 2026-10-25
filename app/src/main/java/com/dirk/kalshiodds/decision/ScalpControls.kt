@@ -13,14 +13,14 @@ data class ScalpControls(
     val enabled: Boolean = true, val killSwitch: Boolean = false, val adaptive: Boolean = true,
     val manual: Boolean = false, val maxAskCents: Int = 50, val stopCents: Int = 6,
     val takeProfitCents: Int = 0, val trailCents: Int = 2, val armCents: Int = 4,
-    val contracts: Int = 10, val maxStakeUsd: Double = 0.0, val maxHoldSeconds: Int = 0,
+    val contracts: Int = PaperClip.MIN, val maxStakeUsd: Double = 0.0, val maxHoldSeconds: Int = 0,
     val maxTradesPerHour: Int = 0, val maxDailyLossUsd: Double = 0.0, val maxOpen: Int = 0,
     val windowSeconds: Int = 30, val dipCents: Double = 0.0,
     val disabledStrategies: Set<String> = emptySet(),
     val peakTrailEnabled: Boolean = true, val peakTrailCents: Int = 3, val stopLossPercent: Int = 20,
     val strategySettings: Map<String, ScalpStrategySettings> = emptyMap(),
     /** Kalshi Scalper: contracts a net-positive scalper buys, filled by walking real book depth. */
-    val greenContracts: Int = 25,
+    val greenContracts: Int = PaperClip.MIN,
     /** Research strategies: shared parameters (window exposure cap, Kelly, maker edge, late window). */
     val research: Research.Params = Research.Params(),
     /** 1.0.9 auto-bench. Off unless the owner turns it on. Net after fees < 0 can bench; shadow > 0 can return. */
@@ -53,9 +53,9 @@ data class ScalpControls(
 ) {
     fun settings(code: String): ScalpStrategySettings =
         ScalpParamSanity.settings(code, strategySettings[code] ?: ScalpStrategySettings())
-    fun normalized() = copy(strategySettings = strategySettings.mapValues { (code, raw) -> ScalpParamSanity.settings(code, raw) }, peakTrailCents = peakTrailCents.coerceIn(1, 20), stopLossPercent = stopLossPercent.coerceIn(1, 99), maxAskCents = maxAskCents.coerceIn(1, 55), greenContracts = greenContracts.coerceIn(1, 500), stopCents = stopCents.coerceIn(1, 99),
+    fun normalized() = copy(strategySettings = strategySettings.mapValues { (code, raw) -> ScalpParamSanity.settings(code, raw) }, peakTrailCents = peakTrailCents.coerceIn(1, 20), stopLossPercent = stopLossPercent.coerceIn(1, 99), maxAskCents = maxAskCents.coerceIn(1, 55), greenContracts = greenContracts.coerceIn(PaperClip.MIN, 500), stopCents = stopCents.coerceIn(1, 99),
         takeProfitCents = takeProfitCents.coerceIn(0, 99), trailCents = trailCents.coerceIn(1, 20),
-        armCents = armCents.coerceIn(1, 99), contracts = contracts.coerceIn(1, 1000),
+        armCents = armCents.coerceIn(1, 99), contracts = contracts.coerceIn(PaperClip.MIN, 1000),
         maxStakeUsd = maxStakeUsd.takeIf { it.isFinite() }?.coerceIn(0.0, 100_000.0) ?: 0.0,
         maxHoldSeconds = maxHoldSeconds.coerceIn(0, 3600), maxTradesPerHour = maxTradesPerHour.coerceIn(0, 10000),
         maxDailyLossUsd = maxDailyLossUsd.takeIf { it.isFinite() }?.coerceIn(0.0, 100_000.0) ?: 0.0,

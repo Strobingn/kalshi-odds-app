@@ -248,6 +248,13 @@ object ScalpModels {
     /** Card label. Unknown and removed variant ids stay readable and do not throw. */
     fun labelFor(variantId: String): String =
         modelByCode(variantId)?.label ?: TwentyScalperFleet.labelOf(variantId) ?: KeptScalpers.REMOVED_LABEL
+
+    /**
+     * Last name this build still has for [code], including strategies pruned off the live board.
+     * Null when the id was never in the catalog. Home uses this so a fill is not called removed
+     * just because it is missing from [modelByCode].
+     */
+    fun archivedLabel(code: String): String? = RAW_BY_CODE[code]?.label
     private fun mergeStat(a: ScalpStat?, b: ScalpStat): ScalpStat {
         if (a == null) return b
         return a.copy(
