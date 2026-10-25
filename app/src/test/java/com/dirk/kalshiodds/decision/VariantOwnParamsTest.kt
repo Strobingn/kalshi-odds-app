@@ -71,9 +71,8 @@ class VariantOwnParamsTest {
         assertEquals(stopped.exitReason, ScalpState.CLOSED, stopped.state)
         assertTrue(stopped.exitReason!!.startsWith("stop"))
         assertEquals(ScalpState.OPEN, held.state)
-        val sold = ScalpFills.sales(stopped).first()
-        assertEquals(entry - 0.13, sold.price, 1e-9)
-        assertTrue(sold.contracts >= PaperClip.MIN)
+        assertTrue(stopped.soldContracts >= PaperClip.MIN)
+        assertEquals(entry - 0.13, stopped.proceedsUsd / stopped.soldContracts, 1e-9)
     }
 
     @Test fun makerStopSellsAtTheDisplayedBidInsteadOfHolding() {
