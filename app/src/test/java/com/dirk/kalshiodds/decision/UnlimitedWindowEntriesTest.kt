@@ -21,7 +21,7 @@ class UnlimitedWindowEntriesTest {
             book.onQuote(quote(start + i * 3_000L, yesBid = 0.34, yesAsk = 0.35, spot = 101_000.0), true)
         }
         val steady = book.snapshot().count { it.variantId == KeptScalpers.FAIR_ID && it.state != ScalpState.NO_FILL }
-        assertEquals(1, steady)
+        assertTrue("steady clips $steady", steady >= 6)
         // Sell the open clip while the bid is still through the target, then buy again.
         var at = start + 24_000L
         book.onQuote(quote(at, yesBid = 0.48, yesAsk = 0.49, spot = 101_000.0), true)

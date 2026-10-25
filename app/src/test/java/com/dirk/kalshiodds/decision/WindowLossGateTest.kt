@@ -131,7 +131,9 @@ class WindowLossGateTest {
         at += 4_000L
         book.onQuote(quote(market, close, at, 0.34, 0.35, 101_000.0), true)
         at += 4_000L
-        book.onQuote(quote(market, close, at, 0.20, 0.21, 101_000.0), true)
+        // Ask is through the entry limit, so a stacked pending clip does not fill
+        // the crash and then take profit on the next dip. The open clip stops.
+        book.onQuote(quote(market, close, at, 0.20, 0.37, 101_000.0), true)
         at += 4_000L
         return at
     }

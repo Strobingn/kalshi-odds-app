@@ -654,15 +654,17 @@ class ScalpBook(
                 val mine = mineAll.filter { it.variantId == p.id }.map { old -> changed.firstOrNull { it.id == old.id } ?: old }
                 if (q.nowMs >= q.closeMs) continue
                 val window = ScalpModels.windowKeyOf(q.ticker)
-                // A new clip on every fresh trigger. An open clip does not block the next one.
-                // WindowLossGate in save() is what stops a side that is already losing this window.
+                // A still-true signal stacks another paper clip on the re-entry clock.
+                // An open clip does not block the next one. WindowLossGate in save()
+                // is what stops a side that is already losing this window.
                 val free = listOf("YES", "NO")
                 val (sig, skip) = ScalpRule.strategySignal(q, tuned(p, ScalpModels.modelOf(p).code), free, recent)
                 if (sig == null) { clearTrigger(p.id, q.ticker); gates.block(modelCode, window, skip) }
                 if (sig != null && (ScalpRule.buyPriceOk(if (p.maker) q.bid(sig.side) else sig.ask) || FairGapTune.lessonAllowed(q, sig.side, sig.ask, sig.fair, ScalpRule.CONTRACTS, variantId = p.id, open = _all.value))) {
                     val role = if (p.id in primaryIds) "P" else "S"
-                    if (!triggerIsNew(p.id, q.ticker, sig.side)) {
-                        gates.block(modelCode, window, "same trigger still on")
+                    val again = reentryRefusal(p.id, q.ticker, sig.side, q.nowMs, changed)
+                    if (again != null) {
+                        gates.block(modelCode, window, again)
                         continue
                     }
                     if (role == "P" && !shadowCode(ScalpModels.modelOf(p).code)) { // 1.0.14: frozen/benched entries reserve nothing
@@ -681,7 +683,7 @@ class ScalpBook(
                         HftSignals.restingBid(touch, q.ask(sig.side), q.tauS, 0.0)
                     } else null
                     if (p.maker && makerBid == null) continue
-                    armTrigger(p.id, q.ticker, sig.side)
+                    armTrigger(p.id, q.ticker, sig.side, q.nowMs)
                     changed += ScalpTrade(
                         id = idFactory(),
                         ticker = q.ticker.uppercase(),
@@ -775,8 +777,9 @@ class ScalpBook(
             val n = spec.clip
             val cost = px * n + ScalpRule.orderFee(n, px)
             if (openCost + cost > bankroll + 1e-9) { gates.block(spec.id, window, "paper cash spent"); continue }
-            if (!triggerIsNew(spec.id, q.ticker, sig.side)) { gates.block(spec.id, window, "same trigger still on"); continue }
-            armTrigger(spec.id, q.ticker, sig.side)
+            val again = reentryRefusal(spec.id, q.ticker, sig.side, q.nowMs, out)
+            if (again != null) { gates.block(spec.id, window, again); continue }
+            armTrigger(spec.id, q.ticker, sig.side, q.nowMs)
             val v2 = spec.kind == ScalpVariants.Kind.V2_FAIR || spec.kind == ScalpVariants.Kind.V2_DIP
             val note = if (v2) {
                 val saved = controls.state.value.settings(spec.id)
@@ -887,9 +890,9 @@ class ScalpBook(
             else if (side != null && ask != null && fadeWantsEntry(mid, ya - yb, ask, kotlin.math.abs(f), q, cfg.marginUsd, band.first, band.second, side, ScalpRule.CONTRACTS, KeptScalpers.FADE_ID)) {
                 val vid = ForecastScalp.variantId(false, KeptScalpers.FADE_HORIZON_S)
                 val cost = ask * ScalpRule.CONTRACTS + ScalpRule.orderFee(ScalpRule.CONTRACTS, ask)
-                val active = openFc.any { it.variantId == vid } || changed.any { it.variantId == vid && isActive(it) }
-                if (active) armForecastEdge(vid, key, side)
-                else if (!forecastEdgeArmed(vid, key) && vid == KeptScalpers.FADE_ID && openCostUsd() + cost <= bankrollUsd() + 1e-9) {
+                val again = reentryRefusal(vid, key, side, q.nowMs, changed)
+                if (again != null) gates.block(KeptScalpers.FADE_ID, fadeWindow, again)
+                else if (vid == KeptScalpers.FADE_ID && openCostUsd() + cost <= bankrollUsd() + 1e-9) {
                     changed += ScalpTrade(
                         id = idFactory(), ticker = key, side = side, state = ScalpState.PENDING_ENTRY, signalAtMs = q.nowMs,
                         signalAsk = ask, fairAtSignal = mid + f, restingLimit = ask, restingSinceMs = q.nowMs,
@@ -897,8 +900,8 @@ class ScalpBook(
                             f * 100, ShortHorizonForecaster.horizonLabel(KeptScalpers.FADE_HORIZON_S), LeadForecaster.VERSION),
                         ruleVersion = "${ScalpRule.VERSION}|$vid|P"
                     )
-                    armForecastEdge(vid, key, side)
-                }
+                    armTrigger(vid, key, side, q.nowMs)
+                } else if (vid == KeptScalpers.FADE_ID) gates.block(KeptScalpers.FADE_ID, fadeWindow, "paper cash spent")
             } else {
                 clearForecastEdge(ForecastScalp.variantId(false, KeptScalpers.FADE_HORIZON_S), key)
                 gates.block(KeptScalpers.FADE_ID, fadeWindow, "fade trigger not met")
@@ -920,9 +923,8 @@ class ScalpBook(
             }
             else if (sideV != null && askV != null && fadeWantsEntry(mid, ya - yb, askV, kotlin.math.abs(fv), q, cfg.marginUsd, spec.fadeLo, spec.fadeHi, sideV, spec.clip, spec.id)) {
                 val costV = askV * spec.clip + ScalpRule.orderFee(spec.clip, askV)
-                val activeV = openFc.any { it.variantId == spec.id } || changed.any { it.variantId == spec.id && isActive(it) }
-                if (activeV) armForecastEdge(spec.id, key, sideV)
-                else if (forecastEdgeArmed(spec.id, key)) Unit
+                val againV = reentryRefusal(spec.id, key, sideV, q.nowMs, changed)
+                if (againV != null) gates.block(spec.id, fadeWindow, againV)
                 else if (openCostUsd() + costV <= bankrollUsd() + 1e-9) {
                     changed += ScalpTrade(
                         id = idFactory(), ticker = key, side = sideV, state = ScalpState.PENDING_ENTRY, signalAtMs = q.nowMs,
@@ -930,7 +932,7 @@ class ScalpBook(
                         note = String.format(Locale.US, "Forecast fade variant %s · clip %d", spec.id, spec.clip),
                         ruleVersion = "${ScalpRule.VERSION}|${spec.id}|P"
                     )
-                    armForecastEdge(spec.id, key, sideV)
+                    armTrigger(spec.id, key, sideV, q.nowMs)
                     gates.entered(spec.id, fadeWindow)
                 } else gates.block(spec.id, fadeWindow, "paper cash spent")
             } else {
@@ -1514,11 +1516,13 @@ class ScalpBook(
         return a - b
     }
 
-    /** Armed when a scalper's trigger is currently true. A new clip needs a rising edge. */
+    /** Last paper clip time per scalper, ticker, and side. The open book does not have to be flat. */
+    private val lastPaperClipMs = HashMap<String, Long>()
+    /** Kept so a cancelled entry can drop its side mark. The re-entry clock does not read this set. */
     private val triggerOn = LinkedHashSet<String>()
     /**
-     * Research and forecast edges stay armed after a close. They clear only when that
-     * strategy's entry gate is false, so a still-true signal does not re-enter.
+     * Cleared when a research or forecast gate goes false. A still-true signal re-enters
+     * through [PaperReentry] instead of waiting for this edge to fall.
      */
     private val researchEdge = LinkedHashSet<String>()
     private val forecastEdge = LinkedHashSet<String>()
@@ -1535,26 +1539,35 @@ class ScalpBook(
         ScalpModels.modelOf(t)?.code?.let { clearTrigger(it, t.ticker) }
     }
 
-    private fun triggerIsNew(id: String, ticker: String, side: String): Boolean {
-        val key = triggerKey(id, ticker, side)
-        if (key !in triggerOn) return true
+    private fun openOnSide(id: String, ticker: String, side: String, also: List<ScalpTrade> = emptyList()): Int {
         val tk = ticker.uppercase()
-        val matching = _all.value.filter {
-            it.ticker.equals(tk, true) && (it.variantId == id || ScalpModels.modelOf(it)?.code == id)
-        }
-        if (matching.none { isActive(it) }) {
-            triggerOn.remove(key)
-            return true
-        }
-        return false
+        val closedNow = also.asSequence().filter { !isActive(it) }.map { it.id }.toSet()
+        fun hit(t: ScalpTrade) = t.id !in closedNow && t.ticker.equals(tk, true) && t.side == side && isActive(t) &&
+            (t.variantId == id || ScalpModels.modelOf(t)?.code == id)
+        val seen = HashSet<String>()
+        var n = 0
+        for (t in _all.value) if (hit(t) && seen.add(t.id)) n++
+        for (t in also) if (hit(t) && seen.add(t.id)) n++
+        return n
     }
 
-    private fun armTrigger(id: String, ticker: String, side: String) {
+    /** Null when this side may take another paper clip. Loss discipline is [save], not this clock. */
+    private fun reentryRefusal(id: String, ticker: String, side: String, nowMs: Long, also: List<ScalpTrade> = emptyList()): String? =
+        PaperReentry.refusal(
+            openOnSide(id, ticker, side, also),
+            lastPaperClipMs[triggerKey(id, ticker, side)],
+            nowMs,
+            controls.state.value.settings(id).maxOpenPerSide
+        )
+
+    private fun armTrigger(id: String, ticker: String, side: String, nowMs: Long) {
         val prefix = "$id|${ticker.uppercase()}|"
         val key = prefix + side
         triggerOn.removeAll { it.startsWith(prefix) && it != key }
         triggerOn.add(key)
+        lastPaperClipMs[key] = nowMs
         while (triggerOn.size > 4_000) triggerOn.remove(triggerOn.first())
+        while (lastPaperClipMs.size > 4_000) lastPaperClipMs.remove(lastPaperClipMs.keys.first())
     }
 
     private fun edgePrefix(id: String, ticker: String) = "$id|${ticker.uppercase()}|"
@@ -1564,19 +1577,7 @@ class ScalpBook(
         set.removeAll { it.startsWith(prefix) }
     }
 
-    private fun armEdge(set: LinkedHashSet<String>, id: String, ticker: String, side: String) {
-        val prefix = edgePrefix(id, ticker)
-        set.removeAll { it.startsWith(prefix) }
-        set.add(prefix + side)
-        while (set.size > 4_000) set.remove(set.first())
-    }
-
-    private fun edgeArmed(set: LinkedHashSet<String>, id: String, ticker: String) =
-        set.any { it.startsWith(edgePrefix(id, ticker)) }
-
     private fun clearForecastEdge(id: String, ticker: String) = clearEdge(forecastEdge, id, ticker)
-    private fun armForecastEdge(id: String, ticker: String, side: String) = armEdge(forecastEdge, id, ticker, side)
-    private fun forecastEdgeArmed(id: String, ticker: String) = edgeArmed(forecastEdge, id, ticker)
 
     /** Band entry, or the lesson path, both over the named round-trip hurdle. */
     private fun fadeWantsEntry(
@@ -1739,11 +1740,12 @@ class ScalpBook(
             gates.block(twin.id, window, blocked ?: "ask above 55¢ ceiling")
             return null
         }
-        if (!triggerIsNew(twin.id, q.ticker, sig.side)) {
-            gates.block(twin.id, window, "same trigger still on")
+        val again = reentryRefusal(twin.id, q.ticker, sig.side, q.nowMs)
+        if (again != null) {
+            gates.block(twin.id, window, again)
             return null
         }
-        armTrigger(twin.id, q.ticker, sig.side)
+        armTrigger(twin.id, q.ticker, sig.side, q.nowMs)
         gates.entered(twin.id, window)
         return ScalpTrade(
             id = idFactory(), ticker = q.ticker.uppercase(), side = sig.side, state = ScalpState.PENDING_ENTRY,
@@ -1783,11 +1785,12 @@ class ScalpBook(
             gates.block(vid, window, "paper cash spent")
             return null
         }
-        if (!triggerIsNew(vid, q.ticker, side)) {
-            gates.block(vid, window, "same trigger still on")
+        val again = reentryRefusal(vid, q.ticker, side, q.nowMs)
+        if (again != null) {
+            gates.block(vid, window, again)
             return null
         }
-        armTrigger(vid, q.ticker, side)
+        armTrigger(vid, q.ticker, side, q.nowMs)
         gates.entered(vid, window)
         return ScalpTrade(
             id = idFactory(), ticker = q.ticker.uppercase(), side = side, state = ScalpState.PENDING_ENTRY, signalAtMs = q.nowMs,
@@ -2454,7 +2457,8 @@ class ScalpBook(
             val seeded = plan.spec.copy(trail = ScalpV2.TRAIL)
             val (minPx, maxPx) = ScalpParamSanity.v2Band(model.code, knobs.minEntryCents / 100.0, seeded.maxAsk)
             val sp = seeded.copy(maxAsk = maxPx, clip = minOf(seeded.clip, ScalpParamSanity.ownClip(model.code, knobs.contracts)))
-            if (_all.value.any { isActive(it) && it.variantId == sp.id && it.ticker.equals(t.ticker, true) }) continue
+            if (reentryRefusal(sp.id, t.ticker, t.side, t.signalAtMs) != null) continue
+            armTrigger(sp.id, t.ticker, t.side, t.signalAtMs)
             val stopPct = knobs.stopLossPercent ?: cfg.stopLossPercent
             val stop = plan.stop
             save(ScalpTrade(id = idFactory(), ticker = t.ticker.uppercase(), side = t.side, state = ScalpState.PENDING_ENTRY,
@@ -2476,7 +2480,7 @@ class ScalpBook(
      */
     /**
      * Queue one paper clip for the built-in / cloud LLM strategy. No Kalshi order.
-     * A second clip on the same ticker and side waits until the first is closed.
+     * Another clip on the same ticker and side follows [PaperReentry], not a one-open wait.
      */
     fun llmEntry(q: ScalpRule.Quote, side: String, conf: Double, enabled: Boolean = true): String? = synchronized(lock) {
         if (!enabled) return "paper disabled"
@@ -2487,8 +2491,9 @@ class ScalpBook(
         val ask = q.ask(want) ?: return "no ask"
         if (!ScalpRule.buyPriceOk(ask)) return "ask above 55¢"
         val ticker = q.ticker.uppercase()
-        val open = _all.value.any { it.variantId == "v2-llm" && it.ticker.equals(ticker, true) && it.side == want && isActive(it) }
-        if (open) return "already open on this ticker"
+        val again = reentryRefusal("v2-llm", ticker, want, q.nowMs)
+        if (again != null) return again
+        armTrigger("v2-llm", ticker, want, q.nowMs)
         save(ScalpTrade(
             id = idFactory(),
             ticker = ticker,
@@ -2654,7 +2659,6 @@ class ScalpBook(
             if (id !in KeptScalpers.IDS) continue
             if (com.dirk.kalshiodds.decision.insights.ScalpFreeze.blocksRestored(id, cfg.benchOverrides[id])) continue
             if (!cfg.permits(id)) continue
-            val activeClip = mine.any { it.variantId == id && isActive(it) }
             val s = StrategyAlgo.view(cfg, id)
             val edge = (s.edgeCents ?: Research.defaultEdge(id)).toDouble()
             // r-late and r-late-t1/t2 use their own window / band / max gap. Sliders and AI algo overrides still win the band.
@@ -2702,12 +2706,12 @@ class ScalpBook(
                 clearEdge(researchEdge, id, q.ticker)
                 continue
             }
-            val sideKey = edgePrefix(id, q.ticker) + best.third.side
-            if (activeClip || sideKey in researchEdge) {
-                armEdge(researchEdge, id, q.ticker, best.third.side)
+            val again = reentryRefusal(id, q.ticker, best.third.side, q.nowMs, out)
+            if (again != null) {
+                gates.block(id, ScalpModels.windowKeyOf(q.ticker), again)
                 continue
             }
-            armEdge(researchEdge, id, q.ticker, best.third.side)
+            armTrigger(id, q.ticker, best.third.side, q.nowMs)
             exposure += best.second
             out += best.third
         }
