@@ -13,7 +13,17 @@ class ScalpGateLog {
         val byReason: Map<String, Int> = emptyMap()
     )
 
-    data class SyncRow(val windowKey: String, val code: String, val reason: String, val count: Int)
+    /**
+     * One counted reason. [latest] is the reason currently on screen.
+     * Remote sync collapses these to one row per window and scalper.
+     */
+    data class SyncRow(
+        val windowKey: String,
+        val code: String,
+        val reason: String,
+        val count: Int,
+        val latest: Boolean = false
+    )
 
     private val hits = HashMap<String, Hit>()
 
@@ -57,7 +67,9 @@ class ScalpGateLog {
         codes.mapNotNull { code ->
             val h = hits[code] ?: return@mapNotNull null
             if (h.byReason.isEmpty()) return@mapNotNull null
-            h.byReason.map { (reason, n) -> SyncRow(h.windowKey, code, reason, n) }
+            h.byReason.map { (reason, n) ->
+                SyncRow(h.windowKey, code, reason, n, latest = reason == h.reason)
+            }
         }.flatten()
     }
 

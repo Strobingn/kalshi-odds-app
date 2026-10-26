@@ -181,7 +181,10 @@ class SupabaseSync(
                 .put("model", com.dirk.kalshiodds.decision.ModelFilter.syncField(t.variantId) ?: JSONObject.NULL)
             out.add(rec("scalp:${t.id}", "scalp", at, payload))
         }
-        bundle.modelDecisions.forEach { d ->
+        // One remote row per twin, side, and 15-minute bucket. Local unsynced
+        // decisions stay intact; SyncWorker still acks the whole queue.
+        HotSyncCoalesce.coalesceModels(bundle.modelDecisions).forEach { kept ->
+            val d = kept.row
             val payload = JSONObject()
                 .put("id", d.id)
                 .put("atMs", d.atMs)
@@ -192,7 +195,7 @@ class SupabaseSync(
                 .put("reason", d.reason)
                 .put("outcomeUsd", d.outcomeUsd ?: JSONObject.NULL)
                 .put("model", d.twinId)
-            out.add(rec("model:${d.id}", "model_decision", d.atMs, payload))
+            out.add(rec(kept.remoteKey, "model_decision", d.atMs, payload))
         }
         bundle.scalpResets.forEach { r ->
             val payload = JSONObject()
@@ -204,10 +207,14 @@ class SupabaseSync(
             out.add(rec("reset:${r.atMs}", "scalp_reset", r.atMs, payload))
         }
         val gateAt = System.currentTimeMillis()
-        bundle.scalpGates.forEach { g ->
+        HotSyncCoalesce.coalesceGates(bundle.scalpGates).forEach { g ->
+            val top = JSONArray()
+            g.top.forEach { (reason, n) -> top.put(JSONObject().put("reason", reason).put("count", n)) }
             val payload = JSONObject()
                 .put("windowKey", g.windowKey).put("code", g.code).put("reason", g.reason).put("count", g.count)
-            out.add(rec("scalp_gate:${g.windowKey}:${g.code}:${g.reason.hashCode()}", "scalp_gate", gateAt, payload))
+                .put("reasons", g.reasons)
+                .put("top", top)
+            out.add(rec(g.remoteKey, "scalp_gate", gateAt, payload))
         }
         bundle.shadow.forEach { s ->
             val payload = JSONObject()
