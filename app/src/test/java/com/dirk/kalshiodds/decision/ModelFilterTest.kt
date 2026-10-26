@@ -238,6 +238,7 @@ class ModelFilterTest {
     @Test fun sampleWeightDropsHighScoresAndDownWeightsHotVolume() {
         assertEquals(1.0, ModelFilter.sampleWeight(0.2, 0.60), 0.0)
         assertEquals(0.0, ModelFilter.sampleWeight(0.2, 0.80), 0.0)
+        assertEquals(ModelFilter.NONQUIET_WEIGHT, ModelFilter.sampleWeight(0.2, 0.80, residualCents = 4.0), 0.0)
         assertEquals(ModelFilter.NONQUIET_WEIGHT, ModelFilter.sampleWeight(ModelFilter.QUIET_VOL, 0.50), 0.0)
         assertEquals(0.0, ModelFilter.sampleWeight(3.0, 0.90), 0.0)
         assertTrue(ModelFilter.regimeAllows(0.60, 0.2, learned = true))
@@ -250,6 +251,10 @@ class ModelFilterTest {
         val logistic = ModelFilter.TWINS.first { it.arm == ModelFilter.Arm.LOGISTIC }
         val lgbm = ModelFilter.TWINS.first { it.arm == ModelFilter.Arm.LGBM }
         val zeros = DoubleArray(ModelFilter.FEATURES)
+        // Break-even above 0.80: a high score whose E[net] is still negative stays a reject,
+        // even when the fee residual would clear.
+        repeat(20) { ModelFilter.onClosed("sf41-logistic", -2.0, 700.0, 1_000L + it, zeros) }
+        ModelFilter.onClosed("sf41-logistic", 0.05, 700.0, 2_000L, zeros)
         ModelFilter.installWeightsForTest(zeros, kotlin.math.ln(0.80 / 0.20), ModelFilter.MIN_TRAIN)
         val highLog = ModelFilter.decide(logistic, quote(), "YES", 0.20, 0.55)
         val highTree = ModelFilter.decide(lgbm, quote(now = 1_700_000_000_500L), "YES", 0.20, 0.55)
@@ -264,6 +269,17 @@ class ModelFilterTest {
         assertTrue(modest.reason, modest.enter)
         assertTrue(modest.score in 0.55..ModelFilter.HIGH_SCORE)
         assertTrue(modestTree.reason, modestTree.enter)
+        ModelFilter.resetForTest()
+        // Same high bias, but the symmetric book clears E[net]. A fee-clearing row may enter.
+        // A high score with no fee edge is still rejected.
+        ModelFilter.installWeightsForTest(zeros, kotlin.math.ln(0.80 / 0.20), ModelFilter.MIN_TRAIN)
+        val paid = ModelFilter.decide(logistic, quote(now = 1_700_000_003_000L), "YES", 0.20, 0.55)
+        assertTrue(paid.reason, paid.enter)
+        val paidTree = ModelFilter.decide(lgbm, quote(now = 1_700_000_003_500L), "YES", 0.20, 0.55)
+        assertTrue(paidTree.reason, paidTree.enter)
+        val noEdge = ModelFilter.decide(logistic, quote(now = 1_700_000_004_000L, bid = 0.39, ask = 0.40), "YES", 0.40, 0.40)
+        assertFalse(noEdge.enter)
+        assertTrue(noEdge.reason, noEdge.reason.contains("high-score") || noEdge.reason.contains("expected net"))
         ModelFilter.resetForTest()
         val now = 1_700_000_000_000L
         repeat(8) { i ->
@@ -318,6 +334,114 @@ class ModelFilterTest {
         assertTrue("ofi ${w[ModelFilter.OFI_FEATURE]}", w[ModelFilter.OFI_FEATURE] <= 0.0)
         assertTrue(w[ModelFilter.OFI_DEPTH_FEATURE] <= 0.0)
         assertTrue(QuantSession.trainedTrees() in TreeEnsemble.MIN_TREES..TreeEnsemble.MAX_TREES)
+    }
+
+    @Test fun losingControlBookDoesNotRejectEveryFeeClearingEntry() {
+        val old = 1_700_000_000_000L
+        val trades = List(80) { i ->
+            ScalpTrade(
+                id = "loss$i",
+                ticker = "KXBTC15M-26OCT122015-15",
+                side = if (i % 5 == 0) "NO" else "YES",
+                state = ScalpState.CLOSED,
+                signalAtMs = old + i * 60_000L,
+                signalAsk = 0.40,
+                fairAtSignal = 0.55,
+                contracts = 10,
+                entryPrice = 0.40,
+                entryAtMs = old + i * 60_000L,
+                closedAtMs = old + i * 60_000L + 5_000L,
+                netUsd = if (i % 7 == 0) 0.40 else -2.80,
+                ruleVersion = "v|sf41|P"
+            )
+        }
+        ModelFilter.retrainFrom(trades, old + 80 * 60_000L + ModelFilter.EMBARGO_MS + 60_000L)
+        val (w, b) = ModelFilter.weightCopy()
+        assertFalse("retrain wiped the logistic to zeros", w.all { it == 0.0 })
+        assertEquals(ModelFilter.PRIOR_BIAS, b, 0.5)
+        val logistic = ModelFilter.TWINS.first { it.arm == ModelFilter.Arm.LOGISTIC }
+        val lgbm = ModelFilter.TWINS.first { it.arm == ModelFilter.Arm.LGBM }
+        val q = quote(now = old + 90 * 60_000L, bid = 0.39, ask = 0.40)
+        val dLog = ModelFilter.decide(logistic, q, "YES", 0.40, 0.55)
+        val dTree = ModelFilter.decide(lgbm, q.copy(nowMs = q.nowMs + 1_000L), "YES", 0.40, 0.55)
+        val detail = "log ${dLog.enter} ${dLog.reason} score=${dLog.score} e=${dLog.expectedNet} " +
+            "tree ${dTree.enter} ${dTree.reason} score=${dTree.score} e=${dTree.expectedNet} " +
+            "bias=$b w16=${w[16]} warming=${ModelFilter.warming()}"
+        assertTrue(detail, dLog.enter)
+        assertTrue(detail, dTree.enter)
+        var spot = 100_000.0
+        val start = q.nowMs + 10_000L
+        repeat(30) { i ->
+            spot *= kotlin.math.exp(if (i % 2 == 0) 3e-5 else -3e-5)
+            ModelFilter.observe(quote(now = start + i * 1_000L, spot = spot, bid = 0.39, ask = 0.40, strike = 100_000.0))
+        }
+        val liveLog = ModelFilter.decide(logistic, quote(now = start + 31_000L, spot = spot, bid = 0.39, ask = 0.40), "YES", 0.40, 0.55)
+        val liveTree = ModelFilter.decide(lgbm, quote(now = start + 32_000L, spot = spot, bid = 0.39, ask = 0.40), "YES", 0.40, 0.55)
+        assertTrue(liveLog.reason, liveLog.enter)
+        assertTrue(liveTree.reason, liveTree.enter)
+        ModelFilter.onClosed(logistic.id, 0.25, 600.0, q.nowMs, dLog.features)
+        ModelFilter.onClosed(lgbm.id, 0.10, 600.0, q.nowMs + 1_000L, dTree.features)
+        val noEdge = ModelFilter.decide(logistic, quote(now = q.nowMs + 3_000L, bid = 0.39, ask = 0.40), "YES", 0.40, 0.40)
+        val noEdgeTree = ModelFilter.decide(lgbm, quote(now = q.nowMs + 4_000L, bid = 0.39, ask = 0.40), "YES", 0.40, 0.40)
+        assertFalse(noEdge.reason, noEdge.enter)
+        assertFalse(noEdgeTree.reason, noEdgeTree.enter)
+        val rich = ModelFilter.decide(logistic, quote(now = q.nowMs + 5_000L, ask = 0.90, bid = 0.88), "YES", 0.90, 0.95)
+        assertFalse(rich.reason, rich.enter)
+        val cards = ModelFilter.scorecards()
+        val logCard = cards.first { it.arm == "logistic" }
+        val treeCard = cards.first { it.arm == "lgbm" }
+        assertTrue("logistic trades ${logCard.trades} rejected ${logCard.rejected}", logCard.trades >= 1 && logCard.rejected >= 1)
+        assertTrue("lgbm trades ${treeCard.trades} rejected ${treeCard.rejected}", treeCard.trades >= 1 && treeCard.rejected >= 1)
+    }
+
+    @Test fun negativeForestDoesNotVetoAClearingEdgeTheLogisticWouldTake() {
+        val logistic = ModelFilter.TWINS.first { it.arm == ModelFilter.Arm.LOGISTIC }
+        val lgbm = ModelFilter.TWINS.first { it.arm == ModelFilter.Arm.LGBM }
+        ModelFilter.installWeightsForTest(ModelFilter.priorWeights(), ModelFilter.PRIOR_BIAS, ModelFilter.MIN_TRAIN)
+        val leaf = TreeEnsemble.build(
+            intArrayOf(1, ModelFilter.FEATURES),
+            listOf(TreeEnsemble.Spec(0, 0, 0, 0.0, "LEAF", 0, 0, -0.20)),
+            logistic = false,
+            base = 0.0
+        )
+        QuantSession.installPayoffForTest(leaf)
+        assertTrue(QuantSession.payoffIsFitted())
+        val now = 1_700_000_010_000L
+        val takeLog = ModelFilter.decide(logistic, quote(now = now, bid = 0.39, ask = 0.40), "YES", 0.40, 0.55)
+        val takeTree = ModelFilter.decide(lgbm, quote(now = now + 1_000L, bid = 0.39, ask = 0.40), "YES", 0.40, 0.55)
+        assertTrue(takeLog.reason, takeLog.enter)
+        assertTrue(takeTree.reason, takeTree.enter)
+        assertTrue(takeTree.expectedNet > 0.0)
+        val skip = ModelFilter.decide(lgbm, quote(now = now + 2_000L, bid = 0.39, ask = 0.40), "YES", 0.40, 0.40)
+        assertFalse(skip.reason, skip.enter)
+    }
+
+    @Test fun undertrainedRetrainKeepsATradablePrior() {
+        val old = 1_700_000_000_000L
+        val trades = List(12) { i ->
+            ScalpTrade(
+                id = "few$i",
+                ticker = "KXBTC15M-26OCT122015-15",
+                side = "YES",
+                state = ScalpState.CLOSED,
+                signalAtMs = old + i * 60_000L,
+                signalAsk = 0.40,
+                fairAtSignal = 0.55,
+                contracts = 10,
+                entryPrice = 0.40,
+                entryAtMs = old + i * 60_000L,
+                closedAtMs = old + i * 60_000L + 400L,
+                netUsd = -1.0,
+                ruleVersion = "v|sf41|P"
+            )
+        }
+        ModelFilter.retrainFrom(trades, old + ModelFilter.EMBARGO_MS + 120_000L)
+        val (w, b) = ModelFilter.weightCopy()
+        assertEquals(ModelFilter.PRIOR_BIAS, b, 1e-9)
+        assertFalse(w.all { it == 0.0 })
+        assertTrue(ModelFilter.warming())
+        val d = ModelFilter.decide(ModelFilter.TWINS.first(), quote(now = old + 30_000L), "YES", 0.40, 0.55)
+        assertTrue(d.reason, d.enter)
     }
 
     @Test fun lgbmGateIsPredictedNetPayoff() {

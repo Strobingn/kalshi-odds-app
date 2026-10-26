@@ -81,7 +81,10 @@ object QuantSession {
     private var warmUs = -1L
     private val latency = LatencyTracker()
     private var trained = TreeEnsemble.priorPayoff()
-    private var lgbm = TreeEnsemble.priorPayoff()
+    /** Cold-start payoff. Kept when a refit is flat or has no positive leaf. */
+    private val coldPayoff = TreeEnsemble.priorPayoff()
+    private var lgbm = coldPayoff
+    private var payoffFitted = false
     private var imported: TreeEnsemble? = null
     private var note = ""
     private var lastReport: Report? = null
@@ -111,13 +114,50 @@ object QuantSession {
     }
 
     fun predictNet(x: DoubleArray): Double = synchronized(lock) {
-        val forest = if (lgbm.treeCount == 0) TreeEnsemble.priorPayoff() else lgbm
+        val forest = if (payoffFitted && lgbm.treeCount > 0) lgbm else coldPayoff
         forest.predict(x)
     }
 
+    /** Fee-residual prior, independent of the fitted forest. */
+    fun priorNet(x: DoubleArray): Double = coldPayoff.predict(x)
+
+    fun payoffIsFitted(): Boolean = synchronized(lock) { payoffFitted }
+
+    /**
+     * Install a regression forest only when some training row is predicted positive.
+     * An all-zero or all-negative fit is the reject-everything failure mode; the prior stays.
+     */
     fun fitPayoff(xs: List<DoubleArray>, ys: DoubleArray, sampleWeight: DoubleArray? = null) = synchronized(lock) {
         val fit = TreeEnsemble.fit(xs, ys, regression = true, sampleWeight = sampleWeight)
-        if (fit.treeCount > 0) lgbm = fit
+        if (fit.treeCount == 0 || xs.isEmpty()) {
+            lgbm = coldPayoff
+            payoffFitted = false
+            return
+        }
+        var peak = Double.NEGATIVE_INFINITY
+        for (x in xs) {
+            val p = fit.predict(x)
+            if (p > peak) peak = p
+        }
+        if (peak > 1e-4) {
+            lgbm = fit
+            payoffFitted = true
+        } else {
+            lgbm = coldPayoff
+            payoffFitted = false
+        }
+    }
+
+    /** Drop a fitted forest and score with the fee-residual prior again. */
+    fun clearPayoffFit() = synchronized(lock) {
+        lgbm = coldPayoff
+        payoffFitted = false
+    }
+
+    /** Test seam. A negative forest stands in for a refit that learned "never" from a losing book. */
+    fun installPayoffForTest(forest: TreeEnsemble) = synchronized(lock) {
+        lgbm = forest
+        payoffFitted = forest.treeCount > 0
     }
 
     fun attributeLogistic(weights: DoubleArray, bias: Double, x: DoubleArray): DoubleArray {
@@ -398,7 +438,8 @@ object QuantSession {
         latency.clear()
         runCatching { File(cacheDir, "qnn/scalp-quant.onnx").delete() }
         trained = TreeEnsemble.priorPayoff()
-        lgbm = TreeEnsemble.priorPayoff()
+        lgbm = coldPayoff
+        payoffFitted = false
         imported = null
         note = ""
         lastReport = null
