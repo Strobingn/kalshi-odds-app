@@ -10,6 +10,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -324,7 +325,10 @@ private fun MessageBubble(m: ChatMessage, onApply: (Long) -> Unit, onCancel: (Lo
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(if (mine) "You" else "AI", color = fg, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-                    Text(m.text, color = fg, style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 24.sp))
+                    val replyTag = if (m.role == ChatMessage.AI || m.role == ChatMessage.ERROR) Modifier.testTag("AI_REPLY_TEXT") else Modifier
+                    SelectionContainer(Modifier.fillMaxWidth()) {
+                        Text(m.text, color = fg, style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 24.sp), modifier = replyTag.fillMaxWidth())
+                    }
                     Text(com.dirk.kalshiodds.domain.EtTime.clock(m.atMs), color = fg.copy(alpha = 0.8f), style = MaterialTheme.typography.labelMedium)
                 }
             }
