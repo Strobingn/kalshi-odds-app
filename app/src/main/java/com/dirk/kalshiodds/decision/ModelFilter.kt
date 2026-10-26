@@ -15,7 +15,7 @@ object ModelFilter {
     const val FEATURES = 26
     /** Entry scoring cadence. Stops do not use this clock. */
     const val ENTRY_CADENCE_MS = 250L
-    const val POLICY_VERSION = "p1|ceil=0.55|high=0.65|vol=quiet|ofi=scaled-nonpositive|stop=sellable-bid|minStop=parent|trail=parent|cutoff=90s|fee=quadratic-0.07|size=1.0x"
+    const val POLICY_VERSION = "p1|ceil=0.55|high=0.65-unless-ev+edge|vol=quiet|ofi=scaled-nonpositive|stop=sellable-bid|minStop=parent|trail=parent|cutoff=90s|fee=quadratic-0.07|size=1.0x"
     const val MIN_TRAIN = 40
     const val EMBARGO_MS = 900_000L
     const val DEFAULT_THRESHOLD = 0.55
@@ -28,8 +28,12 @@ object ModelFilter {
     /** Training weight for the losing high-score regime. Dropped, not nudged. */
     const val HIGH_SCORE_WEIGHT = 0.0
     const val VOL_FEATURE = 7
+    /** Fee-adjusted fair residual, in cents. A large value is the edge, not a separate confidence regime. */
+    const val RESIDUAL_FEATURE = 16
     const val OFI_FEATURE = 21
     const val OFI_DEPTH_FEATURE = 22
+    /** Pull toward the fee-residual prior. Zero-start fits saturated and then rejected every clearing entry. */
+    private const val L2 = 0.08
     const val DEFAULT_EXIT_S = 90.0
     const val PRIOR_BIAS = 0.15
     private const val TICK_KEEP_MS = 30 * 60_000L
@@ -350,8 +354,22 @@ object ModelFilter {
         val qScore = QuantSession.logisticScore(weights, bias, x)
         val spread = if (x.size > 13) x[13] else 0.0
         val learned = winN > 0 && lossN > 0 && trainedN >= MIN_TRAIN
-        val eNet = if (learned) expectedNet(qScore) else coldNet(qScore, fair, ask, spread)
-        val lgbm = QuantSession.predictNet(x)
+        val cold = coldNet(qScore, fair, ask, spread)
+        val eNet = if (learned) expectedNet(qScore) else cold
+        // A losing book pushes the break-even probability above HIGH_SCORE, so the old
+        // "drop every score above 0.65" rule rejected the only scores whose E[net] was positive.
+        // Keep that veto for a high score that does not clear fees. Let a clearing score through
+        // when its own E[net] is positive.
+        val clearingHigh = learned && qScore > HIGH_SCORE && eNet > 0.0 && cold > 0.0
+        val blockHigh = learned && qScore > HIGH_SCORE && !clearingHigh
+        val modelNet = QuantSession.predictNet(x)
+        val priorNet = QuantSession.priorNet(x)
+        // Flat or globally-negative forests (zero sample weights, or a losing control book)
+        // must not erase the cold-start payoff. Use the prior when it still likes the edge
+        // and the logistic's own E[net] clears. A prior-negative row stays a reject.
+        val lgbm = if (modelNet > 0.0) modelNet
+            else if (priorNet > 0.0 && eNet > 0.0 && cold > 0.0) priorNet
+            else modelNet
         val score = if (twin.arm == Arm.LGBM) lgbm else qScore
         val vol1m = if (x.size > VOL_FEATURE) x[VOL_FEATURE] else 0.0
         val quietVol = vol1m < QUIET_VOL
@@ -375,15 +393,14 @@ object ModelFilter {
         } else {
             eNet > 0.0 || (learned && (qScore >= threshold || eNet >= 0.01) && fair >= ask + 0.015)
         }
-        val highScore = learned && qScore > HIGH_SCORE
-        val enter = gate && priceOk && !pin && regimeAllows(qScore, vol1m, learned)
+        val enter = gate && priceOk && !pin && regimeAllows(qScore, vol1m, blockHigh)
         val modelVersion = if (twin.arm == Arm.LGBM) "lgbm-${TreeEnsemble.TRAIN_TREES}x${TreeEnsemble.TRAIN_DEPTH}" else "logistic-l2"
         val reason = when {
             !priceOk && ask + 1e-9 < floor -> "below the ${ScalpFloors.cents(twin.parentId)}¢ floor"
             !priceOk -> "ask above 55¢ ceiling"
             pin -> "pin risk · taker off"
             !quietVol -> "quiet-volume only · 1m vol ${fmt(vol1m)}"
-            highScore -> "high-score regime · ${fmt(qScore)} > ${fmt(HIGH_SCORE)}"
+            blockHigh -> "high-score regime · ${fmt(qScore)} > ${fmt(HIGH_SCORE)}"
             twin.arm == Arm.LGBM && !gate -> "lgbm net ${fmt(lgbm)} ≤ 0"
             twin.arm == Arm.LOGISTIC && !gate -> "expected net ${fmt(eNet)} ≤ 0"
             else -> "enter · ${twin.arm.name.lowercase()} · E[net] ${fmt(if (twin.arm == Arm.LGBM) lgbm else eNet)} · size ${fmt(scalar)}×"
@@ -830,8 +847,11 @@ object ModelFilter {
                 val sample = train[i]
                 xs.add(sample.x)
                 ys[i] = netCentsPerContract(sample.netUsd, sample.contracts)
-                val score = sigmoid(b + dot(w, sample.x))
-                sw[i] = sampleWeight(sample.x.getOrElse(VOL_FEATURE) { 0.0 }, score)
+                // The raw logit is high on every fee-clearing row because feature 16 is in cents.
+                // Weight the high-score penalty on confidence with that residual removed, or every
+                // training row gets weight 0 and the forest is a pile of zero leaves.
+                val score = scoreExcept(w, b, sample.x, RESIDUAL_FEATURE)
+                sw[i] = sampleWeight(sample.x.getOrElse(VOL_FEATURE) { 0.0 }, score, sample.x.getOrElse(RESIDUAL_FEATURE) { 0.0 })
             }
         }
         return RetrainMath(train.size, w, b, true, buckets, xs, ys, sw)
@@ -842,7 +862,11 @@ object ModelFilter {
         trainedN = math.trained
         weights = math.weights
         bias = math.bias
-        if (!math.stamp) return
+        if (!math.stamp) {
+            // Fewer than MIN_TRAIN embargoed closes. Do not keep a forest that rejects every row.
+            QuantSession.clearPayoffFit()
+            return
+        }
         lastTrainMs = nowMs
         val xs = math.treeXs
         val ys = math.treeYs
@@ -861,21 +885,21 @@ object ModelFilter {
 
     private fun fit(rows: List<Sample>): Pair<DoubleArray, Double> {
         if (offlineRetrain.get() == true) retrainComputeHook?.invoke()
-        val w = DoubleArray(FEATURES)
         val prior = priorWeights()
-        w[OFI_FEATURE] = prior[OFI_FEATURE]
-        w[OFI_DEPTH_FEATURE] = prior[OFI_DEPTH_FEATURE]
-        var b = 0.0
+        val w = prior.copyOf()
+        var b = PRIOR_BIAS
         val lr = 0.05
         repeat(30) {
             for (s in rows) {
                 val p = sigmoid(b + dot(w, s.x))
                 val y = if (s.netUsd > 0.0) 1.0 else 0.0
                 val vol = s.x.getOrElse(VOL_FEATURE) { 0.0 }
-                val err = (y - p) * sampleWeight(vol, p)
-                b += lr * err
+                val sw = sampleWeight(vol, scoreExcept(w, b, s.x, RESIDUAL_FEATURE), s.x.getOrElse(RESIDUAL_FEATURE) { 0.0 })
+                if (sw <= 0.0) continue
+                val err = (y - p) * sw
+                b += lr * (err - L2 * (b - PRIOR_BIAS))
                 for (i in 0 until FEATURES) {
-                    var next = w[i] + lr * err * s.x.getOrElse(i) { 0.0 }
+                    var next = w[i] + lr * (err * s.x.getOrElse(i) { 0.0 } - L2 * (w[i] - prior[i]))
                     if (i == OFI_FEATURE || i == OFI_DEPTH_FEATURE) next = next.coerceAtMost(0.0)
                     w[i] = next.coerceIn(-4.0, 4.0)
                 }
@@ -886,8 +910,20 @@ object ModelFilter {
         return w to b
     }
 
+    /** Logistic probability with one feature held out. Used so the residual cannot zero every sample weight. */
+    private fun scoreExcept(w: DoubleArray, b: Double, x: DoubleArray, skip: Int): Double {
+        var z = b
+        for (i in 0 until FEATURES) {
+            if (i == skip) continue
+            z += w[i] * x.getOrElse(i) { 0.0 }
+        }
+        return sigmoid(z)
+    }
+
     /**
-     * Quiet volume and, once the logistic is trained, modest confidence.
+     * Quiet volume, and a learned score above [HIGH_SCORE].
+     * [learned] here means "apply the high-score veto". The quote path turns that off when
+     * E[net] is positive and the fee residual clears — otherwise the veto rejects the whole stream.
      * Cold start still follows the fee residual: the prior score is not a calibrated confidence.
      */
     fun regimeAllows(qScore: Double, vol1m: Double, learned: Boolean): Boolean {
@@ -896,11 +932,16 @@ object ModelFilter {
         return true
     }
 
-    /** Offline sample weight. High-score rows are dropped. Normal and hot volume are down-weighted. */
-    fun sampleWeight(vol1m: Double, score: Double): Double {
+    /**
+     * Offline sample weight. A high score with no fee residual is dropped.
+     * A high score that is the residual itself keeps a small weight, so a book of
+     * fee-clearing closes does not train a forest of zero leaves.
+     * Normal and hot volume are down-weighted.
+     */
+    fun sampleWeight(vol1m: Double, score: Double, residualCents: Double = 0.0): Double {
         var weight = 1.0
         if (vol1m >= QUIET_VOL) weight *= NONQUIET_WEIGHT
-        if (score > HIGH_SCORE) weight *= HIGH_SCORE_WEIGHT
+        if (score > HIGH_SCORE) weight *= if (residualCents > 0.0) NONQUIET_WEIGHT else HIGH_SCORE_WEIGHT
         return weight
     }
 
