@@ -305,7 +305,9 @@ class ScoringEngine(
         // 1.0.11: shrink the raw model toward the market (symmetric logit blend) so a ~50% output doesn't read as UP edge.
         val mlpPp = ai?.yes?.let { com.dirk.kalshiodds.prediction.AiBias.shrinkToMarket(it, mid01) }?.times(100.0)
         val tteFrac = ((tteSec ?: 900L).toDouble() / 900.0).coerceIn(0.0, 1.0)
-        val spotRet = spotFeat?.let { it.spotReturn1m ?: it.spotReturn5m }
+        val liveSpotRet1m = book.spotReturn(tick.ticker, nowMs, 60_000L)
+        val liveSpotRet5m = book.spotReturn(tick.ticker, nowMs, 300_000L)
+        val spotRet = spotFeat?.let { it.spotReturn1m ?: it.spotReturn5m } ?: liveSpotRet1m ?: liveSpotRet5m
         heavy.pushFrame(
             ticker = tick.ticker,
             mid = mid01,
@@ -422,8 +424,21 @@ class ScoringEngine(
         val cancelFeat = pulse?.let { (it.cancelSpike + it.quotePull) / 2.0 }
         val cancelAdjPp = cancelFeat?.let { (midPp + 7.0 * it).coerceIn(2.0, 98.0) }
 
-        val spotAdjPp = SpotFeatureMath.adjustPp(midPp, spotFeat)
-        val spotLabel = SpotFeatureMath.label(spotFeat)
+        val effectiveSpotFeat = when {
+            spotFeat != null && (spotFeat.spotReturn5m != null || spotFeat.spotReturn1m != null || spotFeat.fundingRate != null || spotFeat.realizedVol15m != null) -> spotFeat
+            liveSpotRet1m != null || liveSpotRet5m != null -> com.dirk.kalshiodds.signal.external.AssetSpotFeatures(
+                asset = tick.series,
+                spotReturn1m = liveSpotRet1m,
+                spotReturn5m = liveSpotRet5m,
+                lastPrice = modelSpot,
+                source = "live-spot",
+                fetchedAtMs = nowMs,
+                modelUsable = true
+            )
+            else -> spotFeat
+        }
+        val spotAdjPp = SpotFeatureMath.adjustPp(midPp, effectiveSpotFeat)
+        val spotLabel = SpotFeatureMath.label(effectiveSpotFeat)
 
         val adapterState = adapter
         val baseW = blendWeights(
@@ -594,7 +609,7 @@ class ScoringEngine(
         val dir = DirectionSanity.apply(
             spotUsd = modelSpot,
             strikeUsd = strikeUsd,
-            spotReturn = if (spotFeat?.modelUsable == true) spotRet else null,
+            spotReturn = if (effectiveSpotFeat?.modelUsable == true) spotRet else null,
             fairPp = fair,
             predictedSide = predictedSide,
             digitalFairPp = digitalFairPp,
@@ -688,8 +703,8 @@ class ScoringEngine(
             predictedSide = if (delta >= 0) "YES" else "NO"
         }
         val tape = TapeConflict.evaluate(
-            spotReturn1m = if (spotFeat?.modelUsable == true) spotFeat.spotReturn1m else null,
-            spotReturn5m = if (spotFeat?.modelUsable == true) spotFeat.spotReturn5m else null,
+            spotReturn1m = if (effectiveSpotFeat?.modelUsable == true) effectiveSpotFeat.spotReturn1m else null,
+            spotReturn5m = if (effectiveSpotFeat?.modelUsable == true) effectiveSpotFeat.spotReturn5m else null,
             modelSide = predictedSide,
             yesAsk = tick.yesAsk,
             noAsk = tick.noAsk ?: tick.yesBid?.let { 1.0 - it },
@@ -1093,6 +1108,6 @@ class ScoringEngine(
         const val W_SPOT_LATE = 0.06
 
         /** Book deltas update depth immediately; re-score at most this often. */
-        const val BOOK_SCORE_MIN_INTERVAL_MS = 250L
+        const val BOOK_SCORE_MIN_INTERVAL_MS = 150L
     }
 }

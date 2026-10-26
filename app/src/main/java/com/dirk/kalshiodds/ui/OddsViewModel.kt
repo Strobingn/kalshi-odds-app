@@ -2500,10 +2500,10 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         const val INITIAL_BACKOFF_MS = 2_000L
         const val MAX_BACKOFF_MS = 8_000L // 0.3.49: was 60 s
         const val WS_METADATA_POLL_MS = 3_000L // 0.3.45
-        const val SCORE_OVERLAY_THROTTLE_MS = 250L
-        const val HOME_LIVE_THROTTLE_MS = 250L
-        const val SCALP_TAB_REFRESH_MS = 500L
-        const val CARD_SERIES_DEBOUNCE_MS = 200L
+        const val SCORE_OVERLAY_THROTTLE_MS = 100L
+        const val HOME_LIVE_THROTTLE_MS = 100L
+        const val SCALP_TAB_REFRESH_MS = 250L
+        const val CARD_SERIES_DEBOUNCE_MS = 100L
         const val SCALP_TAB_BOARDS_MS = 10_000L
         const val SCALP_TAB_CI_MS = 60_000L
     }
