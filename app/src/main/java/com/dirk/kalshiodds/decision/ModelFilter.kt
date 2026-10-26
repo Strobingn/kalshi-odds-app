@@ -15,12 +15,16 @@ object ModelFilter {
     const val FEATURES = 26
     /** Entry scoring cadence. Stops do not use this clock. */
     const val ENTRY_CADENCE_MS = 250L
-    const val POLICY_VERSION = "p1|ceil=0.55|high=0.65-unless-ev+edge|vol=quiet|ofi=scaled-nonpositive|stop=sellable-bid|minStop=parent|trail=parent|cutoff=90s|fee=quadratic-0.07|size=1.0x"
+    const val POLICY_VERSION = "p2|floor=0.55|ceil=0.65-hard|late=<5min|low=<0.45|vol=quiet|ofi=scaled-nonpositive|stop=sellable-bid|minStop=parent|trail=parent|cutoff=90s|fee=quadratic-0.07|size=1.0x"
     const val MIN_TRAIN = 40
     const val EMBARGO_MS = 900_000L
     const val DEFAULT_THRESHOLD = 0.55
-    /** Score band that lost after fees. A 0.55→0.57 nudge still lets it through. */
+    /** Score band that lost after fees. A 0.55→0.57 floor nudge still lets it through. */
     const val HIGH_SCORE = 0.65
+    /** Journal pocket: time left under 5 minutes. */
+    const val PREFER_TIME_LEFT_S = 300.0
+    /** Journal pocket: score at or below this, inside the late window, was the green regime. */
+    const val PREFER_SCORE_BELOW = 0.45
     /** Matches the journal "quiet vol" bucket. At or above this, 1-minute vol is not quiet. */
     const val QUIET_VOL = 1.0
     /** Training weight for normal and hot volume. Quiet rows stay at 1. */
@@ -161,12 +165,36 @@ object ModelFilter {
         val outcomeUsd: Double?
     )
 
+    /**
+     * Paper Hybrid Quant gate. The floor is the minimum score. The ceiling drops the
+     * losing high-score regime. Late-window fields are the journal's green pocket.
+     */
+    data class GatePrefs(
+        val scoreFloor: Double,
+        val scoreCeiling: Double,
+        val preferTimeLeftUnderS: Double,
+        val preferScoreBelow: Double,
+        val lateWindowOnly: Boolean,
+        val note: String
+    ) {
+        fun summary(): String {
+            val window = if (lateWindowOnly) "late window on · time left < 5 min" else "prefer time left < 5 min"
+            return "Paper gate · floor ${fmt(scoreFloor)} · ceiling ${fmt(scoreCeiling)} · $window · prefer score < ${fmt(preferScoreBelow)}"
+        }
+    }
+
     private val lock = Any()
     private var weights = priorWeights()
     private var bias = PRIOR_BIAS
     private var trainedN = 0
     private var lastTrainMs = 0L
     private var threshold = DEFAULT_THRESHOLD
+    private var scoreCeiling = HIGH_SCORE
+    private var preferTimeLeftUnderS = PREFER_TIME_LEFT_S
+    private var preferScoreBelow = PREFER_SCORE_BELOW
+    private var lateWindowOnly = false
+    private var adviceNote = ""
+    private var gateFile: java.io.File? = null
     private var exitBeforeS = DEFAULT_EXIT_S
     private val ticks = HashMap<String, ArrayDeque<Tick>>()
     private val openSpot = HashMap<String, Double>()
@@ -220,6 +248,40 @@ object ModelFilter {
 
     fun setThreshold(value: Double) = synchronized(lock) {
         threshold = value.coerceIn(0.40, 0.80)
+        saveGateLocked()
+    }
+
+    fun gatePrefs(): GatePrefs = synchronized(lock) { gateSnapshot() }
+
+    /**
+     * Writes the session-journal gate into the prefs [decide] reads.
+     * Paper twins only. Does not raise the floor from 0.55 to 0.57 — that nudge
+     * still admits the losing band above [HIGH_SCORE].
+     */
+    fun applySessionAdvice(): GatePrefs = synchronized(lock) {
+        if (threshold > DEFAULT_THRESHOLD) threshold = DEFAULT_THRESHOLD
+        scoreCeiling = HIGH_SCORE
+        preferTimeLeftUnderS = PREFER_TIME_LEFT_S
+        preferScoreBelow = PREFER_SCORE_BELOW
+        lateWindowOnly = true
+        val rejectedNudge = DEFAULT_THRESHOLD + 0.02
+        adviceNote = "Applied paper gate · floor ${fmt(threshold)} stays (nudge to ${fmt(rejectedNudge)} not applied) · hard ceiling ${fmt(scoreCeiling)} · time left under 5 min · score under ${fmt(preferScoreBelow)} admitted when the fee residual clears."
+        saveGateLocked()
+        gateSnapshot()
+    }
+
+    /** Same file as the quant runtime prefs. Null in unit tests until bound. */
+    fun bindGateFile(file: java.io.File?) = synchronized(lock) {
+        gateFile = file
+        if (file == null || !file.isFile) return@synchronized
+        val o = runCatching { org.json.JSONObject(file.readText()) }.getOrNull() ?: return@synchronized
+        if (!o.has("scoreCeiling")) return@synchronized
+        scoreCeiling = o.optDouble("scoreCeiling", HIGH_SCORE).coerceIn(0.45, 0.95)
+        preferTimeLeftUnderS = o.optDouble("preferTimeLeftUnderS", PREFER_TIME_LEFT_S).coerceIn(60.0, 900.0)
+        preferScoreBelow = o.optDouble("preferScoreBelow", PREFER_SCORE_BELOW).coerceIn(0.05, HIGH_SCORE)
+        lateWindowOnly = o.optBoolean("lateWindowOnly", false)
+        adviceNote = o.optString("adviceNote", "")
+        if (o.has("scoreFloor")) threshold = o.optDouble("scoreFloor", threshold).coerceIn(0.40, 0.80)
     }
 
     fun warming(): Boolean = synchronized(lock) { trainedN < MIN_TRAIN }
@@ -356,12 +418,14 @@ object ModelFilter {
         val learned = winN > 0 && lossN > 0 && trainedN >= MIN_TRAIN
         val cold = coldNet(qScore, fair, ask, spread)
         val eNet = if (learned) expectedNet(qScore) else cold
-        // A losing book pushes the break-even probability above HIGH_SCORE, so the old
-        // "drop every score above 0.65" rule rejected the only scores whose E[net] was positive.
-        // Keep that veto for a high score that does not clear fees. Let a clearing score through
-        // when its own E[net] is positive.
-        val clearingHigh = learned && qScore > HIGH_SCORE && eNet > 0.0 && cold > 0.0
-        val blockHigh = learned && qScore > HIGH_SCORE && !clearingHigh
+        // The journal's high-score band lost after fees. A floor nudge from 0.55 to 0.57
+        // still admits it, and a positive E[net] does not make that regime a pass.
+        // Cold start stays on the fee residual: the prior score is not a calibrated confidence.
+        // Once session advice is applied, the ceiling and the late window bind even then.
+        val ceilingOn = learned || lateWindowOnly
+        val blockHigh = ceilingOn && qScore > scoreCeiling
+        val outsideLate = lateWindowOnly && q.tauS + 1e-9 >= preferTimeLeftUnderS
+        val inPocket = q.tauS + 1e-9 < preferTimeLeftUnderS && qScore <= preferScoreBelow && qScore <= scoreCeiling
         val modelNet = QuantSession.predictNet(x)
         val priorNet = QuantSession.priorNet(x)
         // Flat or globally-negative forests (zero sample weights, or a losing control book)
@@ -393,16 +457,19 @@ object ModelFilter {
         } else {
             eNet > 0.0 || (learned && (qScore >= threshold || eNet >= 0.01) && fair >= ask + 0.015)
         }
-        val enter = gate && priceOk && !pin && regimeAllows(qScore, vol1m, blockHigh)
+        val pocket = inPocket && cold > 0.0 && quietVol && priceOk && !pin && !blockHigh
+        val enter = !blockHigh && !outsideLate && priceOk && !pin && (pocket || (gate && regimeAllows(qScore, vol1m, blockHigh)))
         val modelVersion = if (twin.arm == Arm.LGBM) "lgbm-${TreeEnsemble.TRAIN_TREES}x${TreeEnsemble.TRAIN_DEPTH}" else "logistic-l2"
         val reason = when {
             !priceOk && ask + 1e-9 < floor -> "below the ${ScalpFloors.cents(twin.parentId)}¢ floor"
             !priceOk -> "ask above 55¢ ceiling"
             pin -> "pin risk · taker off"
             !quietVol -> "quiet-volume only · 1m vol ${fmt(vol1m)}"
-            blockHigh -> "high-score regime · ${fmt(qScore)} > ${fmt(HIGH_SCORE)}"
-            twin.arm == Arm.LGBM && !gate -> "lgbm net ${fmt(lgbm)} ≤ 0"
-            twin.arm == Arm.LOGISTIC && !gate -> "expected net ${fmt(eNet)} ≤ 0"
+            blockHigh -> "high-score regime · ${fmt(qScore)} > ${fmt(scoreCeiling)}"
+            outsideLate -> "outside late window · prefer time left under 5 min"
+            twin.arm == Arm.LGBM && !gate && !pocket -> "lgbm net ${fmt(lgbm)} ≤ 0"
+            twin.arm == Arm.LOGISTIC && !gate && !pocket -> "expected net ${fmt(eNet)} ≤ 0"
+            pocket && qScore < threshold -> "late pocket · score ${fmt(qScore)} ≤ ${fmt(preferScoreBelow)} · time left under 5 min"
             else -> "enter · ${twin.arm.name.lowercase()} · E[net] ${fmt(if (twin.arm == Arm.LGBM) lgbm else eNet)} · size ${fmt(scalar)}×"
         }
         why[twin.id] = reason
@@ -629,6 +696,12 @@ object ModelFilter {
         trainedN = 0
         lastTrainMs = 0L
         threshold = DEFAULT_THRESHOLD
+        scoreCeiling = HIGH_SCORE
+        preferTimeLeftUnderS = PREFER_TIME_LEFT_S
+        preferScoreBelow = PREFER_SCORE_BELOW
+        lateWindowOnly = false
+        adviceNote = ""
+        gateFile = null
         exitBeforeS = DEFAULT_EXIT_S
         ticks.clear()
         openSpot.clear()
@@ -921,14 +994,14 @@ object ModelFilter {
     }
 
     /**
-     * Quiet volume, and a learned score above [HIGH_SCORE].
-     * [learned] here means "apply the high-score veto". The quote path turns that off when
-     * E[net] is positive and the fee residual clears — otherwise the veto rejects the whole stream.
-     * Cold start still follows the fee residual: the prior score is not a calibrated confidence.
+     * Quiet volume, and a score above the hard ceiling.
+     * [learned] here means "apply the high-score veto". That veto is not waived when E[net]
+     * is positive: a 0.55→0.57 floor nudge still leaves the losing band in.
+     * Cold start passes a high prior score unless session advice has turned the ceiling on.
      */
     fun regimeAllows(qScore: Double, vol1m: Double, learned: Boolean): Boolean {
         if (vol1m >= QUIET_VOL) return false
-        if (learned && qScore > HIGH_SCORE) return false
+        if (learned && qScore > scoreCeiling) return false
         return true
     }
 
@@ -1085,6 +1158,23 @@ object ModelFilter {
 
     private fun dot(w: DoubleArray, x: DoubleArray) = (0 until FEATURES).sumOf { w[it] * x[it] }
     private fun sigmoid(z: Double) = 1.0 / (1.0 + exp(-z.coerceIn(-20.0, 20.0)))
+    private fun gateSnapshot() = GatePrefs(
+        threshold, scoreCeiling, preferTimeLeftUnderS, preferScoreBelow, lateWindowOnly, adviceNote
+    )
+
+    private fun saveGateLocked() {
+        val file = gateFile ?: return
+        val o = runCatching { if (file.isFile) org.json.JSONObject(file.readText()) else org.json.JSONObject() }
+            .getOrDefault(org.json.JSONObject())
+        o.put("scoreFloor", threshold)
+        o.put("scoreCeiling", scoreCeiling)
+        o.put("preferTimeLeftUnderS", preferTimeLeftUnderS)
+        o.put("preferScoreBelow", preferScoreBelow)
+        o.put("lateWindowOnly", lateWindowOnly)
+        o.put("adviceNote", adviceNote)
+        runCatching { file.writeText(o.toString()) }
+    }
+
     private fun fmt(v: Double) = String.format(java.util.Locale.US, "%.2f", v)
     private fun fmt4(v: Double) = String.format(java.util.Locale.US, "%.4f", v)
 }

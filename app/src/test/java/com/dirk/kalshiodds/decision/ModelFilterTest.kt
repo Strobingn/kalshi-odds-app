@@ -270,13 +270,17 @@ class ModelFilterTest {
         assertTrue(modest.score in 0.55..ModelFilter.HIGH_SCORE)
         assertTrue(modestTree.reason, modestTree.enter)
         ModelFilter.resetForTest()
-        // Same high bias, but the symmetric book clears E[net]. A fee-clearing row may enter.
-        // A high score with no fee edge is still rejected.
+        // Same high bias, and the book clears E[net]. The ceiling still drops it.
+        // A 0.55→0.57 floor nudge must not admit the band.
         ModelFilter.installWeightsForTest(zeros, kotlin.math.ln(0.80 / 0.20), ModelFilter.MIN_TRAIN)
+        ModelFilter.setThreshold(0.57)
         val paid = ModelFilter.decide(logistic, quote(now = 1_700_000_003_000L), "YES", 0.20, 0.55)
-        assertTrue(paid.reason, paid.enter)
+        assertFalse(paid.reason, paid.enter)
+        assertTrue(paid.reason, paid.reason.contains("high-score"))
+        assertTrue(paid.score > ModelFilter.HIGH_SCORE)
         val paidTree = ModelFilter.decide(lgbm, quote(now = 1_700_000_003_500L), "YES", 0.20, 0.55)
-        assertTrue(paidTree.reason, paidTree.enter)
+        assertFalse(paidTree.reason, paidTree.enter)
+        assertTrue(paidTree.reason, paidTree.reason.contains("high-score"))
         val noEdge = ModelFilter.decide(logistic, quote(now = 1_700_000_004_000L, bid = 0.39, ask = 0.40), "YES", 0.40, 0.40)
         assertFalse(noEdge.enter)
         assertTrue(noEdge.reason, noEdge.reason.contains("high-score") || noEdge.reason.contains("expected net"))
@@ -367,20 +371,19 @@ class ModelFilterTest {
         val detail = "log ${dLog.enter} ${dLog.reason} score=${dLog.score} e=${dLog.expectedNet} " +
             "tree ${dTree.enter} ${dTree.reason} score=${dTree.score} e=${dTree.expectedNet} " +
             "bias=$b w16=${w[16]} warming=${ModelFilter.warming()}"
-        assertTrue(detail, dLog.enter)
-        assertTrue(detail, dTree.enter)
-        var spot = 100_000.0
-        val start = q.nowMs + 10_000L
-        repeat(30) { i ->
-            spot *= kotlin.math.exp(if (i % 2 == 0) 3e-5 else -3e-5)
-            ModelFilter.observe(quote(now = start + i * 1_000L, spot = spot, bid = 0.39, ask = 0.40, strike = 100_000.0))
-        }
-        val liveLog = ModelFilter.decide(logistic, quote(now = start + 31_000L, spot = spot, bid = 0.39, ask = 0.40), "YES", 0.40, 0.55)
-        val liveTree = ModelFilter.decide(lgbm, quote(now = start + 32_000L, spot = spot, bid = 0.39, ask = 0.40), "YES", 0.40, 0.55)
-        assertTrue(liveLog.reason, liveLog.enter)
-        assertTrue(liveTree.reason, liveTree.enter)
-        ModelFilter.onClosed(logistic.id, 0.25, 600.0, q.nowMs, dLog.features)
-        ModelFilter.onClosed(lgbm.id, 0.10, 600.0, q.nowMs + 1_000L, dTree.features)
+        assertFalse(detail, dLog.enter)
+        assertTrue(detail, dLog.reason.contains("high-score"))
+        assertTrue(detail, dLog.score > ModelFilter.HIGH_SCORE)
+        assertFalse(detail, dTree.enter)
+        assertTrue(detail, dTree.reason.contains("high-score"))
+        ModelFilter.installWeightsForTest(DoubleArray(ModelFilter.FEATURES), kotlin.math.ln(0.60 / 0.40), ModelFilter.MIN_TRAIN)
+        val modestLog = ModelFilter.decide(logistic, quote(now = q.nowMs + 2_000L, bid = 0.39, ask = 0.40), "YES", 0.40, 0.48)
+        val modestTree = ModelFilter.decide(lgbm, quote(now = q.nowMs + 2_500L, bid = 0.39, ask = 0.40), "YES", 0.40, 0.48)
+        assertTrue(modestLog.reason, modestLog.enter)
+        assertTrue(modestLog.score <= ModelFilter.HIGH_SCORE)
+        assertTrue(modestTree.reason, modestTree.enter)
+        ModelFilter.onClosed(logistic.id, 0.25, 600.0, modestLog.atMs, modestLog.features)
+        ModelFilter.onClosed(lgbm.id, 0.10, 600.0, modestTree.atMs, modestTree.features)
         val noEdge = ModelFilter.decide(logistic, quote(now = q.nowMs + 3_000L, bid = 0.39, ask = 0.40), "YES", 0.40, 0.40)
         val noEdgeTree = ModelFilter.decide(lgbm, quote(now = q.nowMs + 4_000L, bid = 0.39, ask = 0.40), "YES", 0.40, 0.40)
         assertFalse(noEdge.reason, noEdge.enter)
@@ -397,7 +400,9 @@ class ModelFilterTest {
     @Test fun negativeForestDoesNotVetoAClearingEdgeTheLogisticWouldTake() {
         val logistic = ModelFilter.TWINS.first { it.arm == ModelFilter.Arm.LOGISTIC }
         val lgbm = ModelFilter.TWINS.first { it.arm == ModelFilter.Arm.LGBM }
-        ModelFilter.installWeightsForTest(ModelFilter.priorWeights(), ModelFilter.PRIOR_BIAS, ModelFilter.MIN_TRAIN)
+        val weights = ModelFilter.priorWeights()
+        weights[ModelFilter.RESIDUAL_FEATURE] = 0.0
+        ModelFilter.installWeightsForTest(weights, 0.0, ModelFilter.MIN_TRAIN)
         val leaf = TreeEnsemble.build(
             intArrayOf(1, ModelFilter.FEATURES),
             listOf(TreeEnsemble.Spec(0, 0, 0, 0.0, "LEAF", 0, 0, -0.20)),
@@ -442,6 +447,56 @@ class ModelFilterTest {
         assertTrue(ModelFilter.warming())
         val d = ModelFilter.decide(ModelFilter.TWINS.first(), quote(now = old + 30_000L), "YES", 0.40, 0.55)
         assertTrue(d.reason, d.enter)
+    }
+
+    @Test fun sessionAdviceCapsTheHighScoreRegimeAndKeepsTheLatePocket() {
+        val logistic = ModelFilter.TWINS.first { it.arm == ModelFilter.Arm.LOGISTIC }
+        val zeros = DoubleArray(ModelFilter.FEATURES)
+        ModelFilter.setThreshold(0.57)
+        val applied = ModelFilter.applySessionAdvice()
+        assertEquals(ModelFilter.DEFAULT_THRESHOLD, applied.scoreFloor, 0.0)
+        assertEquals(ModelFilter.HIGH_SCORE, applied.scoreCeiling, 0.0)
+        assertEquals(ModelFilter.PREFER_TIME_LEFT_S, applied.preferTimeLeftUnderS, 0.0)
+        assertEquals(ModelFilter.PREFER_SCORE_BELOW, applied.preferScoreBelow, 0.0)
+        assertTrue(applied.lateWindowOnly)
+        assertTrue(applied.note, applied.note.contains("0.57") && applied.note.contains("not applied"))
+        assertTrue(applied.summary().contains("ceiling 0.65"))
+        assertTrue(applied.summary().contains("floor 0.55"))
+        ModelFilter.installWeightsForTest(zeros, kotlin.math.ln(0.80 / 0.20), ModelFilter.MIN_TRAIN)
+        val highLate = ModelFilter.decide(logistic, quote(now = 1_700_000_005_000L, tauS = 120.0), "YES", 0.20, 0.55)
+        assertFalse(highLate.reason, highLate.enter)
+        assertTrue(highLate.reason, highLate.reason.contains("high-score"))
+        ModelFilter.installWeightsForTest(zeros, kotlin.math.ln(0.60 / 0.40), ModelFilter.MIN_TRAIN)
+        val early = ModelFilter.decide(logistic, quote(now = 1_700_000_006_000L, tauS = 600.0), "YES", 0.20, 0.55)
+        assertFalse(early.reason, early.enter)
+        assertTrue(early.reason, early.reason.contains("late window"))
+        ModelFilter.installWeightsForTest(zeros, kotlin.math.ln(0.40 / 0.60), ModelFilter.MIN_TRAIN)
+        val pocket = ModelFilter.decide(logistic, quote(now = 1_700_000_007_000L, tauS = 120.0), "YES", 0.20, 0.55)
+        assertTrue(pocket.reason, pocket.enter)
+        assertTrue(pocket.score <= ModelFilter.PREFER_SCORE_BELOW)
+        assertTrue(pocket.reason, pocket.reason.contains("late pocket"))
+        val dir = File(System.getProperty("java.io.tmpdir"), "gate-advice-test")
+        dir.mkdirs()
+        val file = File(dir, "model-filter-runtime.json")
+        file.writeText("""{"mode":"LOGISTIC","path":"CPU_FAST","manual":false}""")
+        ModelFilter.bindGateFile(file)
+        ModelFilter.applySessionAdvice()
+        val saved = org.json.JSONObject(file.readText())
+        assertEquals(ModelFilter.HIGH_SCORE, saved.getDouble("scoreCeiling"), 1e-9)
+        assertEquals(ModelFilter.DEFAULT_THRESHOLD, saved.getDouble("scoreFloor"), 1e-9)
+        assertEquals(ModelFilter.PREFER_TIME_LEFT_S, saved.getDouble("preferTimeLeftUnderS"), 1e-9)
+        assertEquals(ModelFilter.PREFER_SCORE_BELOW, saved.getDouble("preferScoreBelow"), 1e-9)
+        assertTrue(saved.getBoolean("lateWindowOnly"))
+        assertEquals("LOGISTIC", saved.getString("mode"))
+        ModelFilter.resetForTest()
+        assertFalse(ModelFilter.gatePrefs().lateWindowOnly)
+        ModelFilter.bindGateFile(file)
+        val restored = ModelFilter.gatePrefs()
+        assertTrue(restored.lateWindowOnly)
+        assertEquals(ModelFilter.HIGH_SCORE, restored.scoreCeiling, 0.0)
+        assertEquals(ModelFilter.DEFAULT_THRESHOLD, restored.scoreFloor, 0.0)
+        assertEquals(ModelFilter.PREFER_TIME_LEFT_S, restored.preferTimeLeftUnderS, 0.0)
+        assertEquals(ModelFilter.PREFER_SCORE_BELOW, restored.preferScoreBelow, 0.0)
     }
 
     @Test fun lgbmGateIsPredictedNetPayoff() {

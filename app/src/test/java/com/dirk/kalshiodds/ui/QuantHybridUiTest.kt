@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -165,6 +166,66 @@ class QuantHybridUiTest {
         compose.waitForIdle()
         assertTrue(asked.contains("Paper session journal"))
         compose.onNodeWithText("Quiet time left is the only green regime.", substring = true).assertExists()
+        compose.onNodeWithTag("GATE_APPLIED").assertExists()
+        compose.onNodeWithTag("GATE_PREFS").assertTextContains("ceiling 0.65", substring = true)
+        compose.onNodeWithTag("RESEARCH_JOURNAL_NOTE").assertExists()
+        assertRepliesSitInSelectionContainer()
+    }
+
+    @Test fun applyAdviceWritesThePaperGateAndRepliesAreSelectable() {
+        compose.setContent {
+            KalshiOddsTheme(darkTheme = true) {
+                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                    QuantHybridScreen(onAskAi = { _, done ->
+                        done("Drop scores above 0.65. The late window under five minutes is the green pocket.")
+                    })
+                }
+            }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithTag("GATE_PREFS").performScrollTo().assertExists()
+        compose.onNodeWithText("ceiling 0.65", substring = true).assertExists()
+        compose.onNodeWithTag("APPLY_ADVICE").performScrollTo().performClick()
+        compose.waitForIdle()
+        assertTrue(ModelFilter.gatePrefs().lateWindowOnly)
+        assertEquals(0.65, ModelFilter.gatePrefs().scoreCeiling, 0.0)
+        assertEquals(0.55, ModelFilter.gatePrefs().scoreFloor, 0.0)
+        assertEquals(300.0, ModelFilter.gatePrefs().preferTimeLeftUnderS, 0.0)
+        assertEquals(0.45, ModelFilter.gatePrefs().preferScoreBelow, 0.0)
+        compose.onNodeWithTag("GATE_APPLIED").assertExists()
+        compose.onNodeWithText("nudge to 0.57 not applied", substring = true).assertExists()
+        compose.onNodeWithTag("RESEARCH_ASK").performScrollTo().performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("RESEARCH_NOTE").assertExists()
+        assertRepliesSitInSelectionContainer()
+    }
+
+    @Test fun aiChatReplyTextIsSelectable() {
+        val reply = ChatMessage(id = 7L, role = ChatMessage.AI, text = "Drop scores above 0.65 and keep the floor at 0.55.", atMs = 1_700_000_000_000L)
+        compose.setContent {
+            KalshiOddsTheme(darkTheme = true) {
+                AiChatContent(messages = listOf(reply), busy = false, strategyStatus = "paper", hasKey = true)
+            }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithTag("AI_REPLY_TEXT").assertExists()
+        compose.onNodeWithText("Drop scores above 0.65 and keep the floor at 0.55.").assertExists()
+        assertRepliesSitInSelectionContainer()
+    }
+
+    private fun assertRepliesSitInSelectionContainer() {
+        fun source(path: String) = listOf(
+            java.io.File(path),
+            java.io.File("app/$path")
+        ).first { it.isFile }.readText()
+        val hybrid = source("src/main/java/com/dirk/kalshiodds/ui/QuantHybridScreen.kt")
+        val journal = hybrid.substringAfter("if (journalNote.isNotBlank())").substringBefore("APPLY_ADVICE")
+        assertTrue(journal, journal.contains("SelectionContainer") && journal.contains("RESEARCH_JOURNAL_NOTE"))
+        val explain = hybrid.substringAfter("if (aiNote.isNotBlank())").substringBefore("Session journal")
+        assertTrue(explain, explain.contains("SelectionContainer") && explain.contains("RESEARCH_NOTE"))
+        val chat = source("src/main/java/com/dirk/kalshiodds/ui/AiChatScreen.kt")
+        val bubble = chat.substringAfter("private fun MessageBubble").substringBefore("EtTime.clock")
+        assertTrue(bubble, bubble.contains("SelectionContainer") && bubble.contains("AI_REPLY_TEXT"))
     }
 
     @Test fun aiTabSwitchesBetweenChatAndHybridQuant() {

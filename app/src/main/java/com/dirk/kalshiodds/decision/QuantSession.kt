@@ -264,6 +264,7 @@ object QuantSession {
         File(cacheDir, "qnn").mkdirs()
         prefsFile = File(filesDir, "model-filter-runtime.json")
         loadPrefs()
+        ModelFilter.bindGateFile(prefsFile)
     }
 
     fun warmUp(weights: DoubleArray, bias: Double) = synchronized(lock) { warmUpLocked(weights, bias) }
@@ -596,10 +597,10 @@ object QuantSession {
 
     private fun savePrefs() {
         val file = prefsFile ?: return
-        val o = JSONObject()
-            .put("mode", mode.name)
-            .put("path", active.name)
-            .put("manual", manual)
+        val o = runCatching { if (file.isFile) JSONObject(file.readText()) else JSONObject() }.getOrDefault(JSONObject())
+        o.put("mode", mode.name)
+        o.put("path", active.name)
+        o.put("manual", manual)
         runCatching { file.writeText(o.toString()) }
     }
 

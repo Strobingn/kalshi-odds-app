@@ -18,6 +18,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -314,17 +315,24 @@ internal fun QuantHybridScreen(
                 colors = ButtonDefaults.buttonColors(containerColor = c.up, contentColor = c.onUp)
             ) { Text("Ask Groq to Explain This Trade") }
             if (aiNote.isNotBlank()) {
-                Text(
-                    aiNote,
-                    color = c.textPrimary,
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.testTag("RESEARCH_NOTE").fillMaxWidth().background(c.surfaceAlt, RoundedCornerShape(8.dp)).padding(8.dp)
-                )
+                SelectionContainer(Modifier.fillMaxWidth()) {
+                    Text(
+                        aiNote,
+                        color = c.textPrimary,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.testTag("RESEARCH_NOTE").fillMaxWidth().background(c.surfaceAlt, RoundedCornerShape(8.dp)).padding(8.dp)
+                    )
+                }
             }
         }
 
         ArenaCard {
             Text("Session journal", color = c.textPrimary, fontWeight = FontWeight.SemiBold)
+            val gate = remember(rev) { ModelFilter.gatePrefs() }
+            Text(gate.summary(), color = c.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("GATE_PREFS"))
+            if (gate.note.isNotBlank()) {
+                Text(gate.note, color = c.textPrimary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("GATE_APPLIED"))
+            }
             OutlinedButton(onClick = { journal = sessionJournal(); rev++ }, modifier = Modifier.testTag("SESSION_JOURNAL")) { Text("Session journal & patterns") }
             journal?.let { page ->
                 Text(if (page.closed == 0) "0 closed · ${fullLog.size} scored" else "${page.closed} closed", color = c.textSecondary)
@@ -336,13 +344,31 @@ internal fun QuantHybridScreen(
             Button(
                 onClick = {
                     val page = sessionJournal().also { journal = it }
+                    ModelFilter.applySessionAdvice()
+                    rev++
                     journalNote = "Asking AI…"
                     onAskAi(journalPrompt(page)) { journalNote = it }
                 },
                 modifier = Modifier.fillMaxWidth().testTag("RESEARCH_JOURNAL_ASK"),
                 colors = ButtonDefaults.buttonColors(containerColor = c.accentBlue, contentColor = c.onAccentBlue)
             ) { Text("Ask AI for Session Summary & Retrain Advice") }
-            if (journalNote.isNotBlank()) Text(journalNote, color = c.textPrimary, style = MaterialTheme.typography.bodyMedium)
+            if (journalNote.isNotBlank()) {
+                SelectionContainer(Modifier.fillMaxWidth()) {
+                    Text(
+                        journalNote,
+                        color = c.textPrimary,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.testTag("RESEARCH_JOURNAL_NOTE").fillMaxWidth()
+                    )
+                }
+            }
+            OutlinedButton(
+                onClick = {
+                    ModelFilter.applySessionAdvice()
+                    rev++
+                },
+                modifier = Modifier.testTag("APPLY_ADVICE")
+            ) { Text("Apply advice") }
             OutlinedButton(
                 onClick = {
                     if (retraining) return@OutlinedButton
@@ -354,7 +380,9 @@ internal fun QuantHybridScreen(
                         try {
                             val note = withContext(Dispatchers.Default) {
                                 syncFromStore()
-                                ResearchCompanion.retrain(now)
+                                val trained = ResearchCompanion.retrain(now)
+                                ModelFilter.applySessionAdvice()
+                                trained
                             }
                             retrainNote = note
                             if (refreshJournal) journal = sessionJournal()
