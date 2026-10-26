@@ -371,20 +371,19 @@ class ModelFilterTest {
         val detail = "log ${dLog.enter} ${dLog.reason} score=${dLog.score} e=${dLog.expectedNet} " +
             "tree ${dTree.enter} ${dTree.reason} score=${dTree.score} e=${dTree.expectedNet} " +
             "bias=$b w16=${w[16]} warming=${ModelFilter.warming()}"
-        assertTrue(detail, dLog.enter)
-        assertTrue(detail, dTree.enter)
-        var spot = 100_000.0
-        val start = q.nowMs + 10_000L
-        repeat(30) { i ->
-            spot *= kotlin.math.exp(if (i % 2 == 0) 3e-5 else -3e-5)
-            ModelFilter.observe(quote(now = start + i * 1_000L, spot = spot, bid = 0.39, ask = 0.40, strike = 100_000.0))
-        }
-        val liveLog = ModelFilter.decide(logistic, quote(now = start + 31_000L, spot = spot, bid = 0.39, ask = 0.40), "YES", 0.40, 0.55)
-        val liveTree = ModelFilter.decide(lgbm, quote(now = start + 32_000L, spot = spot, bid = 0.39, ask = 0.40), "YES", 0.40, 0.55)
-        assertTrue(liveLog.reason, liveLog.enter)
-        assertTrue(liveTree.reason, liveTree.enter)
-        ModelFilter.onClosed(logistic.id, 0.25, 600.0, q.nowMs, dLog.features)
-        ModelFilter.onClosed(lgbm.id, 0.10, 600.0, q.nowMs + 1_000L, dTree.features)
+        assertFalse(detail, dLog.enter)
+        assertTrue(detail, dLog.reason.contains("high-score"))
+        assertTrue(detail, dLog.score > ModelFilter.HIGH_SCORE)
+        assertFalse(detail, dTree.enter)
+        assertTrue(detail, dTree.reason.contains("high-score"))
+        ModelFilter.installWeightsForTest(DoubleArray(ModelFilter.FEATURES), kotlin.math.ln(0.60 / 0.40), ModelFilter.MIN_TRAIN)
+        val modestLog = ModelFilter.decide(logistic, quote(now = q.nowMs + 2_000L, bid = 0.39, ask = 0.40), "YES", 0.40, 0.48)
+        val modestTree = ModelFilter.decide(lgbm, quote(now = q.nowMs + 2_500L, bid = 0.39, ask = 0.40), "YES", 0.40, 0.48)
+        assertTrue(modestLog.reason, modestLog.enter)
+        assertTrue(modestLog.score <= ModelFilter.HIGH_SCORE)
+        assertTrue(modestTree.reason, modestTree.enter)
+        ModelFilter.onClosed(logistic.id, 0.25, 600.0, modestLog.atMs, modestLog.features)
+        ModelFilter.onClosed(lgbm.id, 0.10, 600.0, modestTree.atMs, modestTree.features)
         val noEdge = ModelFilter.decide(logistic, quote(now = q.nowMs + 3_000L, bid = 0.39, ask = 0.40), "YES", 0.40, 0.40)
         val noEdgeTree = ModelFilter.decide(lgbm, quote(now = q.nowMs + 4_000L, bid = 0.39, ask = 0.40), "YES", 0.40, 0.40)
         assertFalse(noEdge.reason, noEdge.enter)
@@ -401,7 +400,9 @@ class ModelFilterTest {
     @Test fun negativeForestDoesNotVetoAClearingEdgeTheLogisticWouldTake() {
         val logistic = ModelFilter.TWINS.first { it.arm == ModelFilter.Arm.LOGISTIC }
         val lgbm = ModelFilter.TWINS.first { it.arm == ModelFilter.Arm.LGBM }
-        ModelFilter.installWeightsForTest(ModelFilter.priorWeights(), ModelFilter.PRIOR_BIAS, ModelFilter.MIN_TRAIN)
+        val weights = ModelFilter.priorWeights()
+        weights[ModelFilter.RESIDUAL_FEATURE] = 0.0
+        ModelFilter.installWeightsForTest(weights, 0.0, ModelFilter.MIN_TRAIN)
         val leaf = TreeEnsemble.build(
             intArrayOf(1, ModelFilter.FEATURES),
             listOf(TreeEnsemble.Spec(0, 0, 0, 0.0, "LEAF", 0, 0, -0.20)),

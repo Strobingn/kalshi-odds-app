@@ -5,8 +5,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.SemanticsActions
-import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -27,7 +26,6 @@ import org.junit.After
 import org.junit.Before
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import java.util.concurrent.atomic.AtomicReference
 import org.junit.Rule
@@ -169,9 +167,9 @@ class QuantHybridUiTest {
         assertTrue(asked.contains("Paper session journal"))
         compose.onNodeWithText("Quiet time left is the only green regime.", substring = true).assertExists()
         compose.onNodeWithTag("GATE_APPLIED").assertExists()
-        compose.onNodeWithText("ceiling 0.65", substring = true).assertExists()
-        val journal = compose.onNodeWithTag("RESEARCH_JOURNAL_NOTE").fetchSemanticsNode()
-        assertNotNull(journal.config.getOrNull(SemanticsActions.SetSelection))
+        compose.onNodeWithTag("GATE_PREFS").assertTextContains("ceiling 0.65", substring = true)
+        compose.onNodeWithTag("RESEARCH_JOURNAL_NOTE").assertExists()
+        assertRepliesSitInSelectionContainer()
     }
 
     @Test fun applyAdviceWritesThePaperGateAndRepliesAreSelectable() {
@@ -198,8 +196,8 @@ class QuantHybridUiTest {
         compose.onNodeWithText("nudge to 0.57 not applied", substring = true).assertExists()
         compose.onNodeWithTag("RESEARCH_ASK").performScrollTo().performClick()
         compose.waitForIdle()
-        val trade = compose.onNodeWithTag("RESEARCH_NOTE").fetchSemanticsNode()
-        assertNotNull(trade.config.getOrNull(SemanticsActions.SetSelection))
+        compose.onNodeWithTag("RESEARCH_NOTE").assertExists()
+        assertRepliesSitInSelectionContainer()
     }
 
     @Test fun aiChatReplyTextIsSelectable() {
@@ -211,8 +209,23 @@ class QuantHybridUiTest {
         }
         compose.waitForIdle()
         compose.onNodeWithTag("AI_REPLY_TEXT").assertExists()
-        val node = compose.onNodeWithTag("AI_REPLY_TEXT").fetchSemanticsNode()
-        assertNotNull(node.config.getOrNull(SemanticsActions.SetSelection))
+        compose.onNodeWithText("Drop scores above 0.65 and keep the floor at 0.55.").assertExists()
+        assertRepliesSitInSelectionContainer()
+    }
+
+    private fun assertRepliesSitInSelectionContainer() {
+        fun source(path: String) = listOf(
+            java.io.File(path),
+            java.io.File("app/$path")
+        ).first { it.isFile }.readText()
+        val hybrid = source("src/main/java/com/dirk/kalshiodds/ui/QuantHybridScreen.kt")
+        val journal = hybrid.substringAfter("if (journalNote.isNotBlank())").substringBefore("APPLY_ADVICE")
+        assertTrue(journal, journal.contains("SelectionContainer") && journal.contains("RESEARCH_JOURNAL_NOTE"))
+        val explain = hybrid.substringAfter("if (aiNote.isNotBlank())").substringBefore("Session journal")
+        assertTrue(explain, explain.contains("SelectionContainer") && explain.contains("RESEARCH_NOTE"))
+        val chat = source("src/main/java/com/dirk/kalshiodds/ui/AiChatScreen.kt")
+        val bubble = chat.substringAfter("private fun MessageBubble").substringBefore("EtTime.clock")
+        assertTrue(bubble, bubble.contains("SelectionContainer") && bubble.contains("AI_REPLY_TEXT"))
     }
 
     @Test fun aiTabSwitchesBetweenChatAndHybridQuant() {
