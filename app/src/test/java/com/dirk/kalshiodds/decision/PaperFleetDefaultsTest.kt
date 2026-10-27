@@ -1,11 +1,13 @@
 package com.dirk.kalshiodds.decision
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Every paper scalper's factory slider is 15–55¢ with a 25¢ take-profit.
+ * Every paper scalper's factory slider is 15–55¢ with a 25¢ take-profit,
+ * except a floor that already sits above 55¢. That row heals into its own book.
  * A stored 31–32¢ (or 34–35¢) band, and a take-profit above 30¢, heal on load.
  */
 class PaperFleetDefaultsTest {
@@ -21,9 +23,13 @@ class PaperFleetDefaultsTest {
     }
 
     private fun assertFleet(id: String, s: ScalpStrategySettings) {
-        assertEquals("$id buy min", PaperFleetDefaults.BUY_MIN, s.minEntryCents)
-        assertEquals("$id buy max", PaperFleetDefaults.BUY_MAX, s.maxEntryCents)
-        assertEquals("$id profit", PaperFleetDefaults.PROFIT_CENTS, s.takeProfitCents)
+        val (lo, hi) = PaperFleetDefaults.band(id)
+        assertEquals("$id buy min", lo, s.minEntryCents)
+        assertEquals("$id buy max", hi, s.maxEntryCents)
+        val entry = ((lo + hi) / 2).coerceIn(lo.coerceAtLeast(1), 98)
+        val profit = if (entry + PaperFleetDefaults.PROFIT_CENTS > 99) (99 - entry).coerceAtLeast(1) else PaperFleetDefaults.PROFIT_CENTS
+        assertEquals("$id profit", profit, s.takeProfitCents)
+        assertTrue("$id ${s.minEntryCents}–${s.maxEntryCents} floor ${ScalpFloors.cents(id)}", s.maxEntryCents!! > ScalpFloors.cents(id))
     }
 
     @Test fun everyScalperDefaultsToFifteenFiftyFiveAndTwentyFive() {
@@ -71,12 +77,30 @@ class PaperFleetDefaultsTest {
     @Test fun factoryBandStaysUnderAHigherStrategyFloor() {
         assertFleet("fcride", ScalpParamSanity.settings("fcride", PaperFleetDefaults.factory()))
         assertFleet("sf17f", ScalpControls().settings("sf17f"))
-        val hand = ScalpParamSanity.settings("sf17f", ScalpStrategySettings(minEntryCents = 20, maxEntryCents = 40, takeProfitCents = 15))
-        assertEquals(20, hand.minEntryCents)
-        assertEquals(40, hand.maxEntryCents)
+        val floor = ScalpFloors.cents("sf17f")
+        assertTrue(floor > PaperFleetDefaults.BUY_MAX)
+        // 20–40¢ and a stored 15–55¢ sit under the favourite floor. Entry would
+        // accept nothing, so the row is put back in that book.
+        listOf(
+            ScalpStrategySettings(minEntryCents = 20, maxEntryCents = 40, takeProfitCents = 15),
+            PaperFleetDefaults.factory(),
+            ScalpStrategySettings(minEntryCents = 70, maxEntryCents = 67, takeProfitCents = 25)
+        ).forEach { raw ->
+            val healed = ScalpParamSanity.settings("sf17f", raw)
+            assertTrue("${healed.minEntryCents}–${healed.maxEntryCents}", healed.maxEntryCents!! > floor)
+            assertFalse(FairGapTune.priceBlocked("sf17f", (floor + 1) / 100.0, healed))
+            assertTrue(FairGapTune.priceBlocked("sf17f", PaperFleetDefaults.BUY_MAX / 100.0, healed))
+        }
+        val hand = ScalpParamSanity.settings("sf17f", ScalpStrategySettings(minEntryCents = 76, maxEntryCents = 90, takeProfitCents = 15))
+        assertEquals(76, hand.minEntryCents)
+        assertEquals(90, hand.maxEntryCents)
         assertEquals(15, hand.takeProfitCents)
-        assertTrue(ScalpFloors.cents("sf17f") > PaperFleetDefaults.BUY_MAX)
         assertTrue(ScalpFloors.cents("fcride") > PaperFleetDefaults.BUY_MIN)
+        assertTrue(ScalpFloors.cents("fcride") < PaperFleetDefaults.BUY_MAX)
+        var learned = ScalpControls().settings("sf17f")
+        repeat(12) { learned = Research.learn("sf17f", learned, 0.50, 55) }
+        assertTrue("${learned.minEntryCents}–${learned.maxEntryCents}", learned.maxEntryCents!! > learned.minEntryCents)
+        assertTrue(learned.maxEntryCents!! > floor)
     }
 
     @Test fun explicitOffProfitOnAWideBandStaysOff() {

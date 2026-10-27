@@ -119,7 +119,9 @@ class AiLearnCollapseTest {
             assertTrue("$code until ${row.untilMinute}", row.untilMinute >= AiLearnBounds.UNTIL_FLOOR)
             assertTrue("$code stop ${row.stopLossPercent}", row.stopLossPercent!! >= AiLearnBounds.STOP_PCT_FLOOR)
             if (row.stopCents != null) assertTrue(row.stopCents!! >= AiLearnBounds.STOP_CENTS_FLOOR)
-            assertEquals(15, row.takeProfitCents)
+            val entry = (row.minEntryCents + (row.maxEntryCents ?: row.minEntryCents)) / 2
+            val profit = if (15 + entry > 99) (99 - entry).coerceAtLeast(1) else 15
+            assertEquals(code, profit, row.takeProfitCents)
         }
         var again = sf42
         repeat(30) { again = Research.learn("sf42", again, -0.05, 55) }

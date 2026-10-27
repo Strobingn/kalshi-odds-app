@@ -113,8 +113,9 @@ object AiLearnBounds {
         }
         val high = (max ?: ceil).coerceIn(floor + 1, ceil)
         if (PaperFleetDefaults.collapsed(s.minEntryCents, s.maxEntryCents)) {
-            min = PaperFleetDefaults.BUY_MIN
-            max = PaperFleetDefaults.BUY_MAX
+            val (lo, hi) = PaperFleetDefaults.band(code)
+            min = lo
+            max = hi
             changed = true
         } else if (high - min < band) {
             val lowered = (high - band).coerceAtLeast(floor)

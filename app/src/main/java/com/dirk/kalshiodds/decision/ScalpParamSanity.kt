@@ -26,6 +26,7 @@ object ScalpParamSanity {
 
     /**
      * @param fleetDefaults factory 15–55¢ / 25¢, and heal a 1–2¢ band or a take-profit above 30¢.
+     * A floor above 55¢ uses that strategy's own book instead of 15–55¢.
      * The strategy-floor audit passes false so a favourite's own fair threshold stays on that report.
      */
     fun settings(code: String, raw: ScalpStrategySettings, fleetDefaults: Boolean = true): ScalpStrategySettings {
@@ -44,13 +45,16 @@ object ScalpParamSanity {
         val stopPct = s.stopLossPercent?.let { it.coerceIn(1, 80) }
         var target = s.takeProfitCents?.let { it.coerceIn(0, 60) }
         if (fleetDefaults) {
-            // A band the owner set at 15¢ or higher is the slider, even when the
-            // strategy floor is 40¢ (forecast) or 70¢+ (a favourite). The floor
-            // clamp above would otherwise turn factory 15–55¢ into 40–55¢.
+            // A band set at 15¢ or higher is the slider when its ceiling still
+            // clears the strategy floor (a 40¢ forecast keeps 15–55¢). A floor
+            // above 55¢ has no ask inside that ceiling, so those rows stay in
+            // the strategy book unless the owner already set a high end above it.
             val rawMax = raw.maxEntryCents
+            val aboveFactory = floor > PaperFleetDefaults.BUY_MAX
             val handBand = raw.minEntryCents >= PaperFleetDefaults.BUY_MIN &&
                 rawMax != null &&
-                !PaperFleetDefaults.collapsed(raw.minEntryCents, rawMax)
+                !PaperFleetDefaults.collapsed(raw.minEntryCents, rawMax) &&
+                (!aboveFactory || rawMax > floor)
             if (handBand) {
                 min = raw.minEntryCents.coerceIn(PaperFleetDefaults.BUY_MIN, 98)
                 max = rawMax.coerceIn(min + 1, 99)
@@ -58,8 +62,9 @@ object ScalpParamSanity {
             val factoryBand = PaperFleetDefaults.untouchedBand(raw)
             val storedCollapse = PaperFleetDefaults.collapsed(raw.minEntryCents, raw.maxEntryCents)
             if (factoryBand || storedCollapse || PaperFleetDefaults.collapsed(min, max)) {
-                min = PaperFleetDefaults.BUY_MIN
-                max = PaperFleetDefaults.BUY_MAX
+                val (lo, hi) = PaperFleetDefaults.band(code)
+                min = lo
+                max = hi
             }
             val factoryProfit = factoryBand && (raw.takeProfitCents == null || raw.takeProfitCents == 0)
             if (factoryProfit || (raw.takeProfitCents != null && raw.takeProfitCents > PaperFleetDefaults.PROFIT_HEAL_ABOVE)) {

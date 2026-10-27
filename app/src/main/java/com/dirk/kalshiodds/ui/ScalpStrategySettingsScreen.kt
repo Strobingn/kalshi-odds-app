@@ -59,7 +59,9 @@ internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: Sc
     val enabled = model.code !in controls.disabledStrategies
     val low = settings.minEntryCents.coerceIn(PaperFleetDefaults.BUY_MIN, 98)
     val high = (settings.maxEntryCents ?: PaperFleetDefaults.BUY_MAX).coerceIn(low + 1, 99)
-    val buyKnobHi = maxOf(PaperFleetDefaults.BUY_MAX, high)
+    // 15–55¢ is the usual cap. A floor above 55¢ has to reach its own ceiling,
+    // or the highest-buy slider cannot be opened back into that book.
+    val buyKnobHi = maxOf(PaperFleetDefaults.band(model.code).second, high)
     LazyColumn(Modifier.fillMaxSize().background(c.bg), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item(key = "settings-header") {
             Row(verticalAlignment = Alignment.CenterVertically) {

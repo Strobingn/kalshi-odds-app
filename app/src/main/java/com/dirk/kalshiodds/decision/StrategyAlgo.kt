@@ -117,7 +117,7 @@ object StrategyAlgo {
             maxHoldSeconds = i("maxHoldSeconds")?.coerceIn(0, 3600) ?: s.maxHoldSeconds,
             edgeCents = i("edgeCents")?.coerceIn(0, 30) ?: s.edgeCents,
             stopLossPercent = i("stopLossPercent")?.coerceIn(1, 99) ?: s.stopLossPercent
-        ).normalized())
+        ), code).normalized()
     }
 
     fun storedInt(c: ScalpControls, code: String, key: String, fallback: Int): Int {
