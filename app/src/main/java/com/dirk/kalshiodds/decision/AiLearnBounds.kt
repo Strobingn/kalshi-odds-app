@@ -3,20 +3,19 @@ package com.dirk.kalshiodds.decision
 /**
  * Floors for "AI learns" and the on-device paper tuner.
  *
- * A loser used to walk three knobs independently: highest buy down to the
- * baseline minus 20¢ (or one cent above the price floor), lowest buy up to
- * one cent under that, and until-minute / stop percent down to 1. A short
- * losing streak then pinned every strategy on a 1¢ band and minute 1, and
- * the next close said "AI kept settings" because nothing could move further.
+ * A loser used to walk the buy band in until it stuck on a 10¢ window
+ * (20–30¢, 23–33¢) and the next close said "AI kept settings". The factory
+ * window is the hard floor: lowest buy stays at or under 15¢, highest buy
+ * stays at or over 55¢, and take-profit stays at 25¢. Losers may still
+ * tighten the entry minute, the stop, and the clip. They may not tighten
+ * the buy band or open-at-once.
  *
- * Losers may still tighten. They may not close the buy band, the entry
- * window, or the stop past the floors below. A band Dirk set by hand that is
- * already narrower than the floor is left alone; only a stored AI-owned row
- * is widened, and only by [repair].
+ * A band Dirk set by hand that is at least 20¢ wide is left alone. A stored
+ * AI-owned row is put back by [repair], including open-at-once and take-profit.
  */
 object AiLearnBounds {
-    /** Usable buy range, in cents. Favourite books with less room keep that room. */
-    const val MIN_BAND_CENTS = 10
+    /** Factory buy window. AI learns may not leave a tighter band. */
+    const val MIN_BAND_CENTS = PaperFleetDefaults.MIN_WIDTH
     const val UNTIL_FLOOR = 5
     const val UNTIL_CEILING = 14
     /** Percent stop under the fill. 1% sells on the first tick. */
@@ -24,33 +23,29 @@ object AiLearnBounds {
     const val STOP_PCT_CEILING = 40
     /** Absolute stop, in cents. The tuner used to walk this to 1¢. */
     const val STOP_CENTS_FLOOR = 6
-    /** A 1–3¢ target does not clear the taker fee. 0 stays "off". */
+    /** A 1–3¢ target does not clear the taker fee. 0 stays "off" on a hand row. */
     const val TAKE_FLOOR = 4
+    /** Retired. Losers used to drop the ceiling by this many cents (55¢ → 35¢). */
     const val MAX_DROP_FROM_BASE = 20
 
-    fun bandRoom(code: String): Int {
-        val room = (ScalpFloors.ceilingCents(code) - ScalpFloors.cents(code)).coerceAtLeast(1)
-        return minOf(MIN_BAND_CENTS, room)
-    }
+    /** Factory 40¢ window for every scalper, including a favourite. */
+    fun bandRoom(@Suppress("UNUSED_PARAMETER") code: String): Int = MIN_BAND_CENTS
 
     /**
-     * Width the next step must keep. A range that is already narrower than
-     * [bandRoom] is not widened here (a hand-set band, or a row waiting for [repair]).
+     * Width the next step must keep: the factory 15–55¢ span.
+     * The current [min] and [max] used to shrink this; they no longer do.
      */
-    fun enforcedBand(code: String, min: Int, max: Int): Int {
-        val want = bandRoom(code)
-        val have = (max - min).coerceAtLeast(1)
-        // A 1–2¢ band is the collapsed slider. The next step uses a real width,
-        // so AI learns cannot keep 31–32¢ or 34–35¢.
-        if (have <= PaperFleetDefaults.COLLAPSED_WIDTH) return want
-        return if (have < want) have else want
-    }
+    fun enforcedBand(
+        @Suppress("UNUSED_PARAMETER") code: String,
+        @Suppress("UNUSED_PARAMETER") min: Int,
+        @Suppress("UNUSED_PARAMETER") max: Int
+    ): Int = MIN_BAND_CENTS
 
-    fun aiOwned(s: ScalpStrategySettings): Boolean {
-        if (!s.aiLearns) return false
-        if (s.aiN > 0 || s.aiBaseCents != null) return true
-        return s.aiNote.startsWith("AI ")
-    }
+    /** Learned at least once. Survives an AI-learns toggle that left the note or the counters. */
+    fun aiTouched(s: ScalpStrategySettings): Boolean =
+        s.aiN > 0 || s.aiBaseCents != null || s.aiNote.startsWith("AI ")
+
+    fun aiOwned(s: ScalpStrategySettings): Boolean = s.aiLearns && aiTouched(s)
 
     fun untilLo(cur: Int): Int = if (cur < UNTIL_FLOOR) cur else UNTIL_FLOOR
 
@@ -58,19 +53,23 @@ object AiLearnBounds {
 
     fun stopCentsLo(cur: Int): Int = if (cur < STOP_CENTS_FLOOR) cur else STOP_CENTS_FLOOR
 
-    fun nextMax(code: String, cur: Int, base: Int, min: Int, step: Int, winner: Boolean): Int {
-        val ceil = ScalpFloors.ceilingCents(code)
-        val band = enforcedBand(code, min, cur)
-        val floorMax = maxOf(ScalpFloors.minCeilingCents(code), min + band).coerceAtMost(ceil)
-        return if (winner) minOf(cur + step, base + 12, ceil)
-        else maxOf(cur - step, base - MAX_DROP_FROM_BASE, floorMax)
+    fun nextMax(code: String, cur: Int, base: Int, @Suppress("UNUSED_PARAMETER") min: Int, step: Int, winner: Boolean): Int {
+        val ceil = maxOf(ScalpFloors.ceilingCents(code), PaperFleetDefaults.BUY_MAX)
+        val restored = maxOf(cur, PaperFleetDefaults.BUY_MAX)
+        if (!winner) return restored
+        return minOf(
+            maxOf(cur + step, PaperFleetDefaults.BUY_MAX),
+            maxOf(base, PaperFleetDefaults.BUY_MAX) + 12,
+            ceil
+        )
     }
 
-    fun nextMin(code: String, curMin: Int, max: Int, step: Int, winner: Boolean): Int {
+    fun nextMin(code: String, curMin: Int, @Suppress("UNUSED_PARAMETER") max: Int, @Suppress("UNUSED_PARAMETER") step: Int, @Suppress("UNUSED_PARAMETER") winner: Boolean): Int {
+        // Lowest buy cannot sit above 15¢, and it cannot sit under the strategy floor.
+        // A favourite whose own floor is 80¢ stays there. A 23¢ paper floor snaps back to 15¢.
         val floor = ScalpFloors.cents(code)
-        val band = enforcedBand(code, curMin, max)
-        val cap = (max - band).coerceAtLeast(floor)
-        return if (winner) (curMin - step).coerceAtLeast(floor) else (curMin + 1).coerceAtMost(cap)
+        val cap = maxOf(floor, PaperFleetDefaults.BUY_MIN)
+        return minOf(maxOf(curMin, floor), cap)
     }
 
     fun nextUntil(cur: Int, winner: Boolean): Int {
@@ -89,52 +88,32 @@ object AiLearnBounds {
     }
 
     /**
-     * One stored strategy whose learner already collapsed it.
-     * Lowest buy moves down until the band is real; the tightened ceiling stays
-     * when it still clears the floor. Until-minute and a 1% stop are lifted.
-     * Take profit of 0 (off) or of the strategy target (15¢ on sf42) is kept.
+     * One stored strategy the learner already moved.
+     * The buy band is put back to 15–55¢ when AI tightened it. Take-profit is
+     * put back to 25¢. Open-at-once is put back to unlimited (0). Until-minute
+     * and a 1% stop are lifted. Clip size is not lowered.
      */
     fun repair(code: String, s: ScalpStrategySettings): ScalpStrategySettings {
-        if (!aiOwned(s)) return s
-        val floor = ScalpFloors.cents(code)
-        val ceil = ScalpFloors.ceilingCents(code)
-        val band = bandRoom(code)
-        var min = s.minEntryCents.coerceIn(floor, 98)
+        if (!aiTouched(s)) return s
+        val ceil = maxOf(ScalpFloors.ceilingCents(code), PaperFleetDefaults.BUY_MAX)
+        var min = s.minEntryCents
         var max = s.maxEntryCents
         var until = s.untilMinute
         var stopPct = s.stopLossPercent
         var stopC = s.stopCents
         var target = s.takeProfitCents
         var contracts = s.contracts
+        var open = s.maxOpenPerSide
         var changed = false
         if (contracts != null && contracts < PaperClip.MIN) {
             contracts = PaperClip.MIN
             changed = true
         }
-        val high = (max ?: ceil).coerceIn(floor + 1, ceil)
-        if (PaperFleetDefaults.collapsed(s.minEntryCents, s.maxEntryCents)) {
-            min = PaperFleetDefaults.BUY_MIN
-            max = PaperFleetDefaults.BUY_MAX
+        val (flooredMin, flooredMax) = PaperFleetDefaults.floorBand(min, max, true, s.minEntryCents, s.maxEntryCents)
+        if (flooredMin != min || flooredMax != max) {
+            min = flooredMin
+            max = flooredMax
             changed = true
-        } else if (high - min < band) {
-            val lowered = (high - band).coerceAtLeast(floor)
-            if (high - lowered >= band) {
-                if (lowered != min) {
-                    min = lowered
-                    changed = true
-                }
-            } else {
-                val raised = (floor + band).coerceAtMost(ceil).coerceAtLeast(min + 1)
-                if (max != raised) {
-                    max = raised
-                    changed = true
-                }
-                val min2 = (raised - band).coerceAtLeast(floor)
-                if (min2 != min) {
-                    min = min2
-                    changed = true
-                }
-            }
         }
         if (until < UNTIL_FLOOR) {
             until = UNTIL_FLOOR
@@ -148,16 +127,16 @@ object AiLearnBounds {
             stopC = STOP_CENTS_FLOOR
             changed = true
         }
-        if (target != null && target in 1 until TAKE_FLOOR) {
-            target = TAKE_FLOOR
-            changed = true
-        }
-        if (target != null && target > PaperFleetDefaults.PROFIT_HEAL_ABOVE) {
+        if (target != PaperFleetDefaults.PROFIT_CENTS) {
             target = PaperFleetDefaults.PROFIT_CENTS
             changed = true
         }
+        if (open != PaperFleetDefaults.OPEN_AT_ONCE) {
+            open = PaperFleetDefaults.OPEN_AT_ONCE
+            changed = true
+        }
         if (!changed) return s
-        val shownHigh = max ?: high
+        val shownHigh = max ?: ceil
         return s.copy(
             minEntryCents = min,
             maxEntryCents = max,
@@ -166,7 +145,8 @@ object AiLearnBounds {
             stopCents = stopC,
             takeProfitCents = target,
             contracts = contracts,
-            aiNote = "AI repaired collapsed sliders · buy $min–${shownHigh}¢ · until minute $until · clip ${contracts ?: PaperClip.MIN}"
+            maxOpenPerSide = open,
+            aiNote = "AI repaired collapsed sliders · buy $min–${shownHigh}¢ · profit ${target}¢ · open $open · until minute $until · clip ${contracts ?: PaperClip.MIN}"
         )
     }
 

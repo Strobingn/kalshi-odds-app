@@ -25,7 +25,8 @@ object ScalpParamSanity {
     )
 
     /**
-     * @param fleetDefaults factory 15–55¢ / 25¢, and heal a 1–2¢ band or a take-profit above 30¢.
+     * @param fleetDefaults factory 15–55¢ / 25¢. Heals a window tighter than 20¢, an AI-owned
+     * band that sits inside that window, and a take-profit above 30¢.
      * The strategy-floor audit passes false so a favourite's own fair threshold stays on that report.
      */
     fun settings(code: String, raw: ScalpStrategySettings, fleetDefaults: Boolean = true): ScalpStrategySettings {
@@ -65,6 +66,11 @@ object ScalpParamSanity {
             if (factoryProfit || (raw.takeProfitCents != null && raw.takeProfitCents > PaperFleetDefaults.PROFIT_HEAL_ABOVE)) {
                 target = PaperFleetDefaults.PROFIT_CENTS
             }
+            val floored = PaperFleetDefaults.floorBand(
+                min, max, AiLearnBounds.aiTouched(s), raw.minEntryCents, raw.maxEntryCents
+            )
+            min = floored.first
+            max = floored.second
         }
         val entry = ((min + (max ?: ceilCap)) / 2).coerceIn(min.coerceAtLeast(1), 98)
         if (target != null && target > 0 && entry + target > 99) target = (99 - entry).coerceAtLeast(1)

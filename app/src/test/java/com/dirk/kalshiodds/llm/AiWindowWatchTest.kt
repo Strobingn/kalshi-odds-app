@@ -45,10 +45,13 @@ class AiWindowWatchTest {
             ]}""")
         }
         // Direct band, same numbers either way around — no side input exists.
-        assertEquals("34", AiWatchBounds.clamp(c.state.value, code, "maxEntryCents", "1", 50))
-        assertEquals("50", AiWatchBounds.clamp(c.state.value, code, "maxEntryCents", "90", 50))
-        assertEquals("24", AiWatchBounds.clamp(c.state.value, research, "maxEntryCents", "20", 40))
-        assertEquals("40", AiWatchBounds.clamp(c.state.value, research, "maxEntryCents", "90", 40))
+        assertEquals("55", AiWatchBounds.clamp(c.state.value, code, "maxEntryCents", "1", 50))
+        assertEquals("55", AiWatchBounds.clamp(c.state.value, code, "maxEntryCents", "90", 50))
+        assertEquals("55", AiWatchBounds.clamp(c.state.value, research, "maxEntryCents", "20", 40))
+        assertEquals("55", AiWatchBounds.clamp(c.state.value, research, "maxEntryCents", "90", 40))
+        assertEquals("0", AiWatchBounds.clamp(c.state.value, code, "maxOpenPerSide", "20", 0))
+        assertEquals("25", AiWatchBounds.clamp(c.state.value, code, "takeProfitCents", "8", 25))
+        assertEquals("15", AiWatchBounds.clamp(c.state.value, code, "minEntryCents", "23", 15))
         assertEquals("14", AiWatchBounds.clamp(c.state.value, code, "stopCents", "99", 6))
         assertEquals(
             AiWatchBounds.clamp(c.state.value, code, "maxEntryCents", "30", 50),
@@ -57,11 +60,11 @@ class AiWindowWatchTest {
         w.tick()
         val v2 = c.state.value.settings(code)
         val edge = c.state.value.settings(research)
-        assertEquals(50, v2.maxEntryCents) // 30 clamps into the band, then 90 clamps to the user baseline 50
+        assertEquals(55, v2.maxEntryCents) // a proposal under 55¢ is put back on the factory ceiling
         assertEquals(50, v2.aiBaseCents)
         assertEquals(2, v2.aiN)
         assertEquals("learning", v2.aiNote)
-        assertEquals(40, edge.maxEntryCents)
+        assertEquals(55, edge.maxEntryCents)
         assertEquals(40, edge.aiBaseCents)
         assertEquals(14, v2.stopCents) // other knobs stay inside −16..+8
         assertFalse(v2.aiNote.contains("set by you"))
@@ -85,7 +88,7 @@ class AiWindowWatchTest {
         nowMs += 120_000
         snap = snap.copy(windowKey = "W2", fingerprint = "fp-2")
         w.tick()
-        assertEquals(40, c.state.value.settings(code).maxEntryCents)
+        assertEquals(55, c.state.value.settings(code).maxEntryCents)
     }
 
     @Test fun realMoneyIsUntouchedAndNoOrderIsPlaced() {
@@ -107,7 +110,7 @@ class AiWindowWatchTest {
         w.tick()
         assertFalse(c.state.value.killSwitch)
         assertEquals(1000.0, c.state.value.research.kellyBankrollUsd, 0.0)
-        assertEquals(45, c.state.value.settings(code).maxEntryCents)
+        assertEquals(55, c.state.value.settings(code).maxEntryCents)
         assertTrue(store.adjustments.value.none { it.setting.contains("live") || it.setting.contains("Order") || it.setting.contains("apiKey") || it.setting == "killSwitch" })
         assertEquals(listOf("maxEntryCents"), store.adjustments.value.map { it.setting })
         val src = source("AiWindowWatch.kt")
@@ -166,7 +169,7 @@ class AiWindowWatchTest {
         }
         w.tick()
         val s = c.state.value.settings(code)
-        assertEquals(45, s.maxEntryCents)
+        assertEquals(55, s.maxEntryCents)
         assertEquals(9, s.stopCents)
         assertEquals(3, s.cadenceSeconds)
         assertNull(s.contracts)

@@ -55,6 +55,25 @@ class PaperFleetDefaultsTest {
         }
     }
 
+    @Test fun tenCentAiWindowsHealAndATwentyCentHandBandStays() {
+        listOf("sf42", "v2-sf41", "s05-student-tail").forEach { id ->
+            val low = ScalpParamSanity.settings(id, ScalpStrategySettings(minEntryCents = 20, maxEntryCents = 30, takeProfitCents = 25))
+            assertFleet(id, low)
+            val mid = ScalpParamSanity.settings(id, ScalpStrategySettings(minEntryCents = 23, maxEntryCents = 33, takeProfitCents = 25))
+            assertFleet(id, mid)
+        }
+        val hand = ScalpParamSanity.settings("sf41", ScalpStrategySettings(minEntryCents = 20, maxEntryCents = 40, takeProfitCents = 15))
+        assertEquals(20, hand.minEntryCents)
+        assertEquals(40, hand.maxEntryCents)
+        assertEquals(15, hand.takeProfitCents)
+        val owned = ScalpParamSanity.settings("sf42", ScalpStrategySettings(
+            minEntryCents = 25, maxEntryCents = 50, takeProfitCents = 15,
+            aiLearns = true, aiN = 4, aiNote = "AI kept settings (loser -1.00)"
+        ))
+        assertEquals(PaperFleetDefaults.BUY_MIN, owned.minEntryCents)
+        assertEquals(PaperFleetDefaults.BUY_MAX, owned.maxEntryCents)
+    }
+
     @Test fun saveHealsACollapsedRowWithoutWipingAHandSetBand() {
         val store = MemoryScalpControls()
         store.save(store.state.value.copy(strategySettings = mapOf(

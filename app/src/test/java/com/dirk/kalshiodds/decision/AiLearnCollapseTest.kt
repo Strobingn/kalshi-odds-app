@@ -6,8 +6,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * AI learns used to pin every strategy on a 1¢ buy band and minute 1.
- * Losers still tighten. They stop at a real band, a usable until-minute, and a stop that can hold a fill.
+ * AI learns used to pin every strategy on a 1¢ buy band, then on a 10¢ window.
+ * Losers still tighten the clip, the stop, and the entry minute. The buy band stays 15–55¢.
  */
 class AiLearnCollapseTest {
     private val streakCodes = listOf("sf41", "sf42", "sf17f", KeptScalpers.V2_DIP_ID, "fair", "r-hold")
@@ -40,8 +40,9 @@ class AiLearnCollapseTest {
         }
         var sf42 = ScalpControls().settings("sf42")
         repeat(40) { sf42 = Research.learn("sf42", sf42, -0.05, 55) }
-        assertEquals(35, sf42.maxEntryCents)
-        assertEquals(25, sf42.minEntryCents)
+        assertEquals(PaperFleetDefaults.BUY_MAX, sf42.maxEntryCents)
+        assertEquals(PaperFleetDefaults.BUY_MIN, sf42.minEntryCents)
+        assertTrue(width("sf42", sf42) > 20)
         assertEquals(AiLearnBounds.UNTIL_FLOOR, sf42.untilMinute)
         assertTrue(sf42.aiNote.startsWith("AI kept settings"))
         var stopped = ScalpControls().settings("sf42").copy(stopLossPercent = 20)
@@ -110,7 +111,8 @@ class AiLearnCollapseTest {
         assertEquals(PaperFleetDefaults.BUY_MAX, sf42.maxEntryCents)
         assertEquals(AiLearnBounds.UNTIL_FLOOR, sf42.untilMinute)
         assertEquals(AiLearnBounds.STOP_PCT_FLOOR, sf42.stopLossPercent)
-        assertEquals(15, sf42.takeProfitCents)
+        assertEquals(PaperFleetDefaults.PROFIT_CENTS, sf42.takeProfitCents)
+        assertEquals(PaperFleetDefaults.OPEN_AT_ONCE, sf42.maxOpenPerSide)
         assertTrue(sf42.aiNote.contains("repaired"))
         assertTrue(sf42.aiNote.contains("15–55"))
         others.keys.forEach { code ->
@@ -119,15 +121,50 @@ class AiLearnCollapseTest {
             assertTrue("$code until ${row.untilMinute}", row.untilMinute >= AiLearnBounds.UNTIL_FLOOR)
             assertTrue("$code stop ${row.stopLossPercent}", row.stopLossPercent!! >= AiLearnBounds.STOP_PCT_FLOOR)
             if (row.stopCents != null) assertTrue(row.stopCents!! >= AiLearnBounds.STOP_CENTS_FLOOR)
-            assertEquals(15, row.takeProfitCents)
+            assertEquals(PaperFleetDefaults.PROFIT_CENTS, row.takeProfitCents)
+            assertEquals(PaperFleetDefaults.OPEN_AT_ONCE, row.maxOpenPerSide)
+            assertTrue("$code width ${width(code, row)}", width(code, row) > 20)
         }
         var again = sf42
         repeat(30) { again = Research.learn("sf42", again, -0.05, 55) }
-        assertEquals(25, again.minEntryCents)
-        assertEquals(35, again.maxEntryCents)
+        assertEquals(PaperFleetDefaults.BUY_MIN, again.minEntryCents)
+        assertEquals(PaperFleetDefaults.BUY_MAX, again.maxEntryCents)
+        assertTrue(width("sf42", again) > 20)
         assertEquals(AiLearnBounds.UNTIL_FLOOR, again.untilMinute)
         assertEquals(AiLearnBounds.STOP_PCT_FLOOR, again.stopLossPercent)
-        assertEquals(15, again.takeProfitCents)
+        assertEquals(PaperFleetDefaults.PROFIT_CENTS, again.takeProfitCents)
+    }
+
+    @Test fun tenCentWindowsAndMaxedOpenAtOnceHealBackToTheFactoryFloor() {
+        val shots = listOf(20 to 30, 23 to 33)
+        shots.forEach { (low, high) ->
+            val row = ScalpStrategySettings(
+                minEntryCents = low, maxEntryCents = high, maxOpenPerSide = if (low == 20) 20 else 15,
+                contracts = 50, takeProfitCents = 25, untilMinute = if (low == 20) 5 else 1,
+                aiLearns = true, aiN = 9, aiBaseCents = high,
+                aiNote = "AI kept settings (loser -7.73)"
+            )
+            val healed = ScalpParamSanity.settings("sf42", row)
+            assertEquals(PaperFleetDefaults.BUY_MIN, healed.minEntryCents)
+            assertEquals(PaperFleetDefaults.BUY_MAX, healed.maxEntryCents)
+            assertTrue(healed.maxEntryCents!! - healed.minEntryCents > 20)
+            val repaired = AiLearnBounds.repair("v2-sf41", row)
+            assertEquals("$low–$high", PaperFleetDefaults.BUY_MIN, repaired.minEntryCents)
+            assertEquals(PaperFleetDefaults.BUY_MAX, repaired.maxEntryCents)
+            assertEquals(PaperFleetDefaults.PROFIT_CENTS, repaired.takeProfitCents)
+            assertEquals(PaperFleetDefaults.OPEN_AT_ONCE, repaired.maxOpenPerSide)
+            assertEquals(50, repaired.contracts)
+            assertTrue(repaired.untilMinute >= AiLearnBounds.UNTIL_FLOOR)
+        }
+        var learned = ScalpStrategySettings(
+            minEntryCents = 23, maxEntryCents = 33, contracts = 50, maxOpenPerSide = 15,
+            takeProfitCents = 25, aiLearns = true, aiN = 4, aiNote = "AI kept settings (loser -9.22)"
+        )
+        repeat(12) { learned = Research.learn("sf42", learned, -9.22, 55) }
+        assertEquals(PaperFleetDefaults.BUY_MIN, learned.minEntryCents)
+        assertEquals(PaperFleetDefaults.BUY_MAX, learned.maxEntryCents)
+        assertTrue(width("sf42", learned) > 20)
+        assertEquals(50, learned.contracts)
     }
 
     @Test fun paperTunerLoserPassesCannotCloseTheBandOrTheWindow() {

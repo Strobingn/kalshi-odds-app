@@ -80,10 +80,9 @@ class ScalpRetune1021Test {
         assertFalse(FairGapTune.priceBlocked("sf41", 0.50, null))
         var learned = ScalpStrategySettings(aiLearns = true)
         repeat(15) { learned = Research.learn("fair", learned.copy(aiN = 2), -1.0, FairGapTune.FAIR_MAX_CENTS) }
-        assertTrue(learned.maxEntryCents!! >= FairGapTune.FAIR_MAX_CENTS - 20)
-        assertTrue(learned.maxEntryCents!! < FairGapTune.FAIR_MAX_CENTS)
+        assertTrue(learned.maxEntryCents!! >= PaperFleetDefaults.BUY_MAX)
         val manual = Research.learn("fair", ScalpStrategySettings(maxEntryCents = 52, aiLearns = true, aiN = 2), -1.0, FairGapTune.FAIR_MAX_CENTS)
-        assertEquals(48, manual.maxEntryCents)
+        assertEquals(PaperFleetDefaults.BUY_MAX, manual.maxEntryCents)
         assertTrue(manual.minEntryCents >= ScalpFloors.cents("fair"))
         val edge = Research.learn("r-late", ScalpStrategySettings(aiLearns = true, aiN = 2), -1.0, 99)
         assertEquals(14, edge.edgeCents)

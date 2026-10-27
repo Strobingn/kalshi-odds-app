@@ -57,7 +57,7 @@ class ResearchTest {
         assertEquals(2, s.edgeCents)                       // never below your setting
         var o = ScalpStrategySettings(maxEntryCents = 50)
         repeat(60) { o = Research.learn("sf41", o, -1.0, 55) }
-        assertEquals(30, o.maxEntryCents)                  // at most −20¢ from the baseline
+        assertEquals(PaperFleetDefaults.BUY_MAX, o.maxEntryCents) // losers may not drop the ceiling under 55¢
         // A null clip already books the paper floor, so losers cannot shrink it under PaperClip.MIN.
         assertTrue((o.contracts ?: PaperClip.MIN) >= PaperClip.MIN)
         val taller = Research.learn("sf41", ScalpStrategySettings(maxEntryCents = 50, contracts = 80), -1.0, 55)
