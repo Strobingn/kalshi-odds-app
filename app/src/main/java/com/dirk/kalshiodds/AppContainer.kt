@@ -316,6 +316,7 @@ class AppContainer(context: Context) {
     /** Every provider, in rotation order. */
     private val ALL_LLM = com.dirk.kalshiodds.signal.scalper.LlmProvider.NAMES.keys.toList()
     private val KEY_AI_OFFS_RESTORED = "ai_offs_restored_v1"
+    private val KEY_BANDS_WIDENED = "ai_bands_widened_v1"
 
     /** The saved key of provider [n] ("groq", "cerebras", "gemini", "mistral"). */
     fun llmKey(n: String): String = when (n) {
@@ -557,6 +558,27 @@ class AppContainer(context: Context) {
                     if (!k.enabled) tuning.set(st, k.copy(enabled = true))
                 }
                 supervisorPrefs.edit().putBoolean(KEY_AI_OFFS_RESTORED, true).apply()
+            }
+        }
+        // 1.24.0: the tuners had squeezed some entry bands down to a cent or two (Kashi's last-45s favourite was
+        // buying 53-54c), which stops a strategy trading without switching it off. Once, hand any band narrower
+        // than ScalpBand.MIN_TUNED_WIDTH_CENTS back to the strategy's own; a band you set yourself is not touched
+        // again after this, and SupervisorBounds no longer lets a tuner make one this narrow.
+        supervisorScope.launch {
+            if (supervisorPrefs.getBoolean(KEY_BANDS_WIDENED, false)) return@launch
+            runCatching {
+                val tuning = scalperStore.tuning
+                for (st in com.dirk.kalshiodds.signal.scalper.ScalpStrategy.values()) {
+                    val k = tuning.knobs(st)
+                    if (!com.dirk.kalshiodds.signal.scalper.ScalpBand.strangled(k)) continue
+                    tuning.set(st, k.copy(entryMinCents = null, entryMaxCents = null))
+                    supervisorLog.append(
+                        "journal",
+                        "{\"ts\":${System.currentTimeMillis()},\"event\":\"band_widened\",\"strategy\":\"${st.name}\"," +
+                            "\"was\":\"${k.entryMinCents}-${k.entryMaxCents}c\"}"
+                    )
+                }
+                supervisorPrefs.edit().putBoolean(KEY_BANDS_WIDENED, true).apply()
             }
         }
         // Scalping AI: every SCALP_GAP_MS (longer only while every provider is resting off a free-tier limit), and

@@ -45,9 +45,10 @@ object SupervisorBounds {
 
     data class Range(val lo: Double, val hi: Double, val integer: Boolean)
 
-    private val band = Range(PrintGrid.MIN_PRICE * 100.0, 98.0, false)
+    /** The tuners move the band inside the arena's own 15–58¢; the sliders still reach anywhere. */
+    private val band = Range(ScalpBand.DEFAULT_MIN * 100.0, ScalpBand.DEFAULT_MAX * 100.0, false)
 
-    /** Knobs with one fixed range for every strategy. The entry band stays inside 10–98¢ (never a long shot; the late favourites buy up to 98¢). */
+    /** Knobs with one fixed range for every strategy. The entry band stays inside the arena's 15–58¢ ([ScalpBand]). */
     private val fixed: Map<String, Range> = linkedMapOf(
         "contracts" to Range(1.0, ScalpTuning.MAX_CONTRACTS.toDouble(), true),
         "targetCents" to Range(1.0, 30.0, false),
@@ -172,10 +173,16 @@ object SupervisorBounds {
         v = snap(st, param, v.coerceIn(range.lo, range.hi), range).coerceIn(range.lo, range.hi)
         if (cur != null && abs(v - cur) < 1e-9) return no("no change")
 
-        val next = with(k, param, v)
+        var next = with(k, param, v)
+        if (param == "entryMinCents" || param == "entryMaxCents") {
+            // A tuner may move one end of the band, not squeeze it shut: the other end gives way instead.
+            next = ScalpBand.widen(next, param, st, range.lo, range.hi)
+        }
         val after = Tuned(st, next, tuning.defaultContracts)
-        if ((param == "entryMinCents" || param == "entryMaxCents") && after.entryMin >= after.entryMax) {
-            return no("entry band would be empty")
+        if ((param == "entryMinCents" || param == "entryMaxCents") &&
+            after.entryMax * 100.0 - after.entryMin * 100.0 < ScalpBand.MIN_TUNED_WIDTH_CENTS - 1e-9
+        ) {
+            return no("entry band would be under ${ScalpBand.MIN_TUNED_WIDTH_CENTS.toInt()}c wide")
         }
         if ((param == "secondsLeftMin" || param == "secondsLeftMax") && after.secondsLeft?.isEmpty() == true) {
             return no("seconds-left window would be empty")

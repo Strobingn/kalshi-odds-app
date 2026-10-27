@@ -19,6 +19,55 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.25.0 (Claude branch): 15–58¢ for every strategy, and the AI learns from the windows it skips
+
+**Every strategy buys 15–58¢** (`ScalpBand.ALL_STRATEGIES_USE_DEFAULT`, you asked for it "for all models"), whatever
+band it declares for itself. The declarations stay on `ScalpStrategy` because they say what each rule was researched
+on, but they no longer reach the engine.
+
+The cost is real and deliberate: a strategy whose signal **is** a price above 58¢ cannot fire any more — Late
+favourite (80–95¢), Early favourite (65–85¢), Heavy favourite (92–97¢), Momentum ride, Opening drive, Opening ride,
+Late tiebreak, Late edge and all five Kashi favourites. Long shot (10–20¢) trades only its 15–20¢ overlap. Set the
+flag to false to give every strategy its own band back; a band you set on one strategy with the sliders still wins
+either way, and the tuners may now only move a band about **inside** 15–58¢.
+
+The strategy card used to read "Trades between 10¢ and 90¢" for any strategy without its own band — `PrintGrid`'s
+quote gate rather than the arena's band. It now says the prices the strategy really buys at.
+
+**The Paper AI learns from the windows it skips.** Lessons were only ever written about windows it *bet* on, so
+"stay out" was unfalsifiable: skipping produced no evidence, and the lessons telling it to skip could never be
+contradicted. Now the first skip of each window is kept with the asks it turned down, and when the window settles
+the side the maths liked is scored as if one contract had been bought. Both prompts carry `whatSkippingHasCost`
+(how many it passed up, how many would have won, the net), and the reflection is told that if skipping is losing
+money then "stay out" is the wrong lesson.
+
+## 1.24.0 (Claude branch): the tuners can no longer squeeze a band shut, and the Paper AI stops inventing history
+
+**A tuner may move one end of an entry band, not squeeze it shut.** The Scalping AI and the live tuner may step
+`entryMinCents` and `entryMaxCents`, and the only guard was that the band must not be *empty* — so they ratcheted it
+closed a cent at a time. Kashi's last-45s favourite was found buying **53–54¢**, a 1¢ window it almost never hits.
+That is switching a strategy off by the back door, which they are not allowed to do head-on. Now a tuner that moves
+one end pushes the other end away to leave `ScalpBand.MIN_TUNED_WIDTH_CENTS` (10¢) of room, and on the first start
+of 1.24.0 any band already under 10¢ wide is handed back to the strategy's own (logged as `band_widened`). Bands you
+set with the sliders are untouched.
+
+**The Paper AI's lessons were invented and self-reinforcing.** Every lesson on the AI tab read "avoid… as historical
+data shows this scenario favors staying out". It had no historical data: the look-back prompt was given one settled
+window plus four calibration numbers, so the model made the history up, and the invention was then stored as memory
+and fed back as fact. Worse, the betting prompt took the newest ten lessons, so a losing run filled every slot with
+"stay out" — and because lessons are only written about windows it *bet* on, nothing could ever contradict them. It
+talked itself out of betting with no way back.
+
+- The look-back now gets `yourRecordOverall` and `yourRecordInSimilarSpots` (its real settled record, grouped by side
+  and confidence band), and is told never to claim a history that is not in those numbers, and to give the count when
+  it does.
+- One window is one sample: under `PaperAi.MIN_FOR_RULE` (8) matching bets it must write an observation, not a rule,
+  and a lesson that would stop it betting needs a losing row of at least that many behind it.
+- Lessons are stored with what the window made, and the betting prompt is shown a mix from winning *and* losing
+  windows, so the corpus cannot become all-avoid.
+- The prompt also carries `skipsSinceYourLastBet`, so a long run of skips is visible to the AI as a failure to
+  gather results rather than as caution.
+
 ## 1.23.0 (Claude branch): 100 contracts a bet, a 15–57¢ buy band, and learning that survives a restart
 
 **100 contracts a bet, and the number finally reaches an order.** `ScalpTuning.DEFAULT_CONTRACTS` said 50, but

@@ -22,7 +22,9 @@ class KashiLateFavTest {
         topOfBook = { null },
         bookLevels = { null },
         closeMs = { open + 900_000L },
-        fairYes = { _, _ -> fair() }, strategies = ScalpStrategy.values().toList()
+        fairYes = { _, _ -> fair() }, strategies = ScalpStrategy.values().toList(),
+        // These tests are about the signals, not the arena's band: every strategy on its researched band.
+        engine = ScalperEngine(tuning = ScalpTuning().useOwnBands())
     )
 
     /** Seconds [from]..[to] of two-sided prints: takers sell YES at [bid] and buy YES at [ask]. */
@@ -109,7 +111,7 @@ class KashiLateFavTest {
 
     @Test
     fun aHoldWithAStopSellsAtTheBidButNeverTimesOut() {
-        val e = ScalperEngine()
+        val e = ScalperEngine(tuning = ScalpTuning().useOwnBands())
         e.buyNow(ScalpStrategy.KASHI_FAV_STRICT, t, "YES", 0.92, { _, _ -> null }, 0L)
         assertTrue("no time-out", e.onClock(t, 50_000L, bidYes = 0.80, bidNo = 0.18).isEmpty())
         val c = e.onClock(t, 51_000L, bidYes = 0.77, bidNo = 0.22).filterIsInstance<ScalpEvent.Closed>().single().scalp

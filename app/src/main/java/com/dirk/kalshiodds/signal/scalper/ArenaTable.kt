@@ -228,7 +228,8 @@ object ArenaTable {
         val band = if (t.ownBand) {
             "Trades only between ${c(t.entryMin)} and ${c(t.entryMax)}."
         } else {
-            "Trades between ${c(PrintGrid.MIN_PRICE)} and ${c(PrintGrid.MAX_PRICE)}."
+            // The arena's band, not PrintGrid's quote gate: the card has to say the prices it really buys at.
+            "Trades between ${c(ScalpBand.DEFAULT_MIN)} and ${c(ScalpBand.DEFAULT_MAX)}."
         }
         val size = "${t.contracts} contracts an order, up to ${t.maxPerSide} at once per side; looks every ${t.cadenceSeconds} s" +
             (if (t.knobs.cooldownSeconds == null && t.cooldownMs > 0) "; ${t.cooldownMs / 1000} s between buys." else ".")

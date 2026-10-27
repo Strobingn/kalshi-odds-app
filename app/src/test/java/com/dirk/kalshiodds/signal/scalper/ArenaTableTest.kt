@@ -100,7 +100,10 @@ class ArenaTableTest {
             assertTrue(st.name, r[1].startsWith(if (st.taker) "Buys at the ask" else "Rests a bid"))
         }
         assertEquals("Out at +8¢ (resting offer), or sold at the bid at −6¢ or after 120 s (taker fee).", ArenaTable.rules(ScalpStrategy.BOUNCE)[2])
-        assertEquals("Trades only between 92¢ and 97¢.", ArenaTable.rules(ScalpStrategy.HEAVY_FAVORITE)[3])
+        // Every strategy buys the arena's band now; its own prices come back only if you set them.
+        assertEquals("Trades between 15¢ and 58¢.", ArenaTable.rules(ScalpStrategy.HEAVY_FAVORITE)[3])
+        val own = Tuned(ScalpStrategy.HEAVY_FAVORITE, ScalpKnobs(entryMinCents = 92.0, entryMaxCents = 97.0), 10)
+        assertEquals("Trades only between 92¢ and 97¢.", ArenaTable.rules(ScalpStrategy.HEAVY_FAVORITE, own)[3])
     }
 
     @Test
