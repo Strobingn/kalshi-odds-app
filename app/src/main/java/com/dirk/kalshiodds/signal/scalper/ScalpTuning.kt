@@ -19,6 +19,40 @@ object ScalpBand {
     const val DEFAULT_MAX = 0.57
     private const val EPS = 1e-9
 
+    /**
+     * The narrowest entry band a tuner may leave behind, in cents.
+     *
+     * The Scalping AI and the live tuner may move `entryMinCents` and `entryMaxCents` a step at a time, and the only
+     * guard used to be that the band must not be empty. So they ratcheted it shut: Kashi's last-45s favourite was
+     * found buying 53-54c, a 1c window it almost never hits. That is switching a strategy off by the back door,
+     * which they are not allowed to do head-on. A tuner that moves one end now pushes the other end away far enough
+     * to leave this much room ([widen]); you can still set whatever you like with the sliders.
+     */
+    const val MIN_TUNED_WIDTH_CENTS = 10.0
+
+    /**
+     * [knobs] with the band widened back to [MIN_TUNED_WIDTH_CENTS] after [moved] was set, by pushing the end that
+     * was NOT moved and keeping it inside [lo]..[hi]. Returns [knobs] unchanged when there is already room.
+     */
+    fun widen(knobs: ScalpKnobs, moved: String, st: ScalpStrategy, lo: Double, hi: Double): ScalpKnobs {
+        val (bandLo, bandHi) = of(st)
+        val min = knobs.entryMinCents ?: bandLo * 100.0
+        val max = knobs.entryMaxCents ?: bandHi * 100.0
+        if (max - min >= MIN_TUNED_WIDTH_CENTS - EPS) return knobs
+        return if (moved == "entryMaxCents") {
+            knobs.copy(entryMinCents = (max - MIN_TUNED_WIDTH_CENTS).coerceIn(lo, hi))
+        } else {
+            knobs.copy(entryMaxCents = (min + MIN_TUNED_WIDTH_CENTS).coerceIn(lo, hi))
+        }
+    }
+
+    /** True when [k] holds a band a tuner strangled: narrower than [MIN_TUNED_WIDTH_CENTS], or the wrong way round. */
+    fun strangled(k: ScalpKnobs): Boolean {
+        val min = k.entryMinCents ?: return false
+        val max = k.entryMaxCents ?: return false
+        return max - min < MIN_TUNED_WIDTH_CENTS - EPS
+    }
+
     /** The band [st] buys in when you have not set one of your own. */
     fun of(st: ScalpStrategy): Pair<Double, Double> =
         if (st.entryMin < DEFAULT_MIN - EPS || st.entryMax > DEFAULT_MAX + EPS) st.entryMin to st.entryMax
