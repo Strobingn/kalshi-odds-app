@@ -47,6 +47,67 @@ class LlmSpeedTest {
     }
 
     @Test
+    fun anEarlyLookDoesNotCallAnyoneWhoIsStillResting() {
+        val c = FakeClock()
+        val s = speedAt(c)
+        s.failed("cerebras", "HTTP 429 rate limit")
+        s.failed("groq", "HTTP 429 quota exhausted")
+        val keyed = listOf("cerebras", "groq")
+        assertEquals("nobody to call until a rest is over", emptyList<String>(), s.ready(keyed))
+
+        val chat = HttpLlmChat(
+            listOf(
+                LlmProvider("cerebras", "http://127.0.0.1:1", listOf("m1")) { "k" },
+                LlmProvider("groq", "http://127.0.0.1:1", listOf("m2")) { "k" }
+            ),
+            speed = s,
+            http = okhttp3.OkHttpClient.Builder().callTimeout(2, java.util.concurrent.TimeUnit.SECONDS).build()
+        )
+        assertNull(chat.chat(listOf("user" to "hi")))
+        assertEquals("the early look did not spend another call", LlmSpeed.LIMIT_COOLDOWN_MS, s.waitMs(keyed, floorMs = 1_000L))
+    }
+
+    @Test
+    fun aTimeoutCountsTowardTheAverageSoTheProviderDropsDown() {
+        val c = FakeClock()
+        val s = speedAt(c)
+        s.answered("cerebras", 300L)
+        s.answered("groq", 900L)
+        s.failed("cerebras", "SocketTimeoutException", 15_000L)
+        // 300 + 0.35 * (15000 - 300) = 5445
+        assertEquals(5_445L, s.millisOf("cerebras"))
+        assertEquals("still resting off the timeout", emptyList<String>(), s.ready(listOf("cerebras")))
+
+        c.now += LlmSpeed.ERROR_COOLDOWN_MS + 1
+        assertEquals("groq is ahead once the rest ends", "groq", s.ready(all).first())
+        assertTrue(s.ready(all).indexOf("groq") < s.ready(all).indexOf("cerebras"))
+    }
+
+    @Test
+    fun aHangingCallIsRecordedAsSlow() {
+        val s = LlmSpeed()
+        s.answered("cerebras", 300L)
+        s.answered("groq", 900L)
+        val http = okhttp3.OkHttpClient.Builder()
+            .addInterceptor {
+                Thread.sleep(40)
+                throw java.io.InterruptedIOException("timeout")
+            }
+            .build()
+        val chat = HttpLlmChat(
+            listOf(
+                LlmProvider("cerebras", "http://127.0.0.1:1", listOf("m1")) { "k" },
+                LlmProvider("groq", "http://127.0.0.1:1", listOf("m2")) { "k" }
+            ),
+            speed = s,
+            http = http
+        )
+        assertNull(chat.chat(listOf("user" to "hi")))
+        assertTrue("the hang was folded into cerebras's time", s.millisOf("cerebras") != 300L)
+        assertTrue(s.state.value.resting.contains("cerebras"))
+    }
+
+    @Test
     fun aRateLimitedProviderRestsAndTheNextFastestAnswers() {
         val c = FakeClock()
         val s = speedAt(c)

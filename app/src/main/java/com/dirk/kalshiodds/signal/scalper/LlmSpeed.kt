@@ -17,9 +17,12 @@ import kotlinx.coroutines.flow.asStateFlow
  * next-fastest answers meanwhile. Each limit in a row doubles that wait, from [LIMIT_COOLDOWN_MS] up to
  * [MAX_COOLDOWN_MS], so a spent daily quota costs one wasted call every few minutes rather than one per tick; the
  * first answer clears it. Anything else that goes wrong (a network drop, a bad key) waits [ERROR_COOLDOWN_MS].
+ * A call abandoned at the client's timeout is one of those, and the time it burned counts in the average, so a
+ * provider that has started hanging is no longer tried first.
  *
  * [waitMs] is the other half: it tells the caller's loop how long to sleep before the next tick — [floorMs] while
- * some provider is ready, otherwise until the first one comes back.
+ * some provider is ready, otherwise until the first one comes back. A look that arrives early still asks only
+ * [ready] providers, so a key that is already resting is not called again.
  *
  * Thread-safe: the AIs, the chat and the writer all share one instance.
  */
@@ -55,10 +58,17 @@ class LlmSpeed(
         publish()
     }
 
-    /** A call [provider] could not answer. [why] is the provider's own words, which say whether it was a limit. */
-    fun failed(provider: String, why: String) {
+    /**
+     * A call [provider] could not answer. [why] is the provider's own words, which say whether it was a limit.
+     * [ms] is how long a timed-out call ran before it was abandoned; that time counts in the average so a hang
+     * drops down the order. Leave it unset for a failure that came back on its own.
+     */
+    fun failed(provider: String, why: String, ms: Long = -1L) {
         synchronized(lock) {
             val s = stats.getOrPut(provider) { Stat() }
+            if (ms > 0L && isTimeout(why)) {
+                s.millis = s.millis?.let { it + ALPHA * (ms - it) } ?: ms.toDouble()
+            }
             if (isLimit(why)) {
                 s.limits += 1
                 val wait = LIMIT_COOLDOWN_MS shl (s.limits - 1).coerceAtMost(SHIFTS)
@@ -70,7 +80,7 @@ class LlmSpeed(
         publish()
     }
 
-    /** [available] in the order to try them: the quickest one that is ready, then the rest, then the ones resting. */
+    /** [available] in speed order: the quickest one that is ready, then the others that are ready, then the ones resting. */
     fun order(available: List<String>): List<String> = synchronized(lock) {
         val now = nowMs()
         available.sortedWith(
@@ -80,6 +90,15 @@ class LlmSpeed(
                 { seedRank(it) }
             )
         )
+    }
+
+    /**
+     * Who a call may try right now: [order] with anyone still resting left out.
+     * Empty while every provider in [available] is cooling down, so an early look does not hit them.
+     */
+    fun ready(available: List<String>): List<String> = synchronized(lock) {
+        val now = nowMs()
+        available.filter { resting(it, now) == 0 }.sortedWith(compareBy({ estimateMs(it) }, { seedRank(it) }))
     }
 
     /** How long the next call should wait: [floorMs] while one provider is ready, else until the first comes back. */
@@ -155,6 +174,12 @@ class LlmSpeed(
             val m = why.lowercase()
             return m.contains("429") || m.contains("rate limit") || m.contains("rate_limit") ||
                 m.contains("quota") || m.contains("exhausted") || m.contains("too many requests")
+        }
+
+        /** True when [why] is a call that was abandoned because it did not answer in time. */
+        fun isTimeout(why: String): Boolean {
+            val m = why.lowercase()
+            return m.contains("timeout") || m.contains("interruptedio")
         }
     }
 }

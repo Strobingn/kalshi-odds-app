@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.signal.scalper
 
+import java.io.InterruptedIOException
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -441,14 +442,18 @@ class HttpLlmChat(
 
     private class Failure(msg: String, val wrongModel: Boolean = false, val toolProblem: Boolean = false) : Exception(msg)
 
-    /** Tries each provider with a key, quickest first, and each of its models from the one that last worked. */
+    /**
+     * Tries each provider with a key, quickest one that is not resting first, and each of its models from the one
+     * that last worked. Providers cooling down after a limit or an error are left out until that rest is over.
+     */
     private fun <T> each(call: (LlmProvider, String) -> T): T? {
-        var anyKey = false
         val keyed = providers.filter { it.key().isNotBlank() }
-        val ordered = speed?.let { s -> s.order(keyed.map { it.name }).mapNotNull { n -> keyed.firstOrNull { it.name == n } } } ?: keyed
+        if (keyed.isEmpty()) {
+            lastError = "no API key saved (AI tab → Keys)"
+            return null
+        }
+        val ordered = speed?.let { s -> s.ready(keyed.map { it.name }).mapNotNull { n -> keyed.firstOrNull { it.name == n } } } ?: keyed
         for (p in ordered) {
-            if (p.key().isBlank()) continue
-            anyKey = true
             var i = p.modelIndex.coerceIn(0, p.models.lastIndex)
             var tried = 0
             while (tried < p.models.size) {
@@ -463,12 +468,14 @@ class HttpLlmChat(
                     runCatching { onCall(LlmAttempt(p.name, model, true, ms)) }
                     return out
                 } catch (e: Exception) {
+                    val ms = System.currentTimeMillis() - t0
                     val why = (e as? Failure)?.message ?: e.javaClass.simpleName
                     lastError = "${p.name} $model: $why"
-                    runCatching { onCall(LlmAttempt(p.name, model, false, System.currentTimeMillis() - t0, why)) }
+                    runCatching { onCall(LlmAttempt(p.name, model, false, ms, why)) }
                     onError(lastError)
                     if ((e as? Failure)?.wrongModel != true) {
-                        speed?.failed(p.name, why)
+                        // A hang burned the whole budget: count that time so this provider is not tried first again.
+                        speed?.failed(p.name, why, if (e is InterruptedIOException) ms else -1L)
                         break // rate limit, bad key, network: next provider
                     }
                     i = (i + 1) % p.models.size
@@ -478,7 +485,6 @@ class HttpLlmChat(
                 }
             }
         }
-        if (!anyKey) lastError = "no API key saved (AI tab → Keys)"
         return null
     }
 
