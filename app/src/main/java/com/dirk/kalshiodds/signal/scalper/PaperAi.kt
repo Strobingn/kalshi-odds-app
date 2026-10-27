@@ -46,6 +46,29 @@ data class PaperBet(
 )
 
 /**
+ * A window the AI looked at and chose not to bet on, with the asks it turned down. Once the window settles,
+ * [result] and [wouldHavePaidUsd] say what one contract on the side the maths liked would have made.
+ *
+ * Without this the AI could only ever learn from windows it BET on, so "stay out" was unfalsifiable: skipping
+ * produced no evidence, and the lessons telling it to skip could never be contradicted.
+ */
+@Serializable
+data class PaperSkip(
+    val ticker: String,
+    val atMs: Long,
+    val reason: String = "",
+    val yesAskCents: Double? = null,
+    val noAskCents: Double? = null,
+    val fairYesCents: Double? = null,
+    /** "YES", "NO" or "VOID" once the window settles. */
+    val result: String? = null,
+    /** One contract on the side the fair price favoured, after the taker fee. Null until it settles. */
+    val wouldHavePaidUsd: Double? = null,
+    /** The side that was priced under its fair value when it skipped, if either was. */
+    val sideItPassedUp: String? = null
+)
+
+/**
  * One lesson, with the window it came from and what that window made. The outcome is kept so the betting prompt can
  * be shown lessons from windows that WON as well as ones that lost: taking the newest lessons outright let a losing
  * run fill every slot with "stay out", and since lessons are only written about windows it bet on, nothing could
@@ -69,7 +92,9 @@ data class PaperAiMemory(
     val toReflect: List<String> = emptyList(),
     val written: List<PaperLesson> = emptyList(),
     /** Skips in a row since its last placed bet: how far it has talked itself out of betting. */
-    val skipsSinceBet: Int = 0
+    val skipsSinceBet: Int = 0,
+    /** Windows it passed on, with what they would have paid once settled. */
+    val skips: List<PaperSkip> = emptyList()
 )
 
 /**
@@ -130,6 +155,7 @@ class PaperAi(
         initialMemory.written.ifEmpty { initialMemory.lessons.map { PaperLesson(it) } }
     private var toReflect: List<String> = initialMemory.toReflect
     private var skipsSinceBet: Int = initialMemory.skipsSinceBet
+    private var skips: List<PaperSkip> = initialMemory.skips
     private var nextId: Long = (bets.maxOfOrNull { it.id } ?: 0L) + 1
 
     private val _status = MutableStateFlow("Paper AI · not started")
@@ -167,12 +193,13 @@ class PaperAi(
                 val pnl = if (void) 0.0 else (if (won) b.contracts * (1.0 - b.price) else -b.contracts * b.price) - b.feeUsd
                 b.copy(result = if (void) "VOID" else if (yes) "YES" else "NO", pnlUsd = Math.round(pnl * 10_000.0) / 10_000.0).also { out += it }
             }
+            settleSkips(ticker, if (void) "VOID" else if (yes) "YES" else "NO")
             if (out.isNotEmpty()) {
                 if (out.any { it.result != "VOID" } && toReflect.none { it.equals(ticker, true) }) {
                     toReflect = (toReflect + ticker).takeLast(MAX_REFLECT_QUEUE)
                 }
-                save()
             }
+            save()
             out
         }
         for (b in closed) {
@@ -197,7 +224,15 @@ class PaperAi(
         val reason = (obj["reason"] as? JsonPrimitive)?.contentOrNull.orEmpty().take(300)
         val conf = ((obj["confidence"] as? JsonPrimitive)?.doubleOrNull ?: 50.0).roundToInt().coerceIn(0, 100)
         if (decision != "YES" && decision != "NO") {
-            val runOfSkips = synchronized(lock) { skipsSinceBet += 1; save(); skipsSinceBet }
+            val yesAsk = (f["yesAskCents"] as? JsonPrimitive)?.doubleOrNull
+            val noAsk = (f["noAskCents"] as? JsonPrimitive)?.doubleOrNull
+            val fair = (f["fairYesCents"] as? JsonPrimitive)?.doubleOrNull?.takeIf { it in 0.0..100.0 }
+            val runOfSkips = synchronized(lock) {
+                skipsSinceBet += 1
+                rememberSkip(ticker, reason, yesAsk, noAsk, fair)
+                save()
+                skipsSinceBet
+            }
             journal("skip", buildJsonObject { put("ticker", ticker); put("reason", reason); put("inARow", runOfSkips) })
             return note("skipped $ticker ($runOfSkips in a row): $reason")
         }
@@ -273,6 +308,7 @@ class PaperAi(
             // Without these the model invented the history and the invention was stored as memory.
             put("yourRecordOverall", overallRecord(ticker))
             put("yourRecordInSimilarSpots", similarRecord(window, ticker))
+            put("whatSkippingHasCost", skipRecord())
             put("yourNotes", buildJsonArray { for (l in synchronized(lock) { lessonsForPrompt(10) }) add(JsonPrimitive(l.text)) })
         }
         // No answer (provider down, rate limit): keep the window queued and look back on it next tick.
@@ -288,6 +324,51 @@ class PaperAi(
             save()
         }
         if (lesson != null) journal("lesson", buildJsonObject { put("ticker", ticker); put("lesson", lesson) })
+    }
+
+    /**
+     * Keeps the first skip of each window, with the asks it turned down. One per window: a skip every minute of a
+     * quiet window would otherwise drown out the bets. Caller holds [lock].
+     */
+    private fun rememberSkip(ticker: String, reason: String, yesAsk: Double?, noAsk: Double?, fair: Double?) {
+        if (skips.any { it.ticker.equals(ticker, true) }) return
+        // The side the maths liked: its ask under its fair price. That is the bet it passed up.
+        val passed = when {
+            fair == null -> null
+            yesAsk != null && yesAsk < fair -> "YES"
+            noAsk != null && noAsk < 100.0 - fair -> "NO"
+            else -> null
+        }
+        skips = (skips + PaperSkip(ticker, nowMs(), reason.take(200), yesAsk, noAsk, fair, sideItPassedUp = passed))
+            .takeLast(KEEP_SKIPS)
+    }
+
+    /** Fills in what [ticker]'s skip would have paid, one contract on the side it passed up. Caller holds [lock]. */
+    private fun settleSkips(ticker: String, result: String) {
+        skips = skips.map { sk ->
+            if (sk.result != null || !sk.ticker.equals(ticker, true)) return@map sk
+            val side = sk.sideItPassedUp
+            val ask = if (side == "YES") sk.yesAskCents else sk.noAskCents
+            val paid = if (result == "VOID" || side == null || ask == null) null else {
+                val price = ask / 100.0
+                val gross = if (side == result) 1.0 - price else -price
+                Math.round((gross - KalshiFee.total(1, price)) * 10_000.0) / 10_000.0
+            }
+            sk.copy(result = result, wouldHavePaidUsd = paid)
+        }
+    }
+
+    /**
+     * What skipping has cost, over the settled skips: how many it passed up, how many of those would have won and
+     * the net of one contract on each. This is the counterweight to a wall of "stay out" lessons.
+     */
+    private fun skipRecord(): JsonObject {
+        val done = synchronized(lock) { skips.filter { it.wouldHavePaidUsd != null } }
+        return buildJsonObject {
+            put("settledSkipsWithABetYouPassedUp", done.size)
+            put("thoseThatWouldHaveWon", done.count { (it.wouldHavePaidUsd ?: 0.0) > 0.0 })
+            put("netUsdOneContractEach", Math.round(done.sumOf { it.wouldHavePaidUsd ?: 0.0 } * 100.0) / 100.0)
+        }
     }
 
     /** Confidence band of [c], the buckets the record is grouped into. */
@@ -373,7 +454,10 @@ class PaperAi(
             persistMemory(
                 json.encodeToString(
                     PaperAiMemory.serializer(),
-                    PaperAiMemory(bets = bets, toReflect = toReflect, written = lessons, skipsSinceBet = skipsSinceBet)
+                    PaperAiMemory(
+                        bets = bets, toReflect = toReflect, written = lessons,
+                        skipsSinceBet = skipsSinceBet, skips = skips
+                    )
                 )
             )
         }
@@ -396,6 +480,7 @@ class PaperAi(
             })
         }
         put("skipsSinceYourLastBet", skipsSinceBet)
+        put("whatSkippingHasCost", skipRecord())
         put("lessonsFromResults", buildJsonArray { for (l in lessonsForPrompt(10)) add(JsonPrimitive(l.text)) })
     }
 
@@ -411,6 +496,7 @@ class PaperAi(
         const val KEEP_BETS = 300
         const val MAX_LESSONS = 30
         const val MAX_REFLECT_QUEUE = 5
+        const val KEEP_SKIPS = 60
 
         /** Settled bets a row needs before a lesson may turn it into a rule. Below this, one window is one sample. */
         const val MIN_FOR_RULE = 8
@@ -420,7 +506,7 @@ Each call you get the live feed, the limits, your record, your calibration, your
 The feed's fairYesCents is the math's chance of YES (0-100) from the settlement index, the strike, its volatility and the time left. spotMinusStrike says how far Bitcoin is from the strike now.
 Before you choose, write bull_case (the best reason UP wins) and bear_case (the best reason DOWN wins), then pick the side whose case is stronger at its price, or SKIP.
 Goal: positive net profit after the taker fee (0.07 x price x (1 - price) per contract). Every bet you place inside the limits is placed: bet often to learn, but only with an edge (the side's ask below your real chance of winning). Give your real chance as confidence; trustInYourConfidence shows how much of the edge you claimed has shown up. SKIP is a good answer when there is no edge.
-The lessons you are shown come from single settled windows unless they name a count, so treat them as evidence, not as rules: your record and your calibration outrank them. skipsSinceYourLastBet is how many times in a row you have skipped - a long run means you have stopped gathering the results you learn from, so take any real edge you find.
+The lessons you are shown come from single settled windows unless they name a count, so treat them as evidence, not as rules: your record and your calibration outrank them. skipsSinceYourLastBet is how many times in a row you have skipped - a long run means you have stopped gathering the results you learn from, so take any real edge you find. whatSkippingHasCost scores the windows you passed on, one contract on the side the maths liked: a positive netUsd there means your skipping is costing you money, and you should be betting more of those spots, not fewer.
 Paper only. Answer only by calling place_bet."""
 
         val REFLECT_SYSTEM = """You are the PAPER BETTING AI looking back on one settled Bitcoin 15-minute window you bet on. You get how it finished, your bets (side, price, confidence, the fair price at entry, your reason, your bull and bear cases), your calibration, your record overall and your record in spots like this one.
@@ -430,6 +516,7 @@ Rules for the lesson:
 - One window is one sample. If the matching row has fewer than $MIN_FOR_RULE settled bets, write what happened and that it may be luck - do NOT write a rule telling yourself to avoid the setup.
 - A lesson that would stop you betting ("avoid", "stay out", "wait for clearer bias") needs the numbers to back it: a losing row of at least $MIN_FOR_RULE bets. Otherwise say what would have made the bet better (a better price, more time left, a bigger gap to the strike, a different side), not that you should not have bet.
 - Prefer a lesson that tells you what to DO. You only learn by betting, and lessons are only written about windows you bet on, so a wall of "stay out" leaves you nothing to learn from.
+- whatSkippingHasCost is the windows you passed on, scored the same way: if skipping is making money, say so; if it is losing money, a "stay out" lesson is the wrong lesson.
 - One losing window after a good decision is variance, not a mistake. Say so when the price and your confidence were right.
 Answer only by calling write_lesson."""
 

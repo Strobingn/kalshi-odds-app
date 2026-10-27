@@ -13,8 +13,19 @@ class LateWindowKnobsTest {
 
     private fun runner(knobs: Map<String, ScalpKnobs>, fair: Double = 0.98) = PaperScalper(
         model = null, ledger = ScalperLedger(), topOfBook = { null }, bookLevels = { null }, closeMs = { 900_000L },
-        engine = ScalperEngine(tuning = ScalpTuning(knobs)), fairYes = { _, _ -> fair }, strategies = listOf(base)
+        engine = ScalperEngine(tuning = tuningFor(knobs)), fairYes = { _, _ -> fair }, strategies = listOf(base)
     )
+
+    /**
+     * [knobs] on top of the strategy's researched band. These tests are about the late-window settings, not about
+     * the arena's 15–58¢, so the favourite keeps its own prices unless [knobs] names a band itself.
+     */
+    private fun tuningFor(knobs: Map<String, ScalpKnobs>): ScalpTuning {
+        val tuning = ScalpTuning(knobs)
+        val k = tuning.knobs(base)
+        if (k.entryMinCents == null && k.entryMaxCents == null) tuning.useOwnBands(base)
+        return tuning
+    }
 
     private fun prints(s: PaperScalper, from: Int, to: Int, bid: Double, ask: Double) {
         for (sec in from..to) {

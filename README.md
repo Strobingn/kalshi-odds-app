@@ -19,6 +19,28 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.25.0 (Claude branch): 15–58¢ for every strategy, and the AI learns from the windows it skips
+
+**Every strategy buys 15–58¢** (`ScalpBand.ALL_STRATEGIES_USE_DEFAULT`, you asked for it "for all models"), whatever
+band it declares for itself. The declarations stay on `ScalpStrategy` because they say what each rule was researched
+on, but they no longer reach the engine.
+
+The cost is real and deliberate: a strategy whose signal **is** a price above 58¢ cannot fire any more — Late
+favourite (80–95¢), Early favourite (65–85¢), Heavy favourite (92–97¢), Momentum ride, Opening drive, Opening ride,
+Late tiebreak, Late edge and all five Kashi favourites. Long shot (10–20¢) trades only its 15–20¢ overlap. Set the
+flag to false to give every strategy its own band back; a band you set on one strategy with the sliders still wins
+either way, and the tuners may now only move a band about **inside** 15–58¢.
+
+The strategy card used to read "Trades between 10¢ and 90¢" for any strategy without its own band — `PrintGrid`'s
+quote gate rather than the arena's band. It now says the prices the strategy really buys at.
+
+**The Paper AI learns from the windows it skips.** Lessons were only ever written about windows it *bet* on, so
+"stay out" was unfalsifiable: skipping produced no evidence, and the lessons telling it to skip could never be
+contradicted. Now the first skip of each window is kept with the asks it turned down, and when the window settles
+the side the maths liked is scored as if one contract had been bought. Both prompts carry `whatSkippingHasCost`
+(how many it passed up, how many would have won, the net), and the reflection is told that if skipping is losing
+money then "stay out" is the wrong lesson.
+
 ## 1.24.0 (Claude branch): the tuners can no longer squeeze a band shut, and the Paper AI stops inventing history
 
 **A tuner may move one end of an entry band, not squeeze it shut.** The Scalping AI and the live tuner may step

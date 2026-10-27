@@ -54,8 +54,9 @@ class ScalpTuningTest {
     @Test
     fun yourStopAndTimeOutApplyAndAHoldCanBeGivenAStop() {
         val tuning = ScalpTuning()
-        tuning.set(ScalpStrategy.DIP_HUNTER, ScalpKnobs(stopCents = 10.0, timeoutSeconds = 300))
-        tuning.set(ScalpStrategy.LATE_FAVORITE, ScalpKnobs(stopCents = 10.0))
+        tuning.useOwnBands()
+        tuning.set(ScalpStrategy.DIP_HUNTER, tuning.knobs(ScalpStrategy.DIP_HUNTER).copy(stopCents = 10.0, timeoutSeconds = 300))
+        tuning.set(ScalpStrategy.LATE_FAVORITE, tuning.knobs(ScalpStrategy.LATE_FAVORITE).copy(stopCents = 10.0))
         val e = ScalperEngine(tuning = tuning)
         e.buyNow(ScalpStrategy.DIP_HUNTER, t, "YES", 0.50, noQueue, 0L)
         assertTrue("2¢ down is no longer the stop, 30 s is no longer the time-out", e.onClock(t, 60_000L, 0.48, 0.51).isEmpty())
@@ -67,8 +68,9 @@ class ScalpTuningTest {
     @Test
     fun aSwitchedOffStrategyOpensNothingAndATriggerMovesItsSignal() {
         val tuning = ScalpTuning()
-        tuning.set(ScalpStrategy.KASHI_FAV_STRICT, ScalpKnobs(enabled = false))
-        tuning.set(ScalpStrategy.KASHI_FAV_97, ScalpKnobs(trigger = 99.0))
+        tuning.useOwnBands()
+        tuning.set(ScalpStrategy.KASHI_FAV_STRICT, tuning.knobs(ScalpStrategy.KASHI_FAV_STRICT).copy(enabled = false))
+        tuning.set(ScalpStrategy.KASHI_FAV_97, tuning.knobs(ScalpStrategy.KASHI_FAV_97).copy(trigger = 99.0))
         val s = PaperScalper(
             model = null, ledger = ScalperLedger(), topOfBook = { null }, bookLevels = { null }, closeMs = { 900_000L },
             engine = ScalperEngine(tuning = tuning), fairYes = { _, _ -> 0.98 }, strategies = ScalpStrategy.values().toList()
@@ -154,8 +156,11 @@ class ScalpTuningTest {
     fun oneSideOnlyAWindowAndASpreadLimitStopTheBuy() {
         val st = ScalpStrategy.KASHI_FAV_BASE
         fun run(knobs: ScalpKnobs): Int {
-            val tuning = ScalpTuning()
-            tuning.set(st, knobs)
+            val tuning = ScalpTuning().useOwnBands(st)
+            tuning.set(st, tuning.knobs(st).copy(
+                side = knobs.side, fromMinute = knobs.fromMinute, untilMinute = knobs.untilMinute,
+                maxSpreadCents = knobs.maxSpreadCents
+            ))
             val s = lateFavWindow(tuning)
             runWindow(s, t, 0L)
             return s.engine.workingFor(st, t, "YES")
@@ -175,8 +180,8 @@ class ScalpTuningTest {
         val t3 = "KXBTC15M-26OCT101215-15"
         val day = 86_400_000L
         val closes = mapOf(t to 900_000L, t2 to 1_800_000L, t3 to day + 900_000L)
-        val tuning = ScalpTuning()
-        tuning.set(st, ScalpKnobs(dailyLossUsd = 5.0))
+        val tuning = ScalpTuning().useOwnBands(st)
+        tuning.set(st, tuning.knobs(st).copy(dailyLossUsd = 5.0))
         val s = lateFavWindow(tuning, { closes[it] })
         runWindow(s, t, 0L)
         assertEquals(1, s.engine.workingFor(st, t, "YES"))

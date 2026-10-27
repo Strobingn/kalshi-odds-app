@@ -22,7 +22,7 @@ class BandSqueezeTest {
         val tuning = ScalpTuning()
         tuning.set(st, ScalpKnobs(entryMinCents = 53.0, entryMaxCents = 70.0))
         val r = SupervisorBounds.apply(tuning, st.name, "entryMaxCents", 54.0)
-        assertTrue(r is SupervisorBounds.Change.Applied)
+        assertTrue("$r", r is SupervisorBounds.Change.Applied)
         val (lo, hi) = bandOf(tuning)
         assertEquals("the top moved where the tuner asked", 54L, hi)
         assertEquals("and the bottom gave way to keep 10¢ of room", 44L, lo)
@@ -31,11 +31,11 @@ class BandSqueezeTest {
     @Test
     fun raisingTheBottomPushesTheTopUp() {
         val tuning = ScalpTuning()
-        tuning.set(st, ScalpKnobs(entryMinCents = 50.0, entryMaxCents = 56.0))
-        assertTrue(SupervisorBounds.apply(tuning, st.name, "entryMinCents", 55.0) is SupervisorBounds.Change.Applied)
+        tuning.set(st, ScalpKnobs(entryMinCents = 40.0, entryMaxCents = 46.0))
+        assertTrue(SupervisorBounds.apply(tuning, st.name, "entryMinCents", 45.0) is SupervisorBounds.Change.Applied)
         val (lo, hi) = bandOf(tuning)
-        assertEquals(55L, lo)
-        assertEquals(65L, hi)
+        assertEquals(45L, lo)
+        assertEquals(55L, hi)
     }
 
     @Test
@@ -52,12 +52,15 @@ class BandSqueezeTest {
     }
 
     @Test
-    fun theWholeRangeIsStillReachable() {
+    fun aTunerStaysInsideTheArenasOwnBand() {
         val tuning = ScalpTuning()
-        tuning.set(st, ScalpKnobs(entryMinCents = 50.0, entryMaxCents = 95.0))
-        assertTrue(SupervisorBounds.apply(tuning, st.name, "entryMinCents", 80.0) is SupervisorBounds.Change.Applied)
-        assertEquals("a favourite can still be moved up", 80L, bandOf(tuning).first)
-        assertTrue(bandOf(tuning).second >= 90L)
+        tuning.set(st, ScalpKnobs(entryMinCents = 20.0, entryMaxCents = 40.0))
+        // It may move the band about inside 15-58c...
+        assertTrue(SupervisorBounds.apply(tuning, st.name, "entryMinCents", 30.0) is SupervisorBounds.Change.Applied)
+        assertEquals(30L, bandOf(tuning).first)
+        // ...but not take a strategy back out to the favourites the arena no longer buys.
+        SupervisorBounds.apply(tuning, st.name, "entryMaxCents", 95.0)
+        assertTrue("clamped to the arena's top", bandOf(tuning).second <= 58L)
     }
 
     // ---- the repair of bands already saved ----
@@ -73,25 +76,15 @@ class BandSqueezeTest {
     }
 
     @Test
-    fun clearingAStrangledBandGivesTheStrategyItsOwnBack() {
+    fun clearingAStrangledBandGivesTheArenaBandBack() {
         val tuning = ScalpTuning()
         tuning.set(st, ScalpKnobs(entryMinCents = 53.0, entryMaxCents = 54.0, contracts = 7))
         assertEquals(53L to 54L, bandOf(tuning))
 
         val k = tuning.knobs(st)
         tuning.set(st, k.copy(entryMinCents = null, entryMaxCents = null))
-        assertEquals("Kashi's last-45s favourite buys 50–95¢ again", 50L to 95L, bandOf(tuning))
+        assertEquals("back to the arena's 15-58c", 15L to 58L, bandOf(tuning))
         assertEquals("the rest of its settings are untouched", 7, tuning.tuned(st).contracts)
-    }
-
-    @Test
-    fun aStrategyWithNoBandOfItsOwnFallsBackToTheArenaBand() {
-        val tuning = ScalpTuning()
-        val quiet = ScalpStrategy.LATE_COMEBACK
-        tuning.set(quiet, ScalpKnobs(entryMinCents = 30.0, entryMaxCents = 31.0))
-        assertTrue(ScalpBand.strangled(tuning.knobs(quiet)))
-        tuning.set(quiet, tuning.knobs(quiet).copy(entryMinCents = null, entryMaxCents = null))
-        assertEquals(15L to 57L, bandOf(tuning, quiet))
-        assertNull(tuning.knobs(quiet).entryMinCents)
+        assertNull(tuning.knobs(st).entryMinCents)
     }
 }
