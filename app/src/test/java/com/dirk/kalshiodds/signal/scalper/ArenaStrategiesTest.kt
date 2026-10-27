@@ -14,6 +14,14 @@ import org.junit.Test
 /** The arena: the eight strategies added in 1.9.0, the leaderboard and the status panel. Paper only. */
 class ArenaStrategiesTest {
 
+    /**
+     * The fee and P&L maths here is written for a 10-contract order, so these tests name that size instead of
+     * riding on [ScalpTuning.DEFAULT_CONTRACTS] (100 since 1.23.0) and changing meaning when the default moves.
+     */
+    private fun engine(tuning: ScalpTuning = ScalpTuning()) =
+        ScalperEngine(ScalperEngine.Config(contracts = 10), tuning)
+
+
     private val t = "KXBTC15M-26OCT091215-15"
     private val noQueue: (String, Double) -> Double? = { _, _ -> 0.0 }
     private val fee = KalshiFee.TAKER_COEFFICIENT
@@ -23,7 +31,8 @@ class ArenaStrategiesTest {
         ledger = ScalperLedger(),
         topOfBook = { top() },
         bookLevels = { null },
-        closeMs = { 900_000L }, strategies = ScalpStrategy.values().toList()
+        closeMs = { 900_000L }, strategies = ScalpStrategy.values().toList(),
+        engine = engine()
     )
 
     /** One second of two-sided prints: takers sell YES at [bid] and buy YES at [ask]. */
@@ -48,7 +57,7 @@ class ArenaStrategiesTest {
 
     @Test
     fun holdStrategiesHaveNoExitAndRideToTheSettlement() {
-        val e = ScalperEngine()
+        val e = engine()
         val buy = e.buyNow(ScalpStrategy.LATE_FAVORITE, t, "YES", 0.85, noQueue, 0L)
         assertEquals(2, buy.size)
         // A print far above the entry, a bid far below it and ten minutes: a scalp would have closed by now.
@@ -59,7 +68,7 @@ class ArenaStrategiesTest {
         assertEquals(ExitKind.SETTLED, won.kind)
         assertEquals((1.0 - 0.85) * 10 - KalshiFee.total(10, 0.85, fee), won.pnlUsd, 1e-9)
 
-        val lost = ScalperEngine().let { e2 ->
+        val lost = engine().let { e2 ->
             e2.buyNow(ScalpStrategy.LONG_SHOT, t, "NO", 0.15, noQueue, 0L)
             e2.settle(t, "yes", 900_000L).filterIsInstance<ScalpEvent.Closed>().single().scalp
         }
@@ -68,7 +77,7 @@ class ArenaStrategiesTest {
 
     @Test
     fun eachStrategyTradesOnlyInsideItsOwnPriceBand() {
-        val e = ScalperEngine()
+        val e = engine()
         assertEquals(2, e.buyNow(ScalpStrategy.LATE_FAVORITE, t, "YES", 0.92, noQueue, 0L).size)
         assertTrue("late favorite starts at 80¢", e.buyNow(ScalpStrategy.LATE_FAVORITE, t, "NO", 0.75, noQueue, 0L).isEmpty())
         assertTrue("the original scalpers stop at 90¢", e.buyNow(ScalpStrategy.DIP_HUNTER, t, "YES", 0.92, noQueue, 0L).isEmpty())
@@ -259,7 +268,7 @@ class ArenaStrategiesTest {
         assertEquals(old, ScalperState.upgraded(old) { error("disk full") })
         // ...and trading on it does not stamp it current, so that next start still archives it.
         val ledger = ScalperLedger(initial = old)
-        ledger.apply(ScalperEngine().buyNow(ScalpStrategy.MOMENTUM_SNIPER, t, "YES", 0.40, { _, _ -> null }, 1_000L))
+        ledger.apply(engine().buyNow(ScalpStrategy.MOMENTUM_SNIPER, t, "YES", 0.40, { _, _ -> null }, 1_000L))
         assertEquals(2, ledger.snapshot().version)
     }
 

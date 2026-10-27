@@ -15,6 +15,13 @@ class ScalperEngineTest {
     private val t = "KXBTC15M-26OCT091215-15"
     private val noQueue: (String, Double) -> Double? = { _, _ -> 0.0 }
 
+    /**
+     * The fill and fee maths below is written for a 10-contract order, so these tests name that size instead of
+     * riding on [ScalpTuning.DEFAULT_CONTRACTS] (100 since 1.23.0) and changing meaning when the default moves.
+     */
+    private fun engine(tuning: ScalpTuning = ScalpTuning()) =
+        ScalperEngine(ScalperEngine.Config(contracts = 10), tuning)
+
     private fun closed(events: List<ScalpEvent>): ClosedScalp =
         events.filterIsInstance<ScalpEvent.Closed>().single().scalp
 
@@ -22,7 +29,7 @@ class ScalperEngineTest {
 
     @Test
     fun restingBidFillsOnlyAfterTheQueueAndItsOwnSizeHaveTraded() {
-        val e = ScalperEngine()
+        val e = engine()
         val posted = e.post(ScalpStrategy.ML_REST, t, "YES", 0.50, queueAhead = 100.0, predictionCents = 0.4, expectedCents = 0.17, nowMs = 0L)!!
         assertEquals(QueueBucket.FRONT, posted.order.bucket)
         // A taker buying YES does not touch a YES bid.
@@ -36,7 +43,7 @@ class ScalperEngineTest {
 
     @Test
     fun aPrintThroughThePriceFillsAtOnceWhateverTheQueue() {
-        val e = ScalperEngine()
+        val e = engine()
         e.post(ScalpStrategy.ML_REST, t, "YES", 0.50, 5_000.0, 0.4, -1.7, 0L)
         assertTrue(e.onTrade(t, false, 0.49, 10.0, 1_000L, noQueue).single() is ScalpEvent.Filled)
     }
@@ -44,7 +51,7 @@ class ScalperEngineTest {
     @Test
     fun aPaperBidGetsOnlyTheContractsThatReallyTraded() {
         // 1.20.10: a 1,000,000,000-contract paper bid used to fill whole on a 5-contract print through its price.
-        val e = ScalperEngine()
+        val e = engine()
         e.post(ScalpStrategy.ML_REST, t, "YES", 0.50, 0.0, 0.4, 0.4, 0L, contracts = 1_000_000_000)
         assertTrue(e.onTrade(t, false, 0.49, 5.0, 1_000L, noQueue).isEmpty())
         assertTrue(e.onTrade(t, false, 0.50, 7.0, 2_000L, noQueue).isEmpty())
@@ -56,7 +63,7 @@ class ScalperEngineTest {
 
     @Test
     fun aPartlyFilledBidHoldsItsPartAndAPartlySoldTargetAveragesTheExit() {
-        val e = ScalperEngine()
+        val e = engine()
         e.post(ScalpStrategy.ML_REST, t, "YES", 0.50, 0.0, 0.4, 0.4, 0L)
         e.onTrade(t, false, 0.49, 4.0, 1_000L, noQueue)
         val f = e.onClock(t, 20_001L, 0.50, 0.49).single() as ScalpEvent.Filled
@@ -71,7 +78,7 @@ class ScalperEngineTest {
 
     @Test
     fun aBidPartlyFilledAtTheCloseSettlesItsPart() {
-        val e = ScalperEngine()
+        val e = engine()
         e.post(ScalpStrategy.FLOW_FADE, t, "YES", 0.50, 0.0, 0.0, 0.0, 0L)
         e.onTrade(t, false, 0.49, 6.0, 1_000L, noQueue)
         val c = closed(e.settle(t, "yes", 5_000L))
@@ -81,7 +88,7 @@ class ScalperEngineTest {
 
     @Test
     fun unfilledBidIsCancelledAfterTwentySeconds() {
-        val e = ScalperEngine()
+        val e = engine()
         e.post(ScalpStrategy.ML_REST, t, "YES", 0.50, 100.0, 0.4, 0.17, 0L)
         assertTrue(e.onClock(t, 20_000L, 0.50, 0.49).isEmpty())
         assertTrue(e.onClock(t, 20_001L, 0.50, 0.49).single() is ScalpEvent.Unfilled)
@@ -90,7 +97,7 @@ class ScalperEngineTest {
 
     @Test
     fun downSideBidIsHitByTakersBuyingUp() {
-        val e = ScalperEngine()
+        val e = engine()
         e.post(ScalpStrategy.ML_REST, t, "NO", 0.40, 0.0, 0.4, 0.4, 0L)
         // NO bid at 40¢ = YES offer at 60¢: a taker buying YES at 60¢ for 10 fills it.
         assertTrue(e.onTrade(t, takerYes = false, yesPrice = 0.60, contracts = 50.0, nowMs = 500L, exitQueue = noQueue).isEmpty())
@@ -105,7 +112,7 @@ class ScalperEngineTest {
 
     @Test
     fun targetPaysOneCentAContractWithNoFee() {
-        val e = ScalperEngine()
+        val e = engine()
         e.post(ScalpStrategy.ML_REST, t, "YES", 0.50, 0.0, 0.4, 0.4, 0L)
         e.onTrade(t, false, 0.50, 10.0, 1_000L) { _, _ -> 30.0 }
         // Offer at 51¢ behind 30: 30 + our 10 must trade there.
@@ -120,7 +127,7 @@ class ScalperEngineTest {
 
     @Test
     fun stopSellsAtTheBidAndPaysTheTakerFee() {
-        val e = ScalperEngine()
+        val e = engine()
         e.post(ScalpStrategy.ML_REST, t, "YES", 0.50, 0.0, 0.4, 0.4, 0L)
         e.onTrade(t, false, 0.50, 10.0, 1_000L, noQueue)
         assertTrue("3¢ down is not the stop", e.onClock(t, 2_000L, bidYes = 0.47, bidNo = 0.52).isEmpty())
@@ -133,7 +140,7 @@ class ScalperEngineTest {
 
     @Test
     fun timeOutSellsAtTheBidAfterTheStrategysLimit() {
-        val e = ScalperEngine()
+        val e = engine()
         e.post(ScalpStrategy.ML_REST, t, "YES", 0.50, 0.0, 0.4, 0.4, 0L)
         e.onTrade(t, false, 0.50, 10.0, 1_000L, noQueue)
         assertTrue(e.onClock(t, 120_999L, 0.50, 0.49).isEmpty())
@@ -149,7 +156,7 @@ class ScalperEngineTest {
 
     @Test
     fun settlementPaysOpenScalpsAndDropsUnfilledBids() {
-        val e = ScalperEngine()
+        val e = engine()
         e.post(ScalpStrategy.ML_REST, t, "YES", 0.50, 0.0, 0.4, 0.4, 0L)
         e.onTrade(t, false, 0.50, 10.0, 1_000L, noQueue)
         e.post(ScalpStrategy.ML_REST, t, "NO", 0.45, 0.0, 0.4, 0.4, 2_000L)
@@ -164,7 +171,7 @@ class ScalperEngineTest {
 
     @Test
     fun aVoidBooksNothing() {
-        val e = ScalperEngine()
+        val e = engine()
         e.buyNow(ScalpStrategy.DIP_HUNTER, t, "YES", 0.50, noQueue, 0L)
         assertEquals(0.0, closed(e.settle(t, "void", 1_000L)).pnlUsd, 0.0)
     }
@@ -173,43 +180,44 @@ class ScalperEngineTest {
 
     @Test
     fun buyNowPaysTheAskAndTheFeeAndRestsItsOfferAtOnce() {
-        val e = ScalperEngine()
-        val out = e.buyNow(ScalpStrategy.MOMENTUM_SNIPER, t, "YES", 0.60, noQueue, 0L)
+        val e = engine()
+        val out = e.buyNow(ScalpStrategy.MOMENTUM_SNIPER, t, "YES", 0.50, noQueue, 0L)
         assertEquals(2, out.size)
         val order = (out[0] as ScalpEvent.Posted).order
-        val fee = KalshiFee.total(10, 0.60)
+        val fee = KalshiFee.total(10, 0.50)
         assertEquals(fee, order.entryFeeUsd, 1e-9)
         assertNull("a buy-now entry has no entry queue", order.bucket)
         assertEquals(0 to 1, e.working(t))
-        // +2¢ target: 62¢. The win is 2¢ × 10 minus the entry fee.
-        val c = closed(e.onTrade(t, true, 0.62, 10.0, 5_000L, noQueue))
+        // +2¢ target: 52¢. The win is 2¢ × 10 minus the entry fee.
+        val c = closed(e.onTrade(t, true, 0.52, 10.0, 5_000L, noQueue))
         assertEquals(ExitKind.TARGET, c.kind)
         assertEquals(0.20 - fee, c.pnlUsd, 1e-9)
     }
 
     @Test
     fun buyNowStopAndTimeOutPayBothFees() {
-        val e = ScalperEngine()
-        e.buyNow(ScalpStrategy.DIP_HUNTER, t, "YES", 0.60, noQueue, 0L)
-        val c = closed(e.onClock(t, 4_000L, bidYes = 0.58, bidNo = 0.41))
+        val e = engine()
+        e.buyNow(ScalpStrategy.DIP_HUNTER, t, "YES", 0.50, noQueue, 0L)
+        val c = closed(e.onClock(t, 4_000L, bidYes = 0.48, bidNo = 0.51))
         assertEquals(ExitKind.STOP, c.kind)
-        assertEquals((0.58 - 0.60) * 10 - KalshiFee.total(10, 0.60) - KalshiFee.total(10, 0.58), c.pnlUsd, 1e-9)
-        e.buyNow(ScalpStrategy.DIP_HUNTER, t, "YES", 0.60, noQueue, 10_000L)
-        assertTrue(e.onClock(t, 39_999L, 0.59, 0.40).isEmpty())
-        assertEquals(ExitKind.TIMEOUT, closed(e.onClock(t, 40_000L, 0.59, 0.40)).kind)
+        assertEquals((0.48 - 0.50) * 10 - KalshiFee.total(10, 0.50) - KalshiFee.total(10, 0.48), c.pnlUsd, 1e-9)
+        e.buyNow(ScalpStrategy.DIP_HUNTER, t, "YES", 0.50, noQueue, 10_000L)
+        assertTrue(e.onClock(t, 39_999L, 0.49, 0.50).isEmpty())
+        assertEquals(ExitKind.TIMEOUT, closed(e.onClock(t, 40_000L, 0.49, 0.50)).kind)
     }
 
     @Test
     fun eachStrategyHoldsSeveralPositionsAtOnceUpToItsLimit() {
-        val e = ScalperEngine()
+        val e = engine()
         repeat(ScalpStrategy.DIP_HUNTER.maxPerSide) {
-            assertEquals(2, e.buyNow(ScalpStrategy.DIP_HUNTER, t, "YES", 0.60, noQueue, it * 2_000L).size)
+            assertEquals(2, e.buyNow(ScalpStrategy.DIP_HUNTER, t, "YES", 0.50, noQueue, it * 2_000L).size)
         }
-        assertTrue("the limit is per strategy and side", e.buyNow(ScalpStrategy.DIP_HUNTER, t, "YES", 0.60, noQueue, 99_000L).isEmpty())
-        assertEquals(2, e.buyNow(ScalpStrategy.DIP_HUNTER, t, "NO", 0.41, noQueue, 99_000L).size)
-        assertEquals(2, e.buyNow(ScalpStrategy.MOMENTUM_SNIPER, t, "YES", 0.60, noQueue, 99_000L).size)
+        assertTrue("the limit is per strategy and side", e.buyNow(ScalpStrategy.DIP_HUNTER, t, "YES", 0.50, noQueue, 99_000L).isEmpty())
+        assertEquals(2, e.buyNow(ScalpStrategy.DIP_HUNTER, t, "NO", 0.49, noQueue, 99_000L).size)
+        assertEquals(2, e.buyNow(ScalpStrategy.MOMENTUM_SNIPER, t, "YES", 0.50, noQueue, 99_000L).size)
         assertEquals(0 to (ScalpStrategy.DIP_HUNTER.maxPerSide + 2), e.working(t))
-        assertNull("outside 10–90¢ nothing is posted", e.post(ScalpStrategy.ML_REST, t, "YES", 0.95, 0.0, 1.0, 1.0, 0L))
+        assertNull("above the arena's 57¢ nothing is posted", e.post(ScalpStrategy.ML_REST, t, "YES", 0.95, 0.0, 1.0, 1.0, 0L))
+        assertNull("and nothing below its 15¢", e.post(ScalpStrategy.ML_REST, t, "YES", 0.09, 0.0, 1.0, 1.0, 0L))
         assertTrue(e.buyNow(ScalpStrategy.DIP_HUNTER, "KXBTC15M-OTHER", "YES", 0.05, noQueue, 0L).isEmpty())
     }
 
@@ -220,7 +228,7 @@ class ScalperEngineTest {
         val saved = ArrayList<ScalperState>()
         var now = 0L
         val ledger = ScalperLedger(persist = { saved += it }, nowMs = { now }, persistEveryMs = 15_000L)
-        val e = ScalperEngine()
+        val e = engine()
         // ML scalp from the front of the queue: wins 10¢.
         val a = e.post(ScalpStrategy.ML_REST, t, "YES", 0.50, 50.0, 0.40, 0.28, 0L)!!
         ledger.apply(listOf(a))

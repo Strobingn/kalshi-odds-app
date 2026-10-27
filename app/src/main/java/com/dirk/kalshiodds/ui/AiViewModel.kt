@@ -60,10 +60,10 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun idOf(name: String) = com.dirk.kalshiodds.signal.scalper.LlmProvider.NAMES.entries.firstOrNull { it.value == name }?.key ?: name.lowercase()
 
-    private fun rotationLine(): String {
-        val r = container.llmRotation.state.value
-        return "Now using ${r.provider.replaceFirstChar { it.uppercase() }} · ${r.calls} of ${r.every} calls, then the next provider with a key"
-    }
+    private fun rotationLine(): String =
+        container.llmSpeed.line(
+            com.dirk.kalshiodds.signal.scalper.LlmProvider.NAMES.keys.filter { container.llmKey(it).isNotBlank() }
+        )
 
     private fun keysNow() = AiKeysState(
         rotation = rotationLine(),
@@ -215,37 +215,6 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 delay(5_000L)
             }
-        }
-    }
-
-    // ---- Gemma 4 on the phone (replaces the cloud AI)
-
-    val gemma: StateFlow<com.dirk.kalshiodds.llm.GemmaState> = container.gemma.state
-    private val _gemmaTest = MutableStateFlow("")
-    val gemmaTest: StateFlow<String> = _gemmaTest.asStateFlow()
-    private val _gemmaTesting = MutableStateFlow(false)
-    val gemmaTesting: StateFlow<Boolean> = _gemmaTesting.asStateFlow()
-
-    fun downloadGemma(m: com.dirk.kalshiodds.llm.GemmaModel) = container.gemma.download(m)
-    fun cancelGemma() = container.gemma.cancelTransfer()
-    fun chooseGemma(m: com.dirk.kalshiodds.llm.GemmaModel) = container.gemma.choose(m)
-    fun deleteGemma(m: com.dirk.kalshiodds.llm.GemmaModel) = container.gemma.delete(m)
-
-    fun testGemma() {
-        if (_gemmaTesting.value) return
-        _gemmaTesting.value = true
-        _gemmaTest.value = ""
-        viewModelScope.launch(Dispatchers.IO) {
-            val r = container.gemma.generate(
-                system = "You are a concise assistant inside a paper-trading app.",
-                user = "In two short sentences, say what a 1 cent scalp on a 15-minute Bitcoin up/down market is.",
-                maxOutputTokens = 120
-            ) { partial -> _gemmaTest.value = partial }
-            _gemmaTest.value = r.fold(
-                { a -> a.text + String.format(java.util.Locale.US, "\n\n%.1f s · %s on %s", a.millis / 1000.0, a.model, container.gemma.state.value.backend.ifBlank { "?" }) },
-                { e -> "Failed: ${e.message}" }
-            )
-            _gemmaTesting.value = false
         }
     }
 

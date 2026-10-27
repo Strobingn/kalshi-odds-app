@@ -336,14 +336,22 @@ class AppContainer(context: Context) {
         }
     }
 
-    /** Both AIs and the chat share one provider: 500 answered calls each, then the next one with a key. */
-    val llmRotation = com.dirk.kalshiodds.signal.scalper.LlmRotation(
-        names = ALL_LLM,
-        every = 500,
-        hasKey = { n -> llmKey(n).isNotBlank() },
-        load = { supervisorPrefs.getString("rotation_provider", null)?.let { it to supervisorPrefs.getInt("rotation_calls", 0) } },
-        save = { n, c -> supervisorPrefs.edit().putString("rotation_provider", n).putInt("rotation_calls", c).apply() }
-    )
+    /**
+     * Both AIs, the chat and the writer share one speed table: whichever provider with a key answers quickest right
+     * now takes the call, and one that has hit its free-tier limit rests while the next-fastest answers.
+     */
+    val llmSpeed = com.dirk.kalshiodds.signal.scalper.LlmSpeed()
+
+    /** The providers a call may go to now. */
+    private fun keyedLlms(): List<String> = ALL_LLM.filter { llmKey(it).isNotBlank() }
+
+    /**
+     * The client the live AIs call on. A provider that has not answered in [LIVE_CALL_TIMEOUT_S] is abandoned so the
+     * next-fastest one still answers inside the same tick; the slow one's time goes up and it drops down the order.
+     */
+    private val liveHttp = okhttp3.OkHttpClient.Builder()
+        .callTimeout(LIVE_CALL_TIMEOUT_S, java.util.concurrent.TimeUnit.SECONDS)
+        .build()
 
     /** Every AI call, change, verdict and paper bet, for the AI tab's charts. Kept on the phone. */
     val aiActivity = com.dirk.kalshiodds.signal.scalper.AiActivity(
@@ -375,39 +383,10 @@ class AppContainer(context: Context) {
     private fun llmError(kind: String): (String) -> Unit =
         { msg -> supervisorLog.append(kind, "{\"ts\":${System.currentTimeMillis()},\"error\":\"$msg\"}") }
 
-    private val gemmaPrefs = app.getSharedPreferences("bitcoin_claude_gemma", Context.MODE_PRIVATE)
-    private val gemmaScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
-
-    /** Gemma 4 on the phone (LiteRT-LM): replaces the cloud AI once downloaded (AI → Keys). */
-    val gemma = com.dirk.kalshiodds.llm.Gemma(
-        dir = File(app.getExternalFilesDir(null) ?: app.filesDir, "gemma"),
-        cacheDir = app.cacheDir,
-        scope = gemmaScope,
-        prefs = object : com.dirk.kalshiodds.llm.Gemma.Prefs {
-            override var chosen: String?
-                get() = gemmaPrefs.getString("chosen", null)
-                set(v) { gemmaPrefs.edit().putString("chosen", v).apply() }
-        }
-    )
-
-    /** Gemma first; the cloud keys only until Gemma is downloaded. */
-    private fun gemmaFirst(
-        cloud: com.dirk.kalshiodds.signal.scalper.HttpLlmChat,
-        errorKind: String,
-        ai: String,
-        maxTokens: Int = 1536
-    ) = com.dirk.kalshiodds.llm.GemmaFirstChat(
-        gemma = com.dirk.kalshiodds.llm.GemmaLlmChat(gemma, onError = llmError(errorKind), onCall = callsOf(ai), maxTokens = maxTokens),
-        cloud = cloud
-    )
-
-    /** Scalping AI: tunes the scalping algorithms every 60 s. Gemma on the phone (cloud keys until it's downloaded). */
+    /** Scalping AI: tunes the scalping algorithms every 60 s. Groq, Cerebras, Gemini and Mistral, rotating every 500 calls. */
     val llmSupervisor = com.dirk.kalshiodds.signal.scalper.LlmSupervisor(
         tuning = scalperStore.tuning,
-        chat = gemmaFirst(
-            com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders(*ALL_LLM.toTypedArray()), onError = llmError("errors"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.SCALPING), rotation = llmRotation),
-            "errors", com.dirk.kalshiodds.signal.scalper.AiEvent.SCALPING
-        ),
+        chat = com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders(*ALL_LLM.toTypedArray()), onError = llmError("errors"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.SCALPING), http = liveHttp, speed = llmSpeed),
         feed = { supervisorFeed() },
         stats = { name -> scalperStore.ledger.snapshot().stats(name) },
         sink = { kind, line -> supervisorLog.append(kind, line) },
@@ -418,15 +397,14 @@ class AppContainer(context: Context) {
                     .decodeFromString(com.dirk.kalshiodds.signal.scalper.SupervisorMemory.serializer(), it)
             }
         }.getOrNull() ?: com.dirk.kalshiodds.signal.scalper.SupervisorMemory(),
+        // The scalps it recorded before this launch, so a restart does not wipe what it learns from.
+        loadTrades = { supervisorLog.recentTrades(SUPERVISOR_SEED_TRADES) },
         onEvent = eventsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.SCALPING)
     )
 
-    /** Paper AI: a different AI. Decides paper bets every minute. Gemma on the phone (cloud keys until it's downloaded). Own memory and journal. */
+    /** Paper AI: a different AI. Decides paper bets every minute. Groq, Cerebras, Gemini and Mistral, rotating every 500 calls. Own memory and journal. */
     val paperAi = com.dirk.kalshiodds.signal.scalper.PaperAi(
-        chat = gemmaFirst(
-            com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders(*ALL_LLM.toTypedArray()), onError = llmError("paper_ai_errors"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.PAPER), rotation = llmRotation, maxTokens = 1200),
-            "paper_ai_errors", com.dirk.kalshiodds.signal.scalper.AiEvent.PAPER, maxTokens = 1200
-        ),
+        chat = com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders(*ALL_LLM.toTypedArray()), onError = llmError("paper_ai_errors"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.PAPER), http = liveHttp, speed = llmSpeed, maxTokens = 1200),
         feed = { supervisorFeed() },
         sink = { kind, line -> supervisorLog.append(kind, line) },
         persistMemory = { json -> supervisorPrefs.edit().putString("paper_ai_memory", json).apply() },
@@ -446,10 +424,7 @@ class AppContainer(context: Context) {
     )
 
     /** The chat screen: one thread per AI, history kept on the phone. */
-    private val chatLlm = gemmaFirst(
-        com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders(*ALL_LLM.toTypedArray()), onError = llmError("chat_errors"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.CHAT), rotation = llmRotation),
-        "chat_errors", com.dirk.kalshiodds.signal.scalper.AiEvent.CHAT, maxTokens = 900
-    )
+    private val chatLlm = com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders(*ALL_LLM.toTypedArray()), onError = llmError("chat_errors"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.CHAT), speed = llmSpeed)
     val aiChat = com.dirk.kalshiodds.signal.scalper.AiChat(
         ask = { msgs -> chatLlm.chat(msgs) },
         tuning = scalperStore.tuning,
@@ -486,19 +461,14 @@ class AppContainer(context: Context) {
         }
     )
 
-    /** Explain and the daily review: Gemma on the phone (cloud keys until it's downloaded). */
-    private val writerLlm = gemmaFirst(
-        com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders(*ALL_LLM.toTypedArray()), onError = llmError("writer_errors"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.CHAT), rotation = llmRotation),
-        "writer_errors", com.dirk.kalshiodds.signal.scalper.AiEvent.CHAT, maxTokens = 1200
-    )
+    /** Cloud fallback for Explain and the daily review: the same cloud keys and rotation as the chat. */
+    private val writerLlm = com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders(*ALL_LLM.toTypedArray()), onError = llmError("writer_errors"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.CHAT), speed = llmSpeed)
 
     val aiWriter = com.dirk.kalshiodds.llm.AiWriter(
         local = localLlm,
         cloud = { msgs -> writerLlm.chat(msgs) },
         cloudError = { writerLlm.lastError },
-        hasCloudKey = { writerLlm.hasKey },
-        // Gemma is far stronger than the small llama.cpp model, so once it's on the phone it writes everything.
-        skipLocal = { gemma.isReady }
+        hasCloudKey = { writerLlm.hasKey }
     )
 
     /** "Explain this trade" on the arena's trade cards. */
@@ -589,22 +559,24 @@ class AppContainer(context: Context) {
                 supervisorPrefs.edit().putBoolean(KEY_AI_OFFS_RESTORED, true).apply()
             }
         }
-        // Scalping AI: every 60 s, and early (at most every 20 s) on a new window, a fast move or a run of closed trades.
+        // Scalping AI: every SCALP_GAP_MS (longer only while every provider is resting off a free-tier limit), and
+        // sooner still on a new window, a fast move or a run of closed trades.
         supervisorScope.launch {
             kotlinx.coroutines.delay(5_000L)
             while (true) {
                 if (!anyLlmKey) {
                     if (extraSecrets.supervisorEnabled) llmSupervisor.idle("add a Groq, Cerebras, Gemini or Mistral key in AI → Keys to start")
-                    kotlinx.coroutines.withTimeoutOrNull(60_000L) { scalpKick.receive() }
+                    kotlinx.coroutines.withTimeoutOrNull(IDLE_GAP_MS) { scalpKick.receive() }
                     continue
                 }
                 if (extraSecrets.supervisorEnabled) runCatching { llmSupervisor.tick() }
                 lastScalpTickMs = System.currentTimeMillis()
                 closesSinceTick.set(0)
-                kotlinx.coroutines.withTimeoutOrNull(60_000L) { scalpKick.receive() }
+                kotlinx.coroutines.withTimeoutOrNull(llmSpeed.waitMs(keyedLlms(), SCALP_GAP_MS)) { scalpKick.receive() }
             }
         }
-        // Paper AI: every 60 s, or at once after keys are saved or it is switched on.
+        // Paper AI: every minute, or at once after keys are saved or it is switched on. It opens paper bets on each
+        // tick, so it keeps its own pace rather than the Scalping AI's.
         supervisorScope.launch {
             kotlinx.coroutines.delay(5_000L)
             while (true) {
@@ -613,7 +585,7 @@ class AppContainer(context: Context) {
                 } else if (extraSecrets.paperAiEnabled) {
                     runCatching { paperAi.tick() }
                 }
-                kotlinx.coroutines.withTimeoutOrNull(60_000L) { aiKick.receive() }
+                kotlinx.coroutines.withTimeoutOrNull(PAPER_AI_GAP_MS) { aiKick.receive() }
             }
         }
         // The live window, once a second: the live tuner learns the trades just closed, and the Scalping AI is called
@@ -665,7 +637,9 @@ class AppContainer(context: Context) {
             put("secondsIntoWindow", secIn)
             put("secondsLeft", 900 - secIn)
             cents(last)?.let { put("yesMidCents", it) }
-            for ((label, s) in listOf("change10sCents" to 10, "change30sCents" to 30, "change60sCents" to 60, "change180sCents" to 180)) {
+            put("feedAgeSeconds", w.mids.lastOrNull()?.let { secIn - it.first } ?: -1)
+            // The AI looks every SCALP_GAP_MS, so the shortest move it is shown is shorter than the gap between looks.
+            for ((label, s) in listOf("change5sCents" to 5, "change10sCents" to 10, "change30sCents" to 30, "change60sCents" to 60, "change180sCents" to 180)) {
                 val a = midAgo(s)
                 if (last != null && a != null) cents(last - a)?.let { put(label, it) }
             }
@@ -859,5 +833,27 @@ class AppContainer(context: Context) {
                 pnlUsd = paperSnap?.realizedPnlUsd
             )
         }
+    }
+
+    companion object {
+        /**
+         * How long the Scalping AI waits between looks at the live window when nothing in particular has happened.
+         * It reads a feed that moves every second, so it asks as often as the free tiers will answer: at ten seconds
+         * that is six calls a minute spread over the providers with a key, and [com.dirk.kalshiodds.signal.scalper.LlmSpeed]
+         * stretches the gap by itself whenever every provider is resting off a limit.
+         */
+        const val SCALP_GAP_MS = 10_000L
+
+        /** The Paper AI places bets on each tick, so it keeps its own, slower minute. */
+        const val PAPER_AI_GAP_MS = 60_000L
+
+        /** Waiting for a key, nothing to ask: look again in a minute. */
+        const val IDLE_GAP_MS = 60_000L
+
+        /** A live AI call that has not come back in this long is abandoned and the next-fastest provider answers. */
+        const val LIVE_CALL_TIMEOUT_S = 15L
+
+        /** Closed scalps the Scalping AI reads back off disk on its first tick, so a restart keeps its learning. */
+        const val SUPERVISOR_SEED_TRADES = 200
     }
 }

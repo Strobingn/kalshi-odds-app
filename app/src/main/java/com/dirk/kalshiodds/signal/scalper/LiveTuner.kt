@@ -119,10 +119,11 @@ class LiveTuner(
 }
 
 /**
- * When the Scalping AI should look again before its minute is up: a new window, a fast move in the market, or a run
- * of closed trades. At most once every [minSpacingMs].
+ * When the Scalping AI should look again before its next tick is due: a new window, a fast move in the market, or a
+ * run of closed trades. At most once every [minSpacingMs] — five seconds, so the AI is reading a window that has
+ * just moved rather than one that moved twenty seconds ago.
  */
-class LiveWindowWatch(private val minSpacingMs: Long = 20_000L) {
+class LiveWindowWatch(private val minSpacingMs: Long = 5_000L) {
     private var lastTicker: String? = null
 
     /** A reason to ask the Scalping AI now, or null. [lastTickMs] is when it last ran. */
@@ -139,7 +140,8 @@ class LiveWindowWatch(private val minSpacingMs: Long = 20_000L) {
     }
 
     companion object {
-        const val FAST_MOVE_CENTS = 4.0
-        const val CLOSES = 6
+        /** A 10-second move this big is worth a fresh look now, not at the next tick. */
+        const val FAST_MOVE_CENTS = 2.0
+        const val CLOSES = 3
     }
 }

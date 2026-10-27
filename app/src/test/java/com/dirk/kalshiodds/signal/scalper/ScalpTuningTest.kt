@@ -25,8 +25,9 @@ class ScalpTuningTest {
             assertEquals(st.name, st.timeoutMs, d.timeoutMs)
             assertEquals(st.name, st.maxPerSide, d.maxPerSide)
             assertEquals(st.name, st.cadenceSeconds, d.cadenceSeconds)
-            assertEquals(st.name, st.entryMin, d.entryMin, 0.0)
-            assertEquals(st.name, st.entryMax, d.entryMax, 0.0)
+            val (lo, hi) = ScalpBand.of(st)
+            assertEquals(st.name, lo, d.entryMin, 0.0)
+            assertEquals(st.name, hi, d.entryMax, 0.0)
             assertEquals(st.name, 0.123, d.triggerValue(0.123), 0.0)
             assertEquals("the rules read the same", ArenaTable.rules(st), ArenaTable.rules(st, d))
         }
@@ -37,7 +38,7 @@ class ScalpTuningTest {
     fun theEngineTradesOnYourSizeTargetAndBand() {
         val tuning = ScalpTuning()
         tuning.set(ScalpStrategy.BOUNCE, ScalpKnobs(contracts = 3, targetCents = 5.0, entryMinCents = 40.0, entryMaxCents = 60.0))
-        val e = ScalperEngine(tuning = tuning)
+        val e = ScalperEngine(ScalperEngine.Config(contracts = 10), tuning)
         assertTrue("outside your band", e.buyNow(ScalpStrategy.BOUNCE, t, "YES", 0.65, noQueue, 0L).isEmpty())
         val order = e.buyNow(ScalpStrategy.BOUNCE, t, "YES", 0.50, noQueue, 0L).filterIsInstance<ScalpEvent.Posted>().single().order
         assertEquals(3, order.contracts)

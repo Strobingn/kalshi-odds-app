@@ -84,6 +84,16 @@ class LiveLearningTest {
     }
 
     @Test
+    fun theWatchFollowsTheWindowInSecondsNotTensOfSeconds() {
+        val w = LiveWindowWatch()
+        assertNull("never ran yet", w.check(1_000L, "A", 0.0, 0, 0L))
+        assertNull("four seconds after the last look is still too soon", w.check(5_000L, "A", 9.0, 0, 1_000L))
+        assertNotNull("five seconds on, a 2¢ move is worth a look", w.check(6_000L, "A", LiveWindowWatch.FAST_MOVE_CENTS, 0, 1_000L))
+        assertNotNull("so is a short run of closed trades", w.check(6_000L, "A", 0.0, LiveWindowWatch.CLOSES, 1_000L))
+        assertNull("a 1¢ drift is not", w.check(6_000L, "A", 1.0, 0, 1_000L))
+    }
+
+    @Test
     fun aMicroScalpIsSoldBeforeTheClose() {
         val e = ScalperEngine()
         val st = ScalpStrategy.MICRO_BRTI_PULSE

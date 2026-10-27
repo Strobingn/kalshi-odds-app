@@ -26,9 +26,17 @@ class ScalperResultsTest {
     private val noQueue: (String, Double) -> Double? = { _, _ -> null }
     private val direct = Executor { it.run() }
 
+    /**
+     * The fee and P&L maths here is written for a 10-contract order, so these tests name that size instead of
+     * riding on [ScalpTuning.DEFAULT_CONTRACTS] (100 since 1.23.0) and changing meaning when the default moves.
+     */
+    private fun engine(tuning: ScalpTuning = ScalpTuning()) =
+        ScalperEngine(ScalperEngine.Config(contracts = 10), tuning)
+
+
     /** Three closed scalps (a win, a stop, a time-out) and one bid that expired, through the real engine. */
     private fun play(ledger: ScalperLedger, clock: (Long) -> Unit = {}) {
-        val e = ScalperEngine()
+        val e = engine()
         // 1. ML scalp, +1¢ on 10 contracts, no fee: +$0.10 at 2 s.
         ledger.apply(listOf(e.post(ScalpStrategy.ML_REST, t, "YES", 0.50, 50.0, 0.40, 0.28, 0L,
             ScalpContext(0.50, 0.51, 50.0, 800.0, 0.01, -0.02, floatArrayOf(0.505f, 0.01f, Float.NaN)))!!))
@@ -103,7 +111,7 @@ class ScalperResultsTest {
 
         // Far more buckets than the cap: the curve halves its detail, keeps its end and stays bounded.
         val big = ScalperLedger(hourOf = { 0 })
-        val e = ScalperEngine()
+        val e = engine()
         var total = 0.0
         for (i in 0 until 2_000) {
             val at = i * 60_000L
@@ -221,7 +229,7 @@ class ScalperResultsTest {
         assertEquals("3730000", unfilled[cols.indexOf("resolved_ms")])
 
         // A second flush appends (a second gzip member), it does not rewrite.
-        ledger.apply(ScalperEngine().buyNow(ScalpStrategy.MOMENTUM_SNIPER, t, "YES", 0.30, noQueue, 3_800_000L))
+        ledger.apply(engine().buyNow(ScalpStrategy.MOMENTUM_SNIPER, t, "YES", 0.30, noQueue, 3_800_000L))
         log.flush()
         assertEquals(3, log.recent(10).size)
 
