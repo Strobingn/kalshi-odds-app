@@ -108,7 +108,7 @@ object StrategyAlgo {
         val a = c.algo[code].orEmpty()
         if (a.isEmpty()) return s
         fun i(key: String) = a[key]?.takeIf { it.isFinite() }?.roundToInt()
-        return s.copy(
+        return PaperFleetDefaults.heal(s.copy(
             contracts = i("contracts")?.coerceIn(1, contractCap(c)) ?: s.contracts,
             minEntryCents = i("minEntryCents")?.coerceIn(1, 99) ?: s.minEntryCents,
             maxEntryCents = i("maxEntryCents")?.coerceIn(1, 99) ?: s.maxEntryCents,
@@ -117,7 +117,7 @@ object StrategyAlgo {
             maxHoldSeconds = i("maxHoldSeconds")?.coerceIn(0, 3600) ?: s.maxHoldSeconds,
             edgeCents = i("edgeCents")?.coerceIn(0, 30) ?: s.edgeCents,
             stopLossPercent = i("stopLossPercent")?.coerceIn(1, 99) ?: s.stopLossPercent
-        ).normalized()
+        ).normalized())
     }
 
     fun storedInt(c: ScalpControls, code: String, key: String, fallback: Int): Int {

@@ -57,11 +57,9 @@ internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: Sc
     fun set(next: ScalpStrategySettings) = onChange(next.manual())
     val spec = ScalpV2.spec(model.code)
     val enabled = model.code !in controls.disabledStrategies
-    val floor = com.dirk.kalshiodds.decision.ScalpFloors.cents(model.code)
-    val priceHi = if (com.dirk.kalshiodds.decision.ScalpFloors.isFavorite(model.code)) 99 else 55
-    val inheritedHigh = if (controls.manual) controls.maxAskCents else (spec.maxAsk * 100).roundToInt()
-    val high = maxOf(settings.minEntryCents, settings.maxEntryCents ?: inheritedHigh).coerceIn(floor + 1, priceHi)
-    val low = settings.minEntryCents.coerceIn(floor, high - 1)
+    val low = settings.minEntryCents.coerceIn(PaperFleetDefaults.BUY_MIN, 98)
+    val high = (settings.maxEntryCents ?: PaperFleetDefaults.BUY_MAX).coerceIn(low + 1, 99)
+    val buyKnobHi = maxOf(PaperFleetDefaults.BUY_MAX, high)
     LazyColumn(Modifier.fillMaxSize().background(c.bg), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item(key = "settings-header") {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -100,11 +98,8 @@ internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: Sc
                 ScalpModels.isResearch(model) -> {
                     StrategyKnob("Edge needed after fees", settings.edgeCents ?: Research.defaultEdge(model.code), 0..30, "KNOB_EDGE", { "$it¢" }) { set(settings.copy(edgeCents = it)) }
                     StrategyKnob("Contracts an order", PaperClip.sized(settings.contracts ?: controls.research.clip), PaperClip.MIN..1000, "KNOB_CONTRACTS") { set(settings.copy(contracts = it)) }
-                    val lateShown = if (Research.isLate(model.code)) Research.lateBand(model.code, null) else null
-                    val researchMin = maxOf(floor, if (settings.minEntryCents > 1) settings.minEntryCents else lateShown?.let { Math.round(it.lo * 100).toInt() } ?: settings.minEntryCents)
-                    val researchMax = settings.maxEntryCents ?: lateShown?.let { Math.round(it.hi * 100).toInt() } ?: 99
-                    StrategyKnob("Lowest price it buys", researchMin, floor..99, "KNOB_MIN", { "$it¢" }) { set(settings.copy(minEntryCents = it.coerceAtLeast(floor))) }
-                    StrategyKnob("Highest price it buys", researchMax, researchMin..99, "KNOB_MAX", { "$it¢" }) { set(settings.copy(maxEntryCents = it)) }
+                    StrategyKnob("Lowest price it buys", low, PaperFleetDefaults.BUY_MIN..high, "KNOB_MIN", { "$it¢" }) { set(settings.copy(minEntryCents = it)) }
+                    StrategyKnob("Highest price it buys", high, low..buyKnobHi, "KNOB_MAX", { "$it¢" }) { set(settings.copy(maxEntryCents = it)) }
                     Text("Research strategy: not bound by the 3¢ trail, window-start or >95% hold rules. Shared research limits (window exposure cap, Kelly, maker edge, late window) are in Global controls.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
                 }
                 ScalpModels.isV2(model) -> {
@@ -117,27 +112,25 @@ internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: Sc
                     }
                     StrategyKnob("Trailing stop", settings.trailCents ?: if (controls.peakTrailEnabled) controls.peakTrailCents else if (controls.manual) controls.trailCents else (spec.trail * 100).roundToInt(), 1..20, "KNOB_TRAIL", { "$it¢" }) { set(settings.copy(trailCents = it)) }
                     StrategyKnob("Open at once, per side", settings.maxOpenPerSide, 0..20, "KNOB_MAXOPEN", { if (it == 0) "unlimited" else "$it" }) { set(settings.copy(maxOpenPerSide = it)) }
-                    StrategyKnob("Lowest price it buys", low, floor..high, "KNOB_MIN", { "$it¢" }) { set(settings.copy(minEntryCents = it.coerceAtLeast(floor))) }
-                    StrategyKnob("Highest price it buys", high, low..priceHi, "KNOB_MAX", { "$it¢" }) { set(settings.copy(maxEntryCents = it)) }
+                    StrategyKnob("Lowest price it buys", low, PaperFleetDefaults.BUY_MIN..high, "KNOB_MIN", { "$it¢" }) { set(settings.copy(minEntryCents = it)) }
+                    StrategyKnob("Highest price it buys", high, low..buyKnobHi, "KNOB_MAX", { "$it¢" }) { set(settings.copy(maxEntryCents = it)) }
                     StrategyKnob("Entry checks every", settings.cadenceSeconds, 0..30, "KNOB_CADENCE", { if (it == 0) "Live" else "$it s" }) { set(settings.copy(cadenceSeconds = it)) }
-                    StrategyKnob("Take profit after fees", settings.takeProfitCents ?: if (controls.manual) controls.takeProfitCents else 0, 0..99, "KNOB_TARGET", { if (it == 0) "Off" else "$it¢ / ct" }) { set(settings.copy(takeProfitCents = it)) }
+                    StrategyKnob("Take profit after fees", settings.takeProfitCents ?: if (controls.manual) controls.takeProfitCents else 0, 0..PaperFleetDefaults.PROFIT_HEAL_ABOVE, "KNOB_TARGET", { if (it == 0) "Off" else "$it¢ / ct" }) { set(settings.copy(takeProfitCents = it)) }
                     StrategyKnob("Maximum hold", settings.maxHoldSeconds ?: controls.maxHoldSeconds, 0..3600, "KNOB_HOLD", { if (it == 0) "No timer" else "$it s" }) { set(settings.copy(maxHoldSeconds = it)) }
                     Text("Applies only to this V2 strategy. Overrides take priority over global and learned defaults; a chosen price floor also keeps the inherited ceiling from falling below it. Filled positions keep their saved stops. Entry checks never slow protective exits.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
                     Text("55¢ buy ceiling · stop loss always active · contracts and re-entries per 15-minute window stay unlimited unless you set a limit. Each new entry still needs a fresh trigger. Until minute limits new entries; the final-minute exit policy still applies. Open-at-once is unlimited at 0 and does not create extra entry signals.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
                 }
                 else -> {
                     StrategyKnob("Until minute", settings.untilMinute, 1..14, "KNOB_UNTIL", { "minute $it" }) { set(settings.copy(untilMinute = it)) }
-                    val shownMin = FairGapTune.effectiveMinCents(model.code, settings)
-                    val shownMax = settings.maxEntryCents ?: FairGapTune.defaultMaxCents(model.code) ?: com.dirk.kalshiodds.decision.ScalpFloors.ceilingCents(model.code)
-                    StrategyKnob("Lowest price it buys", shownMin, floor..priceHi, "KNOB_MIN", { "$it¢" }) { set(settings.copy(minEntryCents = it.coerceAtLeast(floor))) }
-                    StrategyKnob("Highest price it buys", shownMax, shownMin.coerceAtMost(priceHi - 1)..priceHi, "KNOB_MAX", { "$it¢" }) { set(settings.copy(maxEntryCents = it)) }
+                    StrategyKnob("Lowest price it buys", low, PaperFleetDefaults.BUY_MIN..high, "KNOB_MIN", { "$it¢" }) { set(settings.copy(minEntryCents = it)) }
+                    StrategyKnob("Highest price it buys", high, low..buyKnobHi, "KNOB_MAX", { "$it¢" }) { set(settings.copy(maxEntryCents = it)) }
                     StrategyKnob("Stop loss below fill", settings.stopLossPercent ?: 0, 0..99, "KNOB_STOP", { if (it == 0) "Strategy default" else "$it%" }) { set(settings.copy(stopLossPercent = it.takeIf { v -> v > 0 })) }
-                    StrategyKnob("Take profit after fees", settings.takeProfitCents ?: 0, 0..99, "KNOB_TARGET", { if (it == 0) "Off" else "$it¢ / ct" }) { set(settings.copy(takeProfitCents = it)) }
+                    StrategyKnob("Take profit after fees", settings.takeProfitCents ?: 0, 0..PaperFleetDefaults.PROFIT_HEAL_ABOVE, "KNOB_TARGET", { if (it == 0) "Off" else "$it¢ / ct" }) { set(settings.copy(takeProfitCents = it)) }
                     StrategyKnob("Maximum hold", settings.maxHoldSeconds ?: 0, 0..3600, "KNOB_HOLD", { if (it == 0) "No timer" else "$it s" }) { set(settings.copy(maxHoldSeconds = it)) }
                     Text("Original strategy: these add to its built-in rules (3¢ trail, window-start entries, >95% hold rule stay on).", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
                 }
             }
-            OutlinedButton(onClick = { onChange(ScalpStrategySettings()) }, modifier = Modifier.fillMaxWidth()) { Text("Back to its defaults") }
+            OutlinedButton(onClick = { onChange(PaperFleetDefaults.factory()) }, modifier = Modifier.fillMaxWidth()) { Text("Back to its defaults") }
         } }
     }
 }
