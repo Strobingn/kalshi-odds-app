@@ -19,6 +19,35 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.23.0 (Claude branch): 100 contracts a bet, a 15–57¢ buy band, and learning that survives a restart
+
+**100 contracts a bet, and the number finally reaches an order.** `ScalpTuning.DEFAULT_CONTRACTS` said 50, but
+`ScalperEngine.Config.contracts` said 10 and the engine copies its own figure over the tuning's on construction —
+so the arena was really betting **10**, and the 50 never reached a single order. Both now name the same number and
+it is 100. A size you set yourself on a strategy still wins. Retired strategies brought back in learning mode keep
+betting `LEARNING_CONTRACTS` (50): they lost on every recorded day and are being watched, not backed.
+
+A bigger order also fills more slowly — a resting bid waits for the size ahead of it **plus its own** to trade — so
+expect the resting strategies to fill less often than they did at 10.
+
+**The arena buys 15¢–57¢** (`ScalpBand`), where it used to buy 10¢–90¢. A strategy that deliberately trades outside
+that band keeps its own: the favourites (Late / Early / Heavy favourite, Kashi's five, Late edge, Momentum ride,
+Opening drive, Late tiebreak, Opening ride) still buy dear sides, the Long shot still buys its 10–20¢ underdog —
+for those the price *is* the signal. A band that sat wholly inside 15–57¢ was only ever a filter, so it opens up to
+the full band (Late comeback, which was pinned to 20–40¢). This is deliberately **not** `PrintGrid.MIN_PRICE` /
+`MAX_PRICE`: those decide whether a side can be quoted at all, and narrowing them would hide every favourite from
+the whole arena.
+
+**The Scalping AI keeps what it learns across a restart.** It records every closed scalp with the settings it ran
+under, and the prompt carries the last 15 of them, each strategy's results, its own notes and its past changes
+scored better/worse. All of that was in memory only: `supervisor_trades.jsonl` was written and never read, so every
+app launch started with nothing to learn from, and a change made just before the app closed was never judged. Now:
+
+- `SupervisorLog.recentTrades` reads the trades back, and the AI folds the last 200 in on its first tick (off the
+  main thread, once per launch).
+- Changes awaiting judgement are kept with the lessons and the scored changes, so one made just before a restart is
+  still scored afterwards instead of being forgotten unjudged.
+
 ## 1.22.0 (Claude branch): the fastest provider answers, and the Scalping AI reads the window every 10 s
 
 Gemma 4 on the phone (1.21.0) is gone. A 2.6–3.7 GB model on a handset answers in tens of seconds, which is far too

@@ -227,10 +227,27 @@ data class ScoredChange(
     val verdict: String
 )
 
+/** A change the AI made that has not had [LlmSupervisor.EVAL_TRADES] trades on it yet, so it is not scored. */
+@Serializable
+data class PendingChange(
+    val strategy: String,
+    val param: String,
+    val old: Double? = null,
+    val new: Double,
+    val reason: String = "",
+    val atMs: Long,
+    val avgBefore: Double
+)
+
 @Serializable
 data class SupervisorMemory(
     val lessons: List<String> = emptyList(),
-    val scored: List<ScoredChange> = emptyList()
+    val scored: List<ScoredChange> = emptyList(),
+    /**
+     * Changes still waiting for trades to judge them. Kept with the memory so a change made just before the app
+     * closed is still scored afterwards instead of being forgotten unjudged.
+     */
+    val pending: List<PendingChange> = emptyList()
 )
 
 /** Sends one prompt with one forced tool and returns the tool call's argument JSON, or null when no provider answered. */
@@ -531,6 +548,12 @@ class LlmSupervisor(
     private val sink: (String, String) -> Unit = { _, _ -> },
     private val persistMemory: (String) -> Unit = {},
     initialMemory: SupervisorMemory = SupervisorMemory(),
+    /**
+     * Scalps closed before this launch, oldest first ([SupervisorLog.recentTrades]). Without them the AI would
+     * start every launch with nothing to learn from, however many trades it has on disk. Read once, on the first
+     * [tick], because it reads a file and [tick] already runs off the main thread.
+     */
+    private val loadTrades: () -> List<LearnedTrade> = { emptyList() },
     private val strategies: List<ScalpStrategy>? = null,
     /** Told of each journal event (applied, rejected, scored) with the strategy, for the AI tab. */
     private val onEvent: (String, JsonObject) -> Unit = { _, _ -> }
@@ -548,7 +571,10 @@ class LlmSupervisor(
     private val lock = Any()
     private val history = ArrayList<Pair<Long, Map<String, ScalpKnobs>>>().apply { add(0L to tuning.all()) }
     private val trades = ArrayDeque<LearnedTrade>()
-    private val pending = ArrayList<Pending>()
+    private var seededFromDisk = false
+    private val pending = ArrayList<Pending>().apply {
+        initialMemory.pending.forEach { add(Pending(it.strategy, it.param, it.old, it.new, it.reason, it.atMs, it.avgBefore)) }
+    }
     private var memory = initialMemory
     private var tickNo = 0
     private val json = Json { encodeDefaults = false; explicitNulls = false }
@@ -602,6 +628,7 @@ class LlmSupervisor(
     fun tick(): String {
         val ctx = synchronized(lock) {
             tickNo += 1
+            seedTrades()
             scorePending()
             // Free tiers cap tokens a minute (Groq: 8,000 incl. the answer), so the prompt is kept under a budget.
             var c = context()
@@ -660,6 +687,23 @@ class LlmSupervisor(
 
     // ---- internals ----
 
+    /**
+     * Folds the trades kept on disk in under the ones closed since this launch, once. Anything already in memory
+     * is newer, so only the older ones are added and the oldest fall off at [KEEP_TRADES]. Caller holds [lock].
+     */
+    private fun seedTrades() {
+        if (seededFromDisk) return
+        seededFromDisk = true
+        val past = runCatching { loadTrades() }.getOrNull().orEmpty()
+        if (past.isEmpty()) return
+        val oldestLive = trades.firstOrNull()?.closedAtMs ?: Long.MAX_VALUE
+        val older = past.filter { it.closedAtMs < oldestLive }.sortedBy { it.closedAtMs }
+        if (older.isEmpty()) return
+        val merged = (older + trades.toList()).takeLast(KEEP_TRADES)
+        trades.clear()
+        merged.forEach { trades.addLast(it) }
+    }
+
     private fun note(text: String): String {
         val line = "tick $tickNo: $text"
         _status.value = "Scalping AI · $line"
@@ -676,10 +720,15 @@ class LlmSupervisor(
         runCatching { onEvent(event, body) }
     }
 
+    /** Writes the lessons, the scored changes and the changes still waiting to be judged. */
     private fun savedMemory() {
-        val m = synchronized(lock) { memory }
+        val m = synchronized(lock) { withPending() }
         runCatching { persistMemory(json.encodeToString(SupervisorMemory.serializer(), m)) }
     }
+
+    /** [memory] with the live [pending] list folded in. Caller holds [lock]. */
+    private fun withPending(): SupervisorMemory =
+        memory.copy(pending = pending.map { PendingChange(it.strategy, it.param, it.old, it.new, it.reason, it.atMs, it.avgBefore) })
 
     private fun knobsAt(ms: Long, strategy: String): ScalpKnobs {
         var snap = history.first().second
@@ -716,7 +765,7 @@ class LlmSupervisor(
             it.remove()
             changed = true
         }
-        if (changed) runCatching { persistMemory(json.encodeToString(SupervisorMemory.serializer(), memory)) }
+        if (changed) runCatching { persistMemory(json.encodeToString(SupervisorMemory.serializer(), withPending())) }
     }
 
     private fun round4(v: Double) = Math.round(v * 10_000.0) / 10_000.0

@@ -36,7 +36,8 @@ enum class ExitKind { TARGET, STOP, TIMEOUT, SETTLED }
  *
  * [taker] strategies buy at the ask the moment the signal fires and pay the
  * fee; the others rest a bid and wait up to 20 s for it to fill. Entries
- * are taken only between [entryMin] and [entryMax] (the side's price).
+ * are taken only between [entryMin] and [entryMax] (the side's price); a
+ * strategy that names no band buys in the arena's own ([ScalpBand]).
  *
  * [historyCents] is what one filled scalp made, in cents per contract, on
  * seven days of recorded order books (2026-10-03 → 10-09, 577 windows,
@@ -65,8 +66,8 @@ enum class ScalpStrategy(
     val maxPerSide: Int,
     val historyCents: Double?,
     val hold: Boolean = false,
-    val entryMin: Double = PrintGrid.MIN_PRICE,
-    val entryMax: Double = PrintGrid.MAX_PRICE,
+    val entryMin: Double = ScalpBand.DEFAULT_MIN,
+    val entryMax: Double = ScalpBand.DEFAULT_MAX,
     val origin: String = "Claude",
     /** Kashi's late-favourite rule; null for every other strategy. */
     val fav: FavSpec? = null,
@@ -648,13 +649,18 @@ class ScalperEngine(
     var makerFeeRate: Double = 0.0
 
     data class Config(
-        val contracts: Int = 10,
+        /**
+         * Size of an automatic paper bet. The engine's `init` copies this over [ScalpTuning.defaultContracts], so
+         * before 1.23.0 — when this said 10 — the arena bet 10 contracts and [ScalpTuning.DEFAULT_CONTRACTS] never
+         * reached a single order. The two now name the same number.
+         */
+        val contracts: Int = ScalpTuning.DEFAULT_CONTRACTS,
         val entryWaitMs: Long = 20_000L,
         /** Queue assumed when the book shows no size (same figure the flow-fade tracker uses). */
         val unknownQueue: Double = 3_500.0,
         val feeRate: Double = KalshiFee.TAKER_COEFFICIENT,
-        val minPrice: Double = PrintGrid.MIN_PRICE,
-        val maxPrice: Double = PrintGrid.MAX_PRICE
+        val minPrice: Double = ScalpBand.DEFAULT_MIN,
+        val maxPrice: Double = ScalpBand.DEFAULT_MAX
     )
 
     private class Working(var order: ScalpOrder) {
@@ -1010,9 +1016,9 @@ class ScalperEngine(
     }
 
     /**
-     * The original 7 trade 10–90¢ ([Config.minPrice] / [Config.maxPrice]);
-     * a strategy with its own band ([ScalpStrategy.entryMin] /
-     * [ScalpStrategy.entryMax]) trades inside that band only.
+     * A strategy that names no band of its own trades the arena's 15–57¢
+     * ([Config.minPrice] / [Config.maxPrice]); one that deliberately buys
+     * outside it ([ScalpBand.of]) trades inside its own band only.
      */
     private fun inBand(t: Tuned, price: Double): Boolean {
         if (!price.isFinite()) return false

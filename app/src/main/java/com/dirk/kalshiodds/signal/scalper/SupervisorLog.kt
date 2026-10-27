@@ -36,6 +36,31 @@ class SupervisorLog(
         return off
     }
 
+    /**
+     * The last [n] scalps the Scalping AI recorded, oldest first, read back from `supervisor_trades.jsonl` (both
+     * files). The AI keeps its closed trades in memory only, so without this it starts every app launch with
+     * nothing to learn from. Blocking file read: call it off the main thread.
+     */
+    fun recentTrades(n: Int): List<LearnedTrade> {
+        if (n <= 0) return emptyList()
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        val out = ArrayDeque<LearnedTrade>()
+        for (name in listOf("supervisor_trades.1.jsonl", "supervisor_trades.jsonl")) {
+            val f = File(dir, name)
+            if (!f.isFile) continue
+            runCatching {
+                f.forEachLine { line ->
+                    if (line.isBlank()) return@forEachLine
+                    val t = runCatching { json.decodeFromString(LearnedTrade.serializer(), line) }.getOrNull()
+                        ?: return@forEachLine
+                    out.addLast(t)
+                    while (out.size > n) out.removeFirst()
+                }
+            }
+        }
+        return out.sortedBy { it.closedAtMs }
+    }
+
     fun append(kind: String, line: String) {
         io.execute {
             runCatching {

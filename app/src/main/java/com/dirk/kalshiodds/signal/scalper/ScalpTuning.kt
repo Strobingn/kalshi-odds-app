@@ -3,6 +3,32 @@ package com.dirk.kalshiodds.signal.scalper
 import kotlinx.serialization.Serializable
 
 /**
+ * The price band the arena buys in, in dollars a contract.
+ *
+ * [DEFAULT_MIN]–[DEFAULT_MAX] (15–57¢, asked for 2026-10-27) is what a strategy buys in unless it deliberately
+ * trades outside it. This is **not** [PrintGrid.MIN_PRICE]/[PrintGrid.MAX_PRICE]: those gate whether a side can be
+ * quoted at all, and narrowing them would hide every favourite from the whole arena.
+ *
+ * A strategy whose own band reaches past either end ([of]) keeps it, because for those the price **is** the signal:
+ * the favourites (Late / Early / Heavy favourite, Kashi's five, Late edge) buy a side precisely because it is dear,
+ * the long shot precisely because it is cheap. A band that sits wholly inside 15–57¢ was only ever a filter, so it
+ * is opened up to the full band.
+ */
+object ScalpBand {
+    const val DEFAULT_MIN = 0.15
+    const val DEFAULT_MAX = 0.57
+    private const val EPS = 1e-9
+
+    /** The band [st] buys in when you have not set one of your own. */
+    fun of(st: ScalpStrategy): Pair<Double, Double> =
+        if (st.entryMin < DEFAULT_MIN - EPS || st.entryMax > DEFAULT_MAX + EPS) st.entryMin to st.entryMax
+        else DEFAULT_MIN to DEFAULT_MAX
+
+    /** True when [st] buys outside the arena's default band on purpose. */
+    fun ownBand(st: ScalpStrategy): Boolean = of(st) != (DEFAULT_MIN to DEFAULT_MAX)
+}
+
+/**
  * What you changed on one strategy (Arena → strategy → Settings). Every
  * field is null until changed, and null means the strategy's own default
  * ([ScalpStrategy]); so an untouched strategy runs exactly as shipped.
@@ -68,10 +94,9 @@ class Tuned(val strategy: ScalpStrategy, val knobs: ScalpKnobs, defaultContracts
     val cadenceSeconds: Int = (knobs.cadenceSeconds ?: strategy.cadenceSeconds).coerceAtLeast(1)
 
     /** True when the strategy trades its own price band (by default or because you set one). */
-    val ownBand: Boolean = knobs.entryMinCents != null || knobs.entryMaxCents != null ||
-        strategy.entryMin != PrintGrid.MIN_PRICE || strategy.entryMax != PrintGrid.MAX_PRICE
-    val entryMin: Double = knobs.entryMinCents?.div(100.0) ?: strategy.entryMin
-    val entryMax: Double = knobs.entryMaxCents?.div(100.0) ?: strategy.entryMax
+    val ownBand: Boolean = knobs.entryMinCents != null || knobs.entryMaxCents != null || ScalpBand.ownBand(strategy)
+    val entryMin: Double = knobs.entryMinCents?.div(100.0) ?: ScalpBand.of(strategy).first
+    val entryMax: Double = knobs.entryMaxCents?.div(100.0) ?: ScalpBand.of(strategy).second
 
     /** Second of the window it may open orders from, and the second it stops before. */
     val fromSecond: Int = ((knobs.fromMinute ?: strategy.startMinute).coerceIn(0, 15)) * 60
@@ -169,7 +194,8 @@ class ScalpTuning(
     }
 
     companion object {
-        const val DEFAULT_CONTRACTS = 50
+        /** Contracts an automatic paper bet, when nobody has set a size (you asked for 100 on 2026-10-27). */
+        const val DEFAULT_CONTRACTS = 100
         /** No upper limit on contracts an order (you asked 2026-10-23). */
         const val MAX_CONTRACTS = Int.MAX_VALUE
     }

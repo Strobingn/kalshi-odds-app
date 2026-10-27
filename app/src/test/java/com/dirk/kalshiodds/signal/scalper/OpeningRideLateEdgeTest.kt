@@ -11,12 +11,21 @@ import org.junit.Test
  */
 class OpeningRideLateEdgeTest {
 
+    /**
+     * The fee and P&L maths here is written for a 10-contract order, so these tests name that size instead of
+     * riding on [ScalpTuning.DEFAULT_CONTRACTS] (100 since 1.23.0) and changing meaning when the default moves.
+     */
+    private fun engine(tuning: ScalpTuning = ScalpTuning()) =
+        ScalperEngine(ScalperEngine.Config(contracts = 10), tuning)
+
+
     private val t = "KXBTC15M-26OCT091215-15"
     private val noQueue: (String, Double) -> Double? = { _, _ -> null }
 
     private fun runner(fair: () -> Double?) = PaperScalper(
         model = null, ledger = ScalperLedger(), topOfBook = { null }, bookLevels = { null },
-        closeMs = { 900_000L }, fairYes = { _, _ -> fair() }, strategies = ScalpStrategy.values().toList()
+        closeMs = { 900_000L }, fairYes = { _, _ -> fair() }, strategies = ScalpStrategy.values().toList(),
+        engine = engine()
     )
 
     /** Seconds [from]..[to] of two-sided prints: takers sell YES at [bid] and buy YES at [ask]. */
@@ -35,7 +44,7 @@ class OpeningRideLateEdgeTest {
         assertTrue(st.taker && st.trail && st.opening && !st.hold)
         assertEquals(0.10, st.targetDollars, 0.0)
         assertEquals(0.03, st.stopDollars, 0.0)
-        val e = ScalperEngine()
+        val e = engine()
         e.buyNow(st, t, "YES", 0.52, noQueue, 0L)
         assertTrue("2¢ down is not 3¢", e.onClock(t, 1_000L, 0.50, 0.49).isEmpty())
         assertTrue("it climbs: the stop climbs with it", e.onClock(t, 2_000L, 0.58, 0.41).isEmpty())
@@ -45,13 +54,13 @@ class OpeningRideLateEdgeTest {
         assertEquals(0.55, c.exitPrice, 1e-9)
         assertEquals(0.03 * 10 - KalshiFee.total(10, 0.52) - KalshiFee.total(10, 0.55), c.pnlUsd, 1e-9)
 
-        val e2 = ScalperEngine()
+        val e2 = engine()
         e2.buyNow(st, t, "YES", 0.52, noQueue, 0L)
         val won = e2.onTrade(t, true, 0.63, 50.0, 5_000L, noQueue).filterIsInstance<ScalpEvent.Closed>().single().scalp
         assertEquals(ExitKind.TARGET, won.kind)
         assertEquals(0.62, won.exitPrice, 1e-9)
         // A plain stop still hangs from the entry.
-        val e3 = ScalperEngine()
+        val e3 = engine()
         e3.buyNow(ScalpStrategy.DIP_HUNTER, t, "YES", 0.50, noQueue, 0L)
         e3.onClock(t, 1_000L, 0.60, 0.39)
         assertTrue("dip-hunter's 2¢ stop is under its entry, not its best bid", e3.onClock(t, 2_000L, 0.57, 0.42).isEmpty())
@@ -131,7 +140,7 @@ class OpeningRideLateEdgeTest {
     @Test
     fun aMakerFeeIsChargedOnRestingFillsOnlyWhenKalshiListsOne() {
         fun scalp(rate: Double): ClosedScalp {
-            val e = ScalperEngine()
+            val e = engine()
             e.makerFeeRate = rate
             e.post(ScalpStrategy.ML_REST, t, "YES", 0.50, 50.0, 0.4, 0.3, 0L)
             e.onTrade(t, false, 0.49, 10.0, 1_000L, noQueue)

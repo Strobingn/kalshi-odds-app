@@ -397,6 +397,8 @@ class AppContainer(context: Context) {
                     .decodeFromString(com.dirk.kalshiodds.signal.scalper.SupervisorMemory.serializer(), it)
             }
         }.getOrNull() ?: com.dirk.kalshiodds.signal.scalper.SupervisorMemory(),
+        // The scalps it recorded before this launch, so a restart does not wipe what it learns from.
+        loadTrades = { supervisorLog.recentTrades(SUPERVISOR_SEED_TRADES) },
         onEvent = eventsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.SCALPING)
     )
 
@@ -850,5 +852,8 @@ class AppContainer(context: Context) {
 
         /** A live AI call that has not come back in this long is abandoned and the next-fastest provider answers. */
         const val LIVE_CALL_TIMEOUT_S = 15L
+
+        /** Closed scalps the Scalping AI reads back off disk on its first tick, so a restart keeps its learning. */
+        const val SUPERVISOR_SEED_TRADES = 200
     }
 }
