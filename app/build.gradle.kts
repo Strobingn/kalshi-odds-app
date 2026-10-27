@@ -16,8 +16,8 @@ android {
         applicationId = "com.dirk.kalshiodds.claude"
         minSdk = 26
         targetSdk = 35
-        versionCode = 89
-        versionName = "1.21.0"
+        versionCode = 88
+        versionName = "1.20.11"
         // In-app update check (ui/AppUpdate.kt): the Build APK run that made
         // this APK. 0 / "local" when built outside GitHub Actions.
         buildConfigField(
@@ -94,6 +94,9 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    kotlinOptions {
+        jvmTarget = "17"
+    }
 
     buildFeatures {
         compose = true
@@ -165,8 +168,6 @@ dependencies {
     // ONNX Runtime with the QNN execution provider (CPU and the Snapdragon NPU), arm64 only. 1.18/1.19 loaded it in the
     // app's own process and the phone would not start; since 1.20.5 it is loaded only in the ML process (ml.MlService).
     implementation("com.microsoft.onnxruntime:onnxruntime-android-qnn:1.29.0")
-    // Gemma 4 on the phone (replaces the cloud AI). 0.18.x needs Kotlin 2.4.
-    implementation("com.google.ai.edge.litertlm:litertlm-android:0.18.1")
 
     // Persistence + encrypted API-key storage (never commit secrets)
     implementation("androidx.datastore:datastore-preferences:1.1.1")
@@ -229,12 +230,5 @@ afterEvaluate {
                 throw GradleException("debug APK cert $digest != $expectedDebugCertSha256\n$out")
             }
         }
-    }
-}
-
-// Kotlin 2.4: compiler options moved from android.kotlinOptions to the kotlin extension.
-kotlin {
-    compilerOptions {
-        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
 }

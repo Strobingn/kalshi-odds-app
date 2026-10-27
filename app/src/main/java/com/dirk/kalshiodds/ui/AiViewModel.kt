@@ -218,37 +218,6 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // ---- Gemma 4 on the phone (replaces the cloud AI)
-
-    val gemma: StateFlow<com.dirk.kalshiodds.llm.GemmaState> = container.gemma.state
-    private val _gemmaTest = MutableStateFlow("")
-    val gemmaTest: StateFlow<String> = _gemmaTest.asStateFlow()
-    private val _gemmaTesting = MutableStateFlow(false)
-    val gemmaTesting: StateFlow<Boolean> = _gemmaTesting.asStateFlow()
-
-    fun downloadGemma(m: com.dirk.kalshiodds.llm.GemmaModel) = container.gemma.download(m)
-    fun cancelGemma() = container.gemma.cancelTransfer()
-    fun chooseGemma(m: com.dirk.kalshiodds.llm.GemmaModel) = container.gemma.choose(m)
-    fun deleteGemma(m: com.dirk.kalshiodds.llm.GemmaModel) = container.gemma.delete(m)
-
-    fun testGemma() {
-        if (_gemmaTesting.value) return
-        _gemmaTesting.value = true
-        _gemmaTest.value = ""
-        viewModelScope.launch(Dispatchers.IO) {
-            val r = container.gemma.generate(
-                system = "You are a concise assistant inside a paper-trading app.",
-                user = "In two short sentences, say what a 1 cent scalp on a 15-minute Bitcoin up/down market is.",
-                maxOutputTokens = 120
-            ) { partial -> _gemmaTest.value = partial }
-            _gemmaTest.value = r.fold(
-                { a -> a.text + String.format(java.util.Locale.US, "\n\n%.1f s · %s on %s", a.millis / 1000.0, a.model, container.gemma.state.value.backend.ifBlank { "?" }) },
-                { e -> "Failed: ${e.message}" }
-            )
-            _gemmaTesting.value = false
-        }
-    }
-
     fun downloadModel(m: com.dirk.kalshiodds.llm.LocalModel) = container.localLlm.download(m)
     fun cancelTransfer() = container.localLlm.cancelTransfer()
     fun selectModel(name: String) = container.localLlm.select(name)

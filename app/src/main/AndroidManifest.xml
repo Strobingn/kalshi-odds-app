@@ -23,10 +23,6 @@
         android:theme="@style/Theme.KalshiOdds"
         android:usesCleartextTraffic="false"
         android:enableOnBackInvokedCallback="true">
-        <!-- LiteRT-LM GPU backend for Gemma (optional: phones without them use the CPU). -->
-        <uses-native-library android:name="libvndksupport.so" android:required="false" />
-        <uses-native-library android:name="libOpenCL.so" android:required="false" />
-
 
         <!-- The NPU (QNN HTP): its driver talks to the Hexagon DSP through the phone's libcdsprpc.so. Apps that target
              Android 12+ cannot load a vendor library unless it is declared here; without it the HTP backend never

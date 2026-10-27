@@ -135,69 +135,6 @@ fun OnPhoneModelCard(
     }
 }
 
-// ---------------------------------------------------------------- Gemma 4 (Keys tab)
-
-@Composable
-fun GemmaCard(
-    s: com.dirk.kalshiodds.llm.GemmaState,
-    testText: String,
-    testing: Boolean,
-    onDownload: (com.dirk.kalshiodds.llm.GemmaModel) -> Unit,
-    onCancel: () -> Unit,
-    onChoose: (com.dirk.kalshiodds.llm.GemmaModel) -> Unit,
-    onDelete: (com.dirk.kalshiodds.llm.GemmaModel) -> Unit,
-    onTest: () -> Unit
-) {
-    val c = DipTheme.colors
-    AiCard(
-        "Gemma 4 on this phone",
-        "Replaces the cloud AI: once a model is downloaded the Scalping AI, the Paper AI, the chat, Explain and the daily review all run on Gemma here, with no keys and nothing sent anywhere. Until then your cloud keys keep them running."
-    ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            StatTile("Model", s.installed?.title?.removePrefix("Gemma 4 ") ?: "none", if (s.installed != null) c.up else c.textSecondary,
-                if (s.installed != null) "in use" else "cloud keys in use")
-            StatTile("Runs on", s.backend.ifBlank { "–" }, c.accentBlue, if (s.busy) "thinking" else if (s.backend.isNotBlank()) "loaded" else "loads on first call")
-            StatTile("Answers", "${s.answered}", c.textPrimary, if (s.failed > 0) "${s.failed} failed" else "this session")
-        }
-        if (s.lastMs > 0) Text(String.format(Locale.US, "Last answer %.1f s · ~%.0f tokens a second", s.lastMs / 1000.0, s.lastSpeed), fontSize = 11.sp, color = c.textSecondary)
-        if (s.progress.isNotBlank()) {
-            Text(s.progress, fontSize = 12.sp, color = c.textPrimary)
-            s.fraction?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth()) }
-                ?: LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) { Text("Pause download") }
-        } else {
-            for (m in com.dirk.kalshiodds.llm.GemmaModel.entries) {
-                val have = m in s.onPhone
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedButton(
-                        onClick = { if (have) onChoose(m) else onDownload(m) },
-                        modifier = Modifier.weight(1f).testTag("GEMMA_${m.name}")
-                    ) {
-                        Text(
-                            when {
-                                have && s.installed == m -> "✓ ${m.title}"
-                                have -> "Use ${m.title}"
-                                else -> "Download ${m.title} (${m.blurb})"
-                            },
-                            fontSize = 12.sp
-                        )
-                    }
-                    if (have) TextButton(onClick = { onDelete(m) }) { Text("Delete", color = c.down, fontSize = 11.sp) }
-                }
-            }
-            Text("Big download: use Wi-Fi. It resumes if it stops, and is checked before use.", fontSize = 11.sp, color = c.textSecondary)
-        }
-        if (s.message.isNotBlank()) Text(s.message, fontSize = 12.sp, color = c.textSecondary)
-        Button(onClick = onTest, enabled = s.installed != null && !testing && !s.busy, modifier = Modifier.fillMaxWidth().height(48.dp)) {
-            Text(if (testing) "Thinking…" else "Test Gemma")
-        }
-        if (testText.isNotBlank()) {
-            Text(testText, fontSize = 12.sp, color = c.textPrimary,
-                modifier = Modifier.fillMaxWidth().background(c.surfaceAlt, RoundedCornerShape(10.dp)).padding(10.dp))
-        }
-    }
-}
-
 // ---------------------------------------------------------------- Reviews tab
 
 @Composable

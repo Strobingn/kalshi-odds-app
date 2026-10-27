@@ -375,39 +375,10 @@ class AppContainer(context: Context) {
     private fun llmError(kind: String): (String) -> Unit =
         { msg -> supervisorLog.append(kind, "{\"ts\":${System.currentTimeMillis()},\"error\":\"$msg\"}") }
 
-    private val gemmaPrefs = app.getSharedPreferences("bitcoin_claude_gemma", Context.MODE_PRIVATE)
-    private val gemmaScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
-
-    /** Gemma 4 on the phone (LiteRT-LM): replaces the cloud AI once downloaded (AI → Keys). */
-    val gemma = com.dirk.kalshiodds.llm.Gemma(
-        dir = File(app.getExternalFilesDir(null) ?: app.filesDir, "gemma"),
-        cacheDir = app.cacheDir,
-        scope = gemmaScope,
-        prefs = object : com.dirk.kalshiodds.llm.Gemma.Prefs {
-            override var chosen: String?
-                get() = gemmaPrefs.getString("chosen", null)
-                set(v) { gemmaPrefs.edit().putString("chosen", v).apply() }
-        }
-    )
-
-    /** Gemma first; the cloud keys only until Gemma is downloaded. */
-    private fun gemmaFirst(
-        cloud: com.dirk.kalshiodds.signal.scalper.HttpLlmChat,
-        errorKind: String,
-        ai: String,
-        maxTokens: Int = 1536
-    ) = com.dirk.kalshiodds.llm.GemmaFirstChat(
-        gemma = com.dirk.kalshiodds.llm.GemmaLlmChat(gemma, onError = llmError(errorKind), onCall = callsOf(ai), maxTokens = maxTokens),
-        cloud = cloud
-    )
-
-    /** Scalping AI: tunes the scalping algorithms every 60 s. Gemma on the phone (cloud keys until it's downloaded). */
+    /** Scalping AI: tunes the scalping algorithms every 60 s. Groq, Cerebras, Gemini and Mistral, rotating every 500 calls. */
     val llmSupervisor = com.dirk.kalshiodds.signal.scalper.LlmSupervisor(
         tuning = scalperStore.tuning,
-        chat = gemmaFirst(
-            com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders(*ALL_LLM.toTypedArray()), onError = llmError("errors"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.SCALPING), rotation = llmRotation),
-            "errors", com.dirk.kalshiodds.signal.scalper.AiEvent.SCALPING
-        ),
+        chat = com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders(*ALL_LLM.toTypedArray()), onError = llmError("errors"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.SCALPING), rotation = llmRotation),
         feed = { supervisorFeed() },
         stats = { name -> scalperStore.ledger.snapshot().stats(name) },
         sink = { kind, line -> supervisorLog.append(kind, line) },
@@ -421,12 +392,9 @@ class AppContainer(context: Context) {
         onEvent = eventsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.SCALPING)
     )
 
-    /** Paper AI: a different AI. Decides paper bets every minute. Gemma on the phone (cloud keys until it's downloaded). Own memory and journal. */
+    /** Paper AI: a different AI. Decides paper bets every minute. Groq, Cerebras, Gemini and Mistral, rotating every 500 calls. Own memory and journal. */
     val paperAi = com.dirk.kalshiodds.signal.scalper.PaperAi(
-        chat = gemmaFirst(
-            com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders(*ALL_LLM.toTypedArray()), onError = llmError("paper_ai_errors"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.PAPER), rotation = llmRotation, maxTokens = 1200),
-            "paper_ai_errors", com.dirk.kalshiodds.signal.scalper.AiEvent.PAPER, maxTokens = 1200
-        ),
+        chat = com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders(*ALL_LLM.toTypedArray()), onError = llmError("paper_ai_errors"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.PAPER), rotation = llmRotation, maxTokens = 1200),
         feed = { supervisorFeed() },
         sink = { kind, line -> supervisorLog.append(kind, line) },
         persistMemory = { json -> supervisorPrefs.edit().putString("paper_ai_memory", json).apply() },
@@ -446,10 +414,7 @@ class AppContainer(context: Context) {
     )
 
     /** The chat screen: one thread per AI, history kept on the phone. */
-    private val chatLlm = gemmaFirst(
-        com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders(*ALL_LLM.toTypedArray()), onError = llmError("chat_errors"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.CHAT), rotation = llmRotation),
-        "chat_errors", com.dirk.kalshiodds.signal.scalper.AiEvent.CHAT, maxTokens = 900
-    )
+    private val chatLlm = com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders(*ALL_LLM.toTypedArray()), onError = llmError("chat_errors"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.CHAT), rotation = llmRotation)
     val aiChat = com.dirk.kalshiodds.signal.scalper.AiChat(
         ask = { msgs -> chatLlm.chat(msgs) },
         tuning = scalperStore.tuning,
@@ -486,19 +451,14 @@ class AppContainer(context: Context) {
         }
     )
 
-    /** Explain and the daily review: Gemma on the phone (cloud keys until it's downloaded). */
-    private val writerLlm = gemmaFirst(
-        com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders(*ALL_LLM.toTypedArray()), onError = llmError("writer_errors"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.CHAT), rotation = llmRotation),
-        "writer_errors", com.dirk.kalshiodds.signal.scalper.AiEvent.CHAT, maxTokens = 1200
-    )
+    /** Cloud fallback for Explain and the daily review: the same cloud keys and rotation as the chat. */
+    private val writerLlm = com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders(*ALL_LLM.toTypedArray()), onError = llmError("writer_errors"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.CHAT), rotation = llmRotation)
 
     val aiWriter = com.dirk.kalshiodds.llm.AiWriter(
         local = localLlm,
         cloud = { msgs -> writerLlm.chat(msgs) },
         cloudError = { writerLlm.lastError },
-        hasCloudKey = { writerLlm.hasKey },
-        // Gemma is far stronger than the small llama.cpp model, so once it's on the phone it writes everything.
-        skipLocal = { gemma.isReady }
+        hasCloudKey = { writerLlm.hasKey }
     )
 
     /** "Explain this trade" on the arena's trade cards. */
