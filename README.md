@@ -19,6 +19,34 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.22.0 (Claude branch): the fastest provider answers, and the Scalping AI reads the window every 10 s
+
+Gemma 4 on the phone (1.21.0) is gone. A 2.6–3.7 GB model on a handset answers in tens of seconds, which is far too
+slow to follow a market that moves every second, so the Scalping AI, the Paper AI, the chat, Explain and the daily
+review are back on the cloud keys — and those keys are now used for speed rather than fairness:
+
+- **Fastest first, not round-robin.** Every call is timed. Whichever provider with a key has the lowest running
+  average answers the next one (`LlmSpeed`); the old "500 answered calls, then the next provider" rotation is gone.
+  Until a provider has been timed it is placed by where it runs: Cerebras, then Groq (custom silicon), then Gemini,
+  then Mistral.
+- **A limit rests a provider instead of blocking the tick.** A provider that reports a rate limit or a spent quota is
+  set aside and the next-fastest answers. Each limit in a row doubles that rest, from 45 s up to 5 minutes, so a spent
+  daily quota costs one wasted call every few minutes rather than one per tick; its first answer clears it. Anything
+  else that fails (a network drop, a bad key) rests 15 s.
+- **The quickest model of each provider goes first**: `gpt-oss-20b` on Groq, `gemini-3.1-flash-lite`,
+  `ministral-8b-latest`, `gpt-oss-120b` on Cerebras. One that cannot make the tool call still falls through to the
+  next. Qwen now also gets `reasoning_effort: low` — thinking is time, and the window moves while it thinks.
+- **The Scalping AI looks every 10 s, not every 60 s**, and sooner on a new window, a 2¢ move in 10 s or 3 closed
+  trades (was 4¢, 6 trades, and at most once every 20 s — now once every 5 s). While every provider is resting, the
+  gap stretches by itself until the first one is back.
+- **A call that has not come back in 15 s is abandoned** (was 40 s), so a slow provider cannot eat a whole tick; its
+  running average goes up and it drops down the order on its own.
+- **The feed carries `change5sCents` and `feedAgeSeconds`**, so the shortest move the AI is shown is shorter than the
+  gap between its looks, and it can see how stale the quote it is reading is.
+
+The Paper AI keeps its own minute: it opens paper bets on each tick, so its pace is a trading decision, not a
+reading one.
+
 ## 1.20.11 (Claude branch): the AIs keep every strategy on
 
 You asked (2026-10-24) that strategies are not switched off. The Scalping AI's `enabled=0` is now refused ("strategies

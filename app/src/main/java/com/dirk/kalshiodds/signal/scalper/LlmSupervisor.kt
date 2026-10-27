@@ -266,19 +266,25 @@ class LlmProvider(
         const val GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
         const val CEREBRAS_URL = "https://api.cerebras.ai/v1"
 
-        /** Display names, in the order the AIs rotate through them. */
+        /** Display names. [LlmSpeed] decides which one the AIs call; this is the order they are listed in. */
         val NAMES = linkedMapOf("groq" to "Groq", "cerebras" to "Cerebras", "gemini" to "Gemini", "mistral" to "Mistral")
 
-        /** Checked 2026-10-22 against a free Groq key: all three make the tool call; llama-3.3-70b-versatile was gone. */
-        val GROQ_MODELS = listOf("openai/gpt-oss-120b", "qwen/qwen3.8-27b", "openai/gpt-oss-20b", "llama-3.3-70b-versatile")
-        /** Free ("Experiment") Mistral keys get "not available in your subscription tier" for mistral-large: small first. */
-        val MISTRAL_MODELS = listOf("mistral-small-latest", "open-mistral-nemo", "ministral-8b-latest", "mistral-medium-latest", "mistral-large-latest")
         /**
-         * Free-tier Gemini models, newest first (2026-10: 3.8 Flash is the stable one). Google counts the free quota per
-         * model, so a "quota" / "exhausted" answer moves on to the next model before the next provider.
+         * Each provider's models, quickest first: following a live 15-minute window beats a better answer that lands
+         * after the window has moved on. A model that cannot make the tool call falls through to the next one here.
+         *
+         * Checked 2026-10-22 against a free Groq key: all three make the tool call; llama-3.3-70b-versatile was gone.
+         * gpt-oss-20b answers in roughly half the time of the 120b and still makes the call.
          */
-        val GEMINI_MODELS = listOf("gemini-3.8-flash", "gemini-flash-latest", "gemini-3-flash-preview", "gemini-3.1-flash-lite", "gemini-flash-lite-latest", "gemini-2.5-flash")
-        /** Cerebras free trial (2026-10): 5 requests a minute and 1M tokens a day per model. */
+        val GROQ_MODELS = listOf("openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b", "llama-3.3-70b-versatile")
+        /** Free ("Experiment") Mistral keys get "not available in your subscription tier" for mistral-large: 8b first. */
+        val MISTRAL_MODELS = listOf("ministral-8b-latest", "mistral-small-latest", "open-mistral-nemo", "mistral-medium-latest", "mistral-large-latest")
+        /**
+         * Free-tier Gemini models, the lite ones first (they answer in about half the time of Flash). Google counts the
+         * free quota per model, so a "quota" / "exhausted" answer moves on to the next model before the next provider.
+         */
+        val GEMINI_MODELS = listOf("gemini-3.1-flash-lite", "gemini-flash-lite-latest", "gemini-3.8-flash", "gemini-flash-latest", "gemini-3-flash-preview", "gemini-2.5-flash")
+        /** Cerebras free trial (2026-10): 5 requests a minute and 1M tokens a day per model. The quickest of the four. */
         val CEREBRAS_MODELS = listOf("gpt-oss-120b", "qwen-3.8-27b")
     }
 }
@@ -292,8 +298,8 @@ class HttpLlmChat(
     /** Told of every attempt, for the AI tab's call charts and its error line. */
     private val onCall: (LlmAttempt) -> Unit = {},
     private val http: OkHttpClient = OkHttpClient.Builder().callTimeout(40, TimeUnit.SECONDS).build(),
-    /** Shared provider rotation (switch every 500 answered calls); null = always in [providers] order. */
-    private val rotation: LlmRotation? = null,
+    /** Shared speed table: the quickest provider that is not resting off a limit answers. null = [providers] order. */
+    private val speed: LlmSpeed? = null,
     /** Answer budget. gpt-oss counts its reasoning in it, so 1,024 cut tool calls short on a full prompt. */
     private val maxTokens: Int = 2048
 ) : LlmChat {
@@ -362,10 +368,12 @@ class HttpLlmChat(
         }
     }
 
-    /** gpt-oss spends its answer budget on reasoning; "low" leaves room for the tool call. Groq only. */
+    /** gpt-oss spends its answer budget on reasoning; "low" leaves room for the tool call, and the answer lands sooner. */
     private fun kotlinx.serialization.json.JsonObjectBuilder.reasoningLow(model: String) {
-        // gpt-oss counts its reasoning in the answer budget; Gemini 3 thinks at "high" unless told (maps to thinking_level).
-        if (model.startsWith("openai/gpt-oss") || model.startsWith("gpt-oss") || model.startsWith("gemini")) put("reasoning_effort", "low")
+        // gpt-oss counts its reasoning in the answer budget; Gemini 3 thinks at "high" unless told (maps to
+        // thinking_level); Qwen 3 thinks before every answer. Thinking is time, and the window moves while it does.
+        val m = model.substringAfter('/')
+        if (m.startsWith("gpt-oss") || m.startsWith("gemini") || m.startsWith("qwen")) put("reasoning_effort", "low")
     }
 
     private fun isJsonObject(s: String): Boolean = runCatching { Json.parseToJsonElement(s) is JsonObject }.getOrDefault(false)
@@ -416,11 +424,11 @@ class HttpLlmChat(
 
     private class Failure(msg: String, val wrongModel: Boolean = false, val toolProblem: Boolean = false) : Exception(msg)
 
-    /** Tries each provider with a key, and each of its models from the one that last worked, until [call] returns. */
+    /** Tries each provider with a key, quickest first, and each of its models from the one that last worked. */
     private fun <T> each(call: (LlmProvider, String) -> T): T? {
         var anyKey = false
         val keyed = providers.filter { it.key().isNotBlank() }
-        val ordered = rotation?.let { r -> r.order(keyed.map { it.name }).mapNotNull { n -> keyed.firstOrNull { it.name == n } } } ?: keyed
+        val ordered = speed?.let { s -> s.order(keyed.map { it.name }).mapNotNull { n -> keyed.firstOrNull { it.name == n } } } ?: keyed
         for (p in ordered) {
             if (p.key().isBlank()) continue
             anyKey = true
@@ -433,8 +441,9 @@ class HttpLlmChat(
                     val out = call(p, model)
                     p.modelIndex = i
                     lastError = ""
-                    rotation?.answered(p.name)
-                    runCatching { onCall(LlmAttempt(p.name, model, true, System.currentTimeMillis() - t0)) }
+                    val ms = System.currentTimeMillis() - t0
+                    speed?.answered(p.name, ms)
+                    runCatching { onCall(LlmAttempt(p.name, model, true, ms)) }
                     return out
                 } catch (e: Exception) {
                     val why = (e as? Failure)?.message ?: e.javaClass.simpleName
@@ -442,13 +451,13 @@ class HttpLlmChat(
                     runCatching { onCall(LlmAttempt(p.name, model, false, System.currentTimeMillis() - t0, why)) }
                     onError(lastError)
                     if ((e as? Failure)?.wrongModel != true) {
-                        rotation?.failed(p.name)
+                        speed?.failed(p.name, why)
                         break // rate limit, bad key, network: next provider
                     }
                     i = (i + 1) % p.models.size
                     tried += 1
-                    // Every model of this provider refused (over its limit on all of them): the rotation moves on.
-                    if (tried >= p.models.size) rotation?.failed(p.name)
+                    // Every model of this provider refused (over its limit on all of them): rest it and move on.
+                    if (tried >= p.models.size) speed?.failed(p.name, why)
                 }
             }
         }

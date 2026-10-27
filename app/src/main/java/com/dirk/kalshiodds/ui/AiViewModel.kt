@@ -60,10 +60,10 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun idOf(name: String) = com.dirk.kalshiodds.signal.scalper.LlmProvider.NAMES.entries.firstOrNull { it.value == name }?.key ?: name.lowercase()
 
-    private fun rotationLine(): String {
-        val r = container.llmRotation.state.value
-        return "Now using ${r.provider.replaceFirstChar { it.uppercase() }} · ${r.calls} of ${r.every} calls, then the next provider with a key"
-    }
+    private fun rotationLine(): String =
+        container.llmSpeed.line(
+            com.dirk.kalshiodds.signal.scalper.LlmProvider.NAMES.keys.filter { container.llmKey(it).isNotBlank() }
+        )
 
     private fun keysNow() = AiKeysState(
         rotation = rotationLine(),
