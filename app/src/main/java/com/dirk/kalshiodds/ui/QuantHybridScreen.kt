@@ -464,9 +464,10 @@ private fun LocalLlmCard(rev: Int, bump: () -> Unit) {
         )
         LocalAnalyst.SHORTLIST.forEach { row ->
             val speed = listOfNotNull(row.cpuTokPerSec?.let { "$it tok/s CPU" }, row.gpuTokPerSec?.let { "$it tok/s GPU" }).joinToString(" / ")
+            val size = row.sizeLabel.takeIf { it.contains("GB") }?.let { " · $it" }.orEmpty()
             val on = row.name == name
             val tag = if (row.name == "Gemma 3n E2B") "LLM_GEMMA_3N" else "LLM_${row.name.replace(' ', '_')}"
-            Pill("${row.role} · ${row.name}${if (speed.isBlank()) "" else " · $speed"}", on, tag) {
+            Pill("${row.role} · ${row.name}$size${if (speed.isBlank()) "" else " · $speed"}", on, tag) {
                 tap { LocalAnalyst.setActiveName(row.name) }
             }
         }
