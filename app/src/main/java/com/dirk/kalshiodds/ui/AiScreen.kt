@@ -88,6 +88,9 @@ fun AiScreen(vm: AiViewModel) {
     var section by rememberSaveable { mutableIntStateOf(if (dash.keys.any { it.second } || keys.saved.any { it.second }) 0 else 2) }
     var which by rememberSaveable { mutableStateOf(AiChat.SCALPING) }
     val llm by vm.localLlm.collectAsStateWithLifecycle()
+    val gemma by vm.gemma.collectAsStateWithLifecycle()
+    val gemmaTest by vm.gemmaTest.collectAsStateWithLifecycle()
+    val gemmaTesting by vm.gemmaTesting.collectAsStateWithLifecycle()
     val llmTest by vm.llmTest.collectAsStateWithLifecycle()
     val llmTesting by vm.llmTesting.collectAsStateWithLifecycle()
     val speeds by vm.speeds.collectAsStateWithLifecycle()
@@ -127,6 +130,12 @@ fun AiScreen(vm: AiViewModel) {
                 AiKeysContent(
                     keys, onDraft = vm::setDraft, onSave = vm::saveKeys, onTest = vm::testKeys, onClear = vm::clearKey,
                     onScalping = vm::setScalpingOn, onPaper = vm::setPaperOn, onLearning = vm::setLearning
+                )
+                Spacer(Modifier.height(12.dp))
+                GemmaCard(
+                    gemma, gemmaTest, gemmaTesting,
+                    onDownload = vm::downloadGemma, onCancel = vm::cancelGemma, onChoose = vm::chooseGemma,
+                    onDelete = vm::deleteGemma, onTest = vm::testGemma
                 )
                 Spacer(Modifier.height(12.dp))
                 OnPhoneModelCard(

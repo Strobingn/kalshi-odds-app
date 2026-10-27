@@ -762,7 +762,7 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
     ) {
         db.writableDatabase.execSQL(
             "UPDATE $TABLE_SESSION SET ended_at_ms = ?, markets = ?, signals = ?, bets = ?, pnl_usd = ? WHERE id = ?",
-            arrayOf(endedAtMs, markets, signals, bets, pnlUsd, id)
+            arrayOf<Any?>(endedAtMs, markets, signals, bets, pnlUsd, id)
         )
     }
 

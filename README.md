@@ -19,6 +19,17 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.21.0 (Claude branch): Gemma 4 on the phone replaces the cloud AI
+
+You asked (2026-10-27) for Gemma 4 to replace the cloud AI. AI → Keys has a new **Gemma 4 on this phone** card: download
+**Gemma 4 E2B** (2.6 GB, faster) or **E4B** (3.7 GB, smarter) from Hugging Face (litert-community, Apache-2.0). The
+download resumes if it stops and is checked against Hugging Face's size and SHA-256 before use. Once a model is on the
+phone, the Scalping AI, the Paper AI, the chat, Explain and the daily review all run on it through Google's LiteRT-LM
+(GPU first, CPU if the GPU won't load); the cloud keys are not called. Until the download finishes the saved cloud keys
+keep the AIs running. The AIs' forced tool calls become constrained JSON against each tool's own schema, so they get
+the same arguments a cloud tool call returned. The model stays loaded between the every-minute calls and frees itself
+after 5 idle minutes. Kotlin moved from 2.0.21 to 2.4.21 (LiteRT-LM 0.18.1 is built with Kotlin 2.4).
+
 ## 1.20.11 (Claude branch): the AIs keep every strategy on
 
 You asked (2026-10-24) that strategies are not switched off. The Scalping AI's `enabled=0` is now refused ("strategies

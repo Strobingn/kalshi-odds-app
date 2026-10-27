@@ -13,10 +13,13 @@ class AiWriter(
     /** (role, text) messages, system first → ("provider model", text), or null when no provider answered. */
     private val cloud: (List<Pair<String, String>>) -> Pair<String, String>?,
     private val cloudError: () -> String,
-    private val hasCloudKey: () -> Boolean
+    private val hasCloudKey: () -> Boolean,
+    /** True when the small on-phone llama.cpp model should be skipped (Gemma answers through [cloud]). */
+    private val skipLocal: () -> Boolean = { false }
 ) {
     suspend fun write(system: String, user: String, maxTokens: Int, onText: (String) -> Unit = {}): Result<Written> {
-        val localFirst = local.isInstalled && local.state.value.preferLocal
+        val useLocal = local.isInstalled && !skipLocal()
+        val localFirst = useLocal && local.state.value.preferLocal
         var localFailure: String? = null
         if (localFirst) {
             val r = local.generate(system, user, maxTokens = maxTokens, onText = onText)
@@ -30,10 +33,10 @@ class AiWriter(
                 val note = localFailure?.let { " (on-phone model: $it)" }.orEmpty()
                 return Result.success(Written(r.second, r.first + note, false))
             }
-            if (!localFirst && local.isInstalled) return fromLocal(system, user, maxTokens, onText, "cloud: ${cloudError().ifBlank { "no answer" }}")
+            if (!localFirst && useLocal) return fromLocal(system, user, maxTokens, onText, "cloud: ${cloudError().ifBlank { "no answer" }}")
             return Result.failure(IllegalStateException(listOfNotNull(localFailure?.let { "on-phone model: $it" }, "cloud: ${cloudError().ifBlank { "no answer" }}").joinToString("; ")))
         }
-        if (!localFirst && local.isInstalled) return fromLocal(system, user, maxTokens, onText, null)
+        if (!localFirst && useLocal) return fromLocal(system, user, maxTokens, onText, null)
         return Result.failure(
             IllegalStateException(localFailure?.let { "on-phone model: $it; no cloud API key saved" }
                 ?: "install an on-phone model or add a Groq, Cerebras, Gemini or Mistral key (AI → Keys)")
