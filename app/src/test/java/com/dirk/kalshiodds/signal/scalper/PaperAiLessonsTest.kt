@@ -10,6 +10,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -185,6 +186,78 @@ class PaperAiLessonsTest {
         val shown = Json.parseToJsonElement(spy.users.first()).jsonObject["lessonsFromResults"]!!
             .jsonArray.map { it.jsonPrimitive.content }
         assertEquals(listOf("an old lesson", "another"), shown)
+    }
+
+    // ---- it learns from the windows it skipped, not only the ones it bet on ----
+
+    @Test
+    fun aSkippedWindowIsRememberedWithTheAsksItTurnedDown() {
+        val saved = ArrayList<String>()
+        val spy = Spy(mutableListOf("""{"decision":"SKIP","reason":"no edge"}"""))
+        ai(spy, PaperAiMemory(), saved).tick()
+
+        val sk = lastMemory(saved).skips.single()
+        assertEquals("KXBTC15M-NOW", sk.ticker)
+        assertEquals(40.0, sk.yesAskCents!!, 1e-9)
+        assertEquals("YES was 40¢ against a 45¢ fair price", "YES", sk.sideItPassedUp)
+        assertNull("not settled yet", sk.wouldHavePaidUsd)
+    }
+
+    @Test
+    fun oneSkipPerWindowNotOnePerMinute() {
+        val saved = ArrayList<String>()
+        val spy = Spy(MutableList(4) { """{"decision":"SKIP","reason":"no edge"}""" })
+        val paper = ai(spy, PaperAiMemory(), saved)
+        repeat(4) { paper.tick() }
+        assertEquals(1, lastMemory(saved).skips.size)
+        assertEquals(4, lastMemory(saved).skipsSinceBet)
+    }
+
+    @Test
+    fun onceTheWindowSettlesTheSkipIsScoredAndShownToIt() {
+        val saved = ArrayList<String>()
+        val spy = Spy(mutableListOf("""{"decision":"SKIP","reason":"no edge"}""", """{"decision":"SKIP","reason":"no edge"}"""))
+        val paper = ai(spy, PaperAiMemory(), saved)
+        paper.tick()
+        paper.onSettled("KXBTC15M-NOW", "yes")
+
+        val sk = lastMemory(saved).skips.single()
+        assertEquals("YES", sk.result)
+        // YES at 40¢ wins: 60¢ a contract, less the taker fee.
+        assertTrue("the bet it passed up would have paid", sk.wouldHavePaidUsd!! > 0.55)
+
+        paper.tick()
+        val cost = Json.parseToJsonElement(spy.users.last()).jsonObject["whatSkippingHasCost"]!!.jsonObject
+        assertEquals(1, cost["settledSkipsWithABetYouPassedUp"]!!.jsonPrimitive.int())
+        assertEquals(1, cost["thoseThatWouldHaveWon"]!!.jsonPrimitive.int())
+        assertTrue(cost["netUsdOneContractEach"]!!.jsonPrimitive.content.toDouble() > 0.55)
+    }
+
+    @Test
+    fun aSkipThatWasRightScoresAsALoss() {
+        val saved = ArrayList<String>()
+        val spy = Spy(mutableListOf("""{"decision":"SKIP","reason":"no edge"}"""))
+        val paper = ai(spy, PaperAiMemory(), saved)
+        paper.tick()
+        paper.onSettled("KXBTC15M-NOW", "no")
+        val sk = lastMemory(saved).skips.single()
+        assertTrue("passing on YES at 40¢ saved money", sk.wouldHavePaidUsd!! < 0.0)
+    }
+
+    @Test
+    fun aVoidedWindowScoresNothing() {
+        val saved = ArrayList<String>()
+        val spy = Spy(mutableListOf("""{"decision":"SKIP","reason":"no edge"}"""))
+        val paper = ai(spy, PaperAiMemory(), saved)
+        paper.tick()
+        paper.onSettled("KXBTC15M-NOW", "void")
+        assertNull(lastMemory(saved).skips.single().wouldHavePaidUsd)
+    }
+
+    @Test
+    fun bothPromptsAreToldWhatSkippingHasCost() {
+        assertTrue(PaperAi.SYSTEM.contains("whatSkippingHasCost"))
+        assertTrue(PaperAi.REFLECT_SYSTEM.contains("whatSkippingHasCost"))
     }
 
     private fun kotlinx.serialization.json.JsonPrimitive.int() = content.toDouble().toInt()

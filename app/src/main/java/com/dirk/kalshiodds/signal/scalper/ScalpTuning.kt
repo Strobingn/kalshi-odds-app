@@ -16,8 +16,21 @@ import kotlinx.serialization.Serializable
  */
 object ScalpBand {
     const val DEFAULT_MIN = 0.15
-    const val DEFAULT_MAX = 0.57
+    const val DEFAULT_MAX = 0.58
     private const val EPS = 1e-9
+
+    /**
+     * Every strategy buys [DEFAULT_MIN]–[DEFAULT_MAX] (you asked for 15–58¢ "for all models", 2026-10-27), whatever
+     * band it declares for itself.
+     *
+     * The declarations are kept on [ScalpStrategy] because they say what each rule was researched on, but they no
+     * longer reach the engine. The cost is real and deliberate: a strategy whose signal IS a price above 58¢ cannot
+     * fire any more — Late favourite (80–95¢), Early favourite (65–85¢), Heavy favourite (92–97¢), Momentum ride,
+     * Opening drive, Opening ride, Late tiebreak, Late edge and all five Kashi favourites. Long shot (10–20¢) only
+     * trades its 15–20¢ overlap. Set this to false to give every strategy its own band back; a band you set
+     * yourself on one strategy still wins either way.
+     */
+    const val ALL_STRATEGIES_USE_DEFAULT = true
 
     /**
      * The narrowest entry band a tuner may leave behind, in cents.
@@ -54,9 +67,12 @@ object ScalpBand {
     }
 
     /** The band [st] buys in when you have not set one of your own. */
-    fun of(st: ScalpStrategy): Pair<Double, Double> =
-        if (st.entryMin < DEFAULT_MIN - EPS || st.entryMax > DEFAULT_MAX + EPS) st.entryMin to st.entryMax
-        else DEFAULT_MIN to DEFAULT_MAX
+    fun of(st: ScalpStrategy): Pair<Double, Double> = when {
+        ALL_STRATEGIES_USE_DEFAULT -> DEFAULT_MIN to DEFAULT_MAX
+        // A strategy that reaches past either end means it on purpose; one that sat wholly inside was only filtering.
+        st.entryMin < DEFAULT_MIN - EPS || st.entryMax > DEFAULT_MAX + EPS -> st.entryMin to st.entryMax
+        else -> DEFAULT_MIN to DEFAULT_MAX
+    }
 
     /** True when [st] buys outside the arena's default band on purpose. */
     fun ownBand(st: ScalpStrategy): Boolean = of(st) != (DEFAULT_MIN to DEFAULT_MAX)

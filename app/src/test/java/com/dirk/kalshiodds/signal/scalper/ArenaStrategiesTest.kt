@@ -18,7 +18,8 @@ class ArenaStrategiesTest {
      * The fee and P&L maths here is written for a 10-contract order, so these tests name that size instead of
      * riding on [ScalpTuning.DEFAULT_CONTRACTS] (100 since 1.23.0) and changing meaning when the default moves.
      */
-    private fun engine(tuning: ScalpTuning = ScalpTuning()) =
+    /** Every strategy on its researched band: these tests are about the signals, not the arena's 15–58¢. */
+    private fun engine(tuning: ScalpTuning = ScalpTuning().useOwnBands()) =
         ScalperEngine(ScalperEngine.Config(contracts = 10), tuning)
 
 

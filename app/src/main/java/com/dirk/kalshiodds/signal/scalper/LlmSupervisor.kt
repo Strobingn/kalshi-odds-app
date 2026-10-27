@@ -45,9 +45,10 @@ object SupervisorBounds {
 
     data class Range(val lo: Double, val hi: Double, val integer: Boolean)
 
-    private val band = Range(PrintGrid.MIN_PRICE * 100.0, 98.0, false)
+    /** The tuners move the band inside the arena's own 15–58¢; the sliders still reach anywhere. */
+    private val band = Range(ScalpBand.DEFAULT_MIN * 100.0, ScalpBand.DEFAULT_MAX * 100.0, false)
 
-    /** Knobs with one fixed range for every strategy. The entry band stays inside 10–98¢ (never a long shot; the late favourites buy up to 98¢). */
+    /** Knobs with one fixed range for every strategy. The entry band stays inside the arena's 15–58¢ ([ScalpBand]). */
     private val fixed: Map<String, Range> = linkedMapOf(
         "contracts" to Range(1.0, ScalpTuning.MAX_CONTRACTS.toDouble(), true),
         "targetCents" to Range(1.0, 30.0, false),

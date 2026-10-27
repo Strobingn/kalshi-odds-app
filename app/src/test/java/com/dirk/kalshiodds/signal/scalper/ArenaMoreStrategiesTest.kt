@@ -23,7 +23,9 @@ class ArenaMoreStrategiesTest {
         ledger = ScalperLedger(),
         topOfBook = { top() },
         bookLevels = { null },
-        closeMs = { 900_000L }, strategies = ScalpStrategy.values().toList()
+        closeMs = { 900_000L }, strategies = ScalpStrategy.values().toList(),
+        // These tests are about the signals, not the arena's band: every strategy on its researched band.
+        engine = ScalperEngine(tuning = ScalpTuning().useOwnBands())
     )
 
     /** One second of two-sided prints: takers sell YES at [bid] and buy YES at [ask]. */

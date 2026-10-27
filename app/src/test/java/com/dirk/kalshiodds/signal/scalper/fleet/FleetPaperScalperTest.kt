@@ -28,7 +28,10 @@ class FleetPaperScalperTest {
         model = null,
         ledger = ScalperLedger(record = { t, _ -> trades.addAll(t) }, hourOf = { 0 }),
         topOfBook = { top() }, bookLevels = { null }, closeMs = { close },
-        engine = ScalperEngine(), strategies = strategies, fleetFeed = feed
+        engine = ScalperEngine(
+            tuning = com.dirk.kalshiodds.signal.scalper.ScalpTuning()
+                .let { com.dirk.kalshiodds.signal.scalper.useOwnBands(it) }
+        ), strategies = strategies, fleetFeed = feed
     )
 
     @After
