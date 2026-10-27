@@ -1,6 +1,7 @@
 package com.dirk.kalshiodds.llm
 
 import com.dirk.kalshiodds.decision.AiBench
+import com.dirk.kalshiodds.decision.PaperFleetDefaults
 import com.dirk.kalshiodds.decision.PaperTape
 import com.dirk.kalshiodds.decision.Research
 import com.dirk.kalshiodds.decision.ScalpControls
@@ -103,6 +104,25 @@ object AiWatchBounds {
         }
         if (field == "maxEntryCents") lo = maxOf(lo, s.minEntryCents)
         if (field == "minEntryCents") hi = minOf(hi, s.maxEntryCents ?: hi)
+        // Factory floor. AI may not raise lowest buy above 15¢, drop highest buy under 55¢,
+        // move take-profit off 25¢, or raise open-at-once above the value already stored.
+        if (field == "minEntryCents") {
+            hi = minOf(hi, PaperFleetDefaults.BUY_MIN)
+            lo = minOf(lo, PaperFleetDefaults.BUY_MIN)
+        }
+        if (field == "maxEntryCents") {
+            lo = maxOf(lo, PaperFleetDefaults.BUY_MAX)
+            hi = maxOf(hi, PaperFleetDefaults.BUY_MAX)
+            hi = minOf(hi, maxOf(base, PaperFleetDefaults.BUY_MAX))
+        }
+        if (field == "takeProfitCents") {
+            lo = PaperFleetDefaults.PROFIT_CENTS
+            hi = PaperFleetDefaults.PROFIT_CENTS
+        }
+        if (field == "maxOpenPerSide") {
+            hi = minOf(hi, base)
+        }
+        if (lo > hi) lo = hi
         return lo to hi
     }
 

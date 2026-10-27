@@ -136,12 +136,12 @@ object Research {
 
     /**
      * "AI learns": after every close, move several sliders. The step scales with that trade's P&L.
-     * Winners loosen (higher ceiling, lower floor down to the strategy floor, bigger clip, longer entry window).
-     * Losers tighten and shrink, but the buy band stays at least [AiLearnBounds.MIN_BAND_CENTS] wide
-     * (or the strategy's whole book, when that is narrower), until-minute stays at or above
-     * [AiLearnBounds.UNTIL_FLOOR] unless Dirk already set it lower, and a percent stop stays at or above
-     * [AiLearnBounds.STOP_PCT_FLOOR] the same way. It never freezes or benches. A manual edit clears
-     * [ScalpStrategySettings.aiBaseCents] and the next close starts from the values the owner set.
+     * Winners loosen the clip and the entry window. Losers tighten those and shrink the clip.
+     * The buy band stays on the factory floor: lowest buy at or under 15¢, highest buy at or over 55¢.
+     * Until-minute stays at or above [AiLearnBounds.UNTIL_FLOOR] unless Dirk already set it lower, and a
+     * percent stop stays at or above [AiLearnBounds.STOP_PCT_FLOOR] the same way. It never freezes or
+     * benches. A manual edit clears [ScalpStrategySettings.aiBaseCents] and the next close starts from
+     * the values the owner set.
      */
     fun learn(code: String, s: ScalpStrategySettings, net: Double, defaultMaxCents: Int): ScalpStrategySettings {
         if (!s.aiLearns || !net.isFinite()) return s

@@ -89,7 +89,7 @@ internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: Sc
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("AI learns", color = c.textPrimary, fontWeight = FontWeight.SemiBold)
-                    Text(if (settings.aiLearns) "After every close it moves several sliders. The step scales with that trade's P&L: winners get a looser buy range and a bigger clip, losers get tighter and smaller. It never freezes or benches. A change you make by hand resets the baseline." else "Off · sliders stay exactly where you set them", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+                    Text(if (settings.aiLearns) "After every close it moves clip, stop, and the entry window. The step scales with that trade's P&L. The buy band stays 15–55¢ and take profit stays 25¢. It never freezes or benches. A change you make by hand resets the baseline." else "Off · sliders stay exactly where you set them", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
                 }
                 Switch(checked = settings.aiLearns, onCheckedChange = { onChange(settings.copy(aiLearns = it).manual()) }, modifier = Modifier.testTag("STRATEGY_AI_LEARNS"))
             }

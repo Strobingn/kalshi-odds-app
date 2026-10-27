@@ -188,16 +188,19 @@ class MemoryScalpControls(initial: ScalpControls = ScalpControls()) : ScalpContr
  * [FLAG_BAND] rewrites AI-owned rows whose buy band, until-minute, or stop collapsed.
  * [FLAG_FLEET] writes the 15–55¢ / 25¢ heal back to prefs. The heal also runs on every
  * [ScalpControls.normalized] read, so a later collapse does not wait for another flag.
+ * [FLAG_OPEN] runs again for the 10¢ windows and the open-at-once slider the 15–55
+ * pass left in place. It rewrites every AI-touched card, not only a 1–2¢ band.
  */
 object ScalpAutoBenchMigration {
     const val FLAG = "autobench_cleared_1024"
     const val FLAG_1028 = "trading_default_1028"
     const val FLAG_BAND = "ai_learn_band_1026"
     const val FLAG_FLEET = "fleet_band_15_55"
+    const val FLAG_OPEN = "fleet_open_band_1027"
 
     fun apply(saved: ScalpControls): ScalpControls = saved.copy(autoBench = false, aiBench = emptySet()).normalized()
 
-    /** Load-time repair. A 1–2¢ band is put back to 15–55¢. A wider hand-set band stays. */
+    /** Load-time repair. A tight or AI-owned band is put back to 15–55¢ / 25¢. Open-at-once returns to unlimited. A hand band at least 20¢ wide stays. */
     fun repairLearnedBands(saved: ScalpControls): ScalpControls = AiLearnBounds.repairAll(saved).normalized()
 }
 
@@ -216,7 +219,8 @@ class SavedScalpControls(context: Context, private val flushDelayMs: Long = 1_00
             prefs.getBoolean(ScalpAutoBenchMigration.FLAG_1028, false)
         val bandDone = prefs.getBoolean(ScalpAutoBenchMigration.FLAG_BAND, false)
         val fleetDone = prefs.getBoolean(ScalpAutoBenchMigration.FLAG_FLEET, false)
-        if (legacy && bandDone && fleetDone) return raw.normalized()
+        val openDone = prefs.getBoolean(ScalpAutoBenchMigration.FLAG_OPEN, false)
+        if (legacy && bandDone && fleetDone && openDone) return raw.normalized()
         val migrated = if (legacy) raw else ScalpAutoBenchMigration.apply(raw)
         val next = ScalpAutoBenchMigration.repairLearnedBands(migrated)
         prefs.edit()
@@ -224,6 +228,7 @@ class SavedScalpControls(context: Context, private val flushDelayMs: Long = 1_00
             .putBoolean(ScalpAutoBenchMigration.FLAG_1028, true)
             .putBoolean(ScalpAutoBenchMigration.FLAG_BAND, true)
             .putBoolean(ScalpAutoBenchMigration.FLAG_FLEET, true)
+            .putBoolean(ScalpAutoBenchMigration.FLAG_OPEN, true)
             .putString("settings", json.encodeToString(next))
             .apply()
         return next

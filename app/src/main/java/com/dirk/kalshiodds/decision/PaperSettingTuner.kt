@@ -9,8 +9,8 @@ import kotlin.math.roundToInt
  * It loosens and enlarges only a scalper that is net-positive after fees over at least
  * [LOOSEN_MIN] recent closes. A loser gets tighter and a smaller clip.
  * It never loosens a loser, never benches, never pauses, and never moves a setting the owner just edited.
- * Steps scale with recent P&L. The strategy floor, the sane ask ceiling, and [AiLearnBounds]
- * (buy-band width, until-minute, stop) are hard stops. A 1¢ band or minute 1 is not a tighter setting.
+ * Steps scale with recent P&L. The buy band stays 15–55¢ and take-profit stays 25¢.
+ * Until-minute and the stop still have floors. A 10¢ buy window is not a tighter setting.
  */
 object PaperSettingTuner {
     /** Recent closes required before a positive net may loosen or enlarge a clip. */
@@ -51,11 +51,9 @@ object PaperSettingTuner {
             val loser = net < 0.0
             if (!winner && !loser) continue
             val view = controls.settings(tape.code)
-            val floor = ScalpFloors.cents(tape.code)
             val ceil = ScalpFloors.ceilingCents(tape.code)
             val max0 = view.maxEntryCents ?: ceil
-            val min0 = view.minEntryCents.coerceAtLeast(floor)
-            val band = AiLearnBounds.enforcedBand(tape.code, min0, max0)
+            val min0 = view.minEntryCents
             val why = if (winner) {
                 String.format(Locale.US, "winner net %+.2f win %.0f%% · loosen so it trades more", net, wr * 100.0)
             } else {
@@ -69,19 +67,21 @@ object PaperSettingTuner {
                 val hi: Int
                 when (field) {
                     "minEntryCents" -> {
-                        lo = floor
-                        hi = (max0 - band).coerceAtLeast(lo)
+                        lo = PaperFleetDefaults.BUY_MIN
+                        hi = PaperFleetDefaults.BUY_MIN
                     }
                     "maxEntryCents" -> {
-                        hi = ceil
-                        val loBound = maxOf(ScalpFloors.minCeilingCents(tape.code), (min0 + band).coerceAtMost(ceil))
-                        lo = loBound.coerceAtMost(hi)
+                        lo = PaperFleetDefaults.BUY_MAX
+                        hi = maxOf(ceil, PaperFleetDefaults.BUY_MAX)
                     }
                     "contracts" -> { lo = PaperClip.MIN; hi = maxOf(ScalpVariants.clipOf(tape.code) ?: 100, 100) }
                     "untilMinute" -> { lo = AiLearnBounds.untilLo(view.untilMinute); hi = AiLearnBounds.UNTIL_CEILING }
                     "stopCents" -> { lo = AiLearnBounds.stopCentsLo(view.stopCents ?: 8); hi = 48 }
                     "stopLossPercent" -> { lo = AiLearnBounds.stopPctLo(view.stopLossPercent ?: 20); hi = 48 }
-                    "takeProfitCents" -> { lo = 0; hi = PaperFleetDefaults.PROFIT_CENTS }
+                    "takeProfitCents" -> {
+                        lo = PaperFleetDefaults.PROFIT_CENTS
+                        hi = PaperFleetDefaults.PROFIT_CENTS
+                    }
                     "maxHoldSeconds" -> { lo = 0; hi = 900 }
                     "edgeCents" -> { lo = 0; hi = 30 }
                     else -> return

@@ -83,7 +83,7 @@ class SettingToolsTest {
         assertTrue(SettingTools.propose(c, "research.lateHiCents", "70") is SettingTools.Result.Rejected) // default lateLo 80
         val withMin = SettingTools.apply(c, SettingTools.propose(c, "strategy.$code.minEntryCents", "30") as SettingTools.Result.Proposal)
         assertTrue(SettingTools.propose(withMin, "strategy.$code.maxEntryCents", "20") is SettingTools.Result.Rejected)
-        assertTrue(SettingTools.propose(withMin, "strategy.$code.maxEntryCents", "40") is SettingTools.Result.Proposal)
+        assertTrue(SettingTools.propose(withMin, "strategy.$code.maxEntryCents", "50") is SettingTools.Result.Proposal)
     }
 
     @Test fun parsesToolCallLines() {
