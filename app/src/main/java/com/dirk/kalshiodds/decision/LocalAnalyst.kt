@@ -36,6 +36,7 @@ object LocalAnalyst {
 
     val SHORTLIST: List<Candidate> = listOf(
         Candidate("Gemma 4 E2B", "litert-community/gemma-4-E2B-it-litert-lm", "gemma-4-E2B-it.litertlm", "~2.59 GB", null, null, "Primary"),
+        Candidate("Gemma 4 E4B", "litert-community/gemma-4-E4B-it-litert-lm", "gemma-4-E4B-it.litertlm", "~3.65 GB", null, null, "Stronger / larger"),
         Candidate("Gemma 3n E2B", "litert-community/gemma-3n-E2B-it-litert-lm", "gemma-3n-E2B-it.litertlm", "measured", 16, 16, "S24 fallback"),
         Candidate("Gemma 3 1B", "litert-community/gemma-3-1b-it-litert-lm", "gemma-3-1b-it.litertlm", "measured", 33, 24, "S24 fallback"),
         Candidate("Gemma 3n E4B", "litert-community/gemma-3n-E4B-it-litert-lm", "gemma-3n-E4B-it.litertlm", "measured", 9, null, "S24 fallback"),

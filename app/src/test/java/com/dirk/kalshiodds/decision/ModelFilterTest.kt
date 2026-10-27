@@ -95,6 +95,27 @@ class ModelFilterTest {
         assertTrue("distStrikeBps ${push[dist]}", abs(push[dist]) > 1e-6)
     }
 
+    @Test fun gemma4E4bIsSelectableAndE2bStaysDefault() {
+        LocalAnalyst.resetForTest()
+        assertEquals("Gemma 4 E2B", LocalAnalyst.activeName())
+        val primary = LocalAnalyst.SHORTLIST.first()
+        assertEquals("Gemma 4 E2B", primary.name)
+        assertEquals("Primary", primary.role)
+        assertEquals(1, LocalAnalyst.SHORTLIST.count { it.role == "Primary" })
+        val e4b = LocalAnalyst.SHORTLIST.single { it.name == "Gemma 4 E4B" }
+        assertEquals("litert-community/gemma-4-E4B-it-litert-lm", e4b.repo)
+        assertEquals("gemma-4-E4B-it.litertlm", e4b.fileName)
+        assertEquals("~3.65 GB", e4b.sizeLabel)
+        assertEquals("Stronger / larger", e4b.role)
+        assertTrue(e4b.role != "Primary")
+        LocalAnalyst.setActiveName("Gemma 4 E4B")
+        assertEquals("Gemma 4 E4B", LocalAnalyst.activeName())
+        LocalAnalyst.setActiveName("not-a-model")
+        assertEquals("Gemma 4 E4B", LocalAnalyst.activeName())
+        LocalAnalyst.resetForTest()
+        assertEquals("Gemma 4 E2B", LocalAnalyst.activeName())
+    }
+
     @Test fun localAnalystSelectionSurvivesRestart() {
         val dir = File(System.getProperty("java.io.tmpdir"), "local-analyst-test")
         dir.mkdirs()
