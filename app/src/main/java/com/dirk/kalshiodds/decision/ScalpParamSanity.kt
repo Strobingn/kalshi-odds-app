@@ -24,7 +24,11 @@ object ScalpParamSanity {
         val changed: String
     )
 
-    fun settings(code: String, raw: ScalpStrategySettings): ScalpStrategySettings {
+    /**
+     * @param fleetDefaults factory 15–55¢ / 25¢, and heal a 1–2¢ band or a take-profit above 30¢.
+     * The strategy-floor audit passes false so a favourite's own fair threshold stays on that report.
+     */
+    fun settings(code: String, raw: ScalpStrategySettings, fleetDefaults: Boolean = true): ScalpStrategySettings {
         val s = raw.normalized()
         val floor = ScalpFloors.cents(code)
         val ceilCap = ScalpFloors.ceilingCents(code)
@@ -39,7 +43,19 @@ object ScalpParamSanity {
         val stop = s.stopCents?.let { it.coerceIn(1, 48) }
         val stopPct = s.stopLossPercent?.let { it.coerceIn(1, 80) }
         var target = s.takeProfitCents?.let { it.coerceIn(0, 60) }
-        val entry = ((min + (max ?: ceilCap)) / 2).coerceIn(floor, 98)
+        if (fleetDefaults) {
+            val factoryBand = PaperFleetDefaults.untouchedBand(raw)
+            val storedCollapse = PaperFleetDefaults.collapsed(raw.minEntryCents, raw.maxEntryCents)
+            if (factoryBand || storedCollapse || PaperFleetDefaults.collapsed(min, max)) {
+                min = PaperFleetDefaults.BUY_MIN
+                max = PaperFleetDefaults.BUY_MAX
+            }
+            val factoryProfit = factoryBand && (raw.takeProfitCents == null || raw.takeProfitCents == 0)
+            if (factoryProfit || (raw.takeProfitCents != null && raw.takeProfitCents > PaperFleetDefaults.PROFIT_HEAL_ABOVE)) {
+                target = PaperFleetDefaults.PROFIT_CENTS
+            }
+        }
+        val entry = ((min + (max ?: ceilCap)) / 2).coerceIn(min.coerceAtLeast(1), 98)
         if (target != null && target > 0 && entry + target > 99) target = (99 - entry).coerceAtLeast(1)
         return s.copy(
             minEntryCents = min,
@@ -147,7 +163,7 @@ object ScalpParamSanity {
 
     fun audit(code: String): Audit {
         val raw = ScalpStrategySettings()
-        val s = settings(code, raw)
+        val s = settings(code, raw, fleetDefaults = false)
         val floor = s.minEntryCents
         val ceiling = s.maxEntryCents ?: ScalpFloors.ceilingCents(code)
         val spec = ScalpVariants.of(code)

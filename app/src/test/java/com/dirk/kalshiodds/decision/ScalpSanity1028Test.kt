@@ -67,9 +67,11 @@ class ScalpSanity1028Test {
         assertTrue(changes.isNotEmpty())
         assertTrue(changes.none { it.setting == "bench" || it.setting == "enabled" })
         val floor = ScalpFloors.cents(code)
-        changes.filter { it.setting == "minEntryCents" }.forEach { assertTrue(it.newValue.toInt() >= floor) }
-        assertTrue(before.minEntryCents >= floor)
-        assertTrue(before.minEntryCents >= 50)
+        changes.filter { it.setting == "minEntryCents" }.forEach { assertTrue(it.newValue.toInt() >= PaperFleetDefaults.BUY_MIN) }
+        assertEquals(PaperFleetDefaults.BUY_MIN, before.minEntryCents)
+        assertEquals(PaperFleetDefaults.BUY_MAX, before.maxEntryCents)
+        assertEquals(PaperFleetDefaults.PROFIT_CENTS, before.takeProfitCents)
+        assertTrue(floor >= 50)
         val book = ScalpBook()
         val insights = ScalpInsights(book, MemoryScalpControls(), null) {}
         insights.start()
@@ -103,8 +105,9 @@ class ScalpSanity1028Test {
         assertTrue(ScalpFloors.cents(KeptScalpers.FAIR_ID) >= 10)
         assertTrue(ScalpFloors.cents(KeptScalpers.V2_DIP_ID) >= 10)
         val sf17 = ScalpControls().settings("sf17f-v1")
-        assertTrue(sf17.minEntryCents >= 70)
-        assertTrue((sf17.maxEntryCents ?: 0) >= 90)
+        assertEquals(PaperFleetDefaults.BUY_MIN, sf17.minEntryCents)
+        assertEquals(PaperFleetDefaults.BUY_MAX, sf17.maxEntryCents)
+        assertEquals(PaperFleetDefaults.PROFIT_CENTS, sf17.takeProfitCents)
         assertFalse(ShockFav.shockEntryOk(ShockFav.v("sf04"), 0.80, 0.05))
         assertTrue(ShockFav.shockEntryOk(ShockFav.v("sf04"), 0.80, 0.20))
     }

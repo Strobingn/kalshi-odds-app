@@ -169,8 +169,8 @@ class SavedScalpControlsTest {
             .commit()
         val loaded = SavedScalpControls(ctx)
         val sf42 = loaded.state.value.settings("sf42")
-        assertEquals(25, sf42.minEntryCents)
-        assertEquals(35, sf42.maxEntryCents)
+        assertEquals(PaperFleetDefaults.BUY_MIN, sf42.minEntryCents)
+        assertEquals(PaperFleetDefaults.BUY_MAX, sf42.maxEntryCents)
         assertEquals(AiLearnBounds.UNTIL_FLOOR, sf42.untilMinute)
         assertEquals(AiLearnBounds.STOP_PCT_FLOOR, sf42.stopLossPercent)
         assertEquals(15, sf42.takeProfitCents)
@@ -178,16 +178,48 @@ class SavedScalpControlsTest {
         assertTrue(sf41.maxEntryCents!! - sf41.minEntryCents >= AiLearnBounds.bandRoom("sf41"))
         assertTrue(sf41.untilMinute >= AiLearnBounds.UNTIL_FLOOR)
         val sf43 = loaded.state.value.settings("sf43")
-        assertEquals(30, sf43.minEntryCents)
-        assertEquals(32, sf43.maxEntryCents)
+        assertEquals(PaperFleetDefaults.BUY_MIN, sf43.minEntryCents)
+        assertEquals(PaperFleetDefaults.BUY_MAX, sf43.maxEntryCents)
         assertEquals(2, sf43.untilMinute)
         assertEquals(3, sf43.stopLossPercent)
         assertTrue(prefs.getBoolean(ScalpAutoBenchMigration.FLAG_BAND, false))
+        assertTrue(prefs.getBoolean(ScalpAutoBenchMigration.FLAG_FLEET, false))
         loaded.close()
         val again = SavedScalpControls(ctx)
-        assertEquals(25, again.state.value.settings("sf42").minEntryCents)
-        assertEquals(35, again.state.value.settings("sf42").maxEntryCents)
+        assertEquals(PaperFleetDefaults.BUY_MIN, again.state.value.settings("sf42").minEntryCents)
+        assertEquals(PaperFleetDefaults.BUY_MAX, again.state.value.settings("sf42").maxEntryCents)
         assertEquals(2, again.state.value.settings("sf43").untilMinute)
         again.close()
+    }
+
+    @Test fun collapsed31To32AndProfitOver30HealWhenTheOldBandFlagIsAlreadySet() {
+        val ctx = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = ctx.getSharedPreferences("kashi_v2_controls", Context.MODE_PRIVATE)
+        prefs.edit().clear().commit()
+        val stuck = ScalpStrategySettings(
+            minEntryCents = 31, maxEntryCents = 32, untilMinute = 8,
+            takeProfitCents = 36, aiLearns = true, aiN = 9, aiBaseCents = 32,
+            aiNote = "AI kept settings (winner +0.40)"
+        )
+        val saved = ScalpControls(strategySettings = mapOf("s05-student-tail" to stuck, "sf42" to stuck))
+        prefs.edit()
+            .putBoolean(ScalpAutoBenchMigration.FLAG, true)
+            .putBoolean(ScalpAutoBenchMigration.FLAG_1028, true)
+            .putBoolean(ScalpAutoBenchMigration.FLAG_BAND, true)
+            .putString("settings", Json.encodeToString(saved))
+            .commit()
+        val loaded = SavedScalpControls(ctx)
+        listOf("s05-student-tail", "sf42").forEach { id ->
+            val row = loaded.state.value.settings(id)
+            assertEquals(id, PaperFleetDefaults.BUY_MIN, row.minEntryCents)
+            assertEquals(id, PaperFleetDefaults.BUY_MAX, row.maxEntryCents)
+            assertEquals(id, PaperFleetDefaults.PROFIT_CENTS, row.takeProfitCents)
+        }
+        assertTrue(prefs.getBoolean(ScalpAutoBenchMigration.FLAG_FLEET, false))
+        loaded.close()
+        val decoded = Json.decodeFromString<ScalpControls>(prefs.getString("settings", "{}")!!)
+        assertEquals(PaperFleetDefaults.BUY_MIN, decoded.strategySettings.getValue("sf42").minEntryCents)
+        assertEquals(PaperFleetDefaults.BUY_MAX, decoded.strategySettings.getValue("sf42").maxEntryCents)
+        assertEquals(PaperFleetDefaults.PROFIT_CENTS, decoded.strategySettings.getValue("sf42").takeProfitCents)
     }
 }

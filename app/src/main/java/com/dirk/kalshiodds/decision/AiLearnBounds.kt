@@ -40,6 +40,9 @@ object AiLearnBounds {
     fun enforcedBand(code: String, min: Int, max: Int): Int {
         val want = bandRoom(code)
         val have = (max - min).coerceAtLeast(1)
+        // A 1–2¢ band is the collapsed slider. The next step uses a real width,
+        // so AI learns cannot keep 31–32¢ or 34–35¢.
+        if (have <= PaperFleetDefaults.COLLAPSED_WIDTH) return want
         return if (have < want) have else want
     }
 
@@ -109,7 +112,11 @@ object AiLearnBounds {
             changed = true
         }
         val high = (max ?: ceil).coerceIn(floor + 1, ceil)
-        if (high - min < band) {
+        if (PaperFleetDefaults.collapsed(s.minEntryCents, s.maxEntryCents)) {
+            min = PaperFleetDefaults.BUY_MIN
+            max = PaperFleetDefaults.BUY_MAX
+            changed = true
+        } else if (high - min < band) {
             val lowered = (high - band).coerceAtLeast(floor)
             if (high - lowered >= band) {
                 if (lowered != min) {
@@ -143,6 +150,10 @@ object AiLearnBounds {
         }
         if (target != null && target in 1 until TAKE_FLOOR) {
             target = TAKE_FLOOR
+            changed = true
+        }
+        if (target != null && target > PaperFleetDefaults.PROFIT_HEAL_ABOVE) {
+            target = PaperFleetDefaults.PROFIT_CENTS
             changed = true
         }
         if (!changed) return s

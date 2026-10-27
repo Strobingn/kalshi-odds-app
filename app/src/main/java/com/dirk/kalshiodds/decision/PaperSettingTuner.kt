@@ -81,7 +81,7 @@ object PaperSettingTuner {
                     "untilMinute" -> { lo = AiLearnBounds.untilLo(view.untilMinute); hi = AiLearnBounds.UNTIL_CEILING }
                     "stopCents" -> { lo = AiLearnBounds.stopCentsLo(view.stopCents ?: 8); hi = 48 }
                     "stopLossPercent" -> { lo = AiLearnBounds.stopPctLo(view.stopLossPercent ?: 20); hi = 48 }
-                    "takeProfitCents" -> { lo = 0; hi = 40 }
+                    "takeProfitCents" -> { lo = 0; hi = PaperFleetDefaults.PROFIT_CENTS }
                     "maxHoldSeconds" -> { lo = 0; hi = 900 }
                     "edgeCents" -> { lo = 0; hi = 30 }
                     else -> return

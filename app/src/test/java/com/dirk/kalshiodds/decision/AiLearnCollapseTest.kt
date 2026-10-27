@@ -69,15 +69,20 @@ class AiLearnCollapseTest {
         ).manual()
         var kept = hand
         repeat(12) { kept = Research.learn("sf42", kept, -0.05, 55) }
-        assertEquals(34, kept.minEntryCents)
-        assertEquals(35, kept.maxEntryCents)
+        assertTrue(kept.maxEntryCents!! - kept.minEntryCents > PaperFleetDefaults.COLLAPSED_WIDTH)
         assertEquals(2, kept.untilMinute)
         assertEquals(3, kept.stopLossPercent)
         assertEquals(15, kept.takeProfitCents)
-        val repaired = ScalpAutoBenchMigration.repairLearnedBands(ScalpControls(strategySettings = mapOf("sf42" to hand)))
-        assertEquals(34, repaired.settings("sf42").minEntryCents)
-        assertEquals(35, repaired.settings("sf42").maxEntryCents)
+        val wide = ScalpStrategySettings(
+            minEntryCents = 20, maxEntryCents = 40, untilMinute = 6, stopLossPercent = 12,
+            takeProfitCents = 15, aiLearns = true
+        ).manual()
+        val repaired = ScalpAutoBenchMigration.repairLearnedBands(ScalpControls(strategySettings = mapOf("sf42" to hand, "sf41" to wide)))
+        assertEquals(PaperFleetDefaults.BUY_MIN, repaired.settings("sf42").minEntryCents)
+        assertEquals(PaperFleetDefaults.BUY_MAX, repaired.settings("sf42").maxEntryCents)
         assertEquals(2, repaired.settings("sf42").untilMinute)
+        assertEquals(20, repaired.settings("sf41").minEntryCents)
+        assertEquals(40, repaired.settings("sf41").maxEntryCents)
     }
 
     @Test fun storedCollapsedRowsRepairOnLoadAndDoNotRecollapse() {
@@ -101,13 +106,13 @@ class AiLearnCollapseTest {
         val twice = ScalpAutoBenchMigration.repairLearnedBands(once)
         assertEquals(once, twice)
         val sf42 = once.settings("sf42")
-        assertEquals(25, sf42.minEntryCents)
-        assertEquals(35, sf42.maxEntryCents)
+        assertEquals(PaperFleetDefaults.BUY_MIN, sf42.minEntryCents)
+        assertEquals(PaperFleetDefaults.BUY_MAX, sf42.maxEntryCents)
         assertEquals(AiLearnBounds.UNTIL_FLOOR, sf42.untilMinute)
         assertEquals(AiLearnBounds.STOP_PCT_FLOOR, sf42.stopLossPercent)
         assertEquals(15, sf42.takeProfitCents)
         assertTrue(sf42.aiNote.contains("repaired"))
-        assertTrue(sf42.aiNote.contains("25–35"))
+        assertTrue(sf42.aiNote.contains("15–55"))
         others.keys.forEach { code ->
             val row = once.settings(code)
             assertTrue("$code ${row.minEntryCents}–${row.maxEntryCents}", width(code, row) >= AiLearnBounds.bandRoom(code))
