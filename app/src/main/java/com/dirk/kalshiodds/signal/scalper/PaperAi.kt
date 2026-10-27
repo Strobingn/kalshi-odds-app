@@ -45,12 +45,31 @@ data class PaperBet(
     val bearCase: String? = null
 )
 
+/**
+ * One lesson, with the window it came from and what that window made. The outcome is kept so the betting prompt can
+ * be shown lessons from windows that WON as well as ones that lost: taking the newest lessons outright let a losing
+ * run fill every slot with "stay out", and since lessons are only written about windows it bet on, nothing could
+ * then contradict them — the AI talked itself out of betting and had no way back.
+ */
+@Serializable
+data class PaperLesson(
+    val text: String,
+    val ticker: String = "",
+    /** What the window made, or null for a lesson written before 1.24.0, when the outcome was not kept. */
+    val netUsd: Double? = null,
+    val atMs: Long = 0L
+)
+
 @Serializable
 data class PaperAiMemory(
     val bets: List<PaperBet> = emptyList(),
+    /** Lessons written before 1.24.0, text only. Read once and carried into [written]. */
     val lessons: List<String> = emptyList(),
     /** Settled windows whose bets the AI has not yet looked back on. */
-    val toReflect: List<String> = emptyList()
+    val toReflect: List<String> = emptyList(),
+    val written: List<PaperLesson> = emptyList(),
+    /** Skips in a row since its last placed bet: how far it has talked itself out of betting. */
+    val skipsSinceBet: Int = 0
 )
 
 /**
@@ -107,8 +126,10 @@ class PaperAi(
     private val lock = Any()
     private val json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
     private var bets: List<PaperBet> = initialMemory.bets
-    private var lessons: List<String> = initialMemory.lessons
+    private var lessons: List<PaperLesson> =
+        initialMemory.written.ifEmpty { initialMemory.lessons.map { PaperLesson(it) } }
     private var toReflect: List<String> = initialMemory.toReflect
+    private var skipsSinceBet: Int = initialMemory.skipsSinceBet
     private var nextId: Long = (bets.maxOfOrNull { it.id } ?: 0L) + 1
 
     private val _status = MutableStateFlow("Paper AI · not started")
@@ -176,8 +197,9 @@ class PaperAi(
         val reason = (obj["reason"] as? JsonPrimitive)?.contentOrNull.orEmpty().take(300)
         val conf = ((obj["confidence"] as? JsonPrimitive)?.doubleOrNull ?: 50.0).roundToInt().coerceIn(0, 100)
         if (decision != "YES" && decision != "NO") {
-            journal("skip", buildJsonObject { put("ticker", ticker); put("reason", reason) })
-            return note("skipped $ticker: $reason")
+            val runOfSkips = synchronized(lock) { skipsSinceBet += 1; save(); skipsSinceBet }
+            journal("skip", buildJsonObject { put("ticker", ticker); put("reason", reason); put("inARow", runOfSkips) })
+            return note("skipped $ticker ($runOfSkips in a row): $reason")
         }
         val askCents = (f[if (decision == "YES") "yesAskCents" else "noAskCents"] as? JsonPrimitive)?.doubleOrNull
         if (askCents == null || askCents < MIN_ASK_CENTS || askCents > MAX_ASK_CENTS) {
@@ -213,7 +235,7 @@ class PaperAi(
                 feeUsd = fill.feeUsd, openedMs = nowMs(), confidence = conf, reason = reason,
                 fairCents = fairSide?.let { Math.round(it * 10.0) / 10.0 }, chanceCents = Math.round(chance * 10.0) / 10.0,
                 bullCase = bull, bearCase = bear
-            ).also { bets = (bets + it).takeLast(KEEP_BETS); save() }
+            ).also { bets = (bets + it).takeLast(KEEP_BETS); skipsSinceBet = 0; save() }
         }
         journal("bet", json.encodeToJsonElement(PaperBet.serializer(), bet) as JsonObject)
         _record.value = synchronized(lock) { recordLine() }
@@ -247,7 +269,11 @@ class PaperAi(
                 })
             }
             put("calibration", calibrationJson())
-            put("yourNotes", buildJsonArray { for (l in synchronized(lock) { lessons.takeLast(10) }) add(JsonPrimitive(l)) })
+            // The real record, so a lesson that claims "historically this loses" has the numbers in front of it.
+            // Without these the model invented the history and the invention was stored as memory.
+            put("yourRecordOverall", overallRecord(ticker))
+            put("yourRecordInSimilarSpots", similarRecord(window, ticker))
+            put("yourNotes", buildJsonArray { for (l in synchronized(lock) { lessonsForPrompt(10) }) add(JsonPrimitive(l.text)) })
         }
         // No answer (provider down, rate limit): keep the window queued and look back on it next tick.
         val answer = chat.ask(REFLECT_SYSTEM, ctx.toString(), REFLECT_TOOLS) ?: return
@@ -255,10 +281,69 @@ class PaperAi(
             ?.let { (it["lesson"] as? JsonPrimitive)?.contentOrNull?.trim() }?.takeIf { it.isNotBlank() }?.take(300)
         synchronized(lock) {
             toReflect = toReflect.drop(1)
-            if (lesson != null) lessons = (lessons + lesson).takeLast(MAX_LESSONS)
+            if (lesson != null) {
+                val net = window.sumOf { it.pnlUsd ?: 0.0 }
+                lessons = (lessons + PaperLesson(lesson, ticker, Math.round(net * 100.0) / 100.0, nowMs())).takeLast(MAX_LESSONS)
+            }
             save()
         }
         if (lesson != null) journal("lesson", buildJsonObject { put("ticker", ticker); put("lesson", lesson) })
+    }
+
+    /** Confidence band of [c], the buckets the record is grouped into. */
+    private fun band(c: Int): String = when {
+        c < 60 -> "<60"
+        c < 70 -> "60-69"
+        c < 80 -> "70-79"
+        else -> "80+"
+    }
+
+    /** Every settled bet except [exclude]'s window: the base rate a one-window lesson has to be judged against. */
+    private fun overallRecord(exclude: String): JsonObject {
+        val done = synchronized(lock) {
+            bets.filter { it.result != null && it.result != "VOID" && !it.ticker.equals(exclude, true) }
+        }
+        return recordOf(done)
+    }
+
+    /**
+     * What the same kind of bet has really done: one row per (side, confidence band) in the window being looked
+     * back on, over every other settled bet. A row with few bets is the model's signal that one window proves
+     * nothing.
+     */
+    private fun similarRecord(window: List<PaperBet>, exclude: String): JsonArray {
+        val done = synchronized(lock) {
+            bets.filter { it.result != null && it.result != "VOID" && !it.ticker.equals(exclude, true) }
+        }
+        val shapes = window.map { it.side to band(it.confidence) }.distinct()
+        return buildJsonArray {
+            for ((side, b) in shapes) {
+                val like = done.filter { it.side == side && band(it.confidence) == b }
+                add(buildJsonObject {
+                    put("side", side)
+                    put("confidence", b)
+                    for ((k, v) in recordOf(like)) put(k, v)
+                })
+            }
+        }
+    }
+
+    private fun recordOf(done: List<PaperBet>): JsonObject = buildJsonObject {
+        put("settledBets", done.size)
+        put("won", done.count { it.side == it.result })
+        put("netUsd", Math.round(done.sumOf { it.pnlUsd ?: 0.0 } * 100.0) / 100.0)
+    }
+
+    /**
+     * Up to [n] lessons for the betting prompt: half from windows that made money, half from the ones that lost,
+     * oldest first. See [PaperLesson] for why the newest [n] outright was a trap.
+     */
+    private fun lessonsForPrompt(n: Int): List<PaperLesson> {
+        val won = lessons.filter { (it.netUsd ?: 0.0) > 0.0 }
+        val rest = lessons.filter { (it.netUsd ?: 0.0) <= 0.0 }
+        val fromWon = won.takeLast(n / 2)
+        val fromRest = rest.takeLast(n - fromWon.size)
+        return (fromWon + fromRest).sortedBy { it.atMs }.takeLast(n)
     }
 
     private fun calibrationJson(): JsonObject {
@@ -269,7 +354,7 @@ class PaperAi(
         }
     }
 
-    fun lessons(): List<String> = synchronized(lock) { lessons.toList() }
+    fun lessons(): List<String> = synchronized(lock) { lessons.map { it.text } }
 
     private fun note(s: String): String {
         _status.value = "Paper AI · $s"
@@ -284,7 +369,14 @@ class PaperAi(
     }
 
     private fun save() {
-        runCatching { persistMemory(json.encodeToString(PaperAiMemory.serializer(), PaperAiMemory(bets, lessons, toReflect))) }
+        runCatching {
+            persistMemory(
+                json.encodeToString(
+                    PaperAiMemory.serializer(),
+                    PaperAiMemory(bets = bets, toReflect = toReflect, written = lessons, skipsSinceBet = skipsSinceBet)
+                )
+            )
+        }
     }
 
     private fun context(f: JsonObject): JsonObject = buildJsonObject {
@@ -303,7 +395,8 @@ class PaperAi(
                 b.pnlUsd?.let { put("pnlUsd", it) }; put("reason", b.reason)
             })
         }
-        put("lessonsFromResults", buildJsonArray { for (l in lessons.takeLast(10)) add(JsonPrimitive(l)) })
+        put("skipsSinceYourLastBet", skipsSinceBet)
+        put("lessonsFromResults", buildJsonArray { for (l in lessonsForPrompt(10)) add(JsonPrimitive(l.text)) })
     }
 
     companion object {
@@ -319,15 +412,26 @@ class PaperAi(
         const val MAX_LESSONS = 30
         const val MAX_REFLECT_QUEUE = 5
 
+        /** Settled bets a row needs before a lesson may turn it into a rule. Below this, one window is one sample. */
+        const val MIN_FOR_RULE = 8
+
         val SYSTEM = """You are the PAPER BETTING AI for a Bitcoin-only Kalshi 15-minute UP/DOWN market. You are not the scalping AI: another AI tunes the scalping algorithms, you decide, every minute, whether to place another paper bet (there is no limit on how many bets you place in a window; you may bet again, the same side or the other, as the window moves).
 Each call you get the live feed, the limits, your record, your calibration, your last bets with results and lessons you wrote after earlier windows settled. YES = Bitcoin finishes UP (at or above strikePrice), NO = DOWN.
 The feed's fairYesCents is the math's chance of YES (0-100) from the settlement index, the strike, its volatility and the time left. spotMinusStrike says how far Bitcoin is from the strike now.
 Before you choose, write bull_case (the best reason UP wins) and bear_case (the best reason DOWN wins), then pick the side whose case is stronger at its price, or SKIP.
 Goal: positive net profit after the taker fee (0.07 x price x (1 - price) per contract). Every bet you place inside the limits is placed: bet often to learn, but only with an edge (the side's ask below your real chance of winning). Give your real chance as confidence; trustInYourConfidence shows how much of the edge you claimed has shown up. SKIP is a good answer when there is no edge.
+The lessons you are shown come from single settled windows unless they name a count, so treat them as evidence, not as rules: your record and your calibration outrank them. skipsSinceYourLastBet is how many times in a row you have skipped - a long run means you have stopped gathering the results you learn from, so take any real edge you find.
 Paper only. Answer only by calling place_bet."""
 
-        val REFLECT_SYSTEM = """You are the PAPER BETTING AI looking back on one settled Bitcoin 15-minute window you bet on. You get how it finished, your bets (side, price, confidence, the fair price at entry, your reason, your bull and bear cases) and your calibration.
-Say in one sentence what to do differently, or keep doing, next time: name the situation (time left, price, distance from the strike, fair price vs your confidence) so the lesson can be used. If the result was luck either way, say so. Answer only by calling write_lesson."""
+        val REFLECT_SYSTEM = """You are the PAPER BETTING AI looking back on one settled Bitcoin 15-minute window you bet on. You get how it finished, your bets (side, price, confidence, the fair price at entry, your reason, your bull and bear cases), your calibration, your record overall and your record in spots like this one.
+Say in one sentence what to do differently, or keep doing, next time: name the situation (time left, price, distance from the strike, fair price vs your confidence) so the lesson can be used.
+Rules for the lesson:
+- NEVER say "historical data shows", "historically" or anything like it unless the numbers are in yourRecordInSimilarSpots or yourRecordOverall, and then give the count: "0 of 4 NO bets at 60-69% have won". You do not have any history beyond what you are given here. Inventing one poisons every later decision.
+- One window is one sample. If the matching row has fewer than $MIN_FOR_RULE settled bets, write what happened and that it may be luck - do NOT write a rule telling yourself to avoid the setup.
+- A lesson that would stop you betting ("avoid", "stay out", "wait for clearer bias") needs the numbers to back it: a losing row of at least $MIN_FOR_RULE bets. Otherwise say what would have made the bet better (a better price, more time left, a bigger gap to the strike, a different side), not that you should not have bet.
+- Prefer a lesson that tells you what to DO. You only learn by betting, and lessons are only written about windows you bet on, so a wall of "stay out" leaves you nothing to learn from.
+- One losing window after a good decision is variance, not a mistake. Say so when the price and your confidence were right.
+Answer only by calling write_lesson."""
 
         val REFLECT_TOOLS: JsonArray = buildJsonArray {
             add(buildJsonObject {

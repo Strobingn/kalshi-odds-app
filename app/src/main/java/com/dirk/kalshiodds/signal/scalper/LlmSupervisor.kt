@@ -172,10 +172,16 @@ object SupervisorBounds {
         v = snap(st, param, v.coerceIn(range.lo, range.hi), range).coerceIn(range.lo, range.hi)
         if (cur != null && abs(v - cur) < 1e-9) return no("no change")
 
-        val next = with(k, param, v)
+        var next = with(k, param, v)
+        if (param == "entryMinCents" || param == "entryMaxCents") {
+            // A tuner may move one end of the band, not squeeze it shut: the other end gives way instead.
+            next = ScalpBand.widen(next, param, st, range.lo, range.hi)
+        }
         val after = Tuned(st, next, tuning.defaultContracts)
-        if ((param == "entryMinCents" || param == "entryMaxCents") && after.entryMin >= after.entryMax) {
-            return no("entry band would be empty")
+        if ((param == "entryMinCents" || param == "entryMaxCents") &&
+            after.entryMax * 100.0 - after.entryMin * 100.0 < ScalpBand.MIN_TUNED_WIDTH_CENTS - 1e-9
+        ) {
+            return no("entry band would be under ${ScalpBand.MIN_TUNED_WIDTH_CENTS.toInt()}c wide")
         }
         if ((param == "secondsLeftMin" || param == "secondsLeftMax") && after.secondsLeft?.isEmpty() == true) {
             return no("seconds-left window would be empty")
