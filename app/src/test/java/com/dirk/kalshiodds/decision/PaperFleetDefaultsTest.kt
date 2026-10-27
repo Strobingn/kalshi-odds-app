@@ -68,6 +68,17 @@ class PaperFleetDefaultsTest {
         assertEquals(15, hand.takeProfitCents)
     }
 
+    @Test fun factoryBandStaysUnderAHigherStrategyFloor() {
+        assertFleet("fcride", ScalpParamSanity.settings("fcride", PaperFleetDefaults.factory()))
+        assertFleet("sf17f", ScalpControls().settings("sf17f"))
+        val hand = ScalpParamSanity.settings("sf17f", ScalpStrategySettings(minEntryCents = 20, maxEntryCents = 40, takeProfitCents = 15))
+        assertEquals(20, hand.minEntryCents)
+        assertEquals(40, hand.maxEntryCents)
+        assertEquals(15, hand.takeProfitCents)
+        assertTrue(ScalpFloors.cents("sf17f") > PaperFleetDefaults.BUY_MAX)
+        assertTrue(ScalpFloors.cents("fcride") > PaperFleetDefaults.BUY_MIN)
+    }
+
     @Test fun explicitOffProfitOnAWideBandStaysOff() {
         val off = ScalpParamSanity.settings("sf41", ScalpStrategySettings(minEntryCents = 20, maxEntryCents = 40, takeProfitCents = 0))
         assertEquals(20, off.minEntryCents)

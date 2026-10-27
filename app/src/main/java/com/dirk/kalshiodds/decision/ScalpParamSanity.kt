@@ -44,6 +44,17 @@ object ScalpParamSanity {
         val stopPct = s.stopLossPercent?.let { it.coerceIn(1, 80) }
         var target = s.takeProfitCents?.let { it.coerceIn(0, 60) }
         if (fleetDefaults) {
+            // A band the owner set at 15¢ or higher is the slider, even when the
+            // strategy floor is 40¢ (forecast) or 70¢+ (a favourite). The floor
+            // clamp above would otherwise turn factory 15–55¢ into 40–55¢.
+            val rawMax = raw.maxEntryCents
+            val handBand = raw.minEntryCents >= PaperFleetDefaults.BUY_MIN &&
+                rawMax != null &&
+                !PaperFleetDefaults.collapsed(raw.minEntryCents, rawMax)
+            if (handBand) {
+                min = raw.minEntryCents.coerceIn(PaperFleetDefaults.BUY_MIN, 98)
+                max = rawMax.coerceIn(min + 1, 99)
+            }
             val factoryBand = PaperFleetDefaults.untouchedBand(raw)
             val storedCollapse = PaperFleetDefaults.collapsed(raw.minEntryCents, raw.maxEntryCents)
             if (factoryBand || storedCollapse || PaperFleetDefaults.collapsed(min, max)) {
