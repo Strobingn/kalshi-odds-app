@@ -97,7 +97,8 @@ object ModelFilter {
         val benchmarkAgeMs: Long = -1L,
         val policyVersion: String = POLICY_VERSION,
         val modelVersion: String = "",
-        val expectedNet: Double = 0.0
+        val expectedNet: Double = 0.0,
+        val pStrongCents: Double? = null
     )
 
     data class Sample(val x: DoubleArray, val netUsd: Double, val closeMs: Long, val tauS: Double, val twinId: String, val contracts: Int = 1)
@@ -131,8 +132,11 @@ object ModelFilter {
         val benchmarkAgeMs: Long = -1L,
         val policyVersion: String = POLICY_VERSION,
         val modelVersion: String = "",
-        val expectedNet: Double = 0.0
+        val expectedNet: Double = 0.0,
+        val pStrongCents: Double? = null
     )
+
+    data class GateReasonStat(val code: String, val blocked: Int, val logged: Int)
 
     data class Scorecard(
         val arm: String,
@@ -194,6 +198,9 @@ object ModelFilter {
     private var preferScoreBelow = PREFER_SCORE_BELOW
     private var lateWindowOnly = false
     private var adviceNote = ""
+    private var mtfAgree = false
+    private var strongMove = false
+    private var fibMode = HybridQuantGates.FibMode.LOG_ONLY
     private var gateFile: java.io.File? = null
     private var exitBeforeS = DEFAULT_EXIT_S
     private val ticks = HashMap<String, ArrayDeque<Tick>>()
@@ -253,6 +260,53 @@ object ModelFilter {
 
     fun gatePrefs(): GatePrefs = synchronized(lock) { gateSnapshot() }
 
+    fun hybridPrefs(): HybridQuantGates.Prefs = synchronized(lock) { hybridSnapshot() }
+
+    fun setMtfAgree(on: Boolean) = synchronized(lock) {
+        mtfAgree = on
+        saveGateLocked()
+    }
+
+    fun setStrongMove(on: Boolean) = synchronized(lock) {
+        strongMove = on
+        saveGateLocked()
+    }
+
+    fun setFibMode(mode: HybridQuantGates.FibMode) = synchronized(lock) {
+        fibMode = mode
+        saveGateLocked()
+    }
+
+    fun latestDecision(twinId: String): Decision? = synchronized(lock) { lastDecision[twinId] }
+
+    /** Counts of the three Hybrid Quant reason codes on the decision log. Logged means the row still entered. */
+    fun gateReasonStats(): List<GateReasonStat> = synchronized(lock) {
+        val rows = ArrayList<Pair<String, Boolean>>(decisions.size + closedLog.size)
+        val seen = HashSet<String>()
+        for (d in decisions) {
+            seen += decisionId(d.twinId, d.atMs, d.side)
+            rows += d.reason to d.enter
+        }
+        for (row in closedLog) {
+            if (row.id in seen) continue
+            rows += row.reason to row.entered
+        }
+        HybridQuantGates.REASON_CODES.map { code ->
+            var blocked = 0
+            var logged = 0
+            for ((reason, entered) in rows) {
+                if (!reason.contains(code)) continue
+                if (entered) logged++ else blocked++
+            }
+            GateReasonStat(code, blocked, logged)
+        }
+    }
+
+    fun gateReasonLine(): String = gateReasonStats().joinToString(" · ") { stat ->
+        if (stat.logged > 0) "${stat.code} ${stat.blocked} blocked / ${stat.logged} logged"
+        else "${stat.code} ${stat.blocked} blocked"
+    }
+
     /**
      * Writes the session-journal gate into the prefs [decide] reads.
      * Paper twins only. Does not raise the floor from 0.55 to 0.57 — that nudge
@@ -275,6 +329,7 @@ object ModelFilter {
         gateFile = file
         if (file == null || !file.isFile) return@synchronized
         val o = runCatching { org.json.JSONObject(file.readText()) }.getOrNull() ?: return@synchronized
+        loadHybridLocked(o)
         if (!o.has("scoreCeiling")) return@synchronized
         scoreCeiling = o.optDouble("scoreCeiling", HIGH_SCORE).coerceIn(0.45, 0.95)
         preferTimeLeftUnderS = o.optDouble("preferTimeLeftUnderS", PREFER_TIME_LEFT_S).coerceIn(60.0, 900.0)
@@ -458,9 +513,9 @@ object ModelFilter {
             eNet > 0.0 || (learned && (qScore >= threshold || eNet >= 0.01) && fair >= ask + 0.015)
         }
         val pocket = inPocket && cold > 0.0 && quietVol && priceOk && !pin && !blockHigh
-        val enter = !blockHigh && !outsideLate && priceOk && !pin && (pocket || (gate && regimeAllows(qScore, vol1m, blockHigh)))
+        val baseEnter = !blockHigh && !outsideLate && priceOk && !pin && (pocket || (gate && regimeAllows(qScore, vol1m, blockHigh)))
         val modelVersion = if (twin.arm == Arm.LGBM) "lgbm-${TreeEnsemble.TRAIN_TREES}x${TreeEnsemble.TRAIN_DEPTH}" else "logistic-l2"
-        val reason = when {
+        val baseReason = when {
             !priceOk && ask + 1e-9 < floor -> "below the ${ScalpFloors.cents(twin.parentId)}¢ floor"
             !priceOk -> "ask above 55¢ ceiling"
             pin -> "pin risk · taker off"
@@ -472,9 +527,24 @@ object ModelFilter {
             pocket && qScore < threshold -> "late pocket · score ${fmt(qScore)} ≤ ${fmt(preferScoreBelow)} · time left under 5 min"
             else -> "enter · ${twin.arm.name.lowercase()} · E[net] ${fmt(if (twin.arm == Arm.LGBM) lgbm else eNet)} · size ${fmt(scalar)}×"
         }
+        val spotTicks = ArrayList<Pair<Long, Double>>()
+        val row = ticks[q.ticker.uppercase()].orEmpty()
+        for (tick in row) if (tick.atMs < q.nowMs) spotTicks += tick.atMs to tick.spot
+        val mark = if (q.cfFresh()) q.cfSpot else q.spot
+        val ofi = if (x.size > OFI_FEATURE) x[OFI_FEATURE] else 0.0
+        val hybrid = HybridQuantGates.evaluate(
+            hybridSnapshot(), side, ask, mark, q.strike, q.sigmaPerSec, q.tauS,
+            q.nowMs, q.closeMs - 900_000L, spotTicks, ofi, baseEnter, baseReason
+        )
+        val enter = hybrid.enter
+        val reason = hybrid.reason
         why[twin.id] = reason
         lastScore[twin.id] = score
-        val d = Decision(twin.id, q.nowMs, score, scalar, enter, reason, warm, x, fair, ask, side, bookAge, benchAge, POLICY_VERSION, modelVersion, if (twin.arm == Arm.LGBM) lgbm else eNet)
+        val d = Decision(
+            twin.id, q.nowMs, score, scalar, enter, reason, warm, x, fair, ask, side,
+            bookAge, benchAge, POLICY_VERSION, modelVersion, if (twin.arm == Arm.LGBM) lgbm else eNet,
+            hybrid.pStrongCents
+        )
         val print = "$side|${fmt4(ask)}|${fmt4(fair)}|${fmt4(score)}|$enter|$reason"
         if (lastPrint[twin.id] == print) return lastDecision[twin.id] ?: d
         lastPrint[twin.id] = print
@@ -496,7 +566,7 @@ object ModelFilter {
         lastEnter[twinId]?.let { hitId ->
             outcomes[hitId] = netUsd
             decisions.firstOrNull { decisionId(it.twinId, it.atMs, it.side) == hitId }?.let { d ->
-                val row = LogRow(hitId, d.twinId, d.atMs, d.score, d.scalar, d.enter, d.reason, d.features.copyOf(), netUsd, d.side, d.freshnessMs, d.benchmarkAgeMs, d.policyVersion, d.modelVersion, d.expectedNet)
+                val row = LogRow(hitId, d.twinId, d.atMs, d.score, d.scalar, d.enter, d.reason, d.features.copyOf(), netUsd, d.side, d.freshnessMs, d.benchmarkAgeMs, d.policyVersion, d.modelVersion, d.expectedNet, d.pStrongCents)
                 closedLog.removeAll { it.id == hitId }
                 closedLog.addLast(row)
                 while (closedLog.size > 200) closedLog.removeFirst()
@@ -701,6 +771,9 @@ object ModelFilter {
         preferScoreBelow = PREFER_SCORE_BELOW
         lateWindowOnly = false
         adviceNote = ""
+        mtfAgree = false
+        strongMove = false
+        fibMode = HybridQuantGates.FibMode.LOG_ONLY
         gateFile = null
         exitBeforeS = DEFAULT_EXIT_S
         ticks.clear()
@@ -817,7 +890,7 @@ object ModelFilter {
     fun researchLog(): List<LogRow> = synchronized(lock) {
         val live = decisions.map { d ->
             val id = decisionId(d.twinId, d.atMs, d.side)
-            LogRow(id, d.twinId, d.atMs, d.score, d.scalar, d.enter, d.reason, d.features.copyOf(), outcomes[id], d.side, d.freshnessMs, d.benchmarkAgeMs, d.policyVersion, d.modelVersion, d.expectedNet)
+            LogRow(id, d.twinId, d.atMs, d.score, d.scalar, d.enter, d.reason, d.features.copyOf(), outcomes[id], d.side, d.freshnessMs, d.benchmarkAgeMs, d.policyVersion, d.modelVersion, d.expectedNet, d.pStrongCents)
         }
         val liveIds = live.mapTo(HashSet()) { it.id }
         val keptClosed = closedLog.filter { it.id !in liveIds }
@@ -1162,6 +1235,14 @@ object ModelFilter {
         threshold, scoreCeiling, preferTimeLeftUnderS, preferScoreBelow, lateWindowOnly, adviceNote
     )
 
+    private fun hybridSnapshot() = HybridQuantGates.Prefs(mtfAgree, strongMove, fibMode)
+
+    private fun loadHybridLocked(o: org.json.JSONObject) {
+        mtfAgree = o.optBoolean("mtfAgree", false)
+        strongMove = o.optBoolean("strongMove", false)
+        fibMode = HybridQuantGates.FibMode.from(o.optString("fibMode", HybridQuantGates.FibMode.LOG_ONLY.name))
+    }
+
     private fun saveGateLocked() {
         val file = gateFile ?: return
         val o = runCatching { if (file.isFile) org.json.JSONObject(file.readText()) else org.json.JSONObject() }
@@ -1172,6 +1253,9 @@ object ModelFilter {
         o.put("preferScoreBelow", preferScoreBelow)
         o.put("lateWindowOnly", lateWindowOnly)
         o.put("adviceNote", adviceNote)
+        o.put("mtfAgree", mtfAgree)
+        o.put("strongMove", strongMove)
+        o.put("fibMode", fibMode.name)
         runCatching { file.writeText(o.toString()) }
     }
 

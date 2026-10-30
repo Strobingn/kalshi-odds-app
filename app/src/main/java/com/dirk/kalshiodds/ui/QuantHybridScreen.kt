@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.decision.DosMmEngine
 import com.dirk.kalshiodds.decision.TwentyScalperFleet
 import com.dirk.kalshiodds.decision.HftMathEngines
+import com.dirk.kalshiodds.decision.HybridQuantGates
 import com.dirk.kalshiodds.decision.LocalAnalyst
 import com.dirk.kalshiodds.decision.ModelFilter
 import com.dirk.kalshiodds.decision.QuantSession
@@ -198,6 +199,13 @@ internal fun QuantHybridScreen(
             Text("Three paper arms", color = c.textPrimary, fontWeight = FontWeight.SemiBold)
             Text("Same stream, same exits, size 1.0× unless you turn an experiment on.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
             boards.forEach { s -> ArmRow(s) }
+            val gateStats = remember(rev) { ModelFilter.gateReasonLine() }
+            Text(
+                gateStats,
+                color = c.textSecondary,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.testTag("GATE_REASON_STATS")
+            )
             Text("Out of sample by time left", color = c.textSecondary, style = MaterialTheme.typography.labelMedium)
             oosBars(cards, fullLog).forEach { bar ->
                 Text("${bar.label} · ${bar.n} · ${money(bar.netUsd)}", color = if (bar.netUsd >= 0) c.up else c.down, style = MaterialTheme.typography.bodySmall)
@@ -243,6 +251,13 @@ internal fun QuantHybridScreen(
                             color = c.textSecondary, style = MaterialTheme.typography.bodySmall
                         )
                         Text(rowCard.why, color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+                        val pStrong = ModelFilter.latestDecision(rowCard.id)?.pStrongCents
+                        Text(
+                            if (pStrong == null || !pStrong.isFinite()) "P(strong) —" else String.format(Locale.US, "P(strong) %.1f¢", pStrong),
+                            color = c.textPrimary,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.testTag("PSTRONG_${rowCard.id}")
+                        )
                     }
                     Badge(if (enter) "ENTER" else "SKIP", if (enter) c.up else c.spot, c.onUp)
                 }
@@ -279,13 +294,21 @@ internal fun QuantHybridScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        "${item.twinId} · ${item.side} · ${fmt(item.score)}",
-                        color = if (on) c.onAccentBlue else c.textPrimary,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.weight(1f)
-                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "${item.twinId} · ${item.side} · ${fmt(item.score)}",
+                            color = if (on) c.onAccentBlue else c.textPrimary,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        val pStrong = item.pStrongCents
+                        Text(
+                            if (pStrong == null || !pStrong.isFinite()) "P(strong) —" else String.format(Locale.US, "P(strong) %.1f¢", pStrong),
+                            color = if (on) c.onAccentBlue else c.textSecondary,
+                            style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.testTag("PSTRONG_LOG_${item.id}")
+                        )
+                    }
                     Text(
                         "${cents(item.expectedNet)} · $outcome",
                         color = if (on) c.onAccentBlue else c.textSecondary,
@@ -324,6 +347,30 @@ internal fun QuantHybridScreen(
                     )
                 }
             }
+        }
+
+        ArenaCard(Modifier.testTag("HYBRID_GATE_SETTINGS")) {
+            val hybrid = remember(rev) { ModelFilter.hybridPrefs() }
+            Text("Hybrid Quant gates", color = c.textPrimary, fontWeight = FontWeight.SemiBold)
+            Text(
+                "Paper only. Each gate has its own switch. AI Learn leaves these where you set them.",
+                color = c.textSecondary,
+                style = MaterialTheme.typography.bodySmall
+            )
+            FlowRow(Modifier.fillMaxWidth()) {
+                Pill("MTF agree", hybrid.mtfAgree, "MTF_AGREE") { ModelFilter.setMtfAgree(!hybrid.mtfAgree); rev++ }
+                Pill("Strong-move score", hybrid.strongMove, "STRONG_MOVE") { ModelFilter.setStrongMove(!hybrid.strongMove); rev++ }
+                Pill("Fib Off", hybrid.fibMode == HybridQuantGates.FibMode.OFF, "FIB_OFF") {
+                    ModelFilter.setFibMode(HybridQuantGates.FibMode.OFF); rev++
+                }
+                Pill("Fib Log only", hybrid.fibMode == HybridQuantGates.FibMode.LOG_ONLY, "FIB_LOG") {
+                    ModelFilter.setFibMode(HybridQuantGates.FibMode.LOG_ONLY); rev++
+                }
+                Pill("Fib Block", hybrid.fibMode == HybridQuantGates.FibMode.BLOCK, "FIB_BLOCK") {
+                    ModelFilter.setFibMode(HybridQuantGates.FibMode.BLOCK); rev++
+                }
+            }
+            Text(ModelFilter.gateReasonLine(), color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
         }
 
         ArenaCard {

@@ -69,6 +69,7 @@ object ResearchCompanion {
             val liveRegimes = ArrayList<Regime>()
             liveRegimes += groupLive(rows, "Live action") { if (it.entered) "entered (open)" else "skipped" }
             liveRegimes += groupLive(rows, "Live score") { scoreBand(it.score) }
+            liveRegimes += groupLive(rows, "Hybrid gate") { hybridGateName(it.reason) }
             val enteredN = rows.count { it.entered }
             val avgScore = rows.sumOf { it.score } / rows.size
             val tips = listOf(
@@ -81,6 +82,10 @@ object ResearchCompanion {
         regimes += group(closed, "Time left") { ModelFilter.bucketOf(it.features.getOrElse(0) { 0.0 } * 900.0) }
         regimes += group(closed, "Vol") { volRegime(it.features.getOrElse(7) { 0.0 }) }
         regimes += group(closed, "Score") { scoreBand(it.score) }
+        regimes += group(closed, "Hybrid gate") { hybridGateName(it.reason) }
+        regimes += group(closed, "Fib barrier") {
+            if (it.reason.contains(HybridQuantGates.FIB_BARRIER)) "with fib_barrier" else "without fib_barrier"
+        }
         return Journal(closed.size, regimes, suggestions(closed, regimes, threshold), retrainNote)
     }
 
@@ -103,6 +108,13 @@ object ResearchCompanion {
         vol1m < ModelFilter.QUIET_VOL -> "quiet vol"
         vol1m < 5.0 -> "normal vol"
         else -> "hot vol"
+    }
+
+    fun hybridGateName(reason: String): String = when {
+        reason.contains(HybridQuantGates.MTF_DISAGREE) -> HybridQuantGates.MTF_DISAGREE
+        reason.contains(HybridQuantGates.STRONG_MOVE_LOW) -> HybridQuantGates.STRONG_MOVE_LOW
+        reason.contains(HybridQuantGates.FIB_BARRIER) -> HybridQuantGates.FIB_BARRIER
+        else -> "no hybrid gate"
     }
 
     fun scoreBand(score: Double): String = when {

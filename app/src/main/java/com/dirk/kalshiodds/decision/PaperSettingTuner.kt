@@ -10,6 +10,7 @@ import kotlin.math.roundToInt
  * [LOOSEN_MIN] recent closes. A loser gets tighter and a smaller clip.
  * It never loosens a loser, never benches, never pauses, and never moves a setting the owner just edited.
  * Steps scale with recent P&L. The buy band stays 15–55¢ and take-profit stays 25¢.
+ * Hybrid Quant MTF, strong-move, and Fibonacci toggles are ModelFilter prefs. They are not fields here.
  * Until-minute and the stop still have floors. A 10¢ buy window is not a tighter setting.
  */
 object PaperSettingTuner {
