@@ -177,6 +177,9 @@ object QuantCompanion {
      */
     fun explainResearch(prompt: String): String {
         val text = prompt.trim()
+        if (text.contains(EvidenceCard.MARK)) {
+            return EvidenceCard.templateOf(text).ifBlank { text }
+        }
         if (text.contains("Paper session journal", ignoreCase = true)) {
             val closed = Regex("Closed\\s+(\\d+)", RegexOption.IGNORE_CASE).find(text)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
             val bodyLines = text.lines().drop(1).map { it.trim() }.filter {

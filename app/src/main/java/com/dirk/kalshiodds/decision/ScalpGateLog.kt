@@ -10,7 +10,9 @@ class ScalpGateLog {
         val reason: String,
         val count: Int,
         val blocked: Boolean,
-        val byReason: Map<String, Int> = emptyMap()
+        val byReason: Map<String, Int> = emptyMap(),
+        val regime: String = "",
+        val evidence: String = ""
     )
 
     /**
@@ -22,7 +24,9 @@ class ScalpGateLog {
         val code: String,
         val reason: String,
         val count: Int,
-        val latest: Boolean = false
+        val latest: Boolean = false,
+        val regime: String = "",
+        val evidence: String = ""
     )
 
     private val hits = HashMap<String, Hit>()
@@ -35,7 +39,11 @@ class ScalpGateLog {
             val prior = if (sameWindow) prev.byReason else emptyMap()
             val n = (prior[reason] ?: 0) + 1
             val show = if (sameWindow && prev.reason == reason) prev.count + 1 else n
-            hits[code] = Hit(windowKey, reason, show, blocked = true, byReason = prior + (reason to n))
+            val regime = VolRegime.current(windowKey)
+            hits[code] = Hit(
+                windowKey, reason, show, blocked = true, byReason = prior + (reason to n),
+                regime = regime, evidence = if (sameWindow) prev?.evidence.orEmpty() else ""
+            )
         }
     }
 
@@ -57,7 +65,9 @@ class ScalpGateLog {
                 showReason,
                 showCount,
                 blocked = sameWindow && prev.blocked,
-                byReason = prior + (reason to n)
+                byReason = prior + (reason to n),
+                regime = VolRegime.current(windowKey),
+                evidence = if (sameWindow) prev?.evidence.orEmpty() else ""
             )
         }
     }
@@ -67,7 +77,25 @@ class ScalpGateLog {
         synchronized(hits) {
             val prev = hits[code]
             val prior = if (prev != null && prev.windowKey == windowKey) prev.byReason else emptyMap()
-            hits[code] = Hit(windowKey, prev?.reason ?: "", prev?.count ?: 0, blocked = false, byReason = prior)
+            hits[code] = Hit(
+                windowKey, prev?.reason ?: "", prev?.count ?: 0, blocked = false, byReason = prior,
+                regime = VolRegime.current(windowKey),
+                evidence = if (prev != null && prev.windowKey == windowKey) prev.evidence else ""
+            )
+        }
+    }
+
+    /** Latest evidence card for this scalper. Does not change the counted block reason. */
+    fun noteContext(code: String, windowKey: String, regime: String, evidence: String) {
+        if (code.isBlank()) return
+        synchronized(hits) {
+            val prev = hits[code] ?: return
+            if (prev.windowKey != windowKey) return
+            val reg = when (regime) {
+                VolRegime.CALM, VolRegime.NORMAL, VolRegime.CHOPPY -> regime
+                else -> prev.regime
+            }
+            hits[code] = prev.copy(regime = reg, evidence = evidence.take(2_000))
         }
     }
 
@@ -83,7 +111,13 @@ class ScalpGateLog {
         val h = hits[code] ?: return null
         if (!h.blocked || h.reason.isBlank()) return null
         if (windowKey != null && h.windowKey != windowKey && h.reason != OUTAGE) return null
-        return "No entry · ${h.reason} · ${h.count} this window"
+        val base = "No entry · ${h.reason} · ${h.count} this window"
+        val extra = ArrayList<String>(2)
+        if (h.regime == VolRegime.CALM || h.regime == VolRegime.NORMAL || h.regime == VolRegime.CHOPPY) {
+            extra += "regime ${h.regime}"
+        }
+        if (h.evidence.isNotBlank()) extra += h.evidence
+        return if (extra.isEmpty()) base else base + "\n" + extra.joinToString("\n")
     }
 
     fun snapshot(codes: Collection<String>): List<SyncRow> = synchronized(hits) {
@@ -91,7 +125,12 @@ class ScalpGateLog {
             val h = hits[code] ?: return@mapNotNull null
             if (h.byReason.isEmpty()) return@mapNotNull null
             h.byReason.map { (reason, n) ->
-                SyncRow(h.windowKey, code, reason, n, latest = reason == h.reason)
+                val latest = reason == h.reason
+                SyncRow(
+                    h.windowKey, code, reason, n, latest = latest,
+                    regime = if (latest) h.regime else "",
+                    evidence = if (latest) h.evidence.take(160) else ""
+                )
             }
         }.flatten()
     }

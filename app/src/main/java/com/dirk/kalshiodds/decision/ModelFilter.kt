@@ -98,7 +98,9 @@ object ModelFilter {
         val policyVersion: String = POLICY_VERSION,
         val modelVersion: String = "",
         val expectedNet: Double = 0.0,
-        val pStrongCents: Double? = null
+        val pStrongCents: Double? = null,
+        val regime: String = "",
+        val evidenceText: String = ""
     )
 
     data class Sample(val x: DoubleArray, val netUsd: Double, val closeMs: Long, val tauS: Double, val twinId: String, val contracts: Int = 1)
@@ -133,7 +135,9 @@ object ModelFilter {
         val policyVersion: String = POLICY_VERSION,
         val modelVersion: String = "",
         val expectedNet: Double = 0.0,
-        val pStrongCents: Double? = null
+        val pStrongCents: Double? = null,
+        val regime: String = "",
+        val evidenceText: String = ""
     )
 
     data class GateReasonStat(val code: String, val blocked: Int, val logged: Int)
@@ -166,7 +170,9 @@ object ModelFilter {
         val scalar: Double,
         val entered: Boolean,
         val reason: String,
-        val outcomeUsd: Double?
+        val outcomeUsd: Double?,
+        val regime: String = "",
+        val evidence: String = ""
     )
 
     /**
@@ -540,13 +546,74 @@ object ModelFilter {
         val reason = hybrid.reason
         why[twin.id] = reason
         lastScore[twin.id] = score
+        val windowStart = q.closeMs - 900_000L
+        val barsAll = HybridQuantGates.completedMinuteBars(spotTicks, q.nowMs)
+        val inWindow = barsAll.filter { it.startMs >= windowStart && it.endMs <= q.nowMs }
+        val fibRead = HybridQuantGates.fib(inWindow, mark, q.strike, side, ofi, q.sigmaPerSec)
+        val regime = VolRegime.observeBars(com.dirk.kalshiodds.decision.ScalpModels.windowKeyOf(q.ticker), inWindow)
+        val tickViews = ArrayList<EvidenceCard.TickPx>(21)
+        val past = row.filter { it.atMs < q.nowMs }.takeLast(21)
+        for (t in past) tickViews += EvidenceCard.TickPx(t.mid, t.spread, t.bidSz, t.askSz)
+        val bidPx = q.bid(side) ?: 0.0
+        val askPx = q.ask(side) ?: ask
+        val bidSz = q.bidSize(side) ?: 0.0
+        val askSz = q.askSize(side) ?: 0.0
+        val bidDepth = q.bidLadder(side).take(5).sumOf { it.second }
+        val askDepth = q.askLadder(side).take(5).sumOf { it.second }
+        val bookSpread = (askPx - bidPx).coerceAtLeast(0.0)
+        val vamp = if (bidPx > 0.0 && askPx > 0.0) {
+            HftMathEngines.vamp(bidPx, askPx, bidSz.coerceAtLeast(0.0), askSz.coerceAtLeast(0.0))
+        } else 0.0
+        val studentT = HftSignals.studentTFair(mark, q.strike, q.sigmaPerSec, q.tauS, side)
+        val bucket = EvidenceCard.bucketToken(score)
+        val hist = VolRegimeLedger.similar(twin.id, side, bucket, regime)
+        val card = EvidenceCard.build(
+            EvidenceCard.Input(
+                scalperId = twin.id,
+                side = side,
+                gateEnter = enter,
+                gateReason = reason,
+                regime = regime,
+                logisticScore = qScore,
+                lgbmScore = lgbm,
+                ofi = ofi,
+                ofi20 = EvidenceCard.ofi20(tickViews, side),
+                ofi5 = EvidenceCard.ofi5(q.bidLadder(side), q.askLadder(side)),
+                studentT = studentT,
+                entryFair = fair,
+                ask = ask,
+                slope1m = HybridQuantGates.trend1m(barsAll),
+                slope5m = HybridQuantGates.trend5m(barsAll, q.nowMs),
+                pStrongCents = hybrid.pStrongCents,
+                fibPos = fibRead.fibPos,
+                fibSigned = fibRead.signedDist,
+                fibBarrier = fibRead.barrier,
+                fibRatio = fibRead.nearestRatio,
+                fibLevels = fibRead.levels,
+                bestBid = bidPx,
+                bestAsk = askPx,
+                bidDepth = bidDepth,
+                askDepth = askDepth,
+                spread = bookSpread,
+                vamp = vamp,
+                timeLeftS = q.tauS,
+                histN = hist.n,
+                histWins = hist.wins,
+                histWinRate = hist.winRate,
+                histAvgPnl = hist.avgPnl,
+                useLgbm = twin.arm == Arm.LGBM,
+                scoreBucket = bucket
+            )
+        )
+        val evidence = EvidenceCard.prompt(card)
+        EvidenceCard.remember(twin.id, evidence)
         val d = Decision(
             twin.id, q.nowMs, score, scalar, enter, reason, warm, x, fair, ask, side,
             bookAge, benchAge, POLICY_VERSION, modelVersion, if (twin.arm == Arm.LGBM) lgbm else eNet,
-            hybrid.pStrongCents
+            hybrid.pStrongCents, regime, evidence
         )
         val print = "$side|${fmt4(ask)}|${fmt4(fair)}|${fmt4(score)}|$enter|$reason"
-        if (lastPrint[twin.id] == print) return lastDecision[twin.id] ?: d
+        if (lastPrint[twin.id] == print) return lastDecision[twin.id]?.copy(regime = regime, evidenceText = evidence) ?: d
         lastPrint[twin.id] = print
         lastDecision[twin.id] = d
         decisions.addLast(d)
@@ -556,7 +623,7 @@ object ModelFilter {
         }
         val id = decisionId(twin.id, q.nowMs, side)
         if (enter) lastEnter[twin.id] = id
-        unsynced.addLast(SyncRow(id, q.nowMs, twin.id, score, scalar, enter, reason, null))
+        unsynced.addLast(SyncRow(id, q.nowMs, twin.id, score, scalar, enter, reason, null, regime, EvidenceCard.syncSummary(evidence)))
         while (unsynced.size > 400) unsynced.removeFirst()
         d
     }
@@ -566,7 +633,7 @@ object ModelFilter {
         lastEnter[twinId]?.let { hitId ->
             outcomes[hitId] = netUsd
             decisions.firstOrNull { decisionId(it.twinId, it.atMs, it.side) == hitId }?.let { d ->
-                val row = LogRow(hitId, d.twinId, d.atMs, d.score, d.scalar, d.enter, d.reason, d.features.copyOf(), netUsd, d.side, d.freshnessMs, d.benchmarkAgeMs, d.policyVersion, d.modelVersion, d.expectedNet, d.pStrongCents)
+                val row = LogRow(hitId, d.twinId, d.atMs, d.score, d.scalar, d.enter, d.reason, d.features.copyOf(), netUsd, d.side, d.freshnessMs, d.benchmarkAgeMs, d.policyVersion, d.modelVersion, d.expectedNet, d.pStrongCents, d.regime, d.evidenceText)
                 closedLog.removeAll { it.id == hitId }
                 closedLog.addLast(row)
                 while (closedLog.size > 200) closedLog.removeFirst()
@@ -817,6 +884,9 @@ object ModelFilter {
         controlFresh = -1L
         QuantSession.resetForTest()
         retrainComputeHook = null
+        EvidenceCard.reset()
+        VolRegime.reset()
+        VolRegimeLedger.reset()
     }
 
     fun scorecards(): List<Scorecard> = synchronized(lock) {
@@ -890,7 +960,7 @@ object ModelFilter {
     fun researchLog(): List<LogRow> = synchronized(lock) {
         val live = decisions.map { d ->
             val id = decisionId(d.twinId, d.atMs, d.side)
-            LogRow(id, d.twinId, d.atMs, d.score, d.scalar, d.enter, d.reason, d.features.copyOf(), outcomes[id], d.side, d.freshnessMs, d.benchmarkAgeMs, d.policyVersion, d.modelVersion, d.expectedNet, d.pStrongCents)
+            LogRow(id, d.twinId, d.atMs, d.score, d.scalar, d.enter, d.reason, d.features.copyOf(), outcomes[id], d.side, d.freshnessMs, d.benchmarkAgeMs, d.policyVersion, d.modelVersion, d.expectedNet, d.pStrongCents, d.regime, d.evidenceText)
         }
         val liveIds = live.mapTo(HashSet()) { it.id }
         val keptClosed = closedLog.filter { it.id !in liveIds }
