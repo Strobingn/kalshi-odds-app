@@ -1,6 +1,7 @@
 package com.dirk.kalshiodds.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -45,6 +46,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -331,6 +333,11 @@ internal fun AlgoCard(
             }
             Text("Net per bet $perText · n $n · win ${ScalpTabCopy.pct(all?.winRate)}",
                 style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = tone, maxLines = 1)
+            com.dirk.kalshiodds.decision.VolRegimeLedger.lineFor(m.code).takeIf { it.isNotBlank() }?.let { regime ->
+                SelectionContainer {
+                    Text(regime, style = MaterialTheme.typography.labelSmall, color = c.textSecondary, modifier = Modifier.testTag("REGIME_" + m.code))
+                }
+            }
         }
         com.dirk.kalshiodds.decision.ShockFav.byVariantId(m.code)?.let { p ->
             Text(p.summary(), style = MaterialTheme.typography.labelSmall, color = c.textSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)

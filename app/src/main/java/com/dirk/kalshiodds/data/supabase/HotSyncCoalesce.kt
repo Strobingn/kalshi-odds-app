@@ -34,7 +34,9 @@ object HotSyncCoalesce {
         val count: Int,
         /** Distinct reason strings folded into this one remote row. */
         val reasons: Int,
-        val top: List<Pair<String, Int>>
+        val top: List<Pair<String, Int>>,
+        val regime: String = "",
+        val evidence: String = ""
     )
 
     fun windowBucket(atMs: Long): Long = atMs.floorDiv(WINDOW_MS)
@@ -89,7 +91,9 @@ object HotSyncCoalesce {
                 reason = reason,
                 count = chosen.count,
                 reasons = group.map { it.reason.take(REASON_CAP) }.distinct().size,
-                top = topReasons(group, chosen)
+                top = topReasons(group, chosen),
+                regime = chosen.regime,
+                evidence = chosen.evidence.take(REASON_CAP)
             )
         }
     }

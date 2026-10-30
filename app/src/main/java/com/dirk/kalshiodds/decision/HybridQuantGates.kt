@@ -52,7 +52,8 @@ object HybridQuantGates {
         val fibPos: Double?,
         val signedDist: Double?,
         val barrier: Boolean,
-        val nearestRatio: Double?
+        val nearestRatio: Double?,
+        val levels: List<Double> = emptyList()
     )
 
     data class Verdict(
@@ -219,7 +220,7 @@ object HybridQuantGates {
         val signed = if (unit > 0.0) (nearest - strike) / unit else null
         val up = isUp(side)
         val barrier = up != null && ofiWeak(ofiWithTrade) && levelBetween(levels, spot, strike, up)
-        return FibRead(fibPos, signed?.takeIf { it.isFinite() }, barrier, nearestRatio)
+        return FibRead(fibPos, signed?.takeIf { it.isFinite() }, barrier, nearestRatio, levels.toList())
     }
 
     fun evaluate(

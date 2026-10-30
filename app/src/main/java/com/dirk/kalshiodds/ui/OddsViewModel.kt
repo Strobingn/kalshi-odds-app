@@ -318,7 +318,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             } catch (_: Exception) {
                 com.dirk.kalshiodds.decision.QuantCompanion.explainResearch(prompt)
             }
-            runCatching { container.aiChat.postResearch(prompt, text) }
+            val shown = com.dirk.kalshiodds.decision.EvidenceCard.templateOf(prompt).ifBlank { prompt }
+            runCatching { container.aiChat.postResearch(shown, text) }
             withContext(Dispatchers.Main) { done(text) }
         }
     }

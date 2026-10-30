@@ -195,6 +195,8 @@ class SupabaseSync(
                 .put("reason", d.reason)
                 .put("outcomeUsd", d.outcomeUsd ?: JSONObject.NULL)
                 .put("model", d.twinId)
+                .put("regime", d.regime)
+                .put("evidence", d.evidence.take(160))
             out.add(rec(kept.remoteKey, "model_decision", d.atMs, payload))
         }
         bundle.scalpResets.forEach { r ->
@@ -213,6 +215,8 @@ class SupabaseSync(
             val payload = JSONObject()
                 .put("windowKey", g.windowKey).put("code", g.code).put("reason", g.reason).put("count", g.count)
                 .put("reasons", g.reasons)
+                .put("regime", g.regime)
+                .put("evidence", g.evidence.take(160))
                 .put("top", top)
             out.add(rec(g.remoteKey, "scalp_gate", gateAt, payload))
         }

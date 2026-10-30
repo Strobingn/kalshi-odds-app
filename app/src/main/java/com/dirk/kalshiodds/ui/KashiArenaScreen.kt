@@ -1,6 +1,7 @@
 package com.dirk.kalshiodds.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -288,7 +289,14 @@ internal fun ArenaStrategyRow(row: ScalpModels.Row, st: ScalpTabState, onOpen: (
                 else if (bench?.status == com.dirk.kalshiodds.decision.insights.BenchStatus.FORCED_ACTIVE) Text("Bench override · forced trading", color = c.spot, style = MaterialTheme.typography.labelSmall)
                 pause?.takeIf { it != "Bench · forced benched" }?.let { Text(it, color = c.down, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, maxLines = 2) }
                 st.entryGates[row.model.code]?.let {
-                    Text(it, color = c.down, style = MaterialTheme.typography.labelSmall, maxLines = 2, modifier = Modifier.testTag("NO_ENTRY_" + row.model.code))
+                    SelectionContainer {
+                        Text(it, color = c.down, style = MaterialTheme.typography.labelSmall, modifier = Modifier.testTag("NO_ENTRY_" + row.model.code))
+                    }
+                }
+                com.dirk.kalshiodds.decision.VolRegimeLedger.lineFor(row.model.code).takeIf { it.isNotBlank() }?.let { regime ->
+                    SelectionContainer {
+                        Text(regime, color = c.textSecondary, style = MaterialTheme.typography.labelSmall, modifier = Modifier.testTag("REGIME_" + row.model.code))
+                    }
                 }
             }
             Column(horizontalAlignment = Alignment.End) {

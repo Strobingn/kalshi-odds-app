@@ -18,7 +18,8 @@ object ResearchCompanion {
         val reason: String,
         val outcomeUsd: Double?,
         val drivers: List<Driver>,
-        val prompt: String
+        val prompt: String,
+        val cardText: String = ""
     )
 
     data class Regime(val group: String, val name: String, val n: Int, val wins: Int, val netUsd: Double)
@@ -36,6 +37,14 @@ object ResearchCompanion {
     }
 
     fun explain(row: ModelFilter.LogRow, weights: DoubleArray, bias: Double, modelType: String): Explain {
+        if (row.evidenceText.contains(EvidenceCard.MARK)) {
+            val grounded = EvidenceCard.driverRows(row.evidenceText).map { Driver(it.name, it.value, it.push) }
+            val title = "${row.twinId} · ${if (row.entered) "entered" else "skipped"} · score ${fmt(row.score)}"
+            return Explain(
+                title, row.score, row.scalar, row.entered, row.reason, row.outcomeUsd,
+                grounded, row.evidenceText, EvidenceCard.templateOf(row.evidenceText)
+            )
+        }
         val push = QuantSession.attributeLogistic(weights, bias, row.features)
         val names = ModelFilter.FEATURE_NAMES
         val drivers = ArrayList<Driver>(push.size)

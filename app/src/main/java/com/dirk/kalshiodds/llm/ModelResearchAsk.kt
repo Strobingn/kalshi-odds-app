@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.llm
 
+import com.dirk.kalshiodds.decision.EvidenceCard
 import com.dirk.kalshiodds.decision.QuantCompanion
 
 /**
@@ -36,7 +37,30 @@ object ModelResearchAsk {
         onSuccess: (LlmEndpoint, LlmClient.Reply) -> Unit = { _, _ -> }
     ): String {
         val trimmed = prompt.trim()
-        val messages = listOf("system" to SYSTEM, "user" to trimmed.take(1_800))
+        val raw = askRaw(trimmed, local, slots, nowMs, pacer, quotaOf, allowed, ask, onBilling, callsToday, onSuccess)
+        if (!trimmed.contains(EvidenceCard.MARK)) return raw
+        return EvidenceCard.phrase(trimmed, raw).text.ifBlank { EvidenceCard.templateOf(trimmed).ifBlank { raw } }
+    }
+
+    private fun askRaw(
+        trimmed: String,
+        local: LlmEndpoint?,
+        slots: List<LlmEndpoint>,
+        nowMs: Long,
+        pacer: FreeCallPacer,
+        quotaOf: (LlmEndpoint) -> FreeQuota?,
+        allowed: (LlmEndpoint) -> Boolean,
+        ask: (LlmEndpoint, List<Pair<String, String>>) -> LlmClient.Reply,
+        onBilling: (String, String) -> Unit,
+        callsToday: (LlmEndpoint) -> Int,
+        onSuccess: (LlmEndpoint, LlmClient.Reply) -> Unit
+    ): String {
+        val evidence = trimmed.contains(EvidenceCard.MARK)
+        val system = if (evidence) {
+            "Phrase the evidence card. Use only numbers printed in the card. Do not invent reasons or numbers. gates_enter decides the trade. No orders."
+        } else SYSTEM
+        val cap = if (evidence) 4_000 else 1_800
+        val messages = listOf("system" to system, "user" to trimmed.take(cap))
         val loop = local?.takeIf { isLoopback(it.baseUrl) && it.model.isNotBlank() }
         if (loop != null) {
             val ep = if (loop.apiKey.isBlank()) loop.copy(apiKey = "local") else loop

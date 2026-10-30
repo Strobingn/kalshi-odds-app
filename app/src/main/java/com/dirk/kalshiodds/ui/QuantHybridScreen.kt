@@ -318,6 +318,21 @@ internal fun QuantHybridScreen(
             }
             explain?.let { ex ->
                 Text(ex.title, color = c.textPrimary, fontWeight = FontWeight.SemiBold, modifier = Modifier.testTag("EXPLAIN_TRADE"))
+                if (ex.cardText.isNotBlank()) {
+                    SelectionContainer(Modifier.fillMaxWidth()) {
+                        Text(
+                            ex.cardText,
+                            color = c.textPrimary,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.testTag("EVIDENCE_CARD").fillMaxWidth()
+                        )
+                    }
+                    Text(
+                        "Gates decide. A narrative that disagrees is flagged and does not change the entry.",
+                        color = c.textSecondary,
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
                 val peak = ex.drivers.maxOfOrNull { abs(it.push) }?.coerceAtLeast(0.01) ?: 1.0
                 ex.drivers.forEach { d ->
                     Text("${d.name} ${signed(d.push)}", color = if (d.push >= 0) c.up else c.down, style = MaterialTheme.typography.bodySmall)

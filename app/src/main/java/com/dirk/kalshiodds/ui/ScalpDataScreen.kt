@@ -1,6 +1,8 @@
 package com.dirk.kalshiodds.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.items
@@ -12,6 +14,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -224,6 +227,21 @@ fun ScalpDataContent(
         val curve = v.curve
         val rows = v.rows
         item { Text("Scalping results only — paper, net after both Kalshi fees. Not part of the main scorecard.", color = colors.accentOrange, fontWeight = FontWeight.SemiBold) }
+        val regimeLines = com.dirk.kalshiodds.decision.VolRegimeLedger.lines()
+        if (regimeLines.isNotEmpty()) {
+            item {
+                DecisionCard {
+                    Text("P&L by volatility regime", fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
+                    SelectionContainer {
+                        Column {
+                            regimeLines.forEach { line ->
+                                Text(line, style = MaterialTheme.typography.bodySmall, color = colors.textPrimary, modifier = Modifier.testTag("REGIME_LINE"))
+                            }
+                        }
+                    }
+                }
+            }
+        }
         item {
             DecisionCard {
                 Text("Maker-first vs taker (all variants, paper)", fontWeight = FontWeight.SemiBold, color = colors.textPrimary)

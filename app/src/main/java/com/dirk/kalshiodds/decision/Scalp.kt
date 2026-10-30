@@ -499,7 +499,11 @@ class ScalpBook(
     private val idFactory: () -> String = { UUID.randomUUID().toString() }
 ) {
     init {
-        runCatching { ModelFilter.retrainFrom(store.loadScalps(), System.currentTimeMillis()) }
+        runCatching {
+            val rows = store.loadScalps()
+            VolRegimeLedger.ingest(rows)
+            ModelFilter.retrainFrom(rows, System.currentTimeMillis())
+        }
     }
     private val lock = Any()
     private val hft = HftBook()
@@ -602,6 +606,7 @@ class ScalpBook(
     private fun isActive(t: ScalpTrade) = t.state != ScalpState.CLOSED && t.state != ScalpState.NO_FILL
 
     fun onQuote(q: ScalpRule.Quote, enabled: Boolean): List<ScalpTrade> = synchronized(lock) {
+        VolRegime.noteSpot(ScalpModels.windowKeyOf(q.ticker), q.nowMs, if (q.cfFresh()) q.cfSpot else q.spot)
         closeSeen[q.ticker.uppercase()] = q.closeMs
         expireOrphansLocked(q.nowMs)
         if (q.nowMs / 15_000L != (_lastPruneBucket)) { _lastPruneBucket = q.nowMs / 15_000L; pruneClosed(q.nowMs) }
@@ -1737,13 +1742,16 @@ class ScalpBook(
             return null
         }
         val d = ModelFilter.decide(twin, q, sig.side, sig.ask, sig.fair)
+        val blurb = EvidenceCard.latestBlurb(twin.id)
         if (!d.enter) {
             clearTrigger(twin.id, q.ticker)
             gates.block(twin.id, window, d.reason)
+            gates.noteContext(twin.id, window, d.regime, blurb)
             return null
         }
         if (d.reason.contains(HybridQuantGates.FIB_BARRIER)) {
             gates.flag(twin.id, window, HybridQuantGates.FIB_BARRIER)
+            gates.noteContext(twin.id, window, d.regime, blurb)
         }
         val clip = maxOf(twin.clip, PaperClip.MIN)
         val n = PaperClip.sized(ModelFilter.sized(clip, d.scalar, clip))
@@ -1752,23 +1760,33 @@ class ScalpBook(
         val lesson = FairGapTune.lessonAllowed(q, sig.side, sig.ask, sig.fair, n, variantId = twin.id, open = _all.value)
         if (FairGapTune.stackingBlocked(twin.id, q, sig.side, sig.ask, _all.value)) {
             gates.block(twin.id, window, FairGapTune.STACK_GUARD)
+            gates.noteContext(twin.id, window, d.regime, blurb)
             return null
         }
         if (blocked != null || (!ScalpRule.buyPriceOk(sig.ask) && !lesson)) {
             gates.block(twin.id, window, blocked ?: "ask above 55¢ ceiling")
+            gates.noteContext(twin.id, window, d.regime, blurb)
             return null
         }
         val again = reentryRefusal(twin.id, q.ticker, sig.side, q.nowMs)
         if (again != null) {
             gates.block(twin.id, window, again)
+            gates.noteContext(twin.id, window, d.regime, blurb)
             return null
         }
         armTrigger(twin.id, q.ticker, sig.side, q.nowMs)
         gates.entered(twin.id, window)
+        gates.noteContext(twin.id, window, d.regime, blurb)
         return ScalpTrade(
             id = idFactory(), ticker = q.ticker.uppercase(), side = sig.side, state = ScalpState.PENDING_ENTRY,
             signalAtMs = q.nowMs, signalAsk = sig.ask, fairAtSignal = sig.fair, contracts = n,
-            note = "model filter ${twin.id} · ${d.reason} · ${d.policyVersion} · ${d.modelVersion}",
+            note = VolRegime.stampBucket(
+                VolRegime.stamp(
+                    "model filter ${twin.id} · ${d.reason} · ${d.policyVersion} · ${d.modelVersion}",
+                    d.regime.ifBlank { VolRegime.current(window) }
+                ),
+                EvidenceCard.bucketToken(d.score)
+            ),
             ruleVersion = "${ScalpRule.VERSION}|${twin.id}|P"
         )
     }
@@ -2287,7 +2305,11 @@ class ScalpBook(
         val tf = if (prev == null && incoming.state == ScalpState.PENDING_ENTRY) fairGapEntryFilter(settingsEntryFilter(incoming)) else incoming
         // Bench after the live entry gates, so the shadow book only holds entries the scalper would really have taken.
         val t0 = if (prev == null && tf.ruleVersion.endsWith("|P")) benchShadow(tf) else tf
-        val t = if (liveExtras) withDetail(t0, prev) else t0
+        val stamped = if (prev == null) {
+            val regime = VolRegime.current(ScalpModels.windowKeyOf(t0.ticker))
+            t0.copy(note = VolRegime.stamp(t0.note, regime))
+        } else t0
+        val t = if (liveExtras) withDetail(stamped, prev) else stamped
         if (t.state == ScalpState.CLOSED && prev != null && prev.state != ScalpState.CLOSED && (t.isPrimary || BENCH_SHADOW in t.note)) {
             noteSanity(t)
             onSettled?.let { cb -> ScalpModels.modelOf(if (t.isPrimary) t else t.copy(ruleVersion = t.ruleVersion.removeSuffix("|S") + "|P"))?.code?.let { runCatching { cb(it, t) } } }
@@ -2296,6 +2318,16 @@ class ScalpBook(
         writeQ.merge(t.id, t to prev) { old, neu -> neu.first to (old.second ?: neu.second) }
         if (writeQ.size >= 80) flushWrites() // 0.3.67: never let the queue grow unboundedly (soak / burst quotes)
         if (prev == null && liveExtras) spawnV2(if (t0 !== tIn) tIn else t) // benched originals still seed their v2 copies
+        if (t.state == ScalpState.CLOSED && prev?.state != ScalpState.CLOSED) {
+            val net = t.netUsd
+            val regime = VolRegime.regimeOf(t.note)
+            if (net != null && regime != null) {
+                val id = ScalpModels.scalperIdOf(t) ?: t.variantId
+                VolRegimeLedger.record(id, regime, net, t.id)
+                val bucket = VolRegime.bucketOf(t.note)
+                if (bucket != null) VolRegimeLedger.addSetup(t.id, id, t.side, bucket, regime, net)
+            }
+        }
         if (t.state == ScalpState.CLOSED && prev?.state != ScalpState.CLOSED && ScalpV2.isV2(t.variantId))
             ScalperBrain.parse(t.note)?.let { x -> ScalperBrain.learn(ScalpModels.modelOf(t)?.code ?: t.variantId, x, (t.netUsd ?: 0.0) > 0.0) }
         val cur = _all.value
