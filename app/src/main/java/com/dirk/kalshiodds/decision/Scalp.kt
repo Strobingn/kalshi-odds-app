@@ -511,7 +511,8 @@ class ScalpBook(
     /** Last blocking gate for one scalper, for the Scalp tab. Null when the latest tick entered. */
     fun gateLine(code: String, windowKey: String? = null): String? = gates.line(code, windowKey)
 
-    fun gateSnapshot(): List<ScalpGateLog.SyncRow> = gates.snapshot(KeptScalpers.IDS + ScalpVariants.IDS)
+    fun gateSnapshot(): List<ScalpGateLog.SyncRow> =
+        gates.snapshot(KeptScalpers.IDS + ScalpVariants.IDS + ModelFilter.TWINS.map { it.id })
 
     /** Book or spot is missing. Every live scalper shows the same outage reason until a fresh tick. */
     fun noteOutage(tickerOrWindow: String) {
@@ -1740,6 +1741,9 @@ class ScalpBook(
             clearTrigger(twin.id, q.ticker)
             gates.block(twin.id, window, d.reason)
             return null
+        }
+        if (d.reason.contains(HybridQuantGates.FIB_BARRIER)) {
+            gates.flag(twin.id, window, HybridQuantGates.FIB_BARRIER)
         }
         val clip = maxOf(twin.clip, PaperClip.MIN)
         val n = PaperClip.sized(ModelFilter.sized(clip, d.scalar, clip))

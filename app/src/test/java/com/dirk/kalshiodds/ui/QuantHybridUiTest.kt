@@ -16,6 +16,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.dirk.kalshiodds.decision.HybridQuantGates
 import com.dirk.kalshiodds.decision.LocalAnalyst
 import com.dirk.kalshiodds.decision.ModelFilter
 import com.dirk.kalshiodds.decision.QuantSession
@@ -77,6 +78,28 @@ class QuantHybridUiTest {
         compose.onNodeWithText("10–15m", substring = true).assertExists()
         compose.onNodeWithText("<2m", substring = true).assertExists()
         compose.onNodeWithText("Ask Groq to Explain This Trade").assertExists()
+    }
+
+    @Test fun hybridGateTogglesSitOnTheQuantScreen() {
+        compose.setContent {
+            KalshiOddsTheme(darkTheme = true) {
+                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                    QuantHybridScreen()
+                }
+            }
+        }
+        compose.onNodeWithTag("GATE_REASON_STATS").performScrollTo().assertTextContains("mtf_disagree", substring = true)
+        compose.onNodeWithTag("GATE_REASON_STATS").assertTextContains("strong_move_low", substring = true)
+        compose.onNodeWithTag("GATE_REASON_STATS").assertTextContains("fib_barrier", substring = true)
+        compose.onNodeWithTag("MTF_AGREE").performScrollTo().performClick()
+        compose.waitForIdle()
+        assertTrue(ModelFilter.hybridPrefs().mtfAgree)
+        compose.onNodeWithTag("STRONG_MOVE").performScrollTo().performClick()
+        compose.waitForIdle()
+        assertTrue(ModelFilter.hybridPrefs().strongMove)
+        compose.onNodeWithTag("FIB_BLOCK").performScrollTo().performClick()
+        compose.waitForIdle()
+        assertEquals(HybridQuantGates.FibMode.BLOCK, ModelFilter.hybridPrefs().fibMode)
     }
 
     @Test fun overviewKeepsAShortBannerThatOpensQuant() {

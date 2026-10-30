@@ -39,6 +39,29 @@ class ScalpGateLog {
         }
     }
 
+    /**
+     * Count a reason on the gate row without treating it as the latest block.
+     * Log-only Fibonacci uses this so the flag is on the sync payload while the clip still opens.
+     */
+    fun flag(code: String, windowKey: String, reason: String) {
+        if (code.isBlank() || reason.isBlank()) return
+        synchronized(hits) {
+            val prev = hits[code]
+            val sameWindow = prev != null && prev.windowKey == windowKey
+            val prior = if (sameWindow) prev.byReason else emptyMap()
+            val n = (prior[reason] ?: 0) + 1
+            val showReason = if (sameWindow && prev.blocked) prev.reason else prev?.reason ?: ""
+            val showCount = if (sameWindow && prev.blocked) prev.count else prev?.count ?: 0
+            hits[code] = Hit(
+                windowKey,
+                showReason,
+                showCount,
+                blocked = sameWindow && prev.blocked,
+                byReason = prior + (reason to n)
+            )
+        }
+    }
+
     /** The latest evaluation opened a clip. Earlier block counts stay for the sync payload. */
     fun entered(code: String, windowKey: String) {
         synchronized(hits) {
