@@ -606,7 +606,7 @@ class ScalpBook(
     private fun isActive(t: ScalpTrade) = t.state != ScalpState.CLOSED && t.state != ScalpState.NO_FILL
 
     fun onQuote(q: ScalpRule.Quote, enabled: Boolean): List<ScalpTrade> = synchronized(lock) {
-        VolRegime.noteSpot(ScalpModels.windowKeyOf(q.ticker), q.nowMs, if (q.cfFresh()) q.cfSpot else q.spot)
+        VolRegime.noteSpot(q.ticker, q.nowMs, if (q.cfFresh()) q.cfSpot else q.spot)
         closeSeen[q.ticker.uppercase()] = q.closeMs
         expireOrphansLocked(q.nowMs)
         if (q.nowMs / 15_000L != (_lastPruneBucket)) { _lastPruneBucket = q.nowMs / 15_000L; pruneClosed(q.nowMs) }
@@ -1783,9 +1783,9 @@ class ScalpBook(
             note = VolRegime.stampBucket(
                 VolRegime.stamp(
                     "model filter ${twin.id} · ${d.reason} · ${d.policyVersion} · ${d.modelVersion}",
-                    d.regime.ifBlank { VolRegime.current(window) }
+                    d.regime.ifBlank { VolRegime.current(q.ticker) }
                 ),
-                EvidenceCard.bucketToken(d.score)
+                EvidenceCard.bucketToken(d.score, twin.arm == ModelFilter.Arm.LGBM)
             ),
             ruleVersion = "${ScalpRule.VERSION}|${twin.id}|P"
         )
@@ -2306,7 +2306,7 @@ class ScalpBook(
         // Bench after the live entry gates, so the shadow book only holds entries the scalper would really have taken.
         val t0 = if (prev == null && tf.ruleVersion.endsWith("|P")) benchShadow(tf) else tf
         val stamped = if (prev == null) {
-            val regime = VolRegime.current(ScalpModels.windowKeyOf(t0.ticker))
+            val regime = VolRegime.current(t0.ticker)
             t0.copy(note = VolRegime.stamp(t0.note, regime))
         } else t0
         val t = if (liveExtras) withDetail(stamped, prev) else stamped

@@ -6,11 +6,11 @@ import kotlin.math.ln
 import kotlin.math.sqrt
 
 /**
- * Volatility regime for one 15-minute window.
+ * Volatility regime for one coin in one 15-minute window.
  * Realized vol is the sample standard deviation of close-to-close log returns
  * on completed 1-minute bars. The tag compares that vol with the median of
  * earlier windows. With no history yet, the comparison uses [PRIOR_BASELINE].
- * Paper only. One tag per window, not a row per tick.
+ * Paper only. One tag per coin per window, not a row per tick.
  */
 object VolRegime {
     const val CALM = "calm"
@@ -26,18 +26,36 @@ object VolRegime {
     /** Cold-start baseline: 8 bps per completed minute. */
     const val PRIOR_BASELINE = 0.0008
     private const val MAX_WINDOWS = 16
+    /** One close per minute. Three closed minutes are required, and the book ticks much faster than that. */
     private const val MAX_SPOTS = 40
 
     private val lock = Any()
     private val spots = HashMap<String, ArrayDeque<Pair<Long, Double>>>()
     private val rvByWindow = LinkedHashMap<String, Double>()
     private val tags = HashMap<String, String>()
+    /** Expiry stamp → coin|stamp last written. Gate rows pass the stamp alone. */
+    private val latestForStamp = HashMap<String, String>()
 
     fun reset() = synchronized(lock) {
         spots.clear()
         rvByWindow.clear()
         tags.clear()
+        latestForStamp.clear()
     }
+
+    /**
+     * BTC and ETH that close on the same stamp must not share a spot series.
+     * A ticker becomes `COIN|stamp`. A stamp or an already qualified key is unchanged.
+     */
+    fun qualify(tickerOrKey: String): String {
+        val key = tickerOrKey.trim().uppercase()
+        if (key.isBlank() || key.contains('|') || !key.contains('-')) return key
+        val coin = ScalpParams.coinOf(key)
+        val window = key.substringAfter('-').substringBefore('-')
+        return if (window.isBlank()) coin else "$coin|$window"
+    }
+
+    private fun stampOf(key: String): String = if (key.contains('|')) key.substringAfter('|') else key
 
     /** Sample stdev of close-to-close log returns. Null until two returns exist. */
     fun realizedVol(bars: List<HybridQuantGates.MinuteBar>): Double? {
@@ -72,35 +90,53 @@ object VolRegime {
         }
     }
 
-    fun current(windowKey: String): String = synchronized(lock) { tags[windowKey] ?: UNKNOWN }
+    fun current(windowKey: String): String = synchronized(lock) {
+        val key = qualify(windowKey)
+        tags[key]?.let { return@synchronized it }
+        // A bare expiry stamp is what gate rows pass. A ticker that has no tag yet stays unknown.
+        if (key.contains('|') || windowKey.contains('-')) return@synchronized UNKNOWN
+        val latest = latestForStamp[stampOf(key)] ?: return@synchronized UNKNOWN
+        tags[latest] ?: UNKNOWN
+    }
 
-    /** One spot on the window. A bar that is still open does not change the tag. */
+    /** One spot on this coin's window. A bar that is still open does not change the tag. */
     fun noteSpot(windowKey: String, atMs: Long, spot: Double?): String {
-        if (windowKey.isBlank() || spot == null || !spot.isFinite() || spot <= 0.0) return current(windowKey)
+        val key = qualify(windowKey)
+        if (key.isBlank() || spot == null || !spot.isFinite() || spot <= 0.0) {
+            if (key.isNotBlank()) synchronized(lock) { latestForStamp[stampOf(key)] = key }
+            return current(key)
+        }
         val bars = synchronized(lock) {
-            val row = spots.getOrPut(windowKey) { ArrayDeque() }
+            val row = spots.getOrPut(key) { ArrayDeque() }
             val last = row.lastOrNull()
-            if (last == null || last.first != atMs) {
+            val minute = atMs / HybridQuantGates.MINUTE_MS
+            if (last != null && last.first / HybridQuantGates.MINUTE_MS == minute) {
+                row.removeLast()
+                row.addLast(atMs to spot)
+            } else {
                 row.addLast(atMs to spot)
                 while (row.size > MAX_SPOTS) row.removeFirst()
             }
             if (spots.size > MAX_WINDOWS) {
-                val drop = spots.keys.firstOrNull { it != windowKey }
+                val drop = spots.keys.firstOrNull { it != key }
                 if (drop != null) spots.remove(drop)
             }
+            latestForStamp[stampOf(key)] = key
             HybridQuantGates.completedMinuteBars(row.toList(), atMs)
         }
-        return observeBars(windowKey, bars)
+        return observeBars(key, bars)
     }
 
     fun observeBars(windowKey: String, bars: List<HybridQuantGates.MinuteBar>): String = synchronized(lock) {
-        if (windowKey.isBlank()) return@synchronized UNKNOWN
+        val key = qualify(windowKey)
+        if (key.isBlank()) return@synchronized UNKNOWN
+        latestForStamp[stampOf(key)] = key
         val rv = realizedVol(bars)
-        if (rv == null) return@synchronized tags[windowKey] ?: UNKNOWN
-        val base = baselineLocked(windowKey) ?: PRIOR_BASELINE
+        if (rv == null) return@synchronized tags[key] ?: UNKNOWN
+        val base = baselineLocked(key) ?: PRIOR_BASELINE
         val next = tag(rv, base)
-        tags[windowKey] = next
-        rvByWindow[windowKey] = rv
+        tags[key] = next
+        rvByWindow[key] = rv
         while (rvByWindow.size > MAX_WINDOWS) {
             val eldest = rvByWindow.keys.first()
             rvByWindow.remove(eldest)

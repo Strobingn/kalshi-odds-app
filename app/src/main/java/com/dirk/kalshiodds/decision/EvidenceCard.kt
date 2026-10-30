@@ -138,10 +138,25 @@ object EvidenceCard {
         return (sum / wsum).coerceIn(-1.0, 1.0)
     }
 
-    fun bucketToken(score: Double): String = when {
-        score < 0.45 -> "lt45"
-        score <= 0.65 -> "mid"
-        else -> "gt65"
+    /**
+     * Logistic scores split at 0.45 and 0.65. LGBM [predictedNet] is a dollar payoff on the
+     * prior (0.02 is 2¢) and cents per contract once the forest is fitted. Both land in the
+     * same weak / mid / strong tokens so similar-setup history is not one bucket.
+     */
+    fun bucketToken(score: Double, predictedNet: Boolean = false): String {
+        if (!predictedNet) {
+            return when {
+                score < 0.45 -> "lt45"
+                score <= 0.65 -> "mid"
+                else -> "gt65"
+            }
+        }
+        val dollars = if (abs(score) >= 1.0) score / 100.0 else score
+        return when {
+            dollars < 0.01 -> "lt45"
+            dollars <= 0.03 -> "mid"
+            else -> "gt65"
+        }
     }
 
     fun blockedBy(enter: Boolean, reason: String): String = when {
@@ -201,7 +216,7 @@ object EvidenceCard {
             histWinRate = finite(input.histWinRate),
             histAvgPnl = finite(input.histAvgPnl),
             scoreBucket = input.scoreBucket.ifBlank {
-                bucketToken(if (input.useLgbm) input.lgbmScore else input.logisticScore)
+                bucketToken(if (input.useLgbm) input.lgbmScore else input.logisticScore, input.useLgbm)
             },
             abstain = abstain.first,
             abstainWhy = abstain.second,

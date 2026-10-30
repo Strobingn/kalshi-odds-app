@@ -550,7 +550,7 @@ object ModelFilter {
         val barsAll = HybridQuantGates.completedMinuteBars(spotTicks, q.nowMs)
         val inWindow = barsAll.filter { it.startMs >= windowStart && it.endMs <= q.nowMs }
         val fibRead = HybridQuantGates.fib(inWindow, mark, q.strike, side, ofi, q.sigmaPerSec)
-        val regime = VolRegime.observeBars(com.dirk.kalshiodds.decision.ScalpModels.windowKeyOf(q.ticker), inWindow)
+        val regime = VolRegime.observeBars(q.ticker, inWindow)
         val tickViews = ArrayList<EvidenceCard.TickPx>(21)
         val past = row.filter { it.atMs < q.nowMs }.takeLast(21)
         for (t in past) tickViews += EvidenceCard.TickPx(t.mid, t.spread, t.bidSz, t.askSz)
@@ -565,7 +565,7 @@ object ModelFilter {
             HftMathEngines.vamp(bidPx, askPx, bidSz.coerceAtLeast(0.0), askSz.coerceAtLeast(0.0))
         } else 0.0
         val studentT = HftSignals.studentTFair(mark, q.strike, q.sigmaPerSec, q.tauS, side)
-        val bucket = EvidenceCard.bucketToken(score)
+        val bucket = EvidenceCard.bucketToken(score, twin.arm == Arm.LGBM)
         val hist = VolRegimeLedger.similar(twin.id, side, bucket, regime)
         val card = EvidenceCard.build(
             EvidenceCard.Input(
@@ -613,7 +613,14 @@ object ModelFilter {
             hybrid.pStrongCents, regime, evidence
         )
         val print = "$side|${fmt4(ask)}|${fmt4(fair)}|${fmt4(score)}|$enter|$reason"
-        if (lastPrint[twin.id] == print) return lastDecision[twin.id]?.copy(regime = regime, evidenceText = evidence) ?: d
+        if (lastPrint[twin.id] == print) {
+            val prev = lastDecision[twin.id]
+            if (prev != null) {
+                val fresh = d.copy(atMs = prev.atMs)
+                refreshSamePrint(prev, fresh)
+                return fresh
+            }
+        }
         lastPrint[twin.id] = print
         lastDecision[twin.id] = d
         decisions.addLast(d)
@@ -1020,6 +1027,46 @@ object ModelFilter {
     }
 
     private fun decisionId(twinId: String, atMs: Long, side: String) = "mf:$twinId:$atMs:$side"
+
+    /** Same ask/fair/score/reason print. Keep the decision id and replace the card the screen and sync read. */
+    private fun refreshSamePrint(prev: Decision, fresh: Decision) {
+        lastDecision[fresh.twinId] = fresh
+        val next = ArrayDeque<Decision>(decisions.size.coerceAtLeast(1))
+        var found = false
+        for (old in decisions) {
+            if (!found && old.twinId == prev.twinId && old.atMs == prev.atMs && old.side == prev.side) {
+                next.addLast(fresh)
+                found = true
+            } else {
+                next.addLast(old)
+            }
+        }
+        if (!found) next.addLast(fresh)
+        while (next.size > 200) {
+            val old = next.removeFirst()
+            outcomes.remove(decisionId(old.twinId, old.atMs, old.side))
+        }
+        decisions.clear()
+        decisions.addAll(next)
+        val id = decisionId(fresh.twinId, fresh.atMs, fresh.side)
+        val summary = EvidenceCard.syncSummary(fresh.evidenceText)
+        val queued = ArrayDeque<SyncRow>(unsynced.size.coerceAtLeast(1))
+        var queuedHit = false
+        for (row in unsynced) {
+            if (!queuedHit && row.id == id) {
+                queued.addLast(row.copy(scalar = fresh.scalar, regime = fresh.regime, evidence = summary))
+                queuedHit = true
+            } else {
+                queued.addLast(row)
+            }
+        }
+        if (!queuedHit) {
+            queued.addLast(SyncRow(id, fresh.atMs, fresh.twinId, fresh.score, fresh.scalar, fresh.enter, fresh.reason, null, fresh.regime, summary))
+            while (queued.size > 400) queued.removeFirst()
+        }
+        unsynced.clear()
+        unsynced.addAll(queued)
+    }
 
     private class RetrainMath(
         val trained: Int,
