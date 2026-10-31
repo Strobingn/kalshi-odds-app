@@ -197,6 +197,8 @@ object ScalpAutoBenchMigration {
     const val FLAG_BAND = "ai_learn_band_1026"
     const val FLAG_FLEET = "fleet_band_15_55"
     const val FLAG_OPEN = "fleet_open_band_1027"
+    /** 1.0.55: one pass that puts AI-touched buy / take-profit / open-at-once / clip back. */
+    const val FLAG_ADVICE_1055 = "advice_heal_1055"
 
     fun apply(saved: ScalpControls): ScalpControls = saved.copy(autoBench = false, aiBench = emptySet()).normalized()
 
@@ -220,15 +222,18 @@ class SavedScalpControls(context: Context, private val flushDelayMs: Long = 1_00
         val bandDone = prefs.getBoolean(ScalpAutoBenchMigration.FLAG_BAND, false)
         val fleetDone = prefs.getBoolean(ScalpAutoBenchMigration.FLAG_FLEET, false)
         val openDone = prefs.getBoolean(ScalpAutoBenchMigration.FLAG_OPEN, false)
-        if (legacy && bandDone && fleetDone && openDone) return raw.normalized()
+        val adviceDone = prefs.getBoolean(ScalpAutoBenchMigration.FLAG_ADVICE_1055, false)
+        if (legacy && bandDone && fleetDone && openDone && adviceDone) return raw.normalized()
         val migrated = if (legacy) raw else ScalpAutoBenchMigration.apply(raw)
-        val next = ScalpAutoBenchMigration.repairLearnedBands(migrated)
+        val repaired = ScalpAutoBenchMigration.repairLearnedBands(migrated)
+        val next = if (adviceDone) repaired else AdviceApply.repairControls(repaired)
         prefs.edit()
             .putBoolean(ScalpAutoBenchMigration.FLAG, true)
             .putBoolean(ScalpAutoBenchMigration.FLAG_1028, true)
             .putBoolean(ScalpAutoBenchMigration.FLAG_BAND, true)
             .putBoolean(ScalpAutoBenchMigration.FLAG_FLEET, true)
             .putBoolean(ScalpAutoBenchMigration.FLAG_OPEN, true)
+            .putBoolean(ScalpAutoBenchMigration.FLAG_ADVICE_1055, true)
             .putString("settings", json.encodeToString(next))
             .apply()
         return next

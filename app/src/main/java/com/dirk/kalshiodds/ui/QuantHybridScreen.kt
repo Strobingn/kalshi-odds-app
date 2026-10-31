@@ -406,7 +406,6 @@ internal fun QuantHybridScreen(
             Button(
                 onClick = {
                     val page = sessionJournal().also { journal = it }
-                    ModelFilter.applySessionAdvice()
                     rev++
                     journalNote = "Asking AI…"
                     onAskAi(journalPrompt(page)) { journalNote = it }
@@ -426,11 +425,23 @@ internal fun QuantHybridScreen(
             }
             OutlinedButton(
                 onClick = {
-                    ModelFilter.applySessionAdvice()
+                    val page = journal ?: sessionJournal().also { journal = it }
+                    val text = listOf(journalNote, page.suggestions.joinToString("\n"))
+                        .filter { it.isNotBlank() && it != "Asking AI…" }
+                        .joinToString("\n")
+                    ModelFilter.applySessionAdvice(text)
                     rev++
                 },
                 modifier = Modifier.testTag("APPLY_ADVICE")
             ) { Text("Apply advice") }
+            OutlinedButton(
+                onClick = {
+                    ModelFilter.undoLastAdvice()
+                    rev++
+                },
+                enabled = remember(rev) { ModelFilter.hasAdviceUndo() },
+                modifier = Modifier.testTag("UNDO_ADVICE")
+            ) { Text("Undo last advice") }
             OutlinedButton(
                 onClick = {
                     if (retraining) return@OutlinedButton
@@ -442,9 +453,7 @@ internal fun QuantHybridScreen(
                         try {
                             val note = withContext(Dispatchers.Default) {
                                 syncFromStore()
-                                val trained = ResearchCompanion.retrain(now)
-                                ModelFilter.applySessionAdvice()
-                                trained
+                                ResearchCompanion.retrain(now)
                             }
                             retrainNote = note
                             if (refreshJournal) journal = sessionJournal()
