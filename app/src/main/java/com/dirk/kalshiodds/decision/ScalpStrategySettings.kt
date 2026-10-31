@@ -24,9 +24,10 @@ data class ScalpStrategySettings(
             maxHoldSeconds = maxHoldSeconds?.coerceIn(0, 3600), untilMinute = untilMinute.coerceIn(1, 14),
             cadenceSeconds = cadenceSeconds.coerceIn(0, 30), maxOpenPerSide = maxOpenPerSide.coerceIn(0, 20))
     }
-    fun plan(base: ScalpV2.Plan): ScalpV2.Plan = base.copy(spec = base.spec.copy(
+    fun plan(base: ScalpV2.Plan, code: String? = null): ScalpV2.Plan = base.copy(spec = base.spec.copy(
         // A user-specified floor outranks an inherited learned ceiling; never buy below that floor.
-        maxAsk = minOf(PaperFleetDefaults.BUY_CEILING / 100.0, maxOf(minEntryCents / 100.0, maxEntryCents?.div(100.0) ?: base.spec.maxAsk)),
+        // Favourites and research-late keep buyCeiling (above 75¢). A null code stays at the fleet ceiling.
+        maxAsk = minOf(PaperFleetDefaults.buyCeiling(code) / 100.0, maxOf(minEntryCents / 100.0, maxEntryCents?.div(100.0) ?: base.spec.maxAsk)),
         clip = PaperClip.sized((contracts ?: base.spec.clip).coerceAtLeast(1))), stop = stopCents?.div(100.0) ?: base.stop)
     fun timeOk(now: Long, close: Long): Boolean = now >= close - 900_000 && now < close - 900_000 + untilMinute * 60_000L
 }

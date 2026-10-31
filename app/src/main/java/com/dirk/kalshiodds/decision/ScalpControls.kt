@@ -76,7 +76,7 @@ data class ScalpControls(
         val chosen = if (!manual) base else base.copy(
             spec = base.spec.copy(maxAsk = maxAskCents.coerceIn(1, PaperFleetDefaults.BUY_CEILING) / 100.0, trail = trailCents / 100.0, clip = contracts),
             stop = stopCents / 100.0, arm = armCents / 100.0, adjusted = false, note = "v2ai=manual; user parameters")
-        val scoped = modelCode?.let { settings(it).plan(chosen) } ?: chosen
+        val scoped = modelCode?.let { settings(it).plan(chosen, it) } ?: chosen
         return scoped.copy(spec = scoped.spec.copy(maxAsk = minOf(cap, scoped.spec.maxAsk)))
     }
     fun entryBlock(modelCode: String, open: Int, entriesLastHour: Int, todayNet: Double): String? = when {
