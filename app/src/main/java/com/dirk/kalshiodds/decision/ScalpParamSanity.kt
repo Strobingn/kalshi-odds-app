@@ -37,7 +37,10 @@ object ScalpParamSanity {
         var max = s.maxEntryCents
         if (ScalpFloors.isFavorite(code) && (max == null || max < floor)) max = ceilCap
         // A ceiling under 30¢ on a v2 dip / fair-gap copy is the signal price, not a band.
-        if (max != null && ScalpFloors.repairsTightAsk(code) && max < ScalpFloors.minCeilingCents(code)) max = ceilCap
+        // Put it back on the factory max (55¢), not the 75¢ owner ceiling.
+        if (max != null && ScalpFloors.repairsTightAsk(code) && max < ScalpFloors.minCeilingCents(code)) {
+            max = PaperFleetDefaults.buyMax(code)
+        }
         if (max != null && max <= min) max = (min + 1).coerceAtMost(99)
         if (max != null && max > 99) max = 99
         if (min >= (max ?: 99)) min = ((max ?: 99) - 1).coerceAtLeast(floor)
@@ -53,21 +56,22 @@ object ScalpParamSanity {
                 rawMax != null &&
                 !PaperFleetDefaults.collapsed(raw.minEntryCents, rawMax)
             if (handBand) {
-                min = raw.minEntryCents.coerceIn(PaperFleetDefaults.BUY_MIN, 98)
-                max = rawMax.coerceIn(min + 1, 99)
+                val cap = PaperFleetDefaults.buyCeiling(code)
+                min = raw.minEntryCents.coerceIn(PaperFleetDefaults.BUY_MIN, cap - 1)
+                max = rawMax.coerceIn(min + 1, cap)
             }
             val factoryBand = PaperFleetDefaults.untouchedBand(raw)
             val storedCollapse = PaperFleetDefaults.collapsed(raw.minEntryCents, raw.maxEntryCents)
             if (factoryBand || storedCollapse || PaperFleetDefaults.collapsed(min, max)) {
                 min = PaperFleetDefaults.BUY_MIN
-                max = PaperFleetDefaults.BUY_MAX
+                max = PaperFleetDefaults.buyMax(code)
             }
             val factoryProfit = factoryBand && (raw.takeProfitCents == null || raw.takeProfitCents == 0)
             if (factoryProfit || (raw.takeProfitCents != null && raw.takeProfitCents > PaperFleetDefaults.PROFIT_HEAL_ABOVE)) {
                 target = PaperFleetDefaults.PROFIT_CENTS
             }
             val floored = PaperFleetDefaults.floorBand(
-                min, max, AiLearnBounds.aiTouched(s), raw.minEntryCents, raw.maxEntryCents
+                min, max, AiLearnBounds.aiTouched(s), raw.minEntryCents, raw.maxEntryCents, code
             )
             min = floored.first
             max = floored.second
@@ -138,9 +142,11 @@ object ScalpParamSanity {
         val ceil = ScalpFloors.ceilingCents(code) / 100.0
         val minPx = (if (savedMin.isFinite()) savedMin else floor).coerceAtLeast(floor).coerceIn(floor, 0.98)
         var maxPx = if (savedMax.isFinite() && savedMax > 0.0) savedMax else ceil
-        if (ScalpFloors.repairsTightAsk(code) && maxPx + 1e-9 < ScalpFloors.minCeilingCents(code) / 100.0) maxPx = ceil
-        if (maxPx <= minPx + 1e-9) maxPx = ceil
-        maxPx = maxPx.coerceAtMost(ceil).coerceAtLeast(minPx + 0.01)
+        val factoryMax = PaperFleetDefaults.buyMax(code) / 100.0
+        if (ScalpFloors.repairsTightAsk(code) && maxPx + 1e-9 < ScalpFloors.minCeilingCents(code) / 100.0) maxPx = factoryMax
+        if (maxPx <= minPx + 1e-9) maxPx = maxOf(factoryMax, minPx + 0.01)
+        val ownerCap = PaperFleetDefaults.buyCeiling(code) / 100.0
+        maxPx = maxPx.coerceAtMost(maxOf(ceil, ownerCap)).coerceAtLeast(minPx + 0.01)
         return minPx to maxPx
     }
 

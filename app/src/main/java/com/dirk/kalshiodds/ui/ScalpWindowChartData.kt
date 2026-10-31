@@ -59,7 +59,8 @@ data class ScalpWindowChartData(
         val missingDown = up && !down
         val name = if (missingDown) "DOWN" else "UP"
         val ask = complementaryAskCents(missingDown)
-        val reason = if (ask != null && ask > ScalpRule.ENTRY_HI * 100.0 + 1e-6) "ask above 55¢ ceiling" else "no scalper took this side"
+        val ceiling = PaperFleetDefaults.BUY_CEILING.toDouble()
+        val reason = if (ask != null && ask > ceiling + 1e-6) "ask above ${PaperFleetDefaults.BUY_CEILING}¢ ceiling" else "no scalper took this side"
         return "no $name trigger this window ($reason)"
     }
 

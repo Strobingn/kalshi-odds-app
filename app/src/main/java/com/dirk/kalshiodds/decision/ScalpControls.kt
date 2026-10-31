@@ -53,7 +53,7 @@ data class ScalpControls(
 ) {
     fun settings(code: String): ScalpStrategySettings =
         ScalpParamSanity.settings(code, strategySettings[code] ?: ScalpStrategySettings())
-    fun normalized() = copy(strategySettings = strategySettings.mapValues { (code, raw) -> ScalpParamSanity.settings(code, raw) }, peakTrailCents = peakTrailCents.coerceIn(1, 20), stopLossPercent = stopLossPercent.coerceIn(1, 99), maxAskCents = maxAskCents.coerceIn(1, 55), greenContracts = greenContracts.coerceIn(PaperClip.MIN, 500), stopCents = stopCents.coerceIn(1, 99),
+    fun normalized() = copy(strategySettings = strategySettings.mapValues { (code, raw) -> ScalpParamSanity.settings(code, raw) }, peakTrailCents = peakTrailCents.coerceIn(1, 20), stopLossPercent = stopLossPercent.coerceIn(1, 99), maxAskCents = maxAskCents.coerceIn(1, PaperFleetDefaults.BUY_CEILING), greenContracts = greenContracts.coerceIn(PaperClip.MIN, 500), stopCents = stopCents.coerceIn(1, 99),
         takeProfitCents = takeProfitCents.coerceIn(0, 99), trailCents = trailCents.coerceIn(1, 20),
         armCents = armCents.coerceIn(1, 99), contracts = contracts.coerceIn(PaperClip.MIN, 1000),
         maxStakeUsd = maxStakeUsd.takeIf { it.isFinite() }?.coerceIn(0.0, 100_000.0) ?: 0.0,
@@ -72,11 +72,12 @@ data class ScalpControls(
     }
     fun permits(modelCode: String) = enabled && !killSwitch && modelCode !in disabledStrategies
     fun plan(base: ScalpV2.Plan, modelCode: String? = null): ScalpV2.Plan {
+        val cap = (modelCode?.let { PaperFleetDefaults.buyCeiling(it) } ?: PaperFleetDefaults.BUY_CEILING) / 100.0
         val chosen = if (!manual) base else base.copy(
-            spec = base.spec.copy(maxAsk = maxAskCents.coerceIn(1, 55) / 100.0, trail = trailCents / 100.0, clip = contracts),
+            spec = base.spec.copy(maxAsk = maxAskCents.coerceIn(1, PaperFleetDefaults.BUY_CEILING) / 100.0, trail = trailCents / 100.0, clip = contracts),
             stop = stopCents / 100.0, arm = armCents / 100.0, adjusted = false, note = "v2ai=manual; user parameters")
         val scoped = modelCode?.let { settings(it).plan(chosen) } ?: chosen
-        return scoped.copy(spec = scoped.spec.copy(maxAsk = minOf(ScalpRule.ENTRY_HI, scoped.spec.maxAsk)))
+        return scoped.copy(spec = scoped.spec.copy(maxAsk = minOf(cap, scoped.spec.maxAsk)))
     }
     fun entryBlock(modelCode: String, open: Int, entriesLastHour: Int, todayNet: Double): String? = when {
         !permits(modelCode) -> "V2 entries paused or strategy disabled"
@@ -199,6 +200,27 @@ object ScalpAutoBenchMigration {
     const val FLAG_OPEN = "fleet_open_band_1027"
     /** 1.0.55: one pass that puts AI-touched buy / take-profit / open-at-once / clip back. */
     const val FLAG_ADVICE_1055 = "advice_heal_1055"
+    /** 1.0.56: late window's factory highest buy moves from 55¢ to 95¢ once. */
+    const val FLAG_LATE5 = "late5_max_95"
+
+    /**
+     * One upgrade. A stored late-window max at or under the old 55¢ ceiling becomes 95¢.
+     * A max already above 55¢ is only clamped if it sits above 95¢.
+     */
+    fun migrateLateWindow(saved: ScalpControls): ScalpControls {
+        val code = LateWindowScalper.CODE
+        val cur = saved.strategySettings[code] ?: PaperFleetDefaults.factory(code)
+        val max = cur.maxEntryCents
+        val nextMax = when {
+            max == null || max <= PaperFleetDefaults.BUY_MAX -> PaperFleetDefaults.LATE_BUY_MAX
+            max > PaperFleetDefaults.LATE_BUY_MAX -> PaperFleetDefaults.LATE_BUY_MAX
+            else -> max
+        }
+        if (saved.strategySettings[code] != null && nextMax == max) return saved
+        val min = cur.minEntryCents.coerceAtLeast(PaperFleetDefaults.BUY_MIN)
+        val row = cur.copy(minEntryCents = min, maxEntryCents = nextMax)
+        return saved.copy(strategySettings = saved.strategySettings + (code to row))
+    }
 
     fun apply(saved: ScalpControls): ScalpControls = saved.copy(autoBench = false, aiBench = emptySet()).normalized()
 
@@ -223,10 +245,12 @@ class SavedScalpControls(context: Context, private val flushDelayMs: Long = 1_00
         val fleetDone = prefs.getBoolean(ScalpAutoBenchMigration.FLAG_FLEET, false)
         val openDone = prefs.getBoolean(ScalpAutoBenchMigration.FLAG_OPEN, false)
         val adviceDone = prefs.getBoolean(ScalpAutoBenchMigration.FLAG_ADVICE_1055, false)
-        if (legacy && bandDone && fleetDone && openDone && adviceDone) return raw.normalized()
+        val lateDone = prefs.getBoolean(ScalpAutoBenchMigration.FLAG_LATE5, false)
+        if (legacy && bandDone && fleetDone && openDone && adviceDone && lateDone) return raw.normalized()
         val migrated = if (legacy) raw else ScalpAutoBenchMigration.apply(raw)
         val repaired = ScalpAutoBenchMigration.repairLearnedBands(migrated)
-        val next = if (adviceDone) repaired else AdviceApply.repairControls(repaired)
+        val advised = if (adviceDone) repaired else AdviceApply.repairControls(repaired)
+        val next = if (lateDone) advised else ScalpAutoBenchMigration.migrateLateWindow(advised)
         prefs.edit()
             .putBoolean(ScalpAutoBenchMigration.FLAG, true)
             .putBoolean(ScalpAutoBenchMigration.FLAG_1028, true)
@@ -234,6 +258,7 @@ class SavedScalpControls(context: Context, private val flushDelayMs: Long = 1_00
             .putBoolean(ScalpAutoBenchMigration.FLAG_FLEET, true)
             .putBoolean(ScalpAutoBenchMigration.FLAG_OPEN, true)
             .putBoolean(ScalpAutoBenchMigration.FLAG_ADVICE_1055, true)
+            .putBoolean(ScalpAutoBenchMigration.FLAG_LATE5, true)
             .putString("settings", json.encodeToString(next))
             .apply()
         return next

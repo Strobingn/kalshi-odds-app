@@ -52,8 +52,7 @@ object PaperSettingTuner {
             val loser = net < 0.0
             if (!winner && !loser) continue
             val view = controls.settings(tape.code)
-            val ceil = ScalpFloors.ceilingCents(tape.code)
-            val max0 = view.maxEntryCents ?: ceil
+            val max0 = view.maxEntryCents ?: PaperFleetDefaults.buyMax(tape.code)
             val min0 = view.minEntryCents
             val why = if (winner) {
                 String.format(Locale.US, "winner net %+.2f win %.0f%% · loosen so it trades more", net, wr * 100.0)
@@ -72,8 +71,12 @@ object PaperSettingTuner {
                         hi = PaperFleetDefaults.BUY_MIN
                     }
                     "maxEntryCents" -> {
-                        lo = PaperFleetDefaults.BUY_MAX
-                        hi = maxOf(ceil, PaperFleetDefaults.BUY_MAX)
+                        val ceiling = PaperFleetDefaults.buyCeiling(tape.code)
+                        val factory = PaperFleetDefaults.buyMax(tape.code)
+                        val held = view.maxEntryCents ?: factory
+                        // AI may not raise the factory max. A hand max above it is left where the owner put it.
+                        lo = if (held > factory) held.coerceAtMost(ceiling) else factory
+                        hi = if (held > factory) held.coerceAtMost(ceiling) else factory
                     }
                     "contracts" -> { lo = PaperClip.MIN; hi = maxOf(ScalpVariants.clipOf(tape.code) ?: 100, 100) }
                     "untilMinute" -> { lo = AiLearnBounds.untilLo(view.untilMinute); hi = AiLearnBounds.UNTIL_CEILING }
@@ -89,7 +92,7 @@ object PaperSettingTuner {
                 }
                 val clamped = next.coerceIn(lo, hi)
                 if (old != null && clamped == old) return
-                if (old == null && field == "maxEntryCents" && clamped == ceil && !winner) return
+                if (old == null && field == "maxEntryCents" && clamped == PaperFleetDefaults.buyMax(tape.code) && !winner) return
                 out += Change(tape.code, field, old?.toString() ?: "default", clamped.toString(), why)
             }
             val clip0 = PaperClip.sized(view.contracts ?: ScalpParamSanity.builtinClip(tape.code))

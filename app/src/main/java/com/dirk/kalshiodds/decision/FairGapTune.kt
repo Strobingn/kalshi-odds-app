@@ -118,11 +118,14 @@ object FairGapTune {
         moveBp: Double? = null,
         vwapZ: Double? = null,
         variantId: String? = null,
-        open: List<ScalpTrade> = emptyList()
+        open: List<ScalpTrade> = emptyList(),
+        maxCents: Int? = null
     ): Boolean {
         if (!ask.isFinite() || ask <= 0.0 || ask > 0.99) return false
         if (q != null && side != null && stackingBlocked(variantId, q, side, ask, open)) return false
         if (favLeg && ownsRules(code)) return true
+        val cap = PaperFleetDefaults.askLimit(code, maxCents ?: PaperFleetDefaults.buyMax(code))
+        if (ask <= cap + 1e-9) return true
         if (ScalpRule.buyPriceOk(ask)) return true
         return q != null && side != null && fair != null &&
             lessonAllowed(q, side, ask, fair, clip, moveBp, vwapZ, variantId, open)

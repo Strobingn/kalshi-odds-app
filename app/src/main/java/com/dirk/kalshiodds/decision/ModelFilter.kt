@@ -591,7 +591,8 @@ object ModelFilter {
         val warm = trainedN < MIN_TRAIN
         val floor = ScalpFloors.cents(twin.parentId) / 100.0
         val lesson = FairGapTune.lessonAllowed(q, side, ask, fair, twin.clip, variantId = twin.id)
-        val priceOk = ask + 1e-9 >= floor && (ScalpRule.buyPriceOk(ask) || lesson)
+        val hardCents = PaperFleetDefaults.buyCeiling(twin.id)
+        val priceOk = ask + 1e-9 >= floor && (ask <= hardCents / 100.0 + 1e-9 || lesson)
         val gate = if (twin.arm == Arm.LGBM) {
             lgbm > 0.0 || (lgbm > -0.005 && fair >= ask + 0.015)
         } else {
@@ -602,7 +603,7 @@ object ModelFilter {
         val modelVersion = if (twin.arm == Arm.LGBM) "lgbm-${TreeEnsemble.TRAIN_TREES}x${TreeEnsemble.TRAIN_DEPTH}" else "logistic-l2"
         val baseReason = when {
             !priceOk && ask + 1e-9 < floor -> "below the ${ScalpFloors.cents(twin.parentId)}¢ floor"
-            !priceOk -> "ask above 55¢ ceiling"
+            !priceOk -> PaperFleetDefaults.overCeilingReason(hardCents)
             pin -> "pin risk · taker off"
             !quietVol -> "quiet-volume only · 1m vol ${fmt(vol1m)}"
             blockHigh -> "high-score regime · ${fmt(qScore)} > ${fmt(scoreCeiling)}"

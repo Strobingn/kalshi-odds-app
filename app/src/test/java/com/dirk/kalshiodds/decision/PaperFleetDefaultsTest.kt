@@ -30,9 +30,20 @@ class PaperFleetDefaultsTest {
         val codes = ids()
         assertTrue("scalper id list", codes.size >= 20)
         codes.forEach { id ->
-            assertFleet(id, ScalpControls().settings(id))
-            assertFleet(id, ScalpParamSanity.settings(id, ScalpStrategySettings()))
-            assertFleet(id, ScalpParamSanity.settings(id, PaperFleetDefaults.factory()))
+            if (LateWindowScalper.matches(id)) {
+                val fresh = ScalpControls().settings(id)
+                assertEquals(PaperFleetDefaults.BUY_MIN, fresh.minEntryCents)
+                assertEquals(PaperFleetDefaults.LATE_BUY_MAX, fresh.maxEntryCents)
+                assertEquals(PaperFleetDefaults.PROFIT_CENTS, fresh.takeProfitCents)
+                val blank = ScalpParamSanity.settings(id, ScalpStrategySettings())
+                assertEquals(PaperFleetDefaults.LATE_BUY_MAX, blank.maxEntryCents)
+                // An explicit generic 15–55¢ row is a hand band. Late window does not widen it.
+                assertFleet(id, ScalpParamSanity.settings(id, PaperFleetDefaults.factory()))
+            } else {
+                assertFleet(id, ScalpControls().settings(id))
+                assertFleet(id, ScalpParamSanity.settings(id, ScalpStrategySettings()))
+                assertFleet(id, ScalpParamSanity.settings(id, PaperFleetDefaults.factory()))
+            }
         }
     }
 

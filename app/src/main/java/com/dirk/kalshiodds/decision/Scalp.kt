@@ -64,8 +64,13 @@ object ScalpRule {
     const val ENTRY_LO = 0.10
     const val ENTRY_HI = 0.55
 
-    /** Hard ceiling for every scalping buy, independent of settings or saved strategy rules. */
-    fun buyPriceOk(price: Double?): Boolean = price != null && price.isFinite() && price > 0.0 && price <= ENTRY_HI + 1e-9
+    /**
+     * Price is a finite positive buy at or under [ceiling].
+     * The default ceiling is the factory 55¢ ([ENTRY_HI]). A caller that already
+     * knows the owner raised the band passes a higher ceiling (75¢, or 95¢ on late window).
+     */
+    fun buyPriceOk(price: Double?, ceiling: Double = ENTRY_HI): Boolean =
+        price != null && price.isFinite() && price > 0.0 && price <= ceiling + 1e-9
     const val SLIPPAGE = 0.01
     const val LATENCY_MS = 3_000L
     const val FRESH_BOOK_MS = 10_000L
@@ -240,7 +245,7 @@ object ScalpRule {
             val fair = q.fair(side) ?: return@mapNotNull null
             val px = if (p.maker) q.bid(side) else ask
             val lesson = !p.maker && FairGapTune.lessonAllowed(q, side, ask, fair, CONTRACTS)
-            if (ask < ENTRY_LO - 1e-9 || px == null || (!buyPriceOk(px) && !lesson)) return@mapNotNull null
+            if (ask < ENTRY_LO - 1e-9 || px == null || (!buyPriceOk(px, PaperFleetDefaults.BUY_CEILING / 100.0) && !lesson)) return@mapNotNull null
             Entry(side, ask, fair, fair - ask - feePerContract(CONTRACTS, ask))
         }
         val best = SidePick.onlyMaxBy(cands) { it.gapAfterFee }
@@ -297,7 +302,7 @@ object ScalpRule {
             val lesson = !p.maker && FairGapTune.lessonAllowed(q, side, ask, fair, CONTRACTS)
             val move: Double = when (p.strategy) {
                 ScalpStrategy.DIP_HUNTER -> {
-                    if (ask < ENTRY_LO - 1e-9 || px == null || (!buyPriceOk(px) && !lesson)) return@mapNotNull null
+                    if (ask < ENTRY_LO - 1e-9 || px == null || (!buyPriceOk(px, PaperFleetDefaults.BUY_CEILING / 100.0) && !lesson)) return@mapNotNull null
                     val ref = past.mapNotNull { it.ask(side) }.maxOrNull() ?: return@mapNotNull null
                     val drop = ref - ask
                     // Spot must not explain the drop: fair still at or above the ask.
@@ -305,7 +310,7 @@ object ScalpRule {
                     drop * 0.5 // half retrace
                 }
                 ScalpStrategy.MOMENTUM -> {
-                    if (ask < ENTRY_LO - 1e-9 || px == null || (!buyPriceOk(px) && !lesson)) return@mapNotNull null
+                    if (ask < ENTRY_LO - 1e-9 || px == null || (!buyPriceOk(px, PaperFleetDefaults.BUY_CEILING / 100.0) && !lesson)) return@mapNotNull null
                     val refBid = past.mapNotNull { it.bid(side) }.minOrNull() ?: return@mapNotNull null
                     val rise = bid - refBid
                     val fairThen = past.minByOrNull { it.atMs }?.fair(side) ?: return@mapNotNull null
@@ -349,7 +354,7 @@ object ScalpRule {
         if (spread > MAX_SPREAD + 1e-9) return null to "spread over 2¢"
         val cands = sides.mapNotNull { side ->
             val ask = q.ask(side) ?: return@mapNotNull null
-            if (ask < ENTRY_LO - 1e-9 || !buyPriceOk(if (p.maker) q.bid(side) else ask)) return@mapNotNull null
+            if (ask < ENTRY_LO - 1e-9 || !buyPriceOk(if (p.maker) q.bid(side) else ask, PaperFleetDefaults.BUY_CEILING / 100.0)) return@mapNotNull null
             val fair = q.cfFair(side) ?: return@mapNotNull null
             val entryFee = feePerContract(CONTRACTS, ask)
             Entry(side, ask, fair, fair - ask - entryFee)
@@ -670,7 +675,9 @@ class ScalpBook(
                 val free = listOf("YES", "NO")
                 val (sig, skip) = ScalpRule.strategySignal(q, tuned(p, ScalpModels.modelOf(p).code), free, recent)
                 if (sig == null) { clearTrigger(p.id, q.ticker); gates.block(modelCode, window, skip) }
-                if (sig != null && (ScalpRule.buyPriceOk(if (p.maker) q.bid(sig.side) else sig.ask) || FairGapTune.lessonAllowed(q, sig.side, sig.ask, sig.fair, ScalpRule.CONTRACTS, variantId = p.id, open = _all.value))) {
+                val entryPx = if (sig != null) if (p.maker) q.bid(sig.side) else sig.ask else null
+                val entryLesson = sig != null && FairGapTune.lessonAllowed(q, sig.side, sig.ask, sig.fair, ScalpRule.CONTRACTS, variantId = p.id, open = _all.value)
+                if (sig != null && tradableAsk(modelCode, entryPx, entryLesson)) {
                     val role = if (p.id in primaryIds) "P" else "S"
                     val again = reentryRefusal(p.id, q.ticker, sig.side, q.nowMs, changed)
                     if (again != null) {
@@ -715,7 +722,7 @@ class ScalpBook(
                     gates.entered(modelCode, window)
                 } else if (sig != null) {
                     clearTrigger(p.id, q.ticker)
-                    gates.block(modelCode, window, "ask above 55¢ ceiling")
+                    gates.block(modelCode, window, overCapReason(modelCode))
                 }
             }
             if (liveExtras && coin == ShockFav.TRADE_COIN) {
@@ -782,8 +789,8 @@ class ScalpBook(
             }
             val px = if (p.maker) q.bid(sig.side) else sig.ask
             if (px == null) { gates.block(spec.id, window, "no bid"); continue }
-            if (!ScalpRule.buyPriceOk(px) && !FairGapTune.lessonAllowed(q, sig.side, sig.ask, sig.fair, spec.clip, variantId = spec.id, open = _all.value)) {
-                gates.block(spec.id, window, "ask above 55¢ ceiling")
+            if (!tradableAsk(spec.id, px, FairGapTune.lessonAllowed(q, sig.side, sig.ask, sig.fair, spec.clip, variantId = spec.id, open = _all.value))) {
+                gates.block(spec.id, window, overCapReason(spec.id))
                 continue
             }
             val n = spec.clip
@@ -827,7 +834,7 @@ class ScalpBook(
             if (sig == null) continue
             if (v2Id == KeptScalpers.V2_DIP_ID && FairGapTune.fallingKnife(sig.side, q.spot, q.strike, q.fair(sig.side), sig.ask)) continue
             val px = if (raw.maker) q.bid(sig.side) ?: continue else sig.ask
-            if (!ScalpRule.buyPriceOk(px) && !FairGapTune.lessonAllowed(q, sig.side, sig.ask, sig.fair, ScalpV2.CLIP, variantId = v2Id, open = _all.value)) continue
+            if (!tradableAsk(v2Id, px, FairGapTune.lessonAllowed(q, sig.side, sig.ask, sig.fair, ScalpV2.CLIP, variantId = v2Id, open = _all.value))) continue
             spawnV2(ScalpTrade(
                 id = "v2src-$v2Id", ticker = q.ticker.uppercase(), side = sig.side, state = ScalpState.PENDING_ENTRY,
                 signalAtMs = q.nowMs, signalAsk = px, fairAtSignal = sig.fair, note = "kept v2 source ${raw.id}",
@@ -893,13 +900,15 @@ class ScalpBook(
             val f = -predFade
             val side = ForecastScalp.sideOf(f)
             val ask = side?.let { q.ask(it) }
-            val band = ForecastScalp.entryBand(KeptScalpers.FADE_ID, entryView(ForecastScalp.FADE_PREFIX) ?: explicit(ForecastScalp.FADE_PREFIX))
+            val fadeSettings = entryView(ForecastScalp.FADE_PREFIX) ?: explicit(ForecastScalp.FADE_PREFIX)
+            val band = ForecastScalp.entryBand(KeptScalpers.FADE_ID, fadeSettings)
+            val fadeCeiling = maxOf(ScalpRule.ENTRY_HI, PaperFleetDefaults.askLimit(KeptScalpers.FADE_ID, fadeSettings?.maxEntryCents))
             val fadeKnife = side != null && ask != null && FairGapTune.fallingKnife(side, q.spot, q.strike, q.fair(side), ask)
             if (fadeKnife) {
                 clearForecastEdge(ForecastScalp.variantId(false, KeptScalpers.FADE_HORIZON_S), key)
                 gates.block(KeptScalpers.FADE_ID, fadeWindow, "lesson guard: falling knife")
             }
-            else if (side != null && ask != null && fadeWantsEntry(mid, ya - yb, ask, kotlin.math.abs(f), q, cfg.marginUsd, band.first, band.second, side, PaperClip.MIN, KeptScalpers.FADE_ID)) {
+            else if (side != null && ask != null && fadeWantsEntry(mid, ya - yb, ask, kotlin.math.abs(f), q, cfg.marginUsd, band.first, band.second, side, PaperClip.MIN, KeptScalpers.FADE_ID, fadeCeiling)) {
                 val vid = ForecastScalp.variantId(false, KeptScalpers.FADE_HORIZON_S)
                 val fadeN = PaperClip.sized(StrategyAlgo.clip(controls.state.value, vid, ScalpRule.CONTRACTS))
                 val cost = ask * fadeN + ScalpRule.orderFee(fadeN, ask)
@@ -935,7 +944,7 @@ class ScalpBook(
                 clearForecastEdge(spec.id, key)
                 gates.block(spec.id, fadeWindow, "lesson guard: falling knife")
             }
-            else if (sideV != null && askV != null && fadeWantsEntry(mid, ya - yb, askV, kotlin.math.abs(fv), q, cfg.marginUsd, spec.fadeLo, spec.fadeHi, sideV, spec.clip, spec.id)) {
+            else if (sideV != null && askV != null && fadeWantsEntry(mid, ya - yb, askV, kotlin.math.abs(fv), q, cfg.marginUsd, spec.fadeLo, spec.fadeHi, sideV, spec.clip, spec.id, maxOf(ScalpRule.ENTRY_HI, PaperFleetDefaults.askLimit(spec.id, controls.state.value.settings(spec.id).maxEntryCents)))) {
                 val costV = askV * spec.clip + ScalpRule.orderFee(spec.clip, askV)
                 val againV = reentryRefusal(spec.id, key, sideV, q.nowMs, changed)
                 if (againV != null) gates.block(spec.id, fadeWindow, againV)
@@ -964,8 +973,8 @@ class ScalpBook(
         return when (t.state) {
             ScalpState.PENDING_ENTRY -> {
                 val limit = t.restingLimit ?: t.signalAsk
-                val ok = ScalpRule.buyPriceOk(limit) || ScalpFloors.isFavorite(t.variantId) ||
-                    FairGapTune.lessonAllowed(q, t.side, limit, q.fair(t.side) ?: t.fairAtSignal, t.contracts.coerceAtLeast(1), variantId = t.variantId)
+                val fcCode = codeOf(t)
+                val ok = tradableAsk(fcCode, limit, FairGapTune.lessonAllowed(q, t.side, limit, q.fair(t.side) ?: t.fairAtSignal, t.contracts.coerceAtLeast(1), variantId = t.variantId))
                 if (!ok) return cappedEntry(t, q.nowMs)
                 if (q.nowMs - t.signalAtMs > ForecastScalp.ENTRY_LIMIT_TTL_MS || q.nowMs >= q.closeMs)
                     return t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; limit cancelled unfilled")
@@ -1179,11 +1188,12 @@ class ScalpBook(
             if (pk?.kind == ShockFav.Kind.FADE_MAKER) {
                 // 0.3.59 maker: post at the side's bid 2 s after the signal; filled only when the ask trades THROUGH (≤ px − 1¢).
                 val px = t.restingLimit
-                if (px != null && !ScalpRule.buyPriceOk(px)) { changed += cappedEntry(t, q.nowMs); continue }
+                val makerCode = ScalpModels.modelOf(t)?.code ?: t.variantId
+                if (px != null && !tradableAsk(makerCode, px)) { changed += cappedEntry(t, q.nowMs); continue }
                 if (px == null) {
                     // Keep the tenth-cent touch. Rounding to a whole cent (2.9¢ → 3¢, 96.8¢ → 97¢)
                     // posts off the level, and the old 5–95¢ band rejected both sides of a 97/3 book.
-                    val b = q.bid(t.side)?.takeIf { it in 0.001..0.999 && ScalpRule.buyPriceOk(it) }
+                    val b = q.bid(t.side)?.takeIf { it in 0.001..0.999 && tradableAsk(makerCode, it) }
                     val posted = b?.let { kotlin.math.round(it * 1000.0) / 1000.0 }
                     changed += if (posted == null) t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; no bid to join")
                         else t.copy(restingLimit = posted, restingSinceMs = q.nowMs, note = String.format(Locale.US, "%s; resting bid %.1f¢", t.note, posted * 100))
@@ -1203,7 +1213,8 @@ class ScalpBook(
             val code = ScalpModels.modelOf(t)?.code ?: t.variantId
             val fillFair = q.fair(t.side) ?: t.fairAtSignal
             val moveBp = ShockFav.moveBp(ring, sec, 5)
-            if (!FairGapTune.askAllowed(pk?.code, ask, ShockFav.isFavLeg(t.variantId), q, t.side, fillFair, t.contracts.coerceAtLeast(1), moveBp, null, t.variantId, emptyList())) { changed += cappedEntry(t, q.nowMs); continue }
+            val shockCode = pk?.code ?: t.variantId
+            if (!FairGapTune.askAllowed(shockCode, ask, ShockFav.isFavLeg(t.variantId), q, t.side, fillFair, t.contracts.coerceAtLeast(1), moveBp, null, t.variantId, emptyList(), capCents(shockCode))) { changed += cappedEntry(t, q.nowMs); continue }
             if (greenOf(t)) {
                 val admitted = admitSize(t, ask, greenClip) ?: continue
                 val maxPx = if (ScalpFloors.isFavorite(code)) 0.99 else maxOf(ScalpRule.ENTRY_HI, t.signalAsk + 0.04, ask + 0.02).coerceAtMost(0.97)
@@ -1603,9 +1614,10 @@ class ScalpBook(
     /** Band entry, or the lesson path, both over the named round-trip hurdle. */
     private fun fadeWantsEntry(
         mid: Double, spread: Double, ask: Double, move: Double, q: ScalpRule.Quote, marginUsd: Double,
-        bandLo: Double, bandHi: Double, side: String, clip: Int, variantId: String
+        bandLo: Double, bandHi: Double, side: String, clip: Int, variantId: String,
+        priceCeiling: Double = ScalpRule.ENTRY_HI
     ): Boolean {
-        if (ForecastScalp.wantsEntry(mid, spread, ask, move, q.tauS, marginUsd, bandLo, bandHi)) return true
+        if (ForecastScalp.wantsEntry(mid, spread, ask, move, q.tauS, marginUsd, bandLo, bandHi, priceCeiling)) return true
         val fair = (if (side == "YES") mid else 1.0 - mid) + move
         return spread <= ForecastScalp.MAX_SPREAD + 1e-9 && q.tauS >= ForecastScalp.MIN_TAU_ENTRY_S &&
             move > ForecastScalp.minEntryEdgeUsd(spread, ask) + marginUsd.coerceAtLeast(0.0) &&
@@ -1644,7 +1656,7 @@ class ScalpBook(
                     val ask = q.ask(t.side) ?: continue
                     val floor = ScalpFloors.cents(twin.parentId) / 100.0
                     val lesson = FairGapTune.lessonAllowed(q, t.side, ask, q.fair(t.side) ?: t.fairAtSignal, twin.clip, variantId = twin.id)
-                    if ((!ScalpRule.buyPriceOk(ask) && !lesson) || ask + 1e-9 < floor) continue
+                    if ((!tradableAsk(twin.parentId, ask, lesson) && !tradableAsk(twin.id, ask, lesson)) || ask + 1e-9 < floor) continue
                     val n = PaperClip.taker(maxOf(t.contracts, twin.clip, PaperClip.MIN), q.askSize(t.side) ?: 0.0)
                     if (n <= 0) continue
                     out += t.copy(state = ScalpState.OPEN, contracts = n, entryPrice = ask, entryFeeUsd = ScalpRule.orderFee(n, ask), entryAtMs = q.nowMs)
@@ -1690,7 +1702,6 @@ class ScalpBook(
     /** Paper late-window scalper. Take-profit or hold to settlement. No shared late-window gate. */
     private fun stepLateWindow(q: ScalpRule.Quote): List<ScalpTrade> {
         val out = ArrayList<ScalpTrade>()
-        val tp = PaperFleetDefaults.PROFIT_CENTS / 100.0
         for (t in _all.value) {
             if (!LateWindowScalper.matches(t.variantId) || !t.ticker.equals(q.ticker, true) || !isActive(t)) continue
             when (t.state) {
@@ -1698,7 +1709,8 @@ class ScalpBook(
                 ScalpState.OPEN, ScalpState.PENDING_EXIT -> {
                     val bid = q.bid(t.side)?.takeIf { it > 0.0 } ?: continue
                     val entry = t.entryPrice ?: continue
-                    if (bid + 1e-9 < entry + tp) continue
+                    val target = LateWindowScalper.takeProfitBid(entry)
+                    if (bid + 1e-9 < target) continue
                     val sold = ScalpFills.sell(t, q.nowMs, t.remaining, t.remaining * bid, ScalpRule.orderFee(t.remaining, bid))
                     out += close(sold, q.nowMs, "take profit +${PaperFleetDefaults.PROFIT_CENTS}¢")
                 }
@@ -1749,7 +1761,8 @@ class ScalpBook(
             val fair = q.fair(side) ?: continue
             val d = ModelFilter.decide(twin, q, side, ask, fair, forceCeiling = true, ignoreLateWindow = true)
             val why = LateWindowScalper.blockReason(
-                coin, ModelFilter.hybridCoins(), q.tauS, ask, d.score, d.enter, d.reason
+                coin, ModelFilter.hybridCoins(), q.tauS, ask, d.score, d.enter, d.reason,
+                maxCents = capCents(LateWindowScalper.CODE)
             )
             if (why != null) {
                 gates.block(LateWindowScalper.CODE, window, why)
@@ -1834,8 +1847,8 @@ class ScalpBook(
             gates.noteContext(twin.id, window, d.regime, blurb)
             return null
         }
-        if (blocked != null || (!ScalpRule.buyPriceOk(sig.ask) && !lesson)) {
-            gates.block(twin.id, window, blocked ?: "ask above 55¢ ceiling")
+        if (blocked != null || !tradableAsk(twin.id, sig.ask, lesson)) {
+            gates.block(twin.id, window, blocked ?: overCapReason(twin.parentId))
             gates.noteContext(twin.id, window, d.regime, blurb)
             return null
         }
@@ -1966,8 +1979,8 @@ class ScalpBook(
 
     private fun fillMakerEntry(t: ScalpTrade, q: ScalpRule.Quote): ScalpTrade? {
         val lim = t.restingLimit ?: t.signalAsk
-        val ok = ScalpRule.buyPriceOk(lim) || ScalpFloors.isFavorite(t.variantId) ||
-            FairGapTune.lessonAllowed(q, t.side, lim, q.fair(t.side) ?: t.fairAtSignal, t.contracts.coerceAtLeast(1), variantId = t.variantId)
+        val makerCode = codeOf(t)
+        val ok = tradableAsk(makerCode, lim, FairGapTune.lessonAllowed(q, t.side, lim, q.fair(t.side) ?: t.fairAtSignal, t.contracts.coerceAtLeast(1), variantId = t.variantId))
         if (!ok) return cappedEntry(t, q.nowMs)
         if (q.bookAtMs <= t.signalAtMs) return null
         val limit = t.restingLimit ?: t.signalAsk
@@ -2111,18 +2124,31 @@ class ScalpBook(
         }
     }
 
+    /** Highest buy this scalper may fill. Factory 55¢, owner ceiling 75¢, late window 95¢. */
+    private fun capCents(code: String): Int =
+        controls.state.value.settings(code).maxEntryCents ?: PaperFleetDefaults.buyMax(code)
+
+    private fun tradableAsk(code: String, ask: Double?, lesson: Boolean = false): Boolean {
+        if (ask == null || !ask.isFinite() || ask <= 0.0 || ask >= 1.0) return false
+        if (ScalpFloors.isFavorite(code)) return true
+        if (lesson && ask <= FairGapTune.HARD_CAP + 1e-9) return true
+        return ask <= PaperFleetDefaults.askLimit(code, capCents(code)) + 1e-9
+    }
+
+    private fun overCapReason(code: String): String =
+        PaperFleetDefaults.overCeilingReason(capCents(code).coerceAtMost(PaperFleetDefaults.buyCeiling(code)))
+
     /** Next fresh book ≥ latency after the signal: fill at that ask if ≤ limit and size covers the clip. One try. */
     private fun fillEntry(t: ScalpTrade, q: ScalpRule.Quote): ScalpTrade? {
         if (q.nowMs - t.signalAtMs < ScalpRule.LATENCY_MS || q.bookAtMs <= t.signalAtMs) return null
         val miss = { why: String -> unlatchTrigger(t); t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; no fill: $why") }
         if (!q.fresh() || q.nowMs >= q.closeMs) return miss("stale book")
         val ask = q.ask(t.side) ?: return miss("no ask")
-        val ok = ScalpRule.buyPriceOk(ask) || ScalpFloors.isFavorite(t.variantId) ||
-            FairGapTune.lessonAllowed(q, t.side, ask, q.fair(t.side) ?: t.fairAtSignal, t.contracts.coerceAtLeast(1), variantId = t.variantId)
-        if (!ok) return cappedEntry(t, q.nowMs)
+        val clipCode = ScalpModels.modelOf(t)?.code ?: t.variantId
+        val lesson = FairGapTune.lessonAllowed(q, t.side, ask, q.fair(t.side) ?: t.fairAtSignal, t.contracts.coerceAtLeast(1), variantId = t.variantId)
+        if (!tradableAsk(clipCode, ask, lesson)) return cappedEntry(t, q.nowMs)
         if (ask > t.signalAsk + ScalpRule.SLIPPAGE + 1e-9) return miss(String.format(Locale.US, "ask moved to %s", com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(ask)))
         val size = q.askSize(t.side) ?: 0.0
-        val clipCode = ScalpModels.modelOf(t)?.code ?: t.variantId
         val want = if (t.contracts > 0) t.contracts else StrategyAlgo.clip(controls.state.value, clipCode, ScalpVariants.clipOf(clipCode) ?: ScalpRule.CONTRACTS)
         val admitted = admitSize(t, ask, want) ?: return miss("sanity")
         val n = PaperClip.taker(admitted.n, size)
@@ -2143,8 +2169,8 @@ class ScalpBook(
      * unfilled after [ScalpRule.CF_LIMIT_TTL_MS]. Touch fills are slightly optimistic vs real queue priority.
      */
     private fun fillRestingLimitEntry(t: ScalpTrade, q: ScalpRule.Quote): ScalpTrade? {
-        val ok = ScalpRule.buyPriceOk(t.signalAsk) || ScalpFloors.isFavorite(t.variantId) ||
-            FairGapTune.lessonAllowed(q, t.side, t.signalAsk, q.fair(t.side) ?: t.fairAtSignal, t.contracts.coerceAtLeast(1), variantId = t.variantId)
+        val restCode = codeOf(t)
+        val ok = tradableAsk(restCode, t.signalAsk, FairGapTune.lessonAllowed(q, t.side, t.signalAsk, q.fair(t.side) ?: t.fairAtSignal, t.contracts.coerceAtLeast(1), variantId = t.variantId))
         if (!ok) return cappedEntry(t, q.nowMs)
         if (q.bookAtMs <= t.signalAtMs) return null
         val miss = { why: String -> t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; limit cancelled: $why") }
@@ -2612,7 +2638,7 @@ class ScalpBook(
         val want = side.trim().uppercase()
         if (want != "YES" && want != "NO") return "side must be YES or NO"
         val ask = q.ask(want) ?: return "no ask"
-        if (!ScalpRule.buyPriceOk(ask)) return "ask above 55¢"
+        if (!tradableAsk("v2-llm", ask)) return overCapReason("v2-llm")
         val ticker = q.ticker.uppercase()
         val again = reentryRefusal("v2-llm", ticker, want, q.nowMs)
         if (again != null) return again
@@ -2904,7 +2930,7 @@ class ScalpBook(
                     val effMaxAsk = if (v2Lesson || ScalpFloors.isFavorite(code)) {
                         maxOf(maxAsk, t.signalAsk + 0.04, ask + 0.01).coerceAtMost(FairGapTune.HARD_CAP)
                     } else {
-                        minOf(ScalpRule.ENTRY_HI, maxAsk)
+                        minOf(PaperFleetDefaults.buyCeiling(code) / 100.0, maxAsk)
                     }
                     val sp = seed.copy(maxAsk = effMaxAsk, clip = v2Clip)
                     val askOk = if (v2Lesson || ScalpFloors.isFavorite(code)) ask <= sp.maxAsk + 1e-9 else ScalpV2.entryOk(ask, sp.maxAsk)

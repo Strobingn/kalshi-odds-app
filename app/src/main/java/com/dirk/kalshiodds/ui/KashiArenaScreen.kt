@@ -283,7 +283,7 @@ internal fun ArenaStrategyRow(row: ScalpModels.Row, st: ScalpTabState, onOpen: (
                 if (row.model == ScalpModels.Model.LATE_WINDOW) {
                     var mins by remember { mutableIntStateOf(LateWindowScalper.minutes()) }
                     Text(
-                        "Under $mins min · buy ${PaperFleetDefaults.BUY_MIN}–${PaperFleetDefaults.BUY_MAX}¢ · TP ${PaperFleetDefaults.PROFIT_CENTS}¢ · ${PaperClip.MIN} contracts · open unlimited · hold to settle",
+                        "Under $mins min · buy ${PaperFleetDefaults.BUY_MIN}–${PaperFleetDefaults.buyMax(LateWindowScalper.CODE)}¢ · TP ${PaperFleetDefaults.PROFIT_CENTS}¢ · ${PaperClip.MIN} contracts · open unlimited · hold to settle",
                         color = c.textSecondary,
                         style = MaterialTheme.typography.labelSmall
                     )

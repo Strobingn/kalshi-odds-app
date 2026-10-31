@@ -57,9 +57,12 @@ internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: Sc
     fun set(next: ScalpStrategySettings) = onChange(next.manual())
     val spec = ScalpV2.spec(model.code)
     val enabled = model.code !in controls.disabledStrategies
-    val low = settings.minEntryCents.coerceIn(PaperFleetDefaults.BUY_MIN, 98)
-    val high = (settings.maxEntryCents ?: PaperFleetDefaults.BUY_MAX).coerceIn(low + 1, 99)
-    val buyKnobHi = maxOf(PaperFleetDefaults.BUY_MAX, high)
+    val ceiling = PaperFleetDefaults.buyCeiling(model.code)
+    val factoryMax = PaperFleetDefaults.buyMax(model.code)
+    val low = settings.minEntryCents.coerceIn(PaperFleetDefaults.BUY_MIN, ceiling - 1)
+    val high = (settings.maxEntryCents ?: factoryMax).coerceIn(low + 1, ceiling)
+    val buyKnobHi = ceiling
+    val late = LateWindowScalper.matches(model.code)
     LazyColumn(Modifier.fillMaxSize().background(c.bg), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item(key = "settings-header") {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -89,7 +92,10 @@ internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: Sc
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("AI learns", color = c.textPrimary, fontWeight = FontWeight.SemiBold)
-                    Text(if (settings.aiLearns) "After every close it moves clip, stop, and the entry window. The step scales with that trade's P&L. The buy band stays 15–55¢ and take profit stays 25¢. It never freezes or benches. A change you make by hand resets the baseline." else "Off · sliders stay exactly where you set them", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+                    Text(if (settings.aiLearns) {
+                        if (late) "After every close it does not move this window. The buy band stays 15–${factoryMax}¢ and take profit stays 25¢ (sell target cannot exceed ${PaperFleetDefaults.PAYOUT_CENTS}¢). It never freezes or benches."
+                        else "After every close it moves clip, stop, and the entry window. The step scales with that trade's P&L. The buy band stays 15–${PaperFleetDefaults.BUY_MAX}¢ and take profit stays 25¢. It never raises the buy max above ${PaperFleetDefaults.BUY_MAX}¢. It never freezes or benches. A change you make by hand resets the baseline."
+                    } else "Off · sliders stay exactly where you set them", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
                 }
                 Switch(checked = settings.aiLearns, onCheckedChange = { onChange(settings.copy(aiLearns = it).manual()) }, modifier = Modifier.testTag("STRATEGY_AI_LEARNS"))
             }
@@ -118,7 +124,7 @@ internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: Sc
                     StrategyKnob("Take profit after fees", settings.takeProfitCents ?: if (controls.manual) controls.takeProfitCents else 0, 0..PaperFleetDefaults.PROFIT_HEAL_ABOVE, "KNOB_TARGET", { if (it == 0) "Off" else "$it¢ / ct" }) { set(settings.copy(takeProfitCents = it)) }
                     StrategyKnob("Maximum hold", settings.maxHoldSeconds ?: controls.maxHoldSeconds, 0..3600, "KNOB_HOLD", { if (it == 0) "No timer" else "$it s" }) { set(settings.copy(maxHoldSeconds = it)) }
                     Text("Applies only to this V2 strategy. Overrides take priority over global and learned defaults; a chosen price floor also keeps the inherited ceiling from falling below it. Filled positions keep their saved stops. Entry checks never slow protective exits.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
-                    Text("55¢ buy ceiling · stop loss always active · contracts and re-entries per 15-minute window stay unlimited unless you set a limit. Each new entry still needs a fresh trigger. Until minute limits new entries; the final-minute exit policy still applies. Open-at-once is unlimited at 0 and does not create extra entry signals.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+                    Text("${ceiling}¢ buy ceiling · stop loss always active · contracts and re-entries per 15-minute window stay unlimited unless you set a limit. Each new entry still needs a fresh trigger. Until minute limits new entries; the final-minute exit policy still applies. Open-at-once is unlimited at 0 and does not create extra entry signals.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
                 }
                 else -> {
                     StrategyKnob("Until minute", settings.untilMinute, 1..14, "KNOB_UNTIL", { "minute $it" }) { set(settings.copy(untilMinute = it)) }
@@ -130,7 +136,7 @@ internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: Sc
                     Text("Original strategy: these add to its built-in rules (3¢ trail, window-start entries, >95% hold rule stay on).", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
                 }
             }
-            OutlinedButton(onClick = { onChange(PaperFleetDefaults.factory()) }, modifier = Modifier.fillMaxWidth()) { Text("Back to its defaults") }
+            OutlinedButton(onClick = { onChange(PaperFleetDefaults.factory(model.code)) }, modifier = Modifier.fillMaxWidth()) { Text("Back to its defaults") }
         } }
     }
 }

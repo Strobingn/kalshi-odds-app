@@ -68,7 +68,7 @@ class ModelFilterTest {
         assertTrue(penny.reason, penny.reason.contains("floor"))
         val rich = ModelFilter.decide(ModelFilter.TWINS.first(), quote(ask = 0.90, bid = 0.88), "YES", 0.90, 0.95)
         assertFalse(rich.enter)
-        assertTrue(rich.reason, rich.reason.contains("55"))
+        assertTrue(rich.reason, rich.reason.contains("75"))
     }
 
     @Test fun observeKeepsPriorsAndDipTwinsEnter() {

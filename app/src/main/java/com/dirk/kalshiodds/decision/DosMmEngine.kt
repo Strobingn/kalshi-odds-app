@@ -276,7 +276,7 @@ class HftBook {
         val buyYes = sideName == "TAKER_ARB_BUY_YES"
         val ask = if (buyYes) yesAsk else noAsk
         val lessonSide = if (buyYes) "YES" else "NO"
-        if (!ScalpRule.buyPriceOk(ask) && !FairGapTune.lessonAllowed(q, lessonSide, ask, if (buyYes) pTerm else 1.0 - pTerm, 20, variantId = "ts-arb")) return null
+        if (!ScalpRule.buyPriceOk(ask, PaperFleetDefaults.BUY_CEILING / 100.0) && !FairGapTune.lessonAllowed(q, lessonSide, ask, if (buyYes) pTerm else 1.0 - pTerm, 20, variantId = "ts-arb")) return null
         val p = if (buyYes) pTerm else 1.0 - pTerm
         val trip = HftMathEngines.makerInTakerStop()
         val k = HftMathEngines.kelly(p, trip.winNet, trip.lossNet, ask + HftMathEngines.fee(1, ask, HftMathEngines.TAKER), bankroll, q.tauS)
@@ -304,7 +304,7 @@ class HftBook {
         val side = if (prop.v0 < 0.0) "NO" else "YES"
         val px = q.bid(side) ?: return null
         val mrFair = q.fair(side) ?: (px + 0.04)
-        if (!ScalpRule.buyPriceOk(px) && !FairGapTune.lessonAllowed(q, side, px, mrFair, 1, variantId = "mrla-cs")) return null
+        if (!ScalpRule.buyPriceOk(px, PaperFleetDefaults.BUY_CEILING / 100.0) && !FairGapTune.lessonAllowed(q, side, px, mrFair, 1, variantId = "mrla-cs")) return null
         if (m.mrlaSide == side && m.mrlaPx != null && (q.ask(side) ?: 1.0) <= m.mrlaPx!! + 1e-9) {
             m.mrlaSide = null
             val flow = if (prop.v0 < 0.0) 1.0 else -1.0
@@ -341,7 +341,7 @@ class HftBook {
         val side = if (buyYes && !buyNo) "YES" else if (buyNo) "NO" else "YES"
         val ask = if (side == "YES") q.yesAsk ?: return null else noAsk
         val p = if (side == "YES") smile else 1.0 - smile
-        if (!ScalpRule.buyPriceOk(ask) && !FairGapTune.lessonAllowed(q, side, ask, p, 10, variantId = "iv-smile")) return null
+        if (!ScalpRule.buyPriceOk(ask, PaperFleetDefaults.BUY_CEILING / 100.0) && !FairGapTune.lessonAllowed(q, side, ask, p, 10, variantId = "iv-smile")) return null
         val trip = HftMathEngines.makerInTakerStop()
         val k = HftMathEngines.kelly(p, trip.winNet, trip.lossNet, ask + HftMathEngines.fee(1, ask, HftMathEngines.TAKER), bankroll, q.tauS)
         val depth = q.askSize(side) ?: 0.0

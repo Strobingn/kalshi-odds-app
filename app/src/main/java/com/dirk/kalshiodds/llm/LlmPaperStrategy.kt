@@ -124,7 +124,7 @@ class LlmPaperStrategy(
         /** Same gap as the Kalshi quote conflator. The free pacer decides whether a call actually goes out. */
         const val CYCLE_MS = 150L
         const val STRATEGY_PROMPT = "Kalshi BTC 15-minute market %s. Strike %.2f, BTC spot %.2f, minutes left %.1f. YES bid/ask %s/%s. Model fair YES %s. " +
-            "Paper trade only. Rules: buy at most 55c, 3c trailing stop. Reply ONE line: 'YES <conf 0-1>' or 'NO <conf 0-1>' or 'SKIP'."
+            "Paper trade only. Rules: buy at most 75c, 3c trailing stop. Reply ONE line: 'YES <conf 0-1>' or 'NO <conf 0-1>' or 'SKIP'."
         fun parse(reply: String): Pair<String, Double>? {
             val m = Regex("\\b(YES|NO)\\b\\s*([01](?:\\.\\d+)?)?", RegexOption.IGNORE_CASE).find(reply.trim()) ?: return null
             return m.groupValues[1].uppercase() to (m.groupValues[2].toDoubleOrNull() ?: 0.5).coerceIn(0.0, 1.0)

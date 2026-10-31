@@ -111,9 +111,15 @@ object AiWatchBounds {
             lo = minOf(lo, PaperFleetDefaults.BUY_MIN)
         }
         if (field == "maxEntryCents") {
-            lo = maxOf(lo, PaperFleetDefaults.BUY_MAX)
-            hi = maxOf(hi, PaperFleetDefaults.BUY_MAX)
-            hi = minOf(hi, maxOf(base, PaperFleetDefaults.BUY_MAX))
+            val ceiling = PaperFleetDefaults.buyCeiling(code)
+            if (base > PaperFleetDefaults.BUY_MAX) {
+                val held = base.coerceAtMost(ceiling)
+                lo = held
+                hi = held
+            } else {
+                lo = maxOf(lo, PaperFleetDefaults.BUY_MAX)
+                hi = PaperFleetDefaults.BUY_MAX
+            }
         }
         if (field == "takeProfitCents") {
             lo = PaperFleetDefaults.PROFIT_CENTS

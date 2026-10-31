@@ -41,8 +41,23 @@ object LateWindowScalper {
     fun inWindow(tauS: Double, mins: Int = minutes()): Boolean =
         tauS.isFinite() && tauS > 0.0 && tauS + 1e-9 < windowSeconds(mins)
 
-    fun askOk(ask: Double): Boolean =
-        ask.isFinite() && ask + 1e-9 >= PaperFleetDefaults.BUY_MIN / 100.0 && ask <= PaperFleetDefaults.BUY_MAX / 100.0 + 1e-9
+    /** Stored highest buy, or the 95¢ factory max. Never above the late-window ceiling. */
+    fun bandMaxCents(maxCents: Int? = null): Int =
+        (maxCents ?: PaperFleetDefaults.LATE_BUY_MAX).coerceIn(PaperFleetDefaults.BUY_MIN + 1, PaperFleetDefaults.LATE_BUY_MAX)
+
+    fun askOk(ask: Double, maxCents: Int? = null): Boolean {
+        val cap = bandMaxCents(maxCents) / 100.0
+        return ask.isFinite() && ask + 1e-9 >= PaperFleetDefaults.BUY_MIN / 100.0 && ask <= cap + 1e-9
+    }
+
+    /**
+     * Bid that banks the 25¢ take-profit. A 95¢ entry cannot pay 120¢, so the
+     * target stops at [PaperFleetDefaults.PAYOUT_CENTS]. Below that, the position holds to settlement.
+     */
+    fun takeProfitBid(entry: Double, profitCents: Int = PaperFleetDefaults.PROFIT_CENTS): Double {
+        if (!entry.isFinite() || entry <= 0.0) return PaperFleetDefaults.PAYOUT_CENTS / 100.0
+        return (entry + profitCents / 100.0).coerceAtMost(PaperFleetDefaults.PAYOUT_CENTS / 100.0)
+    }
 
     fun coins(hybrid: Set<String>): Set<String> {
         val out = LinkedHashSet<String>()
@@ -68,11 +83,12 @@ object LateWindowScalper {
         score: Double,
         modelEnter: Boolean,
         modelReason: String,
-        mins: Int = minutes()
+        mins: Int = minutes(),
+        maxCents: Int? = null
     ): String? {
         if (!tradesCoin(coin, hybridCoins)) return "coin $coin is outside the Hybrid Quant set"
         if (!inWindow(tauS, mins)) return "outside late window · under ${mins.coerceIn(MIN_MINUTES, MAX_MINUTES)} min"
-        if (!askOk(ask)) return "outside 15–55¢ buy band"
+        if (!askOk(ask, maxCents)) return "outside ${PaperFleetDefaults.BUY_MIN}–${bandMaxCents(maxCents)}¢ buy band"
         if (!score.isFinite() || score > ModelFilter.HIGH_SCORE) return "high-score regime · score above ${ModelFilter.HIGH_SCORE}"
         if (!modelEnter) return modelReason.ifBlank { "hybrid gate blocked" }
         return null
