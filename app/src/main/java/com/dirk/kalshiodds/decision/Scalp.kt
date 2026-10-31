@@ -1647,6 +1647,7 @@ class ScalpBook(
                     if ((!ScalpRule.buyPriceOk(ask) && !lesson) || ask + 1e-9 < floor) continue
                     val n = PaperClip.taker(maxOf(t.contracts, twin.clip, PaperClip.MIN), q.askSize(t.side) ?: 0.0)
                     if (n <= 0) continue
+                    ModelFilter.noteHybridFill(t.ticker)
                     out += t.copy(state = ScalpState.OPEN, contracts = n, entryPrice = ask, entryFeeUsd = ScalpRule.orderFee(n, ask), entryAtMs = q.nowMs)
                 }
                 ScalpState.OPEN, ScalpState.PENDING_EXIT -> {
@@ -1731,10 +1732,10 @@ class ScalpBook(
     }
 
     private fun enterLateWindow(q: ScalpRule.Quote): List<ScalpTrade> {
-        ModelFilter.observe(q)
         val coin = ScalpParams.coinOf(q.ticker)
         val window = ScalpModels.windowKeyOf(q.ticker)
         if (!LateWindowScalper.tradesCoin(coin, ModelFilter.hybridCoins())) return emptyList()
+        ModelFilter.observe(q)
         if (!LateWindowScalper.inWindow(q.tauS)) {
             gates.block(LateWindowScalper.CODE, window, "outside late window · under ${LateWindowScalper.minutes()} min")
             return emptyList()
@@ -2692,7 +2693,7 @@ class ScalpBook(
     private fun settingsExits(mine: List<ScalpTrade>, q: ScalpRule.Quote): Map<String, ScalpTrade> {
         val out = HashMap<String, ScalpTrade>()
         for (t in mine) {
-            if (t.state != ScalpState.OPEN || ScalpV2.isV2(t.variantId) || Research.isResearch(t.variantId) || ForecastScalp.isForecast(t) || HftMathEngines.isHft(t.variantId) || TwentyScalperFleet.isFleet(t.variantId)) continue
+            if (t.state != ScalpState.OPEN || ScalpV2.isV2(t.variantId) || Research.isResearch(t.variantId) || ForecastScalp.isForecast(t) || HftMathEngines.isHft(t.variantId) || TwentyScalperFleet.isFleet(t.variantId) || LateWindowScalper.matches(t.variantId)) continue
             val s = entryView(codeOf(t)) ?: continue
             val bid = q.bid(t.side)?.takeIf { it > 0 } ?: continue
             val entry = t.entryPrice ?: continue

@@ -373,6 +373,11 @@ object ModelFilter {
 
     fun hybridCoins(): Set<String> = synchronized(lock) { hybridCoins.toSet() }
 
+    /** A Hybrid Quant twin filled this market. Quotes and the late-window lane do not count. */
+    fun noteHybridFill(ticker: String) = synchronized(lock) {
+        hybridCoins += ScalpParams.coinOf(ticker)
+    }
+
     fun installFeatureScaleForTest(name: String, scale: Double) = synchronized(lock) {
         featureScale[name] = scale
     }
@@ -519,7 +524,6 @@ object ModelFilter {
         HftSignals.noteSpot(ScalpParams.coinOf(q.ticker), q.nowMs, spot)
         val bid = q.yesBid ?: return@synchronized
         val ask = q.yesAsk ?: return@synchronized
-        hybridCoins += ScalpParams.coinOf(q.ticker)
         val key = q.ticker.uppercase()
         val mid = (bid + ask) / 2.0
         val row = ticks.getOrPut(key) { ArrayDeque() }
