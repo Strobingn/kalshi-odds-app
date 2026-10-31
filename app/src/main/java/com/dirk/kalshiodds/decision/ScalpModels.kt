@@ -375,7 +375,7 @@ object ScalpModels {
             Model.FAIR_T1 -> "stop ${Math.round(ScalpParams.FAIR_TWEAKS[0].stop * 100)}¢"
             Model.FAIR_T2 -> "stop ${Math.round(ScalpParams.FAIR_TWEAKS[1].stop * 100)}¢"
             Model.DOS_MM, Model.TS_ARB, Model.MRLA_CS, Model.IV_SMILE -> "stop 5-gate · paper"
-            Model.LATE_WINDOW -> "take profit +${PaperFleetDefaults.PROFIT_CENTS}¢ · else hold to settlement"
+            Model.LATE_WINDOW -> "stop none · take profit +${PaperFleetDefaults.PROFIT_CENTS}¢ · else hold to settlement"
             else -> ScalpModels.legacyStop(m)
         }
     }
