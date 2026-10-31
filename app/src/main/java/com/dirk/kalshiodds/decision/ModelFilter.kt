@@ -207,6 +207,15 @@ object ModelFilter {
     private var mtfAgree = false
     private var strongMove = false
     private var fibMode = HybridQuantGates.FibMode.LOG_ONLY
+    /** Shared Hybrid Quant entry filter. Apply advice cannot turn this off. */
+    private var hybridGateEnabled = true
+    private val featureScale = HashMap<String, Double>()
+    private val penalties = LinkedHashSet<String>()
+    private val hybridCoins = LinkedHashSet<String>()
+    private var preAdviceWeights: DoubleArray? = null
+    private var preAdviceBias: Double? = null
+    private var undoJson: String? = null
+    private var adviceHealed = false
     private var gateFile: java.io.File? = null
     private var exitBeforeS = DEFAULT_EXIT_S
     private val ticks = HashMap<String, ArrayDeque<Tick>>()
@@ -317,17 +326,74 @@ object ModelFilter {
      * Writes the session-journal gate into the prefs [decide] reads.
      * Paper twins only. Does not raise the floor from 0.55 to 0.57 — that nudge
      * still admits the losing band above [HIGH_SCORE].
+     * Does not turn on a shared late-window gate, and does not touch hybrid, fib,
+     * MTF, strong-move, feature penalties, or Dirk's buy / take-profit / size defaults.
+     * A snapshot of the prefs and weights is kept for [undoLastAdvice].
      */
-    fun applySessionAdvice(): GatePrefs = synchronized(lock) {
+    fun applySessionAdvice(adviceText: String = ""): GatePrefs = synchronized(lock) {
+        rememberPreAdviceLocked()
+        undoJson = snapshotJsonLocked()
         if (threshold > DEFAULT_THRESHOLD) threshold = DEFAULT_THRESHOLD
         scoreCeiling = HIGH_SCORE
-        preferTimeLeftUnderS = PREFER_TIME_LEFT_S
-        preferScoreBelow = PREFER_SCORE_BELOW
-        lateWindowOnly = true
-        val rejectedNudge = DEFAULT_THRESHOLD + 0.02
-        adviceNote = "Applied paper gate · floor ${fmt(threshold)} stays (nudge to ${fmt(rejectedNudge)} not applied) · hard ceiling ${fmt(scoreCeiling)} · time left under 5 min · score under ${fmt(preferScoreBelow)} admitted when the fee residual clears."
+        adviceNote = AdviceApply.note(adviceText, threshold, scoreCeiling)
         saveGateLocked()
         gateSnapshot()
+    }
+
+    fun hasAdviceUndo(): Boolean = synchronized(lock) { !undoJson.isNullOrBlank() }
+
+    /** Restores the snapshot taken immediately before the last [applySessionAdvice]. */
+    fun undoLastAdvice(): Boolean = synchronized(lock) {
+        val raw = undoJson ?: return@synchronized false
+        val o = runCatching { org.json.JSONObject(raw) }.getOrNull() ?: return@synchronized false
+        restoreSnapshotLocked(o)
+        undoJson = null
+        adviceNote = "Undid the last Apply advice."
+        saveGateLocked()
+        true
+    }
+
+    /**
+     * One upgrade to 1.0.55. Re-enables the hybrid gate, puts fib back to log-only,
+     * turns MTF and strong-move off, drops advice penalties on time-left / hybrid-gate /
+     * fib-barrier, and puts weights back to the pre-advice copy or a clean refit.
+     * The 0.65 score ceiling stays. Paper trades are not read or written.
+     */
+    fun healAdviceOnce(nowMs: Long = System.currentTimeMillis()): Boolean = synchronized(lock) {
+        if (adviceHealed) return@synchronized false
+        healLocked(nowMs)
+        true
+    }
+
+    fun hybridGateOn(): Boolean = synchronized(lock) { hybridGateEnabled }
+
+    fun featureScaleOf(name: String): Double = synchronized(lock) { featureScale[name] ?: 1.0 }
+
+    fun featurePenalties(): Set<String> = synchronized(lock) { penalties.toSet() }
+
+    fun hybridCoins(): Set<String> = synchronized(lock) { hybridCoins.toSet() }
+
+    fun installFeatureScaleForTest(name: String, scale: Double) = synchronized(lock) {
+        featureScale[name] = scale
+    }
+
+    fun installPenaltyForTest(name: String) = synchronized(lock) {
+        penalties += name
+    }
+
+    fun installPreAdviceForTest(next: DoubleArray, nextBias: Double) = synchronized(lock) {
+        preAdviceWeights = next.copyOf(FEATURES)
+        preAdviceBias = nextBias
+    }
+
+    fun setHybridGateForTest(on: Boolean) = synchronized(lock) {
+        hybridGateEnabled = on
+    }
+
+    /** Owner control on the Late window card. AI Learn does not call this. */
+    fun setLateWindowMinutes(raw: Int) = synchronized(lock) {
+        LateWindowScalper.setMinutes(raw)
+        saveGateLocked()
     }
 
     /** Same file as the quant runtime prefs. Null in unit tests until bound. */
@@ -336,13 +402,17 @@ object ModelFilter {
         if (file == null || !file.isFile) return@synchronized
         val o = runCatching { org.json.JSONObject(file.readText()) }.getOrNull() ?: return@synchronized
         loadHybridLocked(o)
-        if (!o.has("scoreCeiling")) return@synchronized
-        scoreCeiling = o.optDouble("scoreCeiling", HIGH_SCORE).coerceIn(0.45, 0.95)
-        preferTimeLeftUnderS = o.optDouble("preferTimeLeftUnderS", PREFER_TIME_LEFT_S).coerceIn(60.0, 900.0)
-        preferScoreBelow = o.optDouble("preferScoreBelow", PREFER_SCORE_BELOW).coerceIn(0.05, HIGH_SCORE)
-        lateWindowOnly = o.optBoolean("lateWindowOnly", false)
-        adviceNote = o.optString("adviceNote", "")
-        if (o.has("scoreFloor")) threshold = o.optDouble("scoreFloor", threshold).coerceIn(0.40, 0.80)
+        loadAdviceLocked(o)
+        if (o.has("scoreCeiling")) {
+            scoreCeiling = o.optDouble("scoreCeiling", HIGH_SCORE).coerceIn(0.45, 0.95)
+            preferTimeLeftUnderS = o.optDouble("preferTimeLeftUnderS", PREFER_TIME_LEFT_S).coerceIn(60.0, 900.0)
+            preferScoreBelow = o.optDouble("preferScoreBelow", PREFER_SCORE_BELOW).coerceIn(0.05, HIGH_SCORE)
+            lateWindowOnly = o.optBoolean("lateWindowOnly", false)
+            adviceNote = o.optString("adviceNote", "")
+            if (o.has("scoreFloor")) threshold = o.optDouble("scoreFloor", threshold).coerceIn(0.40, 0.80)
+        }
+        if (!o.has("adviceHeal1055")) healLocked(System.currentTimeMillis())
+        else adviceHealed = o.optBoolean("adviceHeal1055", false)
     }
 
     fun warming(): Boolean = synchronized(lock) { trainedN < MIN_TRAIN }
@@ -449,6 +519,7 @@ object ModelFilter {
         HftSignals.noteSpot(ScalpParams.coinOf(q.ticker), q.nowMs, spot)
         val bid = q.yesBid ?: return@synchronized
         val ask = q.yesAsk ?: return@synchronized
+        hybridCoins += ScalpParams.coinOf(q.ticker)
         val key = q.ticker.uppercase()
         val mid = (bid + ask) / 2.0
         val row = ticks.getOrPut(key) { ArrayDeque() }
@@ -469,7 +540,15 @@ object ModelFilter {
         featureArray(q, side, fair, ask)
     }
 
-    fun decide(twin: Twin, q: ScalpRule.Quote, side: String, ask: Double, fair: Double): Decision = synchronized(lock) {
+    fun decide(
+        twin: Twin,
+        q: ScalpRule.Quote,
+        side: String,
+        ask: Double,
+        fair: Double,
+        forceCeiling: Boolean = false,
+        ignoreLateWindow: Boolean = false
+    ): Decision = synchronized(lock) {
         if (!QuantSession.isWarm()) QuantSession.warmUp(weights, bias)
         val x = featureArray(q, side, fair, ask)
         val bookAge = (q.nowMs - q.bookAtMs).coerceAtLeast(0L)
@@ -483,9 +562,9 @@ object ModelFilter {
         // still admits it, and a positive E[net] does not make that regime a pass.
         // Cold start stays on the fee residual: the prior score is not a calibrated confidence.
         // Once session advice is applied, the ceiling and the late window bind even then.
-        val ceilingOn = learned || lateWindowOnly
+        val ceilingOn = learned || lateWindowOnly || forceCeiling
         val blockHigh = ceilingOn && qScore > scoreCeiling
-        val outsideLate = lateWindowOnly && q.tauS + 1e-9 >= preferTimeLeftUnderS
+        val outsideLate = !ignoreLateWindow && lateWindowOnly && q.tauS + 1e-9 >= preferTimeLeftUnderS
         val inPocket = q.tauS + 1e-9 < preferTimeLeftUnderS && qScore <= preferScoreBelow && qScore <= scoreCeiling
         val modelNet = QuantSession.predictNet(x)
         val priorNet = QuantSession.priorNet(x)
@@ -538,10 +617,14 @@ object ModelFilter {
         for (tick in row) if (tick.atMs < q.nowMs) spotTicks += tick.atMs to tick.spot
         val mark = if (q.cfFresh()) q.cfSpot else q.spot
         val ofi = if (x.size > OFI_FEATURE) x[OFI_FEATURE] else 0.0
-        val hybrid = HybridQuantGates.evaluate(
-            hybridSnapshot(), side, ask, mark, q.strike, q.sigmaPerSec, q.tauS,
-            q.nowMs, q.closeMs - 900_000L, spotTicks, ofi, baseEnter, baseReason
-        )
+        val hybrid = if (hybridGateEnabled) {
+            HybridQuantGates.evaluate(
+                hybridSnapshot(), side, ask, mark, q.strike, q.sigmaPerSec, q.tauS,
+                q.nowMs, q.closeMs - 900_000L, spotTicks, ofi, baseEnter, baseReason
+            )
+        } else {
+            HybridQuantGates.Verdict(baseEnter, baseReason, null, null, null, false)
+        }
         val enter = hybrid.enter
         val reason = hybrid.reason
         why[twin.id] = reason
@@ -841,6 +924,15 @@ object ModelFilter {
         mtfAgree = false
         strongMove = false
         fibMode = HybridQuantGates.FibMode.LOG_ONLY
+        hybridGateEnabled = true
+        featureScale.clear()
+        penalties.clear()
+        hybridCoins.clear()
+        preAdviceWeights = null
+        preAdviceBias = null
+        undoJson = null
+        adviceHealed = false
+        LateWindowScalper.readMinutes(LateWindowScalper.DEFAULT_MINUTES)
         gateFile = null
         exitBeforeS = DEFAULT_EXIT_S
         ticks.clear()
@@ -1237,6 +1329,12 @@ object ModelFilter {
             for (i in intArrayOf(3, 4, 5, 6, 21, 22, 23)) x[i] = -x[i]
         }
         for (i in x.indices) if (!x[i].isFinite()) x[i] = 0.0
+        for (i in x.indices) {
+            val name = FEATURE_NAMES.getOrElse(i) { "" }
+            if (name.isEmpty()) continue
+            val scale = featureScale[name] ?: 1.0
+            if (scale != 1.0) x[i] *= scale
+        }
         return x
     }
 
@@ -1311,6 +1409,118 @@ object ModelFilter {
         mtfAgree = o.optBoolean("mtfAgree", false)
         strongMove = o.optBoolean("strongMove", false)
         fibMode = HybridQuantGates.FibMode.from(o.optString("fibMode", HybridQuantGates.FibMode.LOG_ONLY.name))
+        if (o.has("hybridGate")) hybridGateEnabled = o.optBoolean("hybridGate", true)
+    }
+
+    private fun loadAdviceLocked(o: org.json.JSONObject) {
+        featureScale.clear()
+        val scales = o.optJSONObject("featureScale")
+        if (scales != null) {
+            val keys = scales.keys()
+            while (keys.hasNext()) {
+                val name = keys.next()
+                val v = scales.optDouble(name, 1.0)
+                if (v.isFinite()) featureScale[name] = v
+            }
+        }
+        penalties.clear()
+        val pens = o.optJSONArray("featurePenalties")
+        if (pens != null) {
+            for (i in 0 until pens.length()) {
+                val name = pens.optString(i, "")
+                if (name.isNotBlank()) penalties += name
+            }
+        }
+        val prior = o.optJSONArray("preAdviceWeights")
+        if (prior != null && prior.length() > 0) {
+            val w = DoubleArray(FEATURES)
+            for (i in w.indices) w[i] = prior.optDouble(i, 0.0)
+            preAdviceWeights = w
+            preAdviceBias = o.optDouble("preAdviceBias", PRIOR_BIAS)
+        }
+        undoJson = o.optString("adviceUndo", "").ifBlank { null }
+        if (o.has("lateWindowMinutes")) LateWindowScalper.readMinutes(o.optInt("lateWindowMinutes", LateWindowScalper.DEFAULT_MINUTES))
+    }
+
+    private fun rememberPreAdviceLocked() {
+        if (preAdviceWeights != null) return
+        preAdviceWeights = weights.copyOf()
+        preAdviceBias = bias
+    }
+
+    private fun snapshotJsonLocked(): String {
+        val o = org.json.JSONObject()
+        o.put("scoreFloor", threshold)
+        o.put("scoreCeiling", scoreCeiling)
+        o.put("preferTimeLeftUnderS", preferTimeLeftUnderS)
+        o.put("preferScoreBelow", preferScoreBelow)
+        o.put("lateWindowOnly", lateWindowOnly)
+        o.put("mtfAgree", mtfAgree)
+        o.put("strongMove", strongMove)
+        o.put("fibMode", fibMode.name)
+        o.put("hybridGate", hybridGateEnabled)
+        o.put("bias", bias)
+        o.put("weights", org.json.JSONArray(weights.toList()))
+        o.put("featureScale", org.json.JSONObject(featureScale))
+        o.put("featurePenalties", org.json.JSONArray(penalties.toList()))
+        o.put("lateWindowMinutes", LateWindowScalper.minutes())
+        return o.toString()
+    }
+
+    private fun restoreSnapshotLocked(o: org.json.JSONObject) {
+        threshold = o.optDouble("scoreFloor", threshold).coerceIn(0.40, 0.80)
+        scoreCeiling = o.optDouble("scoreCeiling", scoreCeiling).coerceIn(0.45, 0.95)
+        preferTimeLeftUnderS = o.optDouble("preferTimeLeftUnderS", preferTimeLeftUnderS)
+        preferScoreBelow = o.optDouble("preferScoreBelow", preferScoreBelow)
+        lateWindowOnly = o.optBoolean("lateWindowOnly", lateWindowOnly)
+        mtfAgree = o.optBoolean("mtfAgree", mtfAgree)
+        strongMove = o.optBoolean("strongMove", strongMove)
+        fibMode = HybridQuantGates.FibMode.from(o.optString("fibMode", fibMode.name))
+        hybridGateEnabled = o.optBoolean("hybridGate", hybridGateEnabled)
+        bias = o.optDouble("bias", bias)
+        val w = o.optJSONArray("weights")
+        if (w != null) {
+            val next = DoubleArray(FEATURES)
+            for (i in next.indices) next[i] = w.optDouble(i, weights.getOrElse(i) { 0.0 })
+            weights = next
+        }
+        featureScale.clear()
+        val scales = o.optJSONObject("featureScale")
+        if (scales != null) {
+            val keys = scales.keys()
+            while (keys.hasNext()) {
+                val name = keys.next()
+                featureScale[name] = scales.optDouble(name, 1.0)
+            }
+        }
+        penalties.clear()
+        val pens = o.optJSONArray("featurePenalties")
+        if (pens != null) for (i in 0 until pens.length()) penalties += pens.optString(i)
+        if (o.has("lateWindowMinutes")) LateWindowScalper.readMinutes(o.optInt("lateWindowMinutes"))
+    }
+
+    private fun healLocked(nowMs: Long) {
+        adviceHealed = true
+        hybridGateEnabled = true
+        mtfAgree = false
+        strongMove = false
+        fibMode = HybridQuantGates.FibMode.LOG_ONLY
+        val drop = setOf("timeLeft", "hybrid-gate", "fib_barrier", "fib-barrier")
+        drop.forEach { featureScale.remove(it) }
+        penalties.removeAll(drop)
+        lateWindowOnly = false
+        scoreCeiling = HIGH_SCORE
+        val prior = preAdviceWeights
+        if (prior != null) {
+            weights = prior.copyOf()
+            bias = preAdviceBias ?: PRIOR_BIAS
+        } else {
+            weights = priorWeights()
+            bias = PRIOR_BIAS
+            retrainLocked(nowMs)
+        }
+        adviceNote = "Healed Hybrid Quant advice from before 1.0.55. Score ceiling stays 0.65. Hybrid gate on, fib log only."
+        saveGateLocked()
     }
 
     private fun saveGateLocked() {
@@ -1326,6 +1536,14 @@ object ModelFilter {
         o.put("mtfAgree", mtfAgree)
         o.put("strongMove", strongMove)
         o.put("fibMode", fibMode.name)
+        o.put("hybridGate", hybridGateEnabled)
+        o.put("adviceHeal1055", adviceHealed)
+        o.put("lateWindowMinutes", LateWindowScalper.minutes())
+        o.put("featureScale", org.json.JSONObject(featureScale))
+        o.put("featurePenalties", org.json.JSONArray(penalties.toList()))
+        preAdviceWeights?.let { o.put("preAdviceWeights", org.json.JSONArray(it.toList())) }
+        preAdviceBias?.let { o.put("preAdviceBias", it) }
+        undoJson?.let { o.put("adviceUndo", it) }
         runCatching { file.writeText(o.toString()) }
     }
 

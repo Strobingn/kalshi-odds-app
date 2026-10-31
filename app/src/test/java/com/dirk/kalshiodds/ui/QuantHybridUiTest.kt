@@ -26,6 +26,7 @@ import android.os.Looper
 import org.junit.After
 import org.junit.Before
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import java.util.concurrent.atomic.AtomicReference
@@ -193,7 +194,6 @@ class QuantHybridUiTest {
         compose.waitForIdle()
         assertTrue(asked.contains("Paper session journal"))
         compose.onNodeWithText("Quiet time left is the only green regime.", substring = true).assertExists()
-        compose.onNodeWithTag("GATE_APPLIED").assertExists()
         compose.onNodeWithTag("GATE_PREFS").assertTextContains("ceiling 0.65", substring = true)
         compose.onNodeWithTag("RESEARCH_JOURNAL_NOTE").assertExists()
         assertRepliesSitInSelectionContainer()
@@ -212,15 +212,21 @@ class QuantHybridUiTest {
         compose.waitForIdle()
         compose.onNodeWithTag("GATE_PREFS").performScrollTo().assertExists()
         compose.onNodeWithText("ceiling 0.65", substring = true).assertExists()
+        compose.onNodeWithTag("RESEARCH_JOURNAL_ASK").performScrollTo().performClick()
+        compose.waitForIdle()
         compose.onNodeWithTag("APPLY_ADVICE").performScrollTo().performClick()
         compose.waitForIdle()
-        assertTrue(ModelFilter.gatePrefs().lateWindowOnly)
+        assertFalse(ModelFilter.gatePrefs().lateWindowOnly)
         assertEquals(0.65, ModelFilter.gatePrefs().scoreCeiling, 0.0)
         assertEquals(0.55, ModelFilter.gatePrefs().scoreFloor, 0.0)
-        assertEquals(300.0, ModelFilter.gatePrefs().preferTimeLeftUnderS, 0.0)
-        assertEquals(0.45, ModelFilter.gatePrefs().preferScoreBelow, 0.0)
+        assertEquals(HybridQuantGates.FibMode.LOG_ONLY, ModelFilter.hybridPrefs().fibMode)
+        assertTrue(ModelFilter.hybridGateOn())
         compose.onNodeWithTag("GATE_APPLIED").assertExists()
         compose.onNodeWithText("nudge to 0.57 not applied", substring = true).assertExists()
+        compose.onNodeWithText("Not applied (protected):", substring = true).assertExists()
+        compose.onNodeWithTag("UNDO_ADVICE").performScrollTo().performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Undid the last Apply advice.", substring = true).assertExists()
         compose.onNodeWithTag("RESEARCH_ASK").performScrollTo().performClick()
         compose.waitForIdle()
         compose.onNodeWithTag("RESEARCH_NOTE").assertExists()

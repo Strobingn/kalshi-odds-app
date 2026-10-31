@@ -116,6 +116,7 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
                 item(key = "hero") { ArenaSummary(rows, st.algoToday.values.filter { it.model in models }, active.size) }
                 item(key = "micro") { HftMicroRibbon() }
                 item(key = "model-filter") { ModelFilterCard(onOpenQuant = { tabName = KashiArenaTab.QUANT.name }) }
+                item(key = "late-window") { LateWindowFleetCard(st) { onOpen(ScalpModels.Model.LATE_WINDOW) } }
                 item(key = "curve") { ArenaCard {
                     Text("Running profit", color = c.textPrimary, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Text("Net after fees · recent completed windows", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
@@ -141,6 +142,7 @@ internal fun KashiArenaContent(st: ScalpTabState, onOpen: (ScalpModels.Model) ->
                 item(key = "tools") { Row { TextButton(onClick = onLadder) { Text("Manual ladder") }; TextButton(onClick = onHistory) { Text("All data") } } }
             }
             KashiArenaTab.STRATEGIES -> {
+                if (v2) item(key = "late-window-pin") { LateWindowFleetCard(st) { onOpen(ScalpModels.Model.LATE_WINDOW) } }
                 item(key = "sort") {
                     ArenaSectionHeader("Every strategy · ${rows.size}")
                     ChipRow(KashiArenaData.Sort.values().toList(), sort, { it.label }, { "ARENA_SORT_${it.name}" }) { sortName = it.name }
@@ -255,6 +257,13 @@ private fun PaperCashBadge() {
 }
 
 @Composable
+private fun LateWindowFleetCard(st: ScalpTabState, onOpen: () -> Unit) {
+    val row = st.algoAllTime[ScalpModels.Model.LATE_WINDOW]
+        ?: ScalpModels.rowFromStat(com.dirk.kalshiodds.decision.ScalpStat(LateWindowScalper.CODE))
+    ArenaStrategyRow(row, st, onOpen)
+}
+
+@Composable
 internal fun ArenaStrategyRow(row: ScalpModels.Row, st: ScalpTabState, onOpen: () -> Unit) {
     val c = DipTheme.colors
     val pause = st.controls.pausedReason(row.model.code, open = row.open)
@@ -271,6 +280,27 @@ internal fun ArenaStrategyRow(row: ScalpModels.Row, st: ScalpTabState, onOpen: (
                 }
                 if (ScalpModels.isResearch(row.model)) Text("RESEARCH", color = c.spot, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                 Text("${row.roundTrips} trades · ${ScalpTabCopy.pct(row.winRate)} won · ${row.open} open", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
+                if (row.model == ScalpModels.Model.LATE_WINDOW) {
+                    var mins by remember { mutableIntStateOf(LateWindowScalper.minutes()) }
+                    Text(
+                        "Under $mins min · buy ${PaperFleetDefaults.BUY_MIN}–${PaperFleetDefaults.BUY_MAX}¢ · TP ${PaperFleetDefaults.PROFIT_CENTS}¢ · ${PaperClip.MIN} contracts · open unlimited · hold to settle",
+                        color = c.textSecondary,
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                    Text(LateWindowScalper.promoteLabel(row.roundTrips), color = c.textPrimary, style = MaterialTheme.typography.labelSmall, modifier = Modifier.testTag("LATE_PROMOTE"))
+                    Box(
+                        Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)).background(c.border).testTag("LATE_PROGRESS")
+                    ) {
+                        Box(Modifier.fillMaxWidth(LateWindowScalper.progress(row.roundTrips)).height(8.dp).background(c.up))
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        for (m in LateWindowScalper.MIN_MINUTES..LateWindowScalper.MAX_MINUTES) {
+                            TextButton(onClick = { ModelFilter.setLateWindowMinutes(m); mins = LateWindowScalper.minutes() }, modifier = Modifier.testTag("LATE_MIN_$m")) {
+                                Text(if (m == mins) "${m}m" else "$m", color = if (m == mins) c.up else c.textSecondary)
+                            }
+                        }
+                    }
+                }
                 if (row.roundTrips > 0) Text("Gross ${ScalpTabCopy.money(row.netUsd + row.feesUsd)} · fees ${ScalpTabCopy.money(-row.feesUsd)} · net ${ScalpTabCopy.money(row.netUsd)}", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
                 com.dirk.kalshiodds.decision.ScalpRetune.netPerBetUsd(row.netUsd, row.roundTrips)?.let { per ->
                     Text("Net per bet ${ScalpTabCopy.money(per)}", color = pnlColor(per), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.testTag("NET_PER_BET_" + row.model.code))

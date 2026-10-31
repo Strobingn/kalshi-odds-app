@@ -631,11 +631,12 @@ class ScalpBook(
         mineAll.forEach { t -> if ((!ScalpV2.isV2(t.variantId) || ScalpV2.fresh(q)) && (t.state == ScalpState.OPEN || t.state == ScalpState.PENDING_EXIT)) q.bid(t.side)?.takeIf { it > 0.0 }?.let { b -> peakBid[t.id] = maxOf(peakBid[t.id] ?: b, b) } }
         changed += stepV2(q)
         if (liveExtras) changed += stepModelTwins(q)
+        changed += stepLateWindow(q)
         changed += stepResearch(q, enabled)
         // 1.0.2: Dirk's manual sliders on original strategies (stop % below fill, take profit after fees, max hold).
         val overlay = settingsExits(mineAll, q); changed += overlay.values
         val mineCur = if (overlay.isEmpty()) mineAll else mineAll.map { overlay[it.id] ?: it }
-        mineCur.filter { isActive(it) && !ForecastScalp.isForecast(it) && !ScalpV2.isV2(it.variantId) && !Research.isResearch(it.variantId) && !ModelFilter.isTwin(it.variantId) && !HftMathEngines.isHft(it.variantId) && !TwentyScalperFleet.isFleet(it.variantId) }.forEach { t ->
+        mineCur.filter { isActive(it) && !ForecastScalp.isForecast(it) && !ScalpV2.isV2(it.variantId) && !Research.isResearch(it.variantId) && !ModelFilter.isTwin(it.variantId) && !HftMathEngines.isHft(it.variantId) && !TwentyScalperFleet.isFleet(it.variantId) && !LateWindowScalper.matches(it.variantId) }.forEach { t ->
             // 0.3.69 fix: sf rows have their own lane (entries + TP/stop/60 s exits). They used to also fall through here with
             // the generic primary params, whose profit-target / fair take-profit / turn-down exits fired first, so the sf
             // take-profit never decided (sf41≡sf42, sf43≡sf44). Here they now only get the adverse-selection marks.
@@ -724,6 +725,7 @@ class ScalpBook(
             }
             if (liveExtras && coin == ShockFav.TRADE_COIN) enterKeptV2(q, recent)
             if (liveExtras && coin == ShockFav.TRADE_COIN) changed += enterModelFair(q, recent)
+            changed += enterLateWindow(q).orEmpty()
         }
         if (liveExtras) {
             val pause = sidePause(q)
@@ -1685,6 +1687,27 @@ class ScalpBook(
         }
     }
 
+    /** Paper late-window scalper. Take-profit or hold to settlement. No shared late-window gate. */
+    private fun stepLateWindow(q: ScalpRule.Quote): List<ScalpTrade> {
+        val out = ArrayList<ScalpTrade>()
+        val tp = PaperFleetDefaults.PROFIT_CENTS / 100.0
+        for (t in _all.value) {
+            if (!LateWindowScalper.matches(t.variantId) || !t.ticker.equals(q.ticker, true) || !isActive(t)) continue
+            when (t.state) {
+                ScalpState.PENDING_ENTRY -> fillEntry(t, q)?.let { out += it }
+                ScalpState.OPEN, ScalpState.PENDING_EXIT -> {
+                    val bid = q.bid(t.side)?.takeIf { it > 0.0 } ?: continue
+                    val entry = t.entryPrice ?: continue
+                    if (bid + 1e-9 < entry + tp) continue
+                    val sold = ScalpFills.sell(t, q.nowMs, t.remaining, t.remaining * bid, ScalpRule.orderFee(t.remaining, bid))
+                    out += close(sold, q.nowMs, "take profit +${PaperFleetDefaults.PROFIT_CENTS}¢")
+                }
+                else -> Unit
+            }
+        }
+        return out
+    }
+
     private fun enterModelFair(q: ScalpRule.Quote, recent: List<ScalpRule.Snap>): List<ScalpTrade> {
         ModelFilter.observe(q)
         if (!ModelFilter.dueForEntry(q.ticker, q.nowMs, "fair")) return emptyList()
@@ -1705,6 +1728,54 @@ class ScalpBook(
             out += row
         }
         return out
+    }
+
+    private fun enterLateWindow(q: ScalpRule.Quote): List<ScalpTrade> {
+        ModelFilter.observe(q)
+        val coin = ScalpParams.coinOf(q.ticker)
+        val window = ScalpModels.windowKeyOf(q.ticker)
+        if (!LateWindowScalper.tradesCoin(coin, ModelFilter.hybridCoins())) return emptyList()
+        if (!LateWindowScalper.inWindow(q.tauS)) {
+            gates.block(LateWindowScalper.CODE, window, "outside late window · under ${LateWindowScalper.minutes()} min")
+            return emptyList()
+        }
+        if (!ModelFilter.dueForEntry(q.ticker, q.nowMs, LateWindowScalper.CODE)) return emptyList()
+        val twin = ModelFilter.Twin(
+            LateWindowScalper.CODE, LateWindowScalper.CODE, LateWindowScalper.LABEL,
+            ModelFilter.Kind.FAIR, PaperClip.MIN, ModelFilter.Arm.LOGISTIC
+        )
+        for (side in listOf("YES", "NO")) {
+            val ask = q.ask(side) ?: continue
+            val fair = q.fair(side) ?: continue
+            val d = ModelFilter.decide(twin, q, side, ask, fair, forceCeiling = true, ignoreLateWindow = true)
+            val why = LateWindowScalper.blockReason(
+                coin, ModelFilter.hybridCoins(), q.tauS, ask, d.score, d.enter, d.reason
+            )
+            if (why != null) {
+                gates.block(LateWindowScalper.CODE, window, why)
+                continue
+            }
+            val n = PaperClip.sized(PaperClip.MIN)
+            val blocked = ScalpParamSanity.entryBlock(side, ask, n, PaperFleetDefaults.BUY_MIN / 100.0, bankrollUsd(), n)
+            if (blocked != null) {
+                gates.block(LateWindowScalper.CODE, window, blocked)
+                continue
+            }
+            gates.entered(LateWindowScalper.CODE, window)
+            val regime = d.regime.ifBlank { VolRegime.current(window) }
+            return listOf(
+                ScalpTrade(
+                    id = idFactory(), ticker = q.ticker.uppercase(), side = side, state = ScalpState.PENDING_ENTRY,
+                    signalAtMs = q.nowMs, signalAsk = ask, fairAtSignal = fair, contracts = n,
+                    note = VolRegime.stamp(
+                        "late window <${LateWindowScalper.minutes()} min · ${d.reason} · hold to settle if take profit misses",
+                        regime
+                    ),
+                    ruleVersion = "${ScalpRule.VERSION}|${LateWindowScalper.CODE}|P"
+                )
+            )
+        }
+        return emptyList()
     }
 
     private fun enterModelDip(q: ScalpRule.Quote, key: String, fairYes: Double): List<ScalpTrade> {
@@ -2577,6 +2648,7 @@ class ScalpBook(
     /** "AI learns": nudge one slider of this strategy from its own closed paper trades (bounded; see [Research.learn]). */
     private fun aiLearn(t: ScalpTrade) {
         val code = codeOf(t)
+        if (LateWindowScalper.matches(code)) return
         val cur = controls.state.value
         val s = cur.settings(code)
         if (!s.aiLearns) return

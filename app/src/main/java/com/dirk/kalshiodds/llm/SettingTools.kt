@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.llm
 
+import com.dirk.kalshiodds.decision.LateWindowScalper
 import com.dirk.kalshiodds.decision.ScalpControls
 import com.dirk.kalshiodds.decision.ScalpModels
 import com.dirk.kalshiodds.decision.ScalpStrategySettings
@@ -72,7 +73,7 @@ object SettingTools {
 
     fun fieldsFor(code: String): Set<String> {
         val m = ScalpModels.ALL.firstOrNull { it.code == code } ?: return emptySet()
-        if (m == ScalpModels.Model.V2_LLM) return emptySet() // llmEntry freezes its own clip/ask/stop/hold; strategySettings are not read
+        if (m == ScalpModels.Model.V2_LLM || LateWindowScalper.matches(m.code)) return emptySet()
         return when { ScalpModels.isResearch(m) -> RESEARCH_FIELDS; ScalpModels.isV2(m) -> V2_FIELDS; else -> ORIGINAL_FIELDS }
     }
 
