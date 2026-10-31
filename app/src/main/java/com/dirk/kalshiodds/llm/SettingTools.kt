@@ -39,7 +39,7 @@ object SettingTools {
 
     val GLOBAL: Map<String, Spec> = linkedMapOf(
         "enabled" to b, "killSwitch" to b, "adaptive" to b, "manual" to b,
-        "maxAskCents" to i(1, 55), "stopCents" to i(1, 99), "takeProfitCents" to i(0, 99), // trailCents omitted: spawnV2 hard-codes the 3¢ trail
+        "maxAskCents" to i(1, 75), "stopCents" to i(1, 99), "takeProfitCents" to i(0, 99), // trailCents omitted: spawnV2 hard-codes the 3¢ trail
         "contracts" to i(1, 1000), "greenContracts" to i(1, 500),
         "maxStakeUsd" to d(0.0, 100_000.0), "maxHoldSeconds" to i(0, 3600), "maxTradesPerHour" to i(0, 10_000),
         "maxDailyLossUsd" to d(0.0, 100_000.0), "maxOpen" to i(0, 1000), "windowSeconds" to i(10, 600),

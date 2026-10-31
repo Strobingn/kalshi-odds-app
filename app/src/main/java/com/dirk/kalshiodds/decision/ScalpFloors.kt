@@ -66,8 +66,9 @@ object ScalpFloors {
         }
         val p = params(code)
         if (p != null && p.fav && !p.shock) return (p.amax * 100.0).roundToInt().coerceIn(floor + 1, 99)
+        if (LateWindowScalper.matches(code)) return PaperFleetDefaults.LATE_BUY_MAX.coerceAtLeast(floor + 1)
         if (code.startsWith("fc")) return 49.coerceAtLeast(floor + 1)
-        return 55.coerceAtLeast(floor + 1)
+        return PaperFleetDefaults.BUY_CEILING.coerceAtLeast(floor + 1)
     }
 
     /**
@@ -84,8 +85,9 @@ object ScalpFloors {
     /**
      * Lowest ceiling that is still a band, in cents.
      * On the v2 dip / fair-gap family a ceiling under 30¢ is the collapsed
-     * signal-price cap (the 10–14¢ band). It is put back on the parent 55¢
-     * ceiling. Every other scalper may tighten to one cent above its floor.
+     * signal-price cap (the 10–14¢ band). It is put back on the factory
+     * 55¢ max. The owner may still raise that max as far as 75¢. Every other
+     * scalper may tighten to one cent above its floor.
      */
     fun minCeilingCents(code: String): Int {
         val floor = cents(code)

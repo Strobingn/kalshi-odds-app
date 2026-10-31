@@ -240,7 +240,7 @@ object ScalpV2 {
     fun walk(levels: List<Pair<Double, Double>>, want: Int, ok: (Double) -> Boolean): Pair<Int, Double> {
         var n = 0; var usd = 0.0
         for ((px, sz) in levels) {
-            if (n >= want || !ScalpRule.buyPriceOk(px) || !ok(px)) break
+            if (n >= want || !ScalpRule.buyPriceOk(px, PaperFleetDefaults.BUY_CEILING / 100.0) || !ok(px)) break
             val take = minOf(want - n, kotlin.math.floor(sz + 1e-9).toInt())
             if (take <= 0) continue
             n += take; usd += take * px
@@ -258,7 +258,11 @@ object ScalpV2 {
         else -> ScalpParams.byId(originalVariantId)?.stop ?: 0.10
     }.coerceIn(0.01, 0.99)
 
-    fun entryOk(ask: Double?, maxAsk: Double = MAX_ASK): Boolean = ScalpRule.buyPriceOk(ask) && maxAsk.isFinite() && ask!! <= minOf(MAX_ASK, maxAsk) + 1e-9
+    fun entryOk(ask: Double?, maxAsk: Double = MAX_ASK): Boolean {
+        if (ask == null || !ask.isFinite() || !maxAsk.isFinite() || ask <= 0.0) return false
+        val cap = minOf(PaperFleetDefaults.BUY_CEILING / 100.0, maxAsk)
+        return ask <= cap + 1e-9
+    }
 
     /** Uses the actual entry fees (including level-by-level rounding) and any partial proceeds. */
     fun netPerContract(t: ScalpTrade, bid: Double): Double =

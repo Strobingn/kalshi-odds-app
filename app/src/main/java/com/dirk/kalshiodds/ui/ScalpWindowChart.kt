@@ -28,6 +28,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.testTag
+import com.dirk.kalshiodds.decision.PaperFleetDefaults
 import com.dirk.kalshiodds.ui.charts.ChartStroke
 import com.dirk.kalshiodds.ui.charts.CalibrationPlot
 import com.dirk.kalshiodds.ui.charts.ChartGallery
@@ -108,7 +109,7 @@ internal fun ScalpWindowChart(d: ScalpAlgoDetail, onWindow: (String) -> Unit = {
         Text(data.ticker.ifEmpty { "Chart and trade markers appear here when a window is available." }, color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
             Text("UP ${ScalpTabCopy.cents(data.bid("YES"))}", color = c.up, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-            Text("50¢", color = c.accentOrange, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+            Text("${PaperFleetDefaults.BUY_CEILING}¢", color = c.accentOrange, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
             Text("DOWN ${ScalpTabCopy.cents(data.bid("NO"))}", color = c.down, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
         }
         if (data.closeMs > 0) {
@@ -149,7 +150,8 @@ internal fun ScalpWindowChart(d: ScalpAlgoDetail, onWindow: (String) -> Unit = {
                     paint.textAlign = when (minute) { 0 -> Paint.Align.LEFT; 15 -> Paint.Align.RIGHT; else -> Paint.Align.CENTER }
                     drawContext.canvas.nativeCanvas.drawText("${minute}m", xx, size.height - 2.dp.toPx(), paint)
                 }
-                drawLine(c.accentOrange.copy(alpha = .65f), Offset(left, y(.50)), Offset(left + w, y(.50)), 1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 5.dp.toPx())))
+                val ceilingY = PaperFleetDefaults.BUY_CEILING / 100.0
+                drawLine(c.accentOrange.copy(alpha = .65f), Offset(left, y(ceilingY)), Offset(left + w, y(ceilingY)), 1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 5.dp.toPx())))
                 val labelBg = plotWell
                 val halo = Color.Black.copy(alpha = 0.88f)
                 val endLabel = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -257,13 +259,13 @@ internal fun ScalpWindowChart(d: ScalpAlgoDetail, onWindow: (String) -> Unit = {
                 buildList {
                     add(c.upButton to "UP bid")
                     add(c.downButton to "DOWN bid")
-                    add(c.accentOrange to "50¢ ceiling")
+                    add(c.accentOrange to "${PaperFleetDefaults.BUY_CEILING}¢ ceiling")
                     if (hasFair) add(c.accentBlue to "AI fair")
                 },
                 emphasis = true
             )
             Text("○ Buy order   ▲ Buy fill   ■ Sell fill   · Signal", color = c.textPrimary, style = MaterialTheme.typography.labelMedium)
-            Text("Green UP · red DOWN · both sides. Dashed 50¢ buy ceiling · tap a marker for price and time", color = c.textPrimary, style = MaterialTheme.typography.labelSmall)
+            Text("Green UP · red DOWN · both sides. Dashed ${PaperFleetDefaults.BUY_CEILING}¢ buy ceiling · tap a marker for price and time", color = c.textPrimary, style = MaterialTheme.typography.labelSmall)
             data.quietSideLine()?.let { Text(it, color = c.textSecondary, style = MaterialTheme.typography.bodySmall) }
             run {
                 val upAny = data.points.any { it.upBidCents != null }

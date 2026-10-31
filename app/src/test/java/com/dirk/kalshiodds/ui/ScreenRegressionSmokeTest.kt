@@ -128,7 +128,7 @@ class ScreenRegressionSmokeTest {
     @Test fun strategyPageEmptyComposes() {
         show { ScalpAlgoContent(ScalpAlgoDetail()) }
         assertShown("Algorithm")
-        assertShown("50¢")
+        assertShown("${com.dirk.kalshiodds.decision.PaperFleetDefaults.BUY_CEILING}¢")
         compose.onAllNodesWithText("UP / YES").assertCountEquals(0)
     }
 

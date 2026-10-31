@@ -54,13 +54,15 @@ object AiLearnBounds {
     fun stopCentsLo(cur: Int): Int = if (cur < STOP_CENTS_FLOOR) cur else STOP_CENTS_FLOOR
 
     fun nextMax(code: String, cur: Int, base: Int, @Suppress("UNUSED_PARAMETER") min: Int, step: Int, winner: Boolean): Int {
-        val ceil = maxOf(ScalpFloors.ceilingCents(code), PaperFleetDefaults.BUY_MAX)
+        val ceiling = PaperFleetDefaults.buyCeiling(code)
+        // A hand max above the factory 55¢ stays. AI does not walk it higher and does not put it back.
+        if (cur > PaperFleetDefaults.BUY_MAX) return cur.coerceAtMost(ceiling)
         val restored = maxOf(cur, PaperFleetDefaults.BUY_MAX)
         if (!winner) return restored
         return minOf(
             maxOf(cur + step, PaperFleetDefaults.BUY_MAX),
             maxOf(base, PaperFleetDefaults.BUY_MAX) + 12,
-            ceil
+            PaperFleetDefaults.BUY_MAX
         )
     }
 
@@ -95,7 +97,7 @@ object AiLearnBounds {
      */
     fun repair(code: String, s: ScalpStrategySettings): ScalpStrategySettings {
         if (!aiTouched(s)) return s
-        val ceil = maxOf(ScalpFloors.ceilingCents(code), PaperFleetDefaults.BUY_MAX)
+        val ceil = maxOf(ScalpFloors.ceilingCents(code), PaperFleetDefaults.buyMax(code))
         var min = s.minEntryCents
         var max = s.maxEntryCents
         var until = s.untilMinute
@@ -109,7 +111,7 @@ object AiLearnBounds {
             contracts = PaperClip.MIN
             changed = true
         }
-        val (flooredMin, flooredMax) = PaperFleetDefaults.floorBand(min, max, true, s.minEntryCents, s.maxEntryCents)
+        val (flooredMin, flooredMax) = PaperFleetDefaults.floorBand(min, max, true, s.minEntryCents, s.maxEntryCents, code)
         if (flooredMin != min || flooredMax != max) {
             min = flooredMin
             max = flooredMax

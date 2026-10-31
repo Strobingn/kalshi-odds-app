@@ -47,7 +47,8 @@ class SettingToolsTest {
     @Test fun rangesAreValidatedNotClamped() {
         assertTrue(SettingTools.propose(c, "stopCents", "0") is SettingTools.Result.Rejected)
         assertTrue(SettingTools.propose(c, "stopCents", "100") is SettingTools.Result.Rejected)
-        assertTrue(SettingTools.propose(c, "maxAskCents", "56") is SettingTools.Result.Rejected)
+        assertTrue(SettingTools.propose(c, "maxAskCents", "76") is SettingTools.Result.Rejected)
+        assertTrue(SettingTools.propose(c, "maxAskCents", "75") is SettingTools.Result.Proposal)
         assertTrue(SettingTools.propose(c, "research.kellyFraction", "1.5") is SettingTools.Result.Rejected)
         assertTrue(SettingTools.propose(c, "strategy.$code.cadenceSeconds", "31") is SettingTools.Result.Rejected)
         assertTrue(SettingTools.propose(c, "stopCents", "abc") is SettingTools.Result.Rejected)

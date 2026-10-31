@@ -84,7 +84,7 @@ object ScalpModels {
         R_HOLD("r-hold", "Research · Fair-value hold", "Buys whenever fair value beats price after entry fee and expected exit fee by the edge; sells only if bid beats fair + exit fee or fair falls below entry − fee; else holds to settlement."),
         R_MAKER("r-maker", "Research · Passive maker entry", "Rests a paper bid at fair − edge; fills only when the market trades through; logs 5 s / 30 s drift after the fill; holds to settlement."),
         R_KELLY("r-kelly", "Research · Kelly-sized fair value", "Same entry gate and exits as Fair-value hold; size = quarter-Kelly (p − c)/(1 − c) of a reference bankroll, capped per window."),
-        V2_LLM("v2-llm", "LLM · paper", "One LLM call per BTC window at the window start proposes YES/NO + confidence; code enforces ask ≤ 55¢, 3¢ peak trail and the > 95% hold gate. Paper only."),
+        V2_LLM("v2-llm", "LLM · paper", "One LLM call per BTC window at the window start proposes YES/NO + confidence; code enforces ask ≤ 75¢, 3¢ peak trail and the > 95% hold gate. Paper only."),
         V2_FORECAST_FADE("v2-fcfade", "v2 · Forecast fade", V2_BLURB),
         V2_DIP_HOLD("v2-diph60", "v2 · Dip-hunter hold", V2_BLURB),
         V2_MOMO_HOLD("v2-momoh60", "v2 · Momentum-sniper hold", V2_BLURB),
@@ -216,7 +216,7 @@ object ScalpModels {
         LATE_WINDOW(
             LateWindowScalper.CODE,
             LateWindowScalper.LABEL,
-            "Paper only. Opens when time left in the 15-minute window is under 5 minutes (1–5). Hybrid Quant gate on, scores above 0.65 dropped. Buy 15–55¢, take profit 25¢, at least 50 contracts, open-at-once unlimited. Holds to settlement if take-profit is not hit."
+            "Paper only. Opens when time left in the 15-minute window is under 5 minutes (1–5). Hybrid Quant gate on, scores above 0.65 dropped. Buy 15–95¢, take profit 25¢ (sell target capped at 99¢), at least 50 contracts, open-at-once unlimited. Holds to settlement if take-profit is not hit."
         )
     }
 
@@ -678,12 +678,25 @@ object ForecastScalp {
         val fade = code == FADE_PREFIX || code.startsWith("$FADE_PREFIX-")
         val lo = if (s != null && s.minEntryCents > 1) s.minEntryCents / 100.0 else BAND_LO
         val hi = s?.maxEntryCents?.div(100.0) ?: if (fade) FADE_BAND_HI else BAND_HI
-        return lo to maxOf(lo, hi)
+        val capped = minOf(hi, PaperFleetDefaults.buyCeiling(code) / 100.0)
+        return lo to maxOf(lo, capped)
     }
 
-    fun wantsEntry(mid: Double, spread: Double, ask: Double, move: Double, tauS: Double, marginUsd: Double = SAFETY, bandLo: Double = BAND_LO, bandHi: Double = BAND_HI): Boolean =
-        ScalpRule.buyPriceOk(ask) && mid in bandLo..bandHi && spread <= MAX_SPREAD + 1e-9 && tauS >= MIN_TAU_ENTRY_S &&
+    fun wantsEntry(
+        mid: Double,
+        spread: Double,
+        ask: Double,
+        move: Double,
+        tauS: Double,
+        marginUsd: Double = SAFETY,
+        bandLo: Double = BAND_LO,
+        bandHi: Double = BAND_HI,
+        priceCeiling: Double = ScalpRule.ENTRY_HI
+    ): Boolean {
+        val cap = minOf(bandHi, priceCeiling, PaperFleetDefaults.BUY_CEILING / 100.0)
+        return ScalpRule.buyPriceOk(ask, cap) && mid in bandLo..bandHi && spread <= MAX_SPREAD + 1e-9 && tauS >= MIN_TAU_ENTRY_S &&
             move > minEntryEdgeUsd(spread, ask) + marginUsd.coerceAtLeast(0.0)
+    }
 
     /** Exit when the forecast for the held side turns through the deadband, flips hard, TP, horizon reached, or close. */
     /** [sideForecast] NaN = no fresh forecast: forecast-based exits are skipped (hold until fresh data). */

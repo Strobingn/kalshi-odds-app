@@ -10,10 +10,22 @@ package com.dirk.kalshiodds.decision
  * lowest buy sits above 15¢ or highest buy sits under 55¢. A hand band at
  * least [NARROW_WIDTH] wide (for example 20–40¢) stays. A stored take-profit
  * above 30¢ is put back to [PROFIT_CENTS].
+ *
+ * [BUY_MAX] is the factory highest buy. [BUY_CEILING] is the highest the
+ * slider, prefs, or a healer may store (75¢). A hand max from 56¢ through
+ * 75¢ stays. Anything above the ceiling is clamped down to it. AI Learn
+ * does not walk the max above [BUY_MAX]. Late window uses [LATE_BUY_MAX]
+ * for both its factory max and its ceiling.
  */
 object PaperFleetDefaults {
     const val BUY_MIN = 15
     const val BUY_MAX = 55
+    /** Highest buy the owner may set on every scalper except late window. */
+    const val BUY_CEILING = 75
+    /** Late window (<5 min): factory max and ceiling. Min stays [BUY_MIN]. */
+    const val LATE_BUY_MAX = 95
+    /** Contract pays at most this many cents. A take-profit target cannot sit above it. */
+    const val PAYOUT_CENTS = 99
     const val PROFIT_CENTS = 25
     /** Slider value 0. The label is "unlimited"; it is not a count of clips to open. */
     const val OPEN_AT_ONCE = 0
@@ -29,9 +41,37 @@ object PaperFleetDefaults {
      */
     const val NARROW_WIDTH = 20
 
-    fun factory(): ScalpStrategySettings = ScalpStrategySettings(
+    fun isLate(code: String?): Boolean = code != null && LateWindowScalper.matches(code)
+
+    /** Factory highest buy. 55¢ for the fleet, 95¢ for late window. */
+    fun buyMax(code: String?): Int = if (isLate(code)) LATE_BUY_MAX else BUY_MAX
+
+    /**
+     * Highest cents the owner, prefs, or a healer may store on this scalper.
+     * Late window is 95¢. A favourite or research-late leg keeps its own higher
+     * ceiling. Everyone else stops at [BUY_CEILING].
+     */
+    fun buyCeiling(code: String?): Int {
+        if (code == null) return BUY_CEILING
+        if (isLate(code)) return LATE_BUY_MAX
+        return maxOf(BUY_CEILING, ScalpFloors.ceilingCents(code))
+    }
+
+    /**
+     * Dollar ask cap for [code]. [maxCents] null means the factory max.
+     * The result never sits above [buyCeiling].
+     */
+    fun askLimit(code: String?, maxCents: Int?): Double {
+        val ceiling = buyCeiling(code)
+        val band = (maxCents ?: buyMax(code)).coerceIn(1, ceiling)
+        return band / 100.0
+    }
+
+    fun overCeilingReason(cents: Int): String = "ask above ${cents}¢ ceiling"
+
+    fun factory(code: String? = null): ScalpStrategySettings = ScalpStrategySettings(
         minEntryCents = BUY_MIN,
-        maxEntryCents = BUY_MAX,
+        maxEntryCents = buyMax(code),
         takeProfitCents = PROFIT_CENTS,
         maxOpenPerSide = OPEN_AT_ONCE
     )
@@ -48,33 +88,40 @@ object PaperFleetDefaults {
     /**
      * Buy band after the fleet floor.
      * [rawMin] and [rawMax] are the stored slider, before a favourite ceiling is filled in.
-     * A stored window tighter than [NARROW_WIDTH] (20–30¢, 23–33¢, 31–32¢) becomes 15–55¢.
-     * An AI-owned stored ceiling under 55¢, or a stored lowest buy above 15¢, is put back
-     * the same way. A wider ceiling (above 55¢) is kept. A hand band at least [NARROW_WIDTH]
-     * wide is kept. A missing ceiling is not a tight window.
+     * A stored window tighter than [NARROW_WIDTH] (20–30¢, 23–33¢, 31–32¢) becomes 15–55¢
+     * (15–95¢ for late window). An AI-owned stored ceiling under the factory max, or a
+     * stored lowest buy above 15¢, is put back the same way. A wider hand ceiling
+     * (56–75¢, or up to 95¢ on late window) is kept. Values above [buyCeiling] clamp
+     * down to that ceiling. A hand band at least [NARROW_WIDTH] wide is kept.
+     * A missing ceiling is not a tight window.
      */
     fun floorBand(
         min: Int,
         max: Int?,
         touched: Boolean,
         rawMin: Int = min,
-        rawMax: Int? = max
+        rawMax: Int? = max,
+        code: String? = null
     ): Pair<Int, Int?> {
+        val ceiling = buyCeiling(code)
+        val defaultMax = buyMax(code)
+        val cappedMax = max?.coerceAtMost(ceiling)
         val tight = narrow(rawMin, rawMax)
-        val under = touched && rawMax != null && (rawMin > BUY_MIN || rawMax < BUY_MAX)
-        if (!tight && !under) return min to max
-        val newMax = if (!tight && max != null && max > BUY_MAX) max else BUY_MAX
-        return BUY_MIN to newMax
+        val under = touched && rawMax != null && (rawMin > BUY_MIN || rawMax < defaultMax)
+        if (!tight && !under) return min to cappedMax
+        val newMax = if (!tight && cappedMax != null && cappedMax > defaultMax) cappedMax else defaultMax
+        return BUY_MIN to newMax.coerceAtMost(ceiling)
     }
 
     /** Algo overlay or a row that already passed the floor clamp. Does not invent a factory profit of 0. */
-    fun heal(s: ScalpStrategySettings): ScalpStrategySettings {
+    fun heal(s: ScalpStrategySettings, code: String? = null): ScalpStrategySettings {
         val (min, max) = floorBand(
             s.minEntryCents,
             s.maxEntryCents,
             AiLearnBounds.aiTouched(s),
             s.minEntryCents,
-            s.maxEntryCents
+            s.maxEntryCents,
+            code
         )
         val hot = s.takeProfitCents != null && s.takeProfitCents > PROFIT_HEAL_ABOVE
         if (min == s.minEntryCents && max == s.maxEntryCents && !hot) return s

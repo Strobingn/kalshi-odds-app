@@ -56,6 +56,6 @@ class ScalpDownSideTest {
         )
         assertTrue(chart.markers("YES").any { it.kind == ScalpWindowChartData.Kind.SIGNAL })
         assertEquals(0, chart.markers("NO").size)
-        assertEquals("no DOWN trigger this window (ask above 55¢ ceiling)", chart.quietSideLine())
+        assertEquals("no DOWN trigger this window (ask above 75¢ ceiling)", chart.quietSideLine())
     }
 }
