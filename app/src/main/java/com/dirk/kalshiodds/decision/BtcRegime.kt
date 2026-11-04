@@ -182,6 +182,8 @@ object BtcRegime {
         val vwap: Double? = null,
         val utcHour: Int = 0,
         val entriesThisWindow: Int = 0,
+        /** Clip already sent, fill price not known yet. Another entry would skip the loser check. */
+        val pendingOnSide: Boolean = false,
         val openEntry: Double? = null,
         val openBid: Double? = null,
         val askPath: List<Px> = emptyList(),
@@ -198,6 +200,7 @@ object BtcRegime {
         if (side != "YES" && side != "NO") return "side"
         if (s.avoidUtcHours && e.utcHour in AVOID_HOURS) return "avoid UTC hour ${e.utcHour}"
         if (e.entriesThisWindow >= s.maxEntriesPerWindow) return "max entries this window"
+        if (e.pendingOnSide) return "entry pending"
         if (e.openEntry != null && (e.openBid == null || !e.openBid.isFinite() || e.openBid + 1e-9 < e.openEntry)) {
             return "no averaging down"
         }

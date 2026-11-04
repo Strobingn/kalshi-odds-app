@@ -732,7 +732,7 @@ class ScalpBook(
             if (liveExtras && coin == ShockFav.TRADE_COIN) enterKeptV2(q, recent)
             if (liveExtras && coin == ShockFav.TRADE_COIN) changed += enterModelFair(q, recent)
             changed += enterLateWindow(q).orEmpty()
-            changed += enterBtc15(q)
+            changed += enterBtc15(q, changed)
         }
         if (liveExtras) {
             val hftCoin = ScalpParams.coinOf(q.ticker)
@@ -1798,7 +1798,7 @@ class ScalpBook(
         )
     }
 
-    private fun enterBtc15(q: ScalpRule.Quote): List<ScalpTrade> {
+    private fun enterBtc15(q: ScalpRule.Quote, sameQuote: List<ScalpTrade> = emptyList()): List<ScalpTrade> {
         if (!BtcRegime.tradesTicker(q.ticker)) return emptyList()
         val cfg = controls.state.value
         if (!cfg.permits(BtcRegime.ID) || cfg.benchOverrides[BtcRegime.ID] == "BENCHED") return emptyList()
@@ -1808,17 +1808,19 @@ class ScalpBook(
         val sec = q.nowMs / 1000L
         val velocity = btc15Spot.velocity(sec)
         val vwap = btc15Spot.vwap(sec)
-        val entries = _all.value.count {
-            BtcRegime.matches(it.variantId) && it.ticker.equals(q.ticker, true) && it.state != ScalpState.NO_FILL
+        // Fills land in [sameQuote] before [_all] updates, so a just-filled loser is visible here.
+        val overlay = HashMap<String, ScalpTrade>(sameQuote.size)
+        for (t in sameQuote) if (BtcRegime.matches(t.variantId) && t.ticker.equals(q.ticker, true)) overlay[t.id] = t
+        val rows = _all.value.mapNotNull { t ->
+            if (!BtcRegime.matches(t.variantId) || !t.ticker.equals(q.ticker, true)) null else overlay[t.id] ?: t
         }
+        val entries = rows.count { it.state != ScalpState.NO_FILL }
         val n = StrategyAlgo.clip(cfg, BtcRegime.ID, PaperClip.MIN)
         for (side in listOf("YES", "NO")) {
             val ask = q.ask(side) ?: continue
             val path = btc15Path(q, side)
-            val open = _all.value.firstOrNull {
-                BtcRegime.matches(it.variantId) && it.ticker.equals(q.ticker, true) && it.side == side &&
-                    isActive(it) && it.entryPrice != null
-            }
+            val sideRows = rows.filter { it.side == side && isActive(it) }
+            val open = sideRows.firstOrNull { it.entryPrice != null }
             val why = BtcRegime.blockEntry(
                 BtcRegime.Entry(
                     secondsLeft = secondsLeft,
@@ -1831,6 +1833,7 @@ class ScalpBook(
                     vwap = vwap,
                     utcHour = BtcRegime.utcHour(q.nowMs),
                     entriesThisWindow = entries,
+                    pendingOnSide = sideRows.any { it.state == ScalpState.PENDING_ENTRY },
                     openEntry = open?.entryPrice,
                     openBid = q.bid(side),
                     askPath = path,

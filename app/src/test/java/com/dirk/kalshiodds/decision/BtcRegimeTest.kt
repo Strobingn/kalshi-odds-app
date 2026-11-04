@@ -51,6 +51,17 @@ class BtcRegimeTest {
         assertNull(BtcRegime.blockEntry(yes(hour = 8)))
         assertEquals("no averaging down", BtcRegime.blockEntry(yes(openEntry = 0.40, openBid = 0.30)))
         assertEquals("max entries this window", BtcRegime.blockEntry(yes(entries = 2)))
+        assertEquals("entry pending", BtcRegime.blockEntry(yes(pending = true)))
+    }
+
+    @Test fun pendingClipDoesNotStackTheWindowCap() {
+        val controls = MemoryScalpControls(ScalpControls(btc15 = BtcRegime.Settings(maxEntriesPerWindow = 10)))
+        val book = ScalpBook(bankrollUsd = { 100_000.0 }, idFactory = { "b${seq++}" }, controls = controls)
+        val base = Instant.parse("2026-11-04T03:00:00Z").toEpochMilli()
+        val close = base + 500_000L
+        for (i in 0..40) book.onQuote(quote(base + i * 1_000L, close, 0.49, 0.50, 100_000.0 + i * 5.0), true)
+        val mine = book.allTrades().filter { it.variantId == BtcRegime.ID && it.state != ScalpState.NO_FILL }
+        assertEquals(mine.joinToString { "${it.state} ${it.note}" }, 1, mine.size)
     }
 
     @Test fun exits() {
@@ -121,6 +132,7 @@ class BtcRegimeTest {
         prices: List<Double> = listOf(0.40, 0.40, 0.40),
         hour: Int = 3,
         entries: Int = 0,
+        pending: Boolean = false,
         openEntry: Double? = null,
         openBid: Double? = null,
         path: List<BtcRegime.Px> = emptyList(),
@@ -129,7 +141,7 @@ class BtcRegimeTest {
     ) = BtcRegime.Entry(
         secondsLeft = seconds, side = "YES", ask = ask, fair = fair, prices = prices,
         velocity = 1.0, spot = 101.0, vwap = 100.0, utcHour = hour, entriesThisWindow = entries,
-        openEntry = openEntry, openBid = openBid, askPath = path, nowMs = nowMs, settings = settings
+        pendingOnSide = pending, openEntry = openEntry, openBid = openBid, askPath = path, nowMs = nowMs, settings = settings
     )
 
     private fun no(ask: Double) = yes(ask = ask).copy(side = "NO", velocity = -1.0, spot = 99.0, vwap = 100.0)
