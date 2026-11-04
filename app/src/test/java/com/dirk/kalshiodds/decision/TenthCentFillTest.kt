@@ -33,10 +33,25 @@ class TenthCentFillTest {
 
     @Test fun takerLiftsTheDisplayedDownAskUpToDepth() {
         val start = close - 900_000L
-        val scalp = ScalpBook(bankrollUsd = { 20_000.0 }, idFactory = { "tenth" })
+        val cheap = ScalpTrade(
+            id = "cheap", ticker = ticker, side = "NO", state = ScalpState.PENDING_ENTRY,
+            signalAtMs = start, signalAsk = 0.032, fairAtSignal = 0.10,
+            ruleVersion = "${ScalpRule.VERSION}|sf42|P",
+            note = "sf42 simple dip"
+        )
+        val refused = ScalpBook(
+            InMemoryScalpPersistence().also { it.seed(listOf(cheap)) },
+            liveExtras = true,
+            bankrollUsd = { 20_000.0 }
+        )
+        refused.onShockFavQuote(book(start + 2_000L, touch = 4.0), true)
+        val blocked = refused.snapshot().first { it.id == "cheap" }
+        assertEquals(blocked.note, ScalpState.NO_FILL, blocked.state)
+        assertTrue(blocked.note, blocked.note.contains("15¢"))
+
         val pending = ScalpTrade(
             id = "tenth", ticker = ticker, side = "NO", state = ScalpState.PENDING_ENTRY,
-            signalAtMs = start, signalAsk = 0.032, fairAtSignal = 0.10,
+            signalAtMs = start, signalAsk = 0.152, fairAtSignal = 0.20,
             ruleVersion = "${ScalpRule.VERSION}|sf42|P",
             note = "sf42 simple dip"
         )
@@ -45,39 +60,38 @@ class TenthCentFillTest {
             liveExtras = true,
             bankrollUsd = { 20_000.0 }
         )
-        // 2s later the same tenth-cent book is still offered. A 4-lot touch does not shrink the paper clip.
-        val q = book(start + 2_000L, touch = 4.0)
+        // DOWN ask = 1 − 84.8¢ = 15.2¢. A 4-lot touch does not shrink the paper clip.
+        val q = book(start + 2_000L, touch = 4.0).copy(yesBid = 0.848, yesBidSize = 4.0)
         seeded.onShockFavQuote(q, true)
         val row = seeded.snapshot().first { it.id == "tenth" }
         assertEquals(row.note, ScalpState.OPEN, row.state)
         assertTrue(row.contracts >= PaperClip.MIN)
-        assertEquals(0.032, row.entryPrice!!, 1e-9)
+        assertEquals(0.152, row.entryPrice!!, 1e-9)
         assertTrue(row.entryFeeUsd > 0.0)
-        scalp.hashCode()
     }
 
     @Test fun makerFillsWhenTheAskTradesAtTheBidNotACentThrough() {
         val start = close - 400_000L
         val pending = ScalpTrade(
             id = "maker", ticker = ticker, side = "NO", state = ScalpState.PENDING_ENTRY,
-            signalAtMs = start, signalAsk = 0.029, fairAtSignal = 0.05,
-            restingLimit = 0.029, restingSinceMs = start,
+            signalAtMs = start, signalAsk = 0.154, fairAtSignal = 0.20,
+            restingLimit = 0.154, restingSinceMs = start,
             ruleVersion = "${ScalpRule.VERSION}|sf28|P",
-            note = "maker bid 2.9¢"
+            note = "maker bid 15.4¢"
         )
         val book = ScalpBook(
             InMemoryScalpPersistence().also { it.seed(listOf(pending)) },
             liveExtras = true,
             bankrollUsd = { 20_000.0 }
         )
-        // DOWN ask = 1 − 96.8¢ = 3.2¢, still above the 2.9¢ bid: no fill yet.
-        book.onShockFavQuote(bookQuote(start + 2_000L, yesBid = 0.968), true)
+        // DOWN ask = 1 − 84.3¢ = 15.7¢, still above the 15.4¢ bid: no fill yet.
+        book.onShockFavQuote(bookQuote(start + 2_000L, yesBid = 0.843), true)
         assertEquals(ScalpState.PENDING_ENTRY, book.snapshot().first { it.id == "maker" }.state)
-        // Ask trades AT 2.9¢ (YES bid 97.1¢). That is a fill, not a one-cent trade-through.
-        book.onShockFavQuote(bookQuote(start + 3_000L, yesBid = 0.971), true)
+        // Ask trades AT 15.4¢ (YES bid 84.6¢). That is a fill, not a one-cent trade-through.
+        book.onShockFavQuote(bookQuote(start + 3_000L, yesBid = 0.846), true)
         val filled = book.snapshot().first { it.id == "maker" }
         assertEquals(filled.note, ScalpState.OPEN, filled.state)
-        assertEquals(0.029, filled.entryPrice!!, 1e-9)
+        assertEquals(0.154, filled.entryPrice!!, 1e-9)
         assertTrue(filled.contracts > 0)
     }
 

@@ -7,12 +7,27 @@ import kotlin.math.roundToInt
  * Late favourites buy the favourite, so the floor sits under the fair threshold
  * by [FAV_DISCOUNT] cents and never in the 1–9¢ band.
  * Dip and fair-gap floors are [GENERAL] cents. Shock used to allow a 5¢ ask;
- * the edge is the lag, not a sub-10¢ price, so that band is 10¢ now.
+ * the edge is the lag, not a sub-15¢ price, so that band is 15¢ now.
  * The 3¢ complement of a 97¢ favourite is a real book (tenth-cent fills) and is
  * not a default entry.
  */
 object ScalpFloors {
-    const val GENERAL = 10
+    const val GENERAL = 15
+    /** Last two minutes: do not buy the side priced under 50¢. */
+    const val LATE_FADE_S = 120.0
+    const val LATE_FADE = 0.50
+
+    /**
+     * Shared buy refusal. Under [GENERAL] cents is always refused.
+     * In the last [LATE_FADE_S] seconds a price under 50¢ is refused too.
+     * Null means this check does not block the ask.
+     */
+    fun buyRefused(ask: Double?, tauS: Double? = null): String? {
+        if (ask == null || !ask.isFinite() || ask <= 0.0 || ask >= 1.0) return "no ask"
+        if (ask + 1e-9 < GENERAL / 100.0) return "ask under ${GENERAL}¢"
+        if (tauS != null && tauS <= LATE_FADE_S + 1e-9 && ask + 1e-9 < LATE_FADE) return "last 120s: no buy under 50¢"
+        return null
+    }
     /** Favourite ask stays within this many cents under the fair threshold. */
     const val FAV_DISCOUNT = 15
 

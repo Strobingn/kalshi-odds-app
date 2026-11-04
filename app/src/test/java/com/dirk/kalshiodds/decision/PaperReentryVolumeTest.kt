@@ -6,8 +6,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * A live fair-gap quote may stack paper clips. The window loss gate still
- * pauses a side that is already bleeding. Fills stay on the displayed book.
+ * A live fair-gap quote may stack paper clips. A losing side is not paused.
+ * Fills stay on the displayed book.
  */
 class PaperReentryVolumeTest {
     private val ticker = "KXBTC15M-26OCT181315-00"
@@ -47,7 +47,7 @@ class PaperReentryVolumeTest {
         assertTrue(book.openCostUsd() <= 100_000.0 + 1e-6)
     }
 
-    @Test fun aLosingSidePausesAndAFreshSideCanStillOpen() {
+    @Test fun aLosingSideKeepsOpeningAndAFreshSideCanStillOpen() {
         val close = ScalpTicker.closeMs(ticker)!!
         val start = close - 800_000L
         val book = ScalpBook(bankrollUsd = { 100_000.0 })
@@ -71,7 +71,7 @@ class PaperReentryVolumeTest {
             it.variantId == KeptScalpers.FAIR_ID && it.side == "YES" && it.state != ScalpState.NO_FILL
         }
         val losers = yes.count { it.state == ScalpState.CLOSED && (it.netUsd ?: 0.0) < 0.0 }
-        assertTrue("losers $losers of ${yes.size}", losers >= WindowLossGate.DEFAULT_ADVERSE_FILLS)
+        assertTrue("losers $losers of ${yes.size}", losers >= 3)
         val before = yes.size
         repeat(12) {
             book.onQuote(quote(at, yesBid = 0.34, yesAsk = 0.35, spot = 101_000.0), true)
@@ -80,8 +80,8 @@ class PaperReentryVolumeTest {
         val after = book.snapshot().count {
             it.variantId == KeptScalpers.FAIR_ID && it.side == "YES" && it.state != ScalpState.NO_FILL
         }
-        assertEquals(book.gateLine(KeptScalpers.FAIR_ID), before, after)
-        assertTrue(book.gateLine(KeptScalpers.FAIR_ID), book.gateLine(KeptScalpers.FAIR_ID)!!.contains("UP paused"))
+        assertTrue(book.gateLine(KeptScalpers.FAIR_ID), after > before)
+        assertTrue(book.gateLine(KeptScalpers.FAIR_ID)?.contains("paused") != true)
         book.onQuote(quote(at, yesBid = 0.64, yesAsk = 0.65, spot = 99_000.0), true)
         book.onQuote(quote(at + PaperReentry.GAP_MS, yesBid = 0.64, yesAsk = 0.65, spot = 99_000.0), true)
         val no = book.snapshot().filter {

@@ -243,9 +243,23 @@ internal fun ScalpWindowChart(d: ScalpAlgoDetail, onWindow: (String) -> Unit = {
                             drawRect(sideColor, center - Offset(r, r), Size(2 * r, 2 * r))
                             drawRect(ink, center - Offset(r, r), Size(2 * r, 2 * r), style = Stroke(1.35.dp.toPx()))
                         }
-                        else -> {
-                            drawCircle(sideColor, r, center)
-                            drawCircle(ink, r, center, style = Stroke(1.25.dp.toPx()))
+                        ScalpWindowChartData.Kind.SETTLEMENT -> {
+                            val path = Path().apply {
+                                moveTo(center.x, center.y - r)
+                                lineTo(center.x + r, center.y)
+                                lineTo(center.x, center.y + r)
+                                lineTo(center.x - r, center.y)
+                                close()
+                            }
+                            drawPath(path, sideColor)
+                            drawPath(path, ink, style = Stroke(1.35.dp.toPx()))
+                        }
+                        ScalpWindowChartData.Kind.LEGACY_EXIT -> {
+                            val w = 2.dp.toPx()
+                            drawLine(sideColor, center - Offset(r, r), center + Offset(r, r), w)
+                            drawLine(sideColor, Offset(center.x - r, center.y + r), Offset(center.x + r, center.y - r), w)
+                            drawLine(ink, center - Offset(r, r), center + Offset(r, r), 1.dp.toPx())
+                            drawLine(ink, Offset(center.x - r, center.y + r), Offset(center.x + r, center.y - r), 1.dp.toPx())
                         }
                     }
                     if (m.id == selected) drawCircle(c.textPrimary, r + 3.dp.toPx(), center, style = Stroke(1.5.dp.toPx()))
@@ -264,7 +278,7 @@ internal fun ScalpWindowChart(d: ScalpAlgoDetail, onWindow: (String) -> Unit = {
                 },
                 emphasis = true
             )
-            Text("○ Buy order   ▲ Buy fill   ■ Sell fill   · Signal", color = c.textPrimary, style = MaterialTheme.typography.labelMedium)
+            Text("○ Buy order   ▲ Buy fill   ■ Sell fill   ◆ Settlement   ✕ Historical average exit   · Signal", color = c.textPrimary, style = MaterialTheme.typography.labelMedium)
             Text("Green UP · red DOWN · both sides. Dashed ${PaperFleetDefaults.BUY_CEILING}¢ buy ceiling · tap a marker for price and time", color = c.textPrimary, style = MaterialTheme.typography.labelSmall)
             data.quietSideLine()?.let { Text(it, color = c.textSecondary, style = MaterialTheme.typography.bodySmall) }
             run {
@@ -282,15 +296,6 @@ internal fun ScalpWindowChart(d: ScalpAlgoDetail, onWindow: (String) -> Unit = {
                 Text("$sideName · ${markerName(m.kind)} · ${m.qty.takeIf { it > 0 }?.let { "$it ct · " }.orEmpty()}${ScalpTabCopy.cents(m.price)} · ${com.dirk.kalshiodds.domain.EtTime.clockSec(m.recordedAtMs)}", color = c.textPrimary, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall)
             }
             data.error?.let { Text(it, color = c.down, style = MaterialTheme.typography.bodySmall) }
-            data.sidePauseLine()?.let {
-                Text(
-                    it,
-                    color = c.down,
-                    fontWeight = FontWeight.Bold,
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.testTag("window_side_pause")
-                )
-            }
             WindowPaperPnl(data)
             if (markers.isNotEmpty()) {
                 WindowTimeline(

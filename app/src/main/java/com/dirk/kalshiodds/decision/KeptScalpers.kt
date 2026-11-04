@@ -65,7 +65,8 @@ object KeptScalpers {
         Spec("sf04", "sf04 Shock wide lag", ShockFav.v("sf04").summary(), Kind.SHOCK, "sf04"),
         Spec("sf08", "sf08 Shock tight catch-up", ShockFav.v("sf08").summary(), Kind.SHOCK, "sf08"),
         Spec(FADE_ID, "Forecast fade", "Forecast fade, horizon ${FADE_HORIZON_S}s, entry band 40–49¢. Paper only.", Kind.FADE, "fcfade"),
-        Spec("sf41", "sf41 Simple dip 5¢ → +8¢", ShockFav.v("sf41").summary(), Kind.SIMPLE, "sf41")
+        Spec("sf41", "sf41 Simple dip 5¢ → +8¢", ShockFav.v("sf41").summary(), Kind.SIMPLE, "sf41"),
+        Spec(ShockFav.FINAL60_ID, "Final 60s favorite", ShockFav.v(ShockFav.FINAL60).summary(), Kind.FAV, ShockFav.FINAL60)
     )
 
     init {

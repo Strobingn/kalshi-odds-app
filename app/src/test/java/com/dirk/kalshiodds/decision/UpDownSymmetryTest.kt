@@ -116,11 +116,11 @@ class UpDownSymmetryTest {
         val cheap = 0.1
         val revTie = ScalpRule.strategySignal(q(now, 1.0 - cheap, cheap, spot = 100_000.0, strike = 100_000.0), p, listOf("YES", "NO"), emptyList())
         assertNull(revTie.first)
-        assertEquals("exact tie", revTie.second)
+        assertTrue(revTie.second, revTie.second.contains("off the roster"))
         val revYes = ScalpRule.strategySignal(q(now, 0.90, 0.05, spot = 100_200.0, strike = 100_000.0), p, listOf("YES", "NO"), emptyList()).first
         val revNo = ScalpRule.strategySignal(q(now, 0.95, 0.10, spot = 99_800.0, strike = 100_000.0), p, listOf("YES", "NO"), emptyList()).first
-        assertEquals("YES", revYes?.side)
-        assertEquals("NO", revNo?.side)
+        assertNull(revYes)
+        assertNull(revNo)
 
         val cfr = ScalpParams.seedFor("BTC", ScalpStrategy.CF_REPRICE)
         val cfNow = close - 400_000L

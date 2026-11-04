@@ -36,7 +36,7 @@ object FairGapTune {
      * fcfade uses its own 40–49¢ band.
      */
     val OWN_RULES: Set<String> = setOf(
-        "sf16", "sf17", "sf18", "sf19", "sf20", "sf21", "sf22", "sf23", "sf24", "sf29", "sf31",
+        "sf16", "sf17", "sf18", "sf19", "sf20", "sf21", "sf22", "sf23", "sf24", "sf29", "sf31", "sf62",
         "fcfade", KeptScalpers.FADE_ID
     )
 
@@ -121,7 +121,7 @@ object FairGapTune {
         open: List<ScalpTrade> = emptyList(),
         maxCents: Int? = null
     ): Boolean {
-        if (!ask.isFinite() || ask <= 0.0 || ask > 0.99) return false
+        if (ScalpFloors.buyRefused(ask, q?.tauS) != null) return false
         if (q != null && side != null && stackingBlocked(variantId, q, side, ask, open)) return false
         if (favLeg && ownsRules(code)) return true
         val cap = PaperFleetDefaults.askLimit(code, maxCents ?: PaperFleetDefaults.buyMax(code))

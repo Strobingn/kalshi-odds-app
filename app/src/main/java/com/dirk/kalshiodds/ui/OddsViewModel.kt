@@ -442,15 +442,12 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             val quote = marks[liveTicker] ?: marks[liveTicker.uppercase()]
             val caps = container.scalpControls.state.value
             next = next.copy(arenaChart = ScalpWindowChartData(
-                liveTicker, end, now, quote?.bookAtMs, points, mine,
-                sideLossFloorUsd = caps.windowSideLossUsd, adverseFillCap = caps.windowAdverseFills
+                liveTicker, end, now, quote?.bookAtMs, points, mine
             ))
         } else {
             val quote = marks[liveTicker] ?: marks[liveTicker.uppercase()]
-            val caps = container.scalpControls.state.value
             next = next.copy(arenaChart = next.arenaChart.copy(
-                nowMs = now, bookAtMs = quote?.bookAtMs,
-                sideLossFloorUsd = caps.windowSideLossUsd, adverseFillCap = caps.windowAdverseFills
+                nowMs = now, bookAtMs = quote?.bookAtMs
             ))
         }
         val sharedNote = com.dirk.kalshiodds.decision.ScalpBankrollReset.note.value
@@ -497,6 +494,13 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** 1.0.11: Auto (null) / Force trade ("ACTIVE") / Force bench ("BENCHED") for one scalper. */
+    fun setFinal60AvoidHours(on: Boolean) {
+        val current = container.scalpControls.state.value
+        val next = current.copy(final60AvoidHours = on)
+        notePaperEdit(current, next)
+        container.scalpControls.save(next)
+    }
+
     fun setScalpBenchOverride(code: String, value: String?) {
         val current = container.scalpControls.state.value
         val overrides = if (value == null) current.benchOverrides - code else current.benchOverrides + (code to value)
@@ -564,10 +568,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val open = active.filter { it.state == com.dirk.kalshiodds.decision.ScalpState.OPEN || it.state == com.dirk.kalshiodds.decision.ScalpState.PENDING_EXIT }
         val allRow = com.dirk.kalshiodds.decision.ScalpModels.rowFromStat(st, exits = container.scalp.loadExits().filter { com.dirk.kalshiodds.decision.ScalpModels.canonicalScalperId(it.scalperId) == model.code })
             .copy(open = active.count { it.state in listOf(com.dirk.kalshiodds.decision.ScalpState.PENDING_ENTRY, com.dirk.kalshiodds.decision.ScalpState.OPEN, com.dirk.kalshiodds.decision.ScalpState.PENDING_EXIT) }, unrealizedUsd = open.sumOf { it.unrealizedUsd(marks[it.ticker]?.bid(it.side)) ?: 0.0 })
-        val caps = container.scalpControls.state.value
         val chart = ScalpWindowChartData(
-            ticker, end, now, marks[ticker]?.bookAtMs, points, chartTrades,
-            sideLossFloorUsd = caps.windowSideLossUsd, adverseFillCap = caps.windowAdverseFills
+            ticker, end, now, marks[ticker]?.bookAtMs, points, chartTrades
         )
         _scalpAlgo.update { current ->
             if (current.model != model || current.followLive != selected.followLive || current.chart.ticker != selected.chart.ticker) current

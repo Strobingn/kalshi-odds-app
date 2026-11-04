@@ -21,7 +21,8 @@ class ReleaseGate0364Test {
             assertEquals(10, ShockFav.stopC(p)); assertTrue(p.noEdge2s); assertTrue(ShockFav.isO50(c))
             assertFalse(ScalpModels.ALL.any { it.code == c })
         }
-        assertFalse(ScalpModels.ALL.any { it.code.startsWith("sf5") || it.code.startsWith("sf6") })
+        assertFalse(ScalpModels.ALL.any { it.code.take(4) in codes || it.code in codes })
+        assertTrue(ScalpModels.modelByCode(ShockFav.FINAL60_ID) != null)
         assertEquals("BTC", ShockFav.TRADE_COIN)
     }
 

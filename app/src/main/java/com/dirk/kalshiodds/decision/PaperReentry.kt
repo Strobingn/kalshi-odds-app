@@ -6,7 +6,7 @@ package com.dirk.kalshiodds.decision
  *
  * The gap applies only while that side already has a pending or open clip.
  * A flat side takes the next quote immediately, so a close does not add idle time.
- * [WindowLossGate] is a separate brake and is not consulted here.
+ * A losing window does not pause new clips.
  */
 object PaperReentry {
     /**

@@ -138,7 +138,7 @@ data class ScalpParams(
             }
             add4(ScalpStrategy.DIP_HUNTER, listOf(0.05, 0.08), listOf(Triple(0.06, 0.05, 0.10), Triple(0.08, 0.06, 0.10)), 180.0)
             add4(ScalpStrategy.MOMENTUM, listOf(0.04, 0.06), listOf(Triple(0.06, 0.04, 0.08), Triple(0.08, 0.06, 0.10)), 180.0)
-            add4(ScalpStrategy.EXTREME_REVERSION, listOf(0.08, 0.12), listOf(Triple(0.08, 0.05, 0.06), Triple(0.12, 0.08, 0.10)), 120.0)
+            // Extreme-reversion (2–15¢) stays as a named seed for old rows. It is not on a roster that can trade.
             // 0.3.43 CF-reprice: 2 entry gaps × 2 exit profiles, window 3–13 min (walk-forward tuned like the others).
             for (g in listOf(0.06, 0.08)) for (e in listOf(Triple(0.08, 0.06, 0.0), Triple(0.06, 0.04, 0.0))) {
                 add(ScalpParams(g, e.first, e.second, e.third, 180.0, tauMaxS = 900.0, strategy = ScalpStrategy.CF_REPRICE))

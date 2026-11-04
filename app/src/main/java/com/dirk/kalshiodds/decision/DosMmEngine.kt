@@ -70,9 +70,6 @@ object DosMmEngine {
 }
 
 class HftBook {
-    /** Side + scalper code. A non-null reason refuses the open before inventory moves. */
-    var lossPause: (side: String, code: String) -> String? = { _, _ -> null }
-
     private class Sample(val t: Long, val px: Double, val sz: Double)
     private class Pos(
         val trade: ScalpTrade,
@@ -365,7 +362,7 @@ class HftBook {
         m: Mkt, id: String, side: String, px: Double, n: Int, mFee: Double, q: ScalpRule.Quote, fair: Double, newId: () -> String, note: String
     ): ScalpTrade? {
         if (m.pos[id] != null || n < 1 || px <= 0.01 || px >= 0.99) return null
-        if (lossPause(side, id) != null) return null
+        if (ScalpFloors.buyRefused(px, q.tauS) != null) return null
         val feeTotal = HftMathEngines.fee(n, px, mFee) * n
         val t = ScalpTrade(
             id = newId(),
@@ -390,20 +387,18 @@ class HftBook {
         val pos = m.pos.remove(id) ?: error("missing $id")
         val t = pos.trade
         val n = t.contracts
-        val feeTotal = HftMathEngines.fee(n, exitPx.coerceIn(0.01, 0.99), mFee) * n
-        val proceeds = exitPx * n
-        val net = proceeds - feeTotal - ((t.entryPrice ?: 0.0) * n + t.entryFeeUsd)
+        val px = exitPx.coerceIn(0.01, 0.99)
+        val feeTotal = HftMathEngines.fee(n, px, mFee) * n
+        val sold = ScalpFills.sell(t, at, n, px * n, feeTotal)
+        val net = sold.proceedsUsd - sold.exitFeeUsd - ((t.entryPrice ?: 0.0) * n + t.entryFeeUsd)
         pnl += net
         val i = scores.indexOfFirst { it.id == id }
         if (i >= 0) {
             val s = scores[i]
             scores[i] = s.copy(netUsd = s.netUsd + net, trades = s.trades + 1, wins = s.wins + if (net > 0.0) 1 else 0)
         }
-        return t.copy(
+        return sold.copy(
             state = ScalpState.CLOSED,
-            soldContracts = n,
-            proceedsUsd = proceeds,
-            exitFeeUsd = feeTotal,
             exitDecidedAtMs = at,
             closedAtMs = at,
             netUsd = net,
