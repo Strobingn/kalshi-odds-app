@@ -475,7 +475,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
 
     val scalpStrategyControls = container.scalpControls.state
     fun saveScalpStrategySettings(code: String, settings: com.dirk.kalshiodds.decision.ScalpStrategySettings) {
-        if (!code.startsWith("v2-")) return
+        if (!code.startsWith("v2-") && !com.dirk.kalshiodds.decision.BtcRegime.matches(code)) return
         val current = container.scalpControls.state.value
         val next = current.copy(strategySettings = current.strategySettings + (code to settings.normalized()))
         notePaperEdit(current, next)
@@ -494,6 +494,13 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** 1.0.11: Auto (null) / Force trade ("ACTIVE") / Force bench ("BENCHED") for one scalper. */
+    fun saveBtc15(next: com.dirk.kalshiodds.decision.BtcRegime.Settings) {
+        val current = container.scalpControls.state.value
+        val saved = current.copy(btc15 = next.normalized())
+        notePaperEdit(current, saved)
+        container.scalpControls.save(saved)
+    }
+
     fun setFinal60AvoidHours(on: Boolean) {
         val current = container.scalpControls.state.value
         val next = current.copy(final60AvoidHours = on)

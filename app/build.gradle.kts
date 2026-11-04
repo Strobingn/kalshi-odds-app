@@ -14,8 +14,8 @@ android {
         applicationId = "com.dirk.kalshiodds.scalp"
         minSdk = 26
         targetSdk = 35
-        versionCode = 58
-        versionName = "1.0.57"
+        versionCode = 59
+        versionName = "1.0.58"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

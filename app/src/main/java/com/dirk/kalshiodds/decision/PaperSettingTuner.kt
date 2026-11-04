@@ -36,7 +36,7 @@ object PaperSettingTuner {
     ): List<Change> {
         val out = ArrayList<Change>()
         for (tape in tapes) {
-            if (ScalpModels.modelByCode(tape.code) == null || tape.code == "v2-llm" || LateWindowScalper.matches(tape.code)) continue
+            if (ScalpModels.modelByCode(tape.code) == null || tape.code == "v2-llm" || LateWindowScalper.matches(tape.code) || BtcRegime.matches(tape.code)) continue
             val fields = fieldsFor(tape.code)
             if (fields.isEmpty()) continue
             val sample = tape.recentReal.filter { it.isFinite() }.takeLast(20)
@@ -125,7 +125,7 @@ object PaperSettingTuner {
 
     /** Same families the settings card actually applies. Kept here so the tuner does not depend on the LLM tools. */
     internal fun fieldsFor(code: String): Set<String> {
-        if (LateWindowScalper.matches(code)) return emptySet()
+        if (LateWindowScalper.matches(code) || BtcRegime.matches(code)) return emptySet()
         val m = ScalpModels.modelByCode(code) ?: return emptySet()
         if (m.code == "v2-llm") return emptySet()
         return when {

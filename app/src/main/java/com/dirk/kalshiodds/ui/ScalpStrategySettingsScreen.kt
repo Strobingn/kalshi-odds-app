@@ -52,7 +52,7 @@ internal fun StrategyKnob(label: String, value: Int, range: IntRange, tag: Strin
 @Composable
 internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: ScalpControls, onBack: () -> Unit = {},
     onChange: (ScalpStrategySettings) -> Unit = {}, onEnabled: (Boolean) -> Unit = {}, onBenchOverride: (String?) -> Unit = {},
-    onFinal60AvoidHours: (Boolean) -> Unit = {}) {
+    onFinal60AvoidHours: (Boolean) -> Unit = {}, onBtc15: (BtcRegime.Settings) -> Unit = {}) {
     val c = DipTheme.colors
     val settings = controls.settings(model.code)
     fun set(next: ScalpStrategySettings) = onChange(next.manual())
@@ -64,6 +64,8 @@ internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: Sc
     val high = (settings.maxEntryCents ?: factoryMax).coerceIn(low + 1, ceiling)
     val buyKnobHi = ceiling
     val late = LateWindowScalper.matches(model.code)
+    val btc = BtcRegime.matches(model.code)
+    val btc15 = controls.btc15.normalized()
     LazyColumn(Modifier.fillMaxSize().background(c.bg), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item(key = "settings-header") {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -94,14 +96,42 @@ internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: Sc
                 Column(Modifier.weight(1f)) {
                     Text("AI learns", color = c.textPrimary, fontWeight = FontWeight.SemiBold)
                     Text(if (settings.aiLearns) {
-                        if (late) "After every close it does not move this window. The buy band stays 15–${factoryMax}¢ and take profit stays 25¢ (sell target cannot exceed ${PaperFleetDefaults.PAYOUT_CENTS}¢). It never freezes or benches."
-                        else "After every close it moves clip, stop, and the entry window. The step scales with that trade's P&L. The buy band stays 15–${PaperFleetDefaults.BUY_MAX}¢ and take profit stays 25¢. It never raises the buy max above ${PaperFleetDefaults.BUY_MAX}¢. It never freezes or benches. A change you make by hand resets the baseline."
+                        when {
+                            late -> "After every close it does not move this window. The buy band stays 15–${factoryMax}¢ and take profit stays 25¢ (sell target cannot exceed ${PaperFleetDefaults.PAYOUT_CENTS}¢). It never freezes or benches."
+                            btc -> "It does not shrink the 15¢ floor or the 25¢ take profit, and it never pauses this scalper. A change you make by hand is the next order's settings."
+                            else -> "After every close it moves clip, stop, and the entry window. The step scales with that trade's P&L. The buy band stays 15–${PaperFleetDefaults.BUY_MAX}¢ and take profit stays 25¢. It never raises the buy max above ${PaperFleetDefaults.BUY_MAX}¢. It never freezes or benches. A change you make by hand resets the baseline."
+                        }
                     } else "Off · sliders stay exactly where you set them", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
                 }
                 Switch(checked = settings.aiLearns, onCheckedChange = { onChange(settings.copy(aiLearns = it).manual()) }, modifier = Modifier.testTag("STRATEGY_AI_LEARNS"))
             }
             if (settings.aiNote.isNotBlank()) Text("Last adjusted: ${settings.aiNote}", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
             when {
+                btc -> {
+                    fun put(next: BtcRegime.Settings) = onBtc15(next.normalized())
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Avoid UTC hours 8/11/16/18/21", color = c.textPrimary, fontWeight = FontWeight.SemiBold)
+                            Text("Off by default. When on, BTC 15m regime skips those clock hours.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Switch(checked = btc15.avoidUtcHours, onCheckedChange = { put(btc15.copy(avoidUtcHours = it)) }, modifier = Modifier.testTag("BTC15_AVOID_HOURS"))
+                    }
+                    StrategyKnob("Contracts an order", PaperClip.sized(settings.contracts ?: PaperClip.MIN), PaperClip.MIN..1000, "KNOB_CONTRACTS") { set(settings.copy(contracts = it)) }
+                    StrategyKnob("Buy floor", btc15.floorCents, PaperFleetDefaults.BUY_MIN..60, "KNOB_BTC_FLOOR", { "$it¢" }) { put(btc15.copy(floorCents = it)) }
+                    StrategyKnob("Early max ask", btc15.maxAskCents, btc15.floorCents..PaperFleetDefaults.BUY_CEILING, "KNOB_BTC_MAX", { "$it¢" }) { put(btc15.copy(maxAskCents = it)) }
+                    StrategyKnob("Prime YES max", btc15.primeYesMax, btc15.floorCents..PaperFleetDefaults.BUY_CEILING, "KNOB_BTC_YES", { "$it¢" }) { put(btc15.copy(primeYesMax = it)) }
+                    StrategyKnob("Prime NO max", btc15.primeNoMax, btc15.floorCents..PaperFleetDefaults.BUY_CEILING, "KNOB_BTC_NO", { "$it¢" }) { put(btc15.copy(primeNoMax = it)) }
+                    StrategyKnob("Late max ask", btc15.lateMaxAsk, btc15.floorCents..PaperFleetDefaults.BUY_CEILING, "KNOB_BTC_LATE", { "$it¢" }) { put(btc15.copy(lateMaxAsk = it)) }
+                    StrategyKnob("Stop", btc15.stopCents, 1..48, "KNOB_BTC_STOP", { "$it¢" }) { put(btc15.copy(stopCents = it)) }
+                    StrategyKnob("Late stop", btc15.lateStopCents, 1..48, "KNOB_BTC_LATE_STOP", { "$it¢" }) { put(btc15.copy(lateStopCents = it)) }
+                    StrategyKnob("Take profit", btc15.takeProfitCents, 1..60, "KNOB_BTC_TP", { "$it¢" }) { put(btc15.copy(takeProfitCents = it)) }
+                    StrategyKnob("Final cut", btc15.finalCutSeconds, 1..59, "KNOB_BTC_CUT", { "${it}s" }) { put(btc15.copy(finalCutSeconds = it)) }
+                    StrategyKnob("Falling-price ticks", btc15.fallLookbackTicks, 2..12, "KNOB_BTC_FALL") { put(btc15.copy(fallLookbackTicks = it)) }
+                    StrategyKnob("Entries per window", btc15.maxEntriesPerWindow, 1..10, "KNOB_BTC_ENTRIES") { put(btc15.copy(maxEntriesPerWindow = it)) }
+                    StrategyKnob("Spike", btc15.spikeCents, 1..30, "KNOB_BTC_SPIKE", { "$it¢" }) { put(btc15.copy(spikeCents = it)) }
+                    StrategyKnob("Spike window", btc15.spikeWindowSec, 1..60, "KNOB_BTC_SPIKE_SEC", { "${it}s" }) { put(btc15.copy(spikeWindowSec = it)) }
+                    Text("KXBTC15M only. Size is the contract setting above, at least ${PaperClip.MIN}. Early 10:00+ uses the early max. Prime 5:00–9:59 uses the YES and NO caps. Late 1:00–4:59 buys the favourite and uses the late stop. Under 1:00 it flattens at the final cut and does not hold to settlement.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+                }
                 ScalpModels.isResearch(model) -> {
                     StrategyKnob("Edge needed after fees", settings.edgeCents ?: Research.defaultEdge(model.code), 0..30, "KNOB_EDGE", { "$it¢" }) { set(settings.copy(edgeCents = it)) }
                     StrategyKnob("Contracts an order", PaperClip.sized(settings.contracts ?: controls.research.clip), PaperClip.MIN..1000, "KNOB_CONTRACTS") { set(settings.copy(contracts = it)) }
@@ -146,7 +176,10 @@ internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: Sc
                     Text("Original strategy: these add to its built-in rules (3¢ trail, window-start entries, >95% hold rule stay on).", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
                 }
             }
-            OutlinedButton(onClick = { onChange(PaperFleetDefaults.factory(model.code)) }, modifier = Modifier.fillMaxWidth()) { Text("Back to its defaults") }
+            OutlinedButton(onClick = {
+                if (btc) onBtc15(BtcRegime.Settings())
+                onChange(PaperFleetDefaults.factory(model.code))
+            }, modifier = Modifier.fillMaxWidth()) { Text("Back to its defaults") }
         } }
     }
 }

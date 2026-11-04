@@ -218,7 +218,12 @@ object ScalpModels {
             LateWindowScalper.LABEL,
             "Paper only. Opens when time left in the 15-minute window is under 5 minutes (1–5). Hybrid Quant gate on, scores above 0.65 dropped. Buy 15–95¢, take profit 25¢ (sell target capped at 99¢), at least 50 contracts, open-at-once unlimited. Holds to settlement if take-profit is not hit."
         ),
-        SF62F(ShockFav.FINAL60_ID, "Final 60s favorite", ShockFav.v(ShockFav.FINAL60).summary())
+        SF62F(ShockFav.FINAL60_ID, "Final 60s favorite", ShockFav.v(ShockFav.FINAL60).summary()),
+        BTC15R(
+            BtcRegime.ID,
+            BtcRegime.LABEL,
+            "KXBTC15M only. EARLY from 10:00 needs velocity and 1h VWAP, ask 15–55¢. PRIME 5:00–9:59 buys YES ≤72¢ and NO ≤65¢. LATE 1:00–4:59 buys the favourite only, stop 8¢. The last minute flattens at 45s and does not hold to settlement. Paper only."
+        )
     }
 
     const val V2_BLURB = "v2 paper: new trades default to a 3¢ bid-peak trail active from entry and independent 20% fill-price stop. Existing trades retain saved exits. Preserve positive/inconclusive entry settings; bounded adjustments for sustained losses. Every trade has a protective stop. Exit in the final minute unless fresh CF fair ≥ 97%, bid ≥ 90¢ and holding beats selling. Decisions are estimates, never guaranteed wins. Actual stop/trail and adaptation evidence are in the trade note."
@@ -234,7 +239,7 @@ object ScalpModels {
     /** Kept winners, then paper nudges. Parents stay first and unchanged. */
     val HFT: List<Model> = listOf(Model.DOS_MM, Model.TS_ARB, Model.MRLA_CS, Model.IV_SMILE)
     /** Kept winners, then paper nudges, then the 1.0.37 HFT engines. */
-    val ALL: List<Model> = WINNERS + Model.values().filter { ScalpVariants.isLive(it.code) } + HFT + listOf(Model.LATE_WINDOW)
+    val ALL: List<Model> = WINNERS + Model.values().filter { ScalpVariants.isLive(it.code) } + HFT + listOf(Model.LATE_WINDOW, Model.BTC15R)
     private val RAW_ALL: List<Model> = Model.values().toList()
     private val KEPT_CODES: Set<String> = ALL.map { it.code }.toSet()
     val REMOVED_CODES: Set<String> = RAW_ALL.map { it.code }.filter { it !in KEPT_CODES }.toSet()
@@ -378,6 +383,7 @@ object ScalpModels {
             Model.FAIR_T2 -> "stop ${Math.round(ScalpParams.FAIR_TWEAKS[1].stop * 100)}¢"
             Model.DOS_MM, Model.TS_ARB, Model.MRLA_CS, Model.IV_SMILE -> "stop 5-gate · paper"
             Model.LATE_WINDOW -> "stop none · take profit +${PaperFleetDefaults.PROFIT_CENTS}¢ · else hold to settlement"
+            Model.BTC15R -> "stop 12¢ · late stop 8¢ · take profit +${PaperFleetDefaults.PROFIT_CENTS}¢ · flatten at 45s"
             else -> ScalpModels.legacyStop(m)
         }
     }
