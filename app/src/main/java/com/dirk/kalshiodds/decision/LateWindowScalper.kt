@@ -89,6 +89,7 @@ object LateWindowScalper {
         if (!tradesCoin(coin, hybridCoins)) return "coin $coin is outside the Hybrid Quant set"
         if (!inWindow(tauS, mins)) return "outside late window · under ${mins.coerceIn(MIN_MINUTES, MAX_MINUTES)} min"
         if (!askOk(ask, maxCents)) return "outside ${PaperFleetDefaults.BUY_MIN}–${bandMaxCents(maxCents)}¢ buy band"
+        ScalpFloors.buyRefused(ask, tauS)?.let { return it }
         if (!score.isFinite() || score > ModelFilter.HIGH_SCORE) return "high-score regime · score above ${ModelFilter.HIGH_SCORE}"
         if (!modelEnter) return modelReason.ifBlank { "hybrid gate blocked" }
         return null

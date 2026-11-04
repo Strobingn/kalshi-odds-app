@@ -217,7 +217,8 @@ object ScalpModels {
             LateWindowScalper.CODE,
             LateWindowScalper.LABEL,
             "Paper only. Opens when time left in the 15-minute window is under 5 minutes (1–5). Hybrid Quant gate on, scores above 0.65 dropped. Buy 15–95¢, take profit 25¢ (sell target capped at 99¢), at least 50 contracts, open-at-once unlimited. Holds to settlement if take-profit is not hit."
-        )
+        ),
+        SF62F(ShockFav.FINAL60_ID, "Final 60s favorite", ShockFav.v(ShockFav.FINAL60).summary())
     }
 
     const val V2_BLURB = "v2 paper: new trades default to a 3¢ bid-peak trail active from entry and independent 20% fill-price stop. Existing trades retain saved exits. Preserve positive/inconclusive entry settings; bounded adjustments for sustained losses. Every trade has a protective stop. Exit in the final minute unless fresh CF fair ≥ 97%, bid ≥ 90¢ and holding beats selling. Decisions are estimates, never guaranteed wins. Actual stop/trail and adaptation evidence are in the trade note."
@@ -228,7 +229,7 @@ object ScalpModels {
      */
     val WINNERS: List<Model> = listOf(
         Model.SF42, Model.V2_G10_MK, Model.G14, Model.SF16F, Model.SF15, Model.SF17F,
-        Model.V2_DIP_SEED, Model.SF07, Model.SF04, Model.SF08, Model.FCFADE_H600, Model.SF41
+        Model.V2_DIP_SEED,         Model.SF07, Model.SF04, Model.SF08, Model.FCFADE_H600, Model.SF41, Model.SF62F
     )
     /** Kept winners, then paper nudges. Parents stay first and unchanged. */
     val HFT: List<Model> = listOf(Model.DOS_MM, Model.TS_ARB, Model.MRLA_CS, Model.IV_SMILE)
@@ -363,6 +364,7 @@ object ScalpModels {
     fun stopLabel(m: Model): String {
         if (isV2(m)) return "stop per trade · default 20% fill stop + 3¢ peak trail; saved rules in trade note; 60s close check"
         if (m.code == KeptScalpers.FAIR_ID) return "stop 8¢"
+        if (m.code == ShockFav.FINAL60_ID) return "stop none · hold to settlement · one entry per window"
         ShockFav.byVariantId(m.code)?.let { p -> return "stop ${ShockFav.stopC(p)}¢" + if (ShockFav.stopTrainChosen(p)) "" else " (default)" }
         return when (m) {
             Model.FORECAST_RIDE, Model.FORECAST_FADE, Model.FCFADE_H600 -> "stop ${ForecastScalp.STOP_C}¢ (default)"

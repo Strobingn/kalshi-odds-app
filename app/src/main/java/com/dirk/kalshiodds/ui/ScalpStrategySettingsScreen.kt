@@ -51,7 +51,8 @@ internal fun StrategyKnob(label: String, value: Int, range: IntRange, tag: Strin
 
 @Composable
 internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: ScalpControls, onBack: () -> Unit = {},
-    onChange: (ScalpStrategySettings) -> Unit = {}, onEnabled: (Boolean) -> Unit = {}, onBenchOverride: (String?) -> Unit = {}) {
+    onChange: (ScalpStrategySettings) -> Unit = {}, onEnabled: (Boolean) -> Unit = {}, onBenchOverride: (String?) -> Unit = {},
+    onFinal60AvoidHours: (Boolean) -> Unit = {}) {
     val c = DipTheme.colors
     val settings = controls.settings(model.code)
     fun set(next: ScalpStrategySettings) = onChange(next.manual())
@@ -127,6 +128,15 @@ internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: Sc
                     Text("${ceiling}¢ buy ceiling · stop loss always active · contracts and re-entries per 15-minute window stay unlimited unless you set a limit. Each new entry still needs a fresh trigger. Until minute limits new entries; the final-minute exit policy still applies. Open-at-once is unlimited at 0 and does not create extra entry signals.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
                 }
                 else -> {
+                    if (model.code == ShockFav.FINAL60_ID) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Avoid UTC hours 8/11/16/18/21", color = c.textPrimary, fontWeight = FontWeight.SemiBold)
+                                Text("Off by default. When on, Final 60s favorite skips those clock hours.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+                            }
+                            Switch(checked = controls.final60AvoidHours, onCheckedChange = onFinal60AvoidHours, modifier = Modifier.testTag("FINAL60_AVOID_HOURS"))
+                        }
+                    }
                     StrategyKnob("Until minute", settings.untilMinute, 1..14, "KNOB_UNTIL", { "minute $it" }) { set(settings.copy(untilMinute = it)) }
                     StrategyKnob("Lowest price it buys", low, PaperFleetDefaults.BUY_MIN..high, "KNOB_MIN", { "$it¢" }) { set(settings.copy(minEntryCents = it)) }
                     StrategyKnob("Highest price it buys", high, low..buyKnobHi, "KNOB_MAX", { "$it¢" }) { set(settings.copy(maxEntryCents = it)) }

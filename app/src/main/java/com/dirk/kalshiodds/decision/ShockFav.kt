@@ -30,6 +30,10 @@ object ShockFav {
     enum class O50 { UPTICK, BOTH, MAKER, AI }
     /** 0.3.59: Scalp tab is Bitcoin only — sf scalpers trade BTC; ETH/SOL spot is signal input only. */
     const val TRADE_COIN = "BTC"
+    /** Final 60s favourite. Card id is [FINAL60_ID]. Family code stays four characters so byVariantId resolves. */
+    const val FINAL60 = "sf62"
+    const val FINAL60_ID = "sf62f"
+    val FINAL60_AVOID_HOURS = setOf(8, 11, 16, 18, 21)
 
     data class Params(
         val code: String,
@@ -62,6 +66,8 @@ object ShockFav {
         val favTmax: Double = 60.0,
         val fmin: Double = 0.90,
         val gap: Double = 0.05,
+        /** Lowest ask this favourite will buy. Zero leaves older favourites unchanged. */
+        val amin: Double = 0.0,
         val amax: Double = 0.97,
         val brti: Boolean = false,
         /** 0.3.63 Simple dip: buy a side when its ask is ≥ dip below its own rolling 5-min average ask (price only). */
@@ -101,7 +107,9 @@ object ShockFav {
             tpNetO50?.let { append(String.format(java.util.Locale.US, "; sell at +%.0f¢ net of fees", it * 100)) }
             append("; stop 10¢, hold ≤3 min")
         }
-        private fun summaryShockFav(): String = buildString {
+        private fun summaryShockFav(): String = if (code == FINAL60) {
+            "Final 60s: favourite only, fair ≥ 80%, ask 80–98¢, hold to settlement. One IOC fill and one entry per window. Paper only."
+        } else buildString {
             if (shock) append(String.format(java.util.Locale.US, "shock ≥%.0fbp/%ds, lag ≥%.0f¢, hold ≤%ds", xBp, yS, lag * 100, maxHoldS))
             if (shock && fav) append(" + ")
             if (fav) append(String.format(java.util.Locale.US, "late fav τ≤%.0fs, fair ≥%.0f%%, ≥%.0f¢ under%s", favTmax, fmin * 100, gap * 100, if (brti) " (60 s avg fair)" else ""))
@@ -206,7 +214,12 @@ object ShockFav {
         Params("sf41", "Simple dip 5¢ → +8¢", kind = Kind.SIMPLE_DIP, shock = false, dip = 0.05, tp = 0.08, group = "Simple", noEdge2s = SIMPLE_NOEDGE.getValue("sf41"), oos = SIMPLE_OOS.getValue("sf41")),
         Params("sf42", "Simple dip 5¢ → +15¢", kind = Kind.SIMPLE_DIP, shock = false, dip = 0.05, tp = 0.15, group = "Simple", noEdge2s = SIMPLE_NOEDGE.getValue("sf42"), oos = SIMPLE_OOS.getValue("sf42")),
         Params("sf43", "Simple dip 10¢ → +8¢", kind = Kind.SIMPLE_DIP, shock = false, dip = 0.10, tp = 0.08, group = "Simple", noEdge2s = SIMPLE_NOEDGE.getValue("sf43"), oos = SIMPLE_OOS.getValue("sf43")),
-        Params("sf44", "Simple dip 10¢ → +15¢", kind = Kind.SIMPLE_DIP, shock = false, dip = 0.10, tp = 0.15, group = "Simple", noEdge2s = SIMPLE_NOEDGE.getValue("sf44"), oos = SIMPLE_OOS.getValue("sf44"))
+        Params("sf44", "Simple dip 10¢ → +15¢", kind = Kind.SIMPLE_DIP, shock = false, dip = 0.10, tp = 0.15, group = "Simple", noEdge2s = SIMPLE_NOEDGE.getValue("sf44"), oos = SIMPLE_OOS.getValue("sf44")),
+        Params(
+            FINAL60, "Final 60s favorite", shock = false, fav = true,
+            favTmin = 0.0, favTmax = 60.0, fmin = 0.80, gap = 0.0, amin = 0.80, amax = 0.98,
+            noEdge2s = true, oos = "KXBTC15M final 60s favourite 80–98¢ held to settlement: +2.67¢/contract net"
+        )
     )
     private val BY_CODE = VARIANTS.associateBy { it.code }
 
@@ -321,13 +334,20 @@ object ShockFav {
         return if (m > 0) "YES" else "NO"
     }
 
-    fun shockEntryOk(p: Params, sideFair: Double, ask: Double): Boolean = sideFair - ask >= p.lag - 1e-9 && ask in 0.10..0.95
+    fun shockEntryOk(p: Params, sideFair: Double, ask: Double): Boolean = sideFair - ask >= p.lag - 1e-9 && ask in 0.15..0.95
 
     fun usHours(closeMs: Long): Boolean = java.time.Instant.ofEpochMilli(closeMs - 900_000L).atZone(java.time.ZoneOffset.UTC).hour in 13..20
 
     fun favEntryOk(p: Params, sideFair: Double, ask: Double, tauS: Double, coin: String, closeMs: Long = 0L): Boolean =
         p.fav && (!p.offUsHours || !usHours(closeMs)) && (p.coins == null || coin in p.coins) && tauS >= p.favTmin && tauS <= p.favTmax &&
-            sideFair >= p.fmin - 1e-9 && sideFair - ask >= p.gap - 1e-9 && ask <= p.amax + 1e-9
+            sideFair >= p.fmin - 1e-9 && sideFair - ask >= p.gap - 1e-9 && ask >= p.amin - 1e-9 && ask <= p.amax + 1e-9
+
+    fun isFinal60(variantId: String): Boolean = variantId == FINAL60 || variantId == FINAL60_ID || variantId.startsWith("$FINAL60-")
+
+    fun utcHour(atMs: Long): Int = java.time.Instant.ofEpochMilli(atMs).atZone(java.time.ZoneOffset.UTC).hour
+
+    /** Optional Final 60s filter. Hours are UTC clock hours of the quote. */
+    fun final60HourBlocked(atMs: Long): Boolean = utcHour(atMs) in FINAL60_AVOID_HOURS
 
     /**
      * Shock exit reason, or null to keep holding. Hold-to-close / combo legs ride to settlement once in the

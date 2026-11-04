@@ -130,11 +130,12 @@ class AdviceGuardTest {
     @Test fun lateWindowBlocksOutsideFiveMinutesAndHighScores() {
         assertNull(LateWindowScalper.blockReason("BTC", emptySet(), 299.0, 0.40, 0.50, true, "enter"))
         assertTrue(LateWindowScalper.blockReason("BTC", emptySet(), 300.0, 0.40, 0.50, true, "enter")!!.contains("outside late window"))
-        assertTrue(LateWindowScalper.blockReason("BTC", emptySet(), 120.0, 0.40, 0.66, true, "enter")!!.contains("high-score"))
+        assertTrue(LateWindowScalper.blockReason("BTC", emptySet(), 120.0, 0.55, 0.66, true, "enter")!!.contains("high-score"))
+        assertTrue(LateWindowScalper.blockReason("BTC", emptySet(), 120.0, 0.40, 0.40, true, "enter")!!.contains("50"))
         assertTrue(LateWindowScalper.blockReason("BTC", emptySet(), 120.0, 0.10, 0.40, true, "enter")!!.contains("15–95"))
-        assertTrue(LateWindowScalper.blockReason("BTC", emptySet(), 120.0, 0.40, 0.40, false, "hybrid gate")!!.contains("hybrid gate"))
-        assertTrue(LateWindowScalper.blockReason("ETH", emptySet(), 120.0, 0.40, 0.40, true, "enter")!!.contains("ETH"))
-        assertNull(LateWindowScalper.blockReason("ETH", setOf("ETH"), 120.0, 0.40, 0.40, true, "enter"))
+        assertTrue(LateWindowScalper.blockReason("BTC", emptySet(), 120.0, 0.55, 0.40, false, "hybrid gate")!!.contains("hybrid gate"))
+        assertTrue(LateWindowScalper.blockReason("ETH", emptySet(), 120.0, 0.55, 0.40, true, "enter")!!.contains("ETH"))
+        assertNull(LateWindowScalper.blockReason("ETH", setOf("ETH"), 120.0, 0.55, 0.40, true, "enter"))
         assertEquals(setOf("BTC", "SOL"), LateWindowScalper.coins(setOf("sol")))
     }
 

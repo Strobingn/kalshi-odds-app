@@ -430,15 +430,13 @@ object TwentyScalperFleet {
     /**
      * Paper book for the fleet. Several clips may be open on one scalper and side.
      * [PaperReentry] spaces them. External inputs stay null on the live path, so
-     * those scalpers do not trade. [lossPause] is the window loss brake.
+     * those scalpers do not trade.
      */
     class FleetBook {
         @Volatile var polyYesAsk: Double? = null
         @Volatile var perpBasis: Double? = null
         @Volatile var macroZ: Double? = null
         @Volatile var timesFmYes: Double? = null
-        /** Side + scalper code. A non-null reason refuses the open before inventory moves. */
-        var lossPause: (side: String, code: String) -> String? = { _, _ -> null }
 
         private class Sample(val t: Long, val px: Double)
         private class OpenPos(val strategyId: String, val trade: ScalpTrade, val entry: Double, val atMs: Long, val cost: Double)
@@ -713,12 +711,12 @@ object TwentyScalperFleet {
 
         private fun open(m: Mkt, q: ScalpRule.Quote, id: String, gate: Gate, newId: () -> String): ScalpTrade? {
             if (gate.contracts < 1) return null
-            if (lossPause(gate.side, id) != null) return null
             val ticker = q.ticker.uppercase()
             val clock = "$ticker|$id|${gate.side}"
             val openN = m.pos.count { it.strategyId == id && it.trade.side == gate.side }
             if (!PaperReentry.allowed(openN, lastClipMs[clock], q.nowMs)) return null
             val px = gate.avgFill
+            if (ScalpFloors.buyRefused(px, q.tauS) != null) return null
             if (px <= 0.01 || px >= 0.99) return null
             val n = PaperClip.sized(gate.contracts)
             val fee = quadraticFeeUsd(n, px)
@@ -747,14 +745,12 @@ object TwentyScalperFleet {
             val t = pos.trade
             val n = t.contracts
             val px = exitPx.coerceIn(0.01, 0.99)
-            val fee = quadraticFeeUsd(n, px)
             val proceeds = px * n
-            val net = proceeds - fee - ((t.entryPrice ?: 0.0) * n + t.entryFeeUsd)
-            return t.copy(
+            val fee = quadraticFeeUsd(n, px)
+            val sold = ScalpFills.sell(t, at, n, proceeds, fee)
+            val net = sold.proceedsUsd - sold.exitFeeUsd - ((t.entryPrice ?: 0.0) * n + t.entryFeeUsd)
+            return sold.copy(
                 state = ScalpState.CLOSED,
-                soldContracts = n,
-                proceedsUsd = proceeds,
-                exitFeeUsd = fee,
                 exitDecidedAtMs = at,
                 closedAtMs = at,
                 netUsd = net,

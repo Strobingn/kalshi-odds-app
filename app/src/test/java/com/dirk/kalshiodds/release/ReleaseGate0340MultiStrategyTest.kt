@@ -74,17 +74,16 @@ class ReleaseGate0340MultiStrategyTest {
     }
 
     @Test
-    fun extremeReversionBuysOnlyTheVeryCheapSideBelowFair() {
+    fun extremeReversionIsOffTheRoster() {
         val tau = 600.0
         val cheap = q(close - 600_000L, 0.04, 0.05, spot = spotFor(0.20, tau))
         val (sig, why) = ScalpRule.strategySignal(cheap, seed(ScalpStrategy.EXTREME_REVERSION), listOf("YES", "NO"), emptyList())
-        assertNotNull(why, sig)
-        assertEquals("YES", sig!!.side)
-        // Fair-gap ignores sub-10¢ asks entirely.
+        assertNull(sig)
+        assertTrue(why, why.contains("off the roster"))
         assertNull(ScalpRule.entrySignal(cheap, ScalpParams.CLASSIC.copy(minGap = 0.0)).first)
-        // A 30¢ ask is not "very cheap".
         val mid = q(close - 600_000L, 0.29, 0.30, spot = spotFor(0.50, tau))
         assertNull(ScalpRule.strategySignal(mid, seed(ScalpStrategy.EXTREME_REVERSION), listOf("YES", "NO"), emptyList()).first)
+        assertTrue(ScalpParams.STRATEGY_GRID.none { it.strategy == ScalpStrategy.EXTREME_REVERSION })
     }
 
     private fun book(bankroll: Double = 1_000.0): ScalpBook {

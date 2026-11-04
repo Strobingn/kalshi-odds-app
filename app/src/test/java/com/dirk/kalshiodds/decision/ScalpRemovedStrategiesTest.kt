@@ -23,7 +23,8 @@ class ScalpRemovedStrategiesTest {
         "sf04",
         "sf08",
         "fcfade-h600",
-        "sf41"
+        "sf41",
+        ShockFav.FINAL60_ID
     )
 
     private fun old(id: String) = ScalpTrade(

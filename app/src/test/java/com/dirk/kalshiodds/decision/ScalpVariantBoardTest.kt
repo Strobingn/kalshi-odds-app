@@ -7,7 +7,8 @@ import org.junit.Test
 
 class ScalpVariantBoardTest {
     @Test fun eachWinnerGetsThreeDistinctPaperVariants() {
-        val parents = ScalpModels.WINNERS.map { it.code } + listOf("sf43", "g16-t14-s08-d15-w300", "dip-g05-t08-s06-d10-w180-mk")
+        val parents = (ScalpModels.WINNERS.map { it.code } + listOf("sf43", "g16-t14-s08-d15-w300", "dip-g05-t08-s06-d10-w180-mk"))
+            .filter { it != ShockFav.FINAL60_ID }
         assertTrue(ScalpVariants.ALL.size in 36..48)
         parents.forEach { parent ->
             val kids = ScalpVariants.ALL.filter { it.parentId == parent }

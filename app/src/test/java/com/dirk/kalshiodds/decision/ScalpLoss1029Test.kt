@@ -78,10 +78,10 @@ class ScalpLoss1029Test {
         )
         ids.forEach { code ->
             val saved = ScalpParamSanity.settings(code, ScalpStrategySettings(minEntryCents = 1, maxEntryCents = 12))
-            assertEquals(code, 10, saved.minEntryCents)
+            assertEquals(code, ScalpFloors.GENERAL, saved.minEntryCents)
             assertEquals(code, 55, saved.maxEntryCents)
             val band = ScalpParamSanity.v2Band(code, 0.01, 0.12)
-            assertEquals(code, 0.10, band.first, 1e-9)
+            assertEquals(code, ScalpFloors.GENERAL / 100.0, band.first, 1e-9)
             assertEquals(code, 0.55, band.second, 1e-9)
             val kept = ScalpParamSanity.settings(code, ScalpStrategySettings(minEntryCents = 18, maxEntryCents = 40))
             assertEquals(code, 18, kept.minEntryCents)
@@ -91,7 +91,7 @@ class ScalpLoss1029Test {
             "v2-dip-g05-t08-s06-d10-w180-v3" to ScalpStrategySettings(minEntryCents = 1, maxEntryCents = 14)
         )).normalized()
         val row = loaded.settings("v2-dip-g05-t08-s06-d10-w180-v3")
-        assertEquals(10, row.minEntryCents)
+        assertEquals(ScalpFloors.GENERAL, row.minEntryCents)
         assertEquals(55, row.maxEntryCents)
     }
 
