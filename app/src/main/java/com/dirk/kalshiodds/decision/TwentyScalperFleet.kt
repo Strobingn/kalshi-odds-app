@@ -747,7 +747,8 @@ object TwentyScalperFleet {
             val px = exitPx.coerceIn(0.01, 0.99)
             val proceeds = px * n
             val fee = quadraticFeeUsd(n, px)
-            val sold = ScalpFills.sell(t, at, n, proceeds, fee)
+            // sell() stamps the chart fill, then replaces the fee with a Kalshi sweep. Book this fee.
+            val sold = ScalpFills.sell(t, at, n, proceeds, fee).copy(exitFeeUsd = fee)
             val net = sold.proceedsUsd - sold.exitFeeUsd - ((t.entryPrice ?: 0.0) * n + t.entryFeeUsd)
             return sold.copy(
                 state = ScalpState.CLOSED,

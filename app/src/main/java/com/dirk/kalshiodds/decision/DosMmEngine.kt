@@ -389,7 +389,8 @@ class HftBook {
         val n = t.contracts
         val px = exitPx.coerceIn(0.01, 0.99)
         val feeTotal = HftMathEngines.fee(n, px, mFee) * n
-        val sold = ScalpFills.sell(t, at, n, px * n, feeTotal)
+        // sell() stamps the chart fill, then replaces the fee with a Kalshi sweep. Book mFee.
+        val sold = ScalpFills.sell(t, at, n, px * n, feeTotal).copy(exitFeeUsd = feeTotal)
         val net = sold.proceedsUsd - sold.exitFeeUsd - ((t.entryPrice ?: 0.0) * n + t.entryFeeUsd)
         pnl += net
         val i = scores.indexOfFirst { it.id == id }
