@@ -8,7 +8,7 @@ Opens every :00, :15, :30, :45. Settlement is the 60-second average of CF Benchm
 Edge is timing + fees, not directional prediction. Across many windows the market is roughly fair.
 
 ## Trading rules (authoritative)
-Load `docs/trading-rules.md` when touching entry, exit, sizing, or time-left logic.
+Load `docs/trading-rules.md` (or the skill) when touching entry, exit, sizing, or time-left logic.
 
 Key points (do not contradict these):
 - Buy the cheaper side under max ask when it is not still falling. No dip required.
@@ -32,7 +32,7 @@ Key points (do not contradict these):
 - Market data / Kalshi feed    → data or kalshi client
 - UI (odds, positions, controls) → components related to the 15m window
 - Tests                        → tests/trading/ or co-located *.test.ts
-- Docs / rules                 → docs/trading-rules.md
+- Docs / rules                 → docs/trading-rules.md or the Kalshi 15m skill
 
 ## Testing
 - Unit tests for entry conditions, exit conditions, and time-left branches are required.
