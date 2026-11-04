@@ -91,7 +91,8 @@ fun ScalpAlgoScreen(viewModel: OddsViewModel, onBack: () -> Unit) {
             onChange = { viewModel.saveScalpStrategySettings(model.code, it) },
             onEnabled = { viewModel.enableScalpStrategy(model.code, it) },
             onBenchOverride = { viewModel.setScalpBenchOverride(model.code, it) },
-            onFinal60AvoidHours = { viewModel.setFinal60AvoidHours(it) })
+            onFinal60AvoidHours = { viewModel.setFinal60AvoidHours(it) },
+            onBtc15 = { viewModel.saveBtc15(it) })
     } else {
         val book = d.chart.ticker.takeIf { it.isNotBlank() }?.let { viewModel.orderBook(it) }
         val strike = viewModel.displayStrike(

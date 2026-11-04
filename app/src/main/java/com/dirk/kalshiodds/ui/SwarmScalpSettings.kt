@@ -39,7 +39,8 @@ fun SwarmScalpSettingsDialog(onClose: () -> Unit) {
             onChange = { next -> val current = store.state.value; val savedNext = current.copy(strategySettings = current.strategySettings + (model.code to next)); note(current, savedNext); store.save(savedNext) },
             onEnabled = { enabled -> val current = store.state.value; val savedNext = current.copy(disabledStrategies = if (enabled) current.disabledStrategies - model.code else current.disabledStrategies + model.code); note(current, savedNext); store.save(savedNext) },
             onBenchOverride = { v -> val cur = store.state.value; store.save(cur.copy(benchOverrides = if (v == null) cur.benchOverrides - model.code else cur.benchOverrides + (model.code to v))) },
-            onFinal60AvoidHours = { on -> val cur = store.state.value; store.save(cur.copy(final60AvoidHours = on)) })
+            onFinal60AvoidHours = { on -> val cur = store.state.value; store.save(cur.copy(final60AvoidHours = on)) },
+            onBtc15 = { next -> val cur = store.state.value; val savedNext = cur.copy(btc15 = next.normalized()); note(cur, savedNext); store.save(savedNext) })
         else if (global) SwarmScalpSettingsContent(saved, onBack = { global = false }) { next -> val current = store.state.value; note(current, next); store.save(next); global = false }
         else ScalpSettingsChooser(onClose, { global = true }, { selected = it })
     }

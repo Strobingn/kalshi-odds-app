@@ -66,6 +66,7 @@ object FairGapTune {
     fun exempt(code: String?): Boolean {
         if (code == null) return false
         if (code in KEEP || code in FAMILY || ownsRules(code)) return true
+        if (BtcRegime.matches(code)) return true
         if (code in KeptScalpers.IDS || code in KeptScalpers.HFT_IDS || ScalpVariants.isLive(code) || ModelFilter.isTwin(code) || TwentyScalperFleet.isFleet(code)) return true
         return false
     }

@@ -144,7 +144,7 @@ object Research {
      * the values the owner set.
      */
     fun learn(code: String, s: ScalpStrategySettings, net: Double, defaultMaxCents: Int): ScalpStrategySettings {
-        if (LateWindowScalper.matches(code)) return s
+        if (LateWindowScalper.matches(code) || BtcRegime.matches(code)) return s
         if (!s.aiLearns || !net.isFinite()) return s
         val floor = ScalpFloors.cents(code)
         val ceil = ScalpFloors.ceilingCents(code)

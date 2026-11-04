@@ -46,7 +46,9 @@ data class ScalpControls(
      * Final 60s favourite only. When on, that scalper skips UTC hours 8, 11, 16, 18, and 21.
      * Default off. Saved values of the removed window-loss pause are ignored.
      */
-    val final60AvoidHours: Boolean = false
+    val final60AvoidHours: Boolean = false,
+    /** BTC 15m regime (`btc15r`). Absent on older saves; those load the factory row. */
+    val btc15: BtcRegime.Settings = BtcRegime.Settings()
 ) {
     fun settings(code: String): ScalpStrategySettings =
         ScalpParamSanity.settings(code, strategySettings[code] ?: ScalpStrategySettings())
@@ -63,7 +65,7 @@ data class ScalpControls(
         // 1.0.24 and again here: automatic bench and AI bench never come back. Only Force bench stops a scalper.
         autoBench = false,
         aiBench = emptySet()).let { clean ->
-        clean.copy(algo = StrategyAlgo.sanitize(clean))
+        clean.copy(algo = StrategyAlgo.sanitize(clean), btc15 = clean.btc15.normalized())
     }
     fun permits(modelCode: String) = enabled && !killSwitch && modelCode !in disabledStrategies
     fun plan(base: ScalpV2.Plan, modelCode: String? = null): ScalpV2.Plan {

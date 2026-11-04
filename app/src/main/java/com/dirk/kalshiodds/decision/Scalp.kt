@@ -610,6 +610,7 @@ class ScalpBook(
     fun onQuote(q: ScalpRule.Quote, enabled: Boolean): List<ScalpTrade> = synchronized(lock) {
         VolRegime.noteSpot(ScalpModels.windowKeyOf(q.ticker), q.nowMs, if (q.cfFresh()) q.cfSpot else q.spot)
         closeSeen[q.ticker.uppercase()] = q.closeMs
+        noteBtc15(q)
         expireOrphansLocked(q.nowMs)
         if (q.nowMs / 15_000L != (_lastPruneBucket)) { _lastPruneBucket = q.nowMs / 15_000L; pruneClosed(q.nowMs) }
         _marks.value = (_marks.value + (q.ticker.uppercase() to q)).let { m ->
@@ -634,11 +635,12 @@ class ScalpBook(
         changed += stepV2(q)
         if (liveExtras) changed += stepModelTwins(q)
         changed += stepLateWindow(q)
+        changed += stepBtc15(q)
         changed += stepResearch(q, enabled)
         // 1.0.2: Dirk's manual sliders on original strategies (stop % below fill, take profit after fees, max hold).
         val overlay = settingsExits(mineAll, q); changed += overlay.values
         val mineCur = if (overlay.isEmpty()) mineAll else mineAll.map { overlay[it.id] ?: it }
-        mineCur.filter { isActive(it) && !ForecastScalp.isForecast(it) && !ScalpV2.isV2(it.variantId) && !Research.isResearch(it.variantId) && !ModelFilter.isTwin(it.variantId) && !HftMathEngines.isHft(it.variantId) && !TwentyScalperFleet.isFleet(it.variantId) && !LateWindowScalper.matches(it.variantId) }.forEach { t ->
+        mineCur.filter { isActive(it) && !ForecastScalp.isForecast(it) && !ScalpV2.isV2(it.variantId) && !Research.isResearch(it.variantId) && !ModelFilter.isTwin(it.variantId) && !HftMathEngines.isHft(it.variantId) && !TwentyScalperFleet.isFleet(it.variantId) && !LateWindowScalper.matches(it.variantId) && !BtcRegime.matches(it.variantId) }.forEach { t ->
             // 0.3.69 fix: sf rows have their own lane (entries + TP/stop/60 s exits). They used to also fall through here with
             // the generic primary params, whose profit-target / fair take-profit / turn-down exits fired first, so the sf
             // take-profit never decided (sf41≡sf42, sf43≡sf44). Here they now only get the adverse-selection marks.
@@ -730,6 +732,7 @@ class ScalpBook(
             if (liveExtras && coin == ShockFav.TRADE_COIN) enterKeptV2(q, recent)
             if (liveExtras && coin == ShockFav.TRADE_COIN) changed += enterModelFair(q, recent)
             changed += enterLateWindow(q).orEmpty()
+            changed += enterBtc15(q)
         }
         if (liveExtras) {
             val hftCoin = ScalpParams.coinOf(q.ticker)
@@ -1004,7 +1007,10 @@ class ScalpBook(
 
     /** 0.3.58: feed the sf spot ring from the spot stream every second (not only on book ticks), like the backtest. */
     fun tickSpot(coin: String, spot: Double?, nowMs: Long) = synchronized(lock) {
-        if (spot != null && spot.isFinite() && spot > 0.0) sfSpot.getOrPut(coin) { ShockFav.SpotRing() }.put(nowMs / 1000L, spot)
+        if (spot != null && spot.isFinite() && spot > 0.0) {
+            sfSpot.getOrPut(coin) { ShockFav.SpotRing() }.put(nowMs / 1000L, spot)
+            if (coin.equals("BTC", true)) btc15Spot.put(nowMs / 1000L, spot)
+        }
     }
 
     /** 1.0.11: spot at [atMs] from the live 1 s ring (within 3 s). Null if that moment was not observed. */
@@ -1707,6 +1713,162 @@ class ScalpBook(
                 }
             }
         }
+    }
+
+    private val btc15Spot = BtcRegime.SpotTape()
+    private val btc15Px = HashMap<String, ArrayDeque<BtcRegime.Px>>()
+
+    /** Ask and mid history for the BTC 15m regime knife and spike checks. Spot VWAP rides the same lock. */
+    private fun noteBtc15(q: ScalpRule.Quote) {
+        val spot = q.spot
+        if (BtcRegime.tradesTicker(q.ticker) && spot != null && spot.isFinite() && spot > 0.0) {
+            btc15Spot.put(q.nowMs / 1000L, spot)
+        }
+        if (!BtcRegime.tradesTicker(q.ticker)) return
+        for (side in listOf("YES", "NO")) {
+            val ask = q.ask(side) ?: continue
+            val bid = q.bid(side)
+            val mid = if (bid != null && bid.isFinite()) (ask + bid) / 2.0 else ask
+            val key = q.ticker.uppercase() + "|" + side
+            val dq = btc15Px.getOrPut(key) { ArrayDeque() }
+            dq.addLast(BtcRegime.Px(q.nowMs, ask, mid))
+            val keep = q.nowMs - 70_000L
+            while (dq.isNotEmpty() && (dq.first().atMs < keep || dq.size > 80)) dq.removeFirst()
+        }
+    }
+
+    private fun btc15Path(q: ScalpRule.Quote, side: String): List<BtcRegime.Px> =
+        btc15Px[q.ticker.uppercase() + "|" + side]?.toList() ?: emptyList()
+
+    /** KXBTC15M regime scalper. Sells at the bid. Does not hold into settlement. */
+    private fun stepBtc15(q: ScalpRule.Quote): List<ScalpTrade> {
+        val out = ArrayList<ScalpTrade>()
+        val settings = controls.state.value.btc15.normalized()
+        val secondsLeft = if (q.tauS.isFinite()) kotlin.math.floor(q.tauS).toInt() else -1
+        for (t in _all.value) {
+            if (!BtcRegime.matches(t.variantId) || !t.ticker.equals(q.ticker, true) || !isActive(t)) continue
+            when (t.state) {
+                ScalpState.PENDING_ENTRY -> fillBtc15(t, q, settings)?.let { out += it }
+                ScalpState.OPEN, ScalpState.PENDING_EXIT -> {
+                    val bid = q.bid(t.side)?.takeIf { it > 0.0 } ?: continue
+                    val entry = t.entryPrice ?: continue
+                    if (t.remaining <= 0) continue
+                    val path = btc15Path(q, t.side)
+                    val spike = BtcRegime.spikeAction(path, q.nowMs, settings, entry, bid)
+                    val exit = BtcRegime.exitKind(secondsLeft, entry, bid, settings)
+                    val kind = when {
+                        exit == BtcRegime.ExitKind.FINAL_CUT -> exit
+                        exit == BtcRegime.ExitKind.STOP -> exit
+                        exit == BtcRegime.ExitKind.TAKE_PROFIT || spike == BtcRegime.SpikeAction.SELL -> BtcRegime.ExitKind.TAKE_PROFIT
+                        else -> null
+                    } ?: continue
+                    val reason = if (spike == BtcRegime.SpikeAction.SELL && kind == BtcRegime.ExitKind.TAKE_PROFIT) {
+                        "spike sell into take profit +${settings.takeProfitCents}¢"
+                    } else BtcRegime.exitReason(kind, settings)
+                    val sold = ScalpFills.sell(t, q.nowMs, t.remaining, t.remaining * bid, ScalpRule.orderFee(t.remaining, bid))
+                    out += close(sold, q.nowMs, reason)
+                }
+                else -> Unit
+            }
+        }
+        return out
+    }
+
+    private fun fillBtc15(t: ScalpTrade, q: ScalpRule.Quote, settings: BtcRegime.Settings): ScalpTrade? {
+        if (q.nowMs - t.signalAtMs < ScalpRule.LATENCY_MS || q.bookAtMs <= t.signalAtMs) return null
+        val miss = { why: String -> unlatchTrigger(t); t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; no fill: $why") }
+        if (!q.fresh() || q.nowMs >= q.closeMs) return miss("stale book")
+        val secondsLeft = if (q.tauS.isFinite()) kotlin.math.floor(q.tauS).toInt() else -1
+        if (!BtcRegime.forSecondsLeft(secondsLeft).newEntries) return miss("final minute")
+        val ask = q.ask(t.side) ?: return miss("no ask")
+        ScalpFloors.buyRefused(ask, q.tauS)?.let { return miss(it) }
+        val askC = BtcRegime.cents(ask)
+        if (askC < settings.floorCents || askC > PaperFleetDefaults.BUY_CEILING) return miss("outside 15–75¢")
+        if (ask > t.signalAsk + ScalpRule.SLIPPAGE + 1e-9) return miss("ask moved")
+        val want = if (t.contracts > 0) t.contracts else StrategyAlgo.clip(controls.state.value, BtcRegime.ID, PaperClip.MIN)
+        val n = PaperClip.taker(want, q.askSize(t.side) ?: 0.0)
+        if (n <= 0) return miss("no displayed depth")
+        return t.copy(
+            state = ScalpState.OPEN,
+            contracts = n,
+            entryPrice = ask,
+            entryFeeUsd = ScalpRule.orderFee(n, ask),
+            entryAtMs = q.nowMs,
+            note = String.format(Locale.US, "%s; filled %d @ %.1f¢", t.note, n, ask * 100)
+        )
+    }
+
+    private fun enterBtc15(q: ScalpRule.Quote): List<ScalpTrade> {
+        if (!BtcRegime.tradesTicker(q.ticker)) return emptyList()
+        val cfg = controls.state.value
+        if (!cfg.permits(BtcRegime.ID) || cfg.benchOverrides[BtcRegime.ID] == "BENCHED") return emptyList()
+        val settings = cfg.btc15.normalized()
+        val window = ScalpModels.windowKeyOf(q.ticker)
+        val secondsLeft = if (q.tauS.isFinite()) kotlin.math.floor(q.tauS).toInt() else -1
+        val sec = q.nowMs / 1000L
+        val velocity = btc15Spot.velocity(sec)
+        val vwap = btc15Spot.vwap(sec)
+        val entries = _all.value.count {
+            BtcRegime.matches(it.variantId) && it.ticker.equals(q.ticker, true) && it.state != ScalpState.NO_FILL
+        }
+        val n = StrategyAlgo.clip(cfg, BtcRegime.ID, PaperClip.MIN)
+        for (side in listOf("YES", "NO")) {
+            val ask = q.ask(side) ?: continue
+            val path = btc15Path(q, side)
+            val open = _all.value.firstOrNull {
+                BtcRegime.matches(it.variantId) && it.ticker.equals(q.ticker, true) && it.side == side &&
+                    isActive(it) && it.entryPrice != null
+            }
+            val why = BtcRegime.blockEntry(
+                BtcRegime.Entry(
+                    secondsLeft = secondsLeft,
+                    side = side,
+                    ask = ask,
+                    fair = q.fair(side) ?: Double.NaN,
+                    prices = path.map { if (it.ask.isFinite() && it.ask > 0.0) it.ask else it.mid },
+                    velocity = velocity,
+                    spot = q.spot,
+                    vwap = vwap,
+                    utcHour = BtcRegime.utcHour(q.nowMs),
+                    entriesThisWindow = entries,
+                    openEntry = open?.entryPrice,
+                    openBid = q.bid(side),
+                    askPath = path,
+                    nowMs = q.nowMs,
+                    settings = settings
+                )
+            )
+            if (why != null) {
+                gates.block(BtcRegime.ID, window, why)
+                continue
+            }
+            val cost = ask * n + ScalpRule.orderFee(n, ask)
+            if (openCostUsd() + cost > bankrollUsd() + 1e-9) {
+                gates.block(BtcRegime.ID, window, "paper cash spent")
+                continue
+            }
+            val blocked = ScalpParamSanity.entryBlock(side, ask, n, settings.floorCents / 100.0, bankrollUsd(), n)
+            if (blocked != null) {
+                gates.block(BtcRegime.ID, window, blocked)
+                continue
+            }
+            gates.entered(BtcRegime.ID, window)
+            return listOf(
+                ScalpTrade(
+                    id = idFactory(),
+                    ticker = q.ticker.uppercase(),
+                    side = side,
+                    state = ScalpState.PENDING_ENTRY,
+                    signalAtMs = q.nowMs,
+                    signalAsk = ask,
+                    fairAtSignal = q.fair(side) ?: 0.5,
+                    contracts = n,
+                    note = "btc15r ${BtcRegime.forSecondsLeft(secondsLeft).name.name.lowercase(Locale.US)}",
+                    ruleVersion = "${ScalpRule.VERSION}|${BtcRegime.ID}|P"
+                )
+            )
+        }
+        return emptyList()
     }
 
     /** Paper late-window scalper. Take-profit or hold to settlement. No shared late-window gate. */
@@ -2718,7 +2880,7 @@ class ScalpBook(
     /** "AI learns": nudge one slider of this strategy from its own closed paper trades (bounded; see [Research.learn]). */
     private fun aiLearn(t: ScalpTrade) {
         val code = codeOf(t)
-        if (LateWindowScalper.matches(code)) return
+        if (LateWindowScalper.matches(code) || BtcRegime.matches(code)) return
         val cur = controls.state.value
         val s = cur.settings(code)
         if (!s.aiLearns) return
@@ -2735,7 +2897,7 @@ class ScalpBook(
 
     /** Original strategies: Dirk's price range / until-minute sliders gate new entries (v2, research and LLM have their own). */
     private fun settingsEntryFilter(t: ScalpTrade): ScalpTrade {
-        if (t.state != ScalpState.PENDING_ENTRY || !t.isPrimary || ScalpV2.isV2(t.variantId) || Research.isResearch(t.variantId)) return t
+        if (t.state != ScalpState.PENDING_ENTRY || !t.isPrimary || ScalpV2.isV2(t.variantId) || Research.isResearch(t.variantId) || BtcRegime.matches(t.variantId)) return t
         val code = codeOf(t)
         val s = entryView(code) ?: explicit(code)
         val hasDefault = FairGapTune.defaultMaxCents(code) != null || code == "fairh60"
@@ -2762,7 +2924,7 @@ class ScalpBook(
     private fun settingsExits(mine: List<ScalpTrade>, q: ScalpRule.Quote): Map<String, ScalpTrade> {
         val out = HashMap<String, ScalpTrade>()
         for (t in mine) {
-            if (t.state != ScalpState.OPEN || ScalpV2.isV2(t.variantId) || Research.isResearch(t.variantId) || ForecastScalp.isForecast(t) || HftMathEngines.isHft(t.variantId) || TwentyScalperFleet.isFleet(t.variantId)) continue
+            if (t.state != ScalpState.OPEN || ScalpV2.isV2(t.variantId) || Research.isResearch(t.variantId) || ForecastScalp.isForecast(t) || HftMathEngines.isHft(t.variantId) || TwentyScalperFleet.isFleet(t.variantId) || BtcRegime.matches(t.variantId)) continue
             val s = entryView(codeOf(t)) ?: continue
             val bid = q.bid(t.side)?.takeIf { it > 0 } ?: continue
             val entry = t.entryPrice ?: continue
