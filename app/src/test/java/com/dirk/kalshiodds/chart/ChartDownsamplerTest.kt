@@ -28,6 +28,22 @@ class ChartDownsamplerTest {
     }
 
     @Test
+    fun oneSecondSpikesSurviveBothWays() {
+        val pts = (0 until 900).map { i ->
+            val up = when (i) {
+                300 -> 90f
+                600 -> 10f
+                else -> 50f
+            }
+            BidPoint(1_700_000_000_000L + i * 1_000L, up, 100f - up)
+        }
+        val out = ChartDownsampler.downsample(pts, 240)
+        assertTrue(out.size <= 240)
+        assertTrue("upward spike kept", out.any { it.upBidCents == 90f })
+        assertTrue("downward spike kept", out.any { it.upBidCents == 10f })
+    }
+
+    @Test
     fun spotAxisKeepsStrikeInRange() {
         val range = SpotAxis.range(listOf(84_311.58, 84_305.0), 84_278.84)
         assertTrue(range != null)

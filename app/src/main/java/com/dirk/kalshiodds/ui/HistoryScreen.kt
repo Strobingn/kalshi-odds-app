@@ -61,7 +61,9 @@ fun HistoryScreen(
 ) {
     val colors = DipTheme.colors
     val state by viewModel.state.collectAsStateWithLifecycle()
-    var tab by remember { mutableIntStateOf(0) }
+    // Start on the tab the ViewModel last loaded: coming Back from a market chart used to show Bets while the
+    // paging state still belonged to Markets.
+    var tab by remember { mutableIntStateOf(viewModel.state.value.tab) }
     val tabs = listOf("Bets", "Signals", "Sessions", "Settings", "Markets")
     Scaffold(
         containerColor = colors.bg,

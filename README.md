@@ -19,6 +19,35 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.23.1 (Claude branch): a bug sweep, and charts on the screens that had none
+
+**Charts.** Signal history now opens with totals, an up/down donut, signals per hour (ET), the edge of each signal and
+the regime mix. Data shows the last 96 settled Bitcoin windows as a strip, the current and longest streaks, the up/down
+split and the up rate by ET hour of day. Arb Hunter shows how close each set is to free money, in cents per set after
+fees. The numbers are in `ThinScreenChartData` (unit-tested).
+
+**Fixed:**
+
+- **Arena:** a resting bid whose wait ran out on a trade print (after the window's last clock tick) was removed twice
+  and threw, losing that loop's closed scalps; a partly filled one was dropped instead of becoming a position.
+- **Paper book:** a clip that fit before fees could take cash below zero (the cap now counts the fee); a paper sell's
+  P&L now carries its share of the entry fee, so realized P&L matches cash.
+- **Fleet sizing:** a contract size set on a fleet strategy now wins over its Kelly / quote size (orders with legs on
+  other markets keep theirs). The arena note says 100 contracts, not 10.
+- **Memory:** a settled window's micro tape is freed.
+- **Scalping AI:** a provider that times out now counts that wait in its running average, so it drops down the order
+  instead of coming back first after its rest; the saved trades are read before taking the lock, not under it.
+- **Kalshi polling:** a failed request inside the parallel fetch threw past the fallback, so a 429 never reached the
+  poller as `rateLimited` (no back-off) and the cached snapshot was never shown. The fallback now works.
+- **Live signals:** on Android 15's 6-hour dataSync limit the service now stops (re-promoting could only fail and
+  crash); opening the app starts it again.
+- **Cloud sync:** a failed push no longer moves the sync time past rows it never sent.
+- **Charts:** a window's chart read only its first 240 ticks (the first 4 minutes); it now reads the whole window and
+  thins it. Thinning keeps highs as well as lows. Scrubbing picks the point under the finger, not the n-th one. The
+  odds fallback is stamped back from now, not from the future close.
+- **History:** Load more appears on Signals, Sessions and Markets; coming Back from a market keeps the tab.
+- **Scorecard:** reacts to a settings change at once.
+
 ## 1.23.0 (Claude branch): 100 contracts a bet, a 15–57¢ buy band, and learning that survives a restart
 
 **100 contracts a bet, and the number finally reaches an order.** `ScalpTuning.DEFAULT_CONTRACTS` said 50, but

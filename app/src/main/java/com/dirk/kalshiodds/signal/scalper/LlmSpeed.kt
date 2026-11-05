@@ -55,6 +55,19 @@ class LlmSpeed(
         publish()
     }
 
+    /**
+     * A call that ran out of time after [ms]: the wait counts in the running average (so a provider that has turned
+     * slow drops down the order instead of going back to the top after its rest), but it is not an answer, so a limit
+     * streak is kept. Follow it with [failed] for the rest.
+     */
+    fun timedOut(provider: String, ms: Long) {
+        synchronized(lock) {
+            val s = stats.getOrPut(provider) { Stat() }
+            s.millis = s.millis?.let { it + ALPHA * (ms - it) } ?: ms.toDouble()
+        }
+        publish()
+    }
+
     /** A call [provider] could not answer. [why] is the provider's own words, which say whether it was a limit. */
     fun failed(provider: String, why: String) {
         synchronized(lock) {

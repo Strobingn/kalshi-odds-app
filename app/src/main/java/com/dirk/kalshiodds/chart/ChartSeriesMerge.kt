@@ -8,6 +8,13 @@ package com.dirk.kalshiodds.chart
  */
 object ChartSeriesMerge {
     const val MAX_WINDOW_POINTS = 240
+
+    /**
+     * Rows read back for one window. A window is ~900 one-second ticks and the store returns the oldest first, so
+     * reading only [MAX_WINDOW_POINTS] gave the first 4 minutes and a straight line to the live part; [merge]
+     * thins the full read back down to [MAX_WINDOW_POINTS].
+     */
+    const val STORED_READ_LIMIT = 1_200
     const val BUCKET_MS = 1_000L
     const val MIN_COMPLETE_POINTS = 8
     const val MAX_FIRST_GAP_MS = 90_000L

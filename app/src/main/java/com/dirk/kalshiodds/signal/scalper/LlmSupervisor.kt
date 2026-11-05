@@ -468,6 +468,9 @@ class HttpLlmChat(
                     runCatching { onCall(LlmAttempt(p.name, model, false, System.currentTimeMillis() - t0, why)) }
                     onError(lastError)
                     if ((e as? Failure)?.wrongModel != true) {
+                        if (generateSequence(e as Throwable) { it.cause }.take(5).any { it is java.io.InterruptedIOException }) {
+                            speed?.timedOut(p.name, System.currentTimeMillis() - t0)
+                        }
                         speed?.failed(p.name, why)
                         break // rate limit, bad key, network: next provider
                     }
@@ -626,9 +629,12 @@ class LlmSupervisor(
 
     /** One supervision pass. Blocks on the network call: run it off the main thread. */
     fun tick(): String {
+        // Read the saved trades before taking the lock: onClosed needs the same lock on the trade-print path, and the
+        // files can be a few MB.
+        val past = if (seededFromDisk) null else runCatching { loadTrades() }.getOrNull().orEmpty()
         val ctx = synchronized(lock) {
             tickNo += 1
-            seedTrades()
+            seedTrades(past)
             scorePending()
             // Free tiers cap tokens a minute (Groq: 8,000 incl. the answer), so the prompt is kept under a budget.
             var c = context()
@@ -691,10 +697,9 @@ class LlmSupervisor(
      * Folds the trades kept on disk in under the ones closed since this launch, once. Anything already in memory
      * is newer, so only the older ones are added and the oldest fall off at [KEEP_TRADES]. Caller holds [lock].
      */
-    private fun seedTrades() {
-        if (seededFromDisk) return
+    private fun seedTrades(past: List<LearnedTrade>?) {
+        if (seededFromDisk || past == null) return
         seededFromDisk = true
-        val past = runCatching { loadTrades() }.getOrNull().orEmpty()
         if (past.isEmpty()) return
         val oldestLive = trades.firstOrNull()?.closedAtMs ?: Long.MAX_VALUE
         val older = past.filter { it.closedAtMs < oldestLive }.sortedBy { it.closedAtMs }

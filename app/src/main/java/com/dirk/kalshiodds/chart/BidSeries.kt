@@ -37,29 +37,27 @@ object ChartDownsampler {
         val first = sorted.first().tMs
         val last = sorted.last().tMs
         val span = (last - first).coerceAtLeast(1L)
-        val buckets = Array<MutableList<BidPoint>?>(maxPoints) { null }
+        // Per bucket: first, last, and the low and high of the UP bid (DOWN when there is no UP), so a one-sample spike
+        // survives in either direction. Before, only the first 3 samples and the newest were kept and only a low was
+        // picked, so upward spikes were dropped and the chart leaned down.
+        val firstOf = arrayOfNulls<BidPoint>(maxPoints)
+        val lastOf = arrayOfNulls<BidPoint>(maxPoints)
+        val lowOf = arrayOfNulls<BidPoint>(maxPoints)
+        val highOf = arrayOfNulls<BidPoint>(maxPoints)
+        fun level(p: BidPoint): Float? = p.upBidCents ?: p.downBidCents
         for (p in sorted) {
             val idx = (((p.tMs - first) * (maxPoints - 1L)) / span).toInt().coerceIn(0, maxPoints - 1)
-            val bucket = buckets[idx] ?: ArrayList<BidPoint>(2).also { buckets[idx] = it }
-            if (bucket.size < 4) {
-                bucket.add(p)
-            } else {
-                // Keep first, last, min-up, max-up of the bucket (overwrite last).
-                bucket[bucket.lastIndex] = p
-            }
+            if (firstOf[idx] == null) firstOf[idx] = p
+            lastOf[idx] = p
+            val v = level(p) ?: continue
+            if (lowOf[idx]?.let { level(it)!! > v } != false) lowOf[idx] = p
+            if (highOf[idx]?.let { level(it)!! < v } != false) highOf[idx] = p
         }
         val out = ArrayList<BidPoint>(maxPoints)
-        for (b in buckets) {
-            if (b.isNullOrEmpty()) continue
-            if (b.size == 1) {
-                out.add(b[0])
-            } else {
-                out.add(b.first())
-                val mid = b.drop(1).dropLast(1)
-                val extrema = mid.minByOrNull { it.upBidCents ?: it.downBidCents ?: 0f }
-                if (extrema != null) out.add(extrema)
-                out.add(b.last())
-            }
+        for (i in 0 until maxPoints) {
+            val f = firstOf[i] ?: continue
+            val picks = listOfNotNull(f, lowOf[i], highOf[i], lastOf[i]).distinct().sortedBy { it.tMs }
+            out.addAll(picks)
         }
         return if (out.size <= maxPoints) out else lttb(out, maxPoints)
     }

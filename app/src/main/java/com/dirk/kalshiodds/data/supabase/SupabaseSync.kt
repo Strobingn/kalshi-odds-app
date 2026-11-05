@@ -250,6 +250,8 @@ class SupabaseSync(
         if (!settings.supabaseConfigured) {
             return Status(ok = false, message = "Supabase is not configured")
         }
+        // Rows written while this sync runs must not fall behind the saved sync time, so it is taken at the start.
+        val startedMs = System.currentTimeMillis()
         return try {
             val packed = pack(local)
             val remote = pull(settings)
@@ -257,9 +259,13 @@ class SupabaseSync(
             apply(merged.upserts, store, onSettings, onPaper)
             val outgoing = SyncMerge.outgoing(packed, lastPushMs)
             val pushed = push(settings, outgoing)
+            // A failed upsert pushes 0; calling that a success moved the sync time past rows never sent, so they
+            // were skipped on every later sync.
+            val pushOk = outgoing.none { !SyncMerge.isForbiddenPayload(it.payload) } || pushed > 0
             Status(
-                ok = true,
-                message = "Synced · pulled ${remote.size} · merged ${merged.upserts.size} · pushed $pushed",
+                ok = pushOk,
+                atMs = startedMs,
+                message = (if (pushOk) "Synced" else "Push failed, will retry") + " · pulled ${remote.size} · merged ${merged.upserts.size} · pushed $pushed",
                 pulled = remote.size,
                 pushed = pushed
             )

@@ -88,9 +88,12 @@ class ScorecardViewModel(application: Application) : AndroidViewModel(applicatio
         container.paper.book.state,
         container.adapterStore.stateFlow,
         container.guardrailStore.stateFlow,
-        combine(_exportMessage, _modelNote) { export, note -> export to note }
-    ) { entries, paper, adapter, guard, notes ->
-        val settings = container.hub.settings
+        // Settings are part of the combine so a changed threshold / confidence / mute floor shows at once; reading
+        // hub.settings alone only refreshed when some other flow emitted.
+        combine(_exportMessage, _modelNote, container.preferences.settings) { export, note, live -> Triple(export, note, live) }
+    ) { entries, paper, adapter, guard, notesAndSettings ->
+        val notes = notesAndSettings.first to notesAndSettings.second
+        val settings = notesAndSettings.third
         val windows = runCatching { container.archive.recentSettled(limit = 400) }.getOrElse { emptyList() }
         val ledgerRows = runCatching { container.ledger?.all().orEmpty() }.getOrElse { emptyList() }
         ScorecardUi(

@@ -863,8 +863,9 @@ class ScalperEngine(
             val sidePrice = if (yes) yesPrice else 1.0 - yesPrice
             if (w.resting) {
                 if (nowMs - o.postedAtMs > tuning.tuned(o.strategy).entryWaitMs(config.entryWaitMs)) {
-                    it.remove()
-                    // Partly filled: what it got becomes the position; nothing: the bid is gone.
+                    // Partly filled: what it got becomes the position and stays on the list to be exited or settled
+                    // (as in onClock); nothing: the bid is gone. This used to remove the order first, so a partial fill
+                    // was dropped and an unfilled one called remove() twice and threw.
                     if (w.got > 0) {
                         events += fill(w, nowMs) { sd, px -> exitQueue(sd, px) }
                     } else {

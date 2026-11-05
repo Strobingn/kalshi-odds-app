@@ -442,7 +442,10 @@ class PaperBook(
             if (qty <= 0) return null
             val proceeds = qty * px
             val cost = qty * open.limitPrice
-            val pnl = proceeds - cost
+            // The entry fee was debited from cash with the buy, so the share of it these contracts carry belongs in
+            // their P&L; without it realized P&L drifted above what cash showed.
+            val feeShare = if (open.contracts > 0) open.feeUsd * qty / open.contracts else 0.0
+            val pnl = proceeds - cost - feeShare
             val remaining = open.contracts - qty
             val sold = open.copy(
                 settled = remaining <= 0,
@@ -450,12 +453,14 @@ class PaperBook(
                 outcome = "sell",
                 won = pnl >= 0.0,
                 pnlUsd = pnl,
+                feeUsd = if (remaining <= 0) open.feeUsd else feeShare,
                 note = "Paper sell $qty ct @ ${String.format(java.util.Locale.US, "%.1f¢", px * 100)} · never sent to Kalshi"
             )
             val leftover = if (remaining > 0) {
                 open.copy(
                     contracts = remaining,
                     stakeUsd = remaining * open.limitPrice,
+                    feeUsd = (open.feeUsd - feeShare).coerceAtLeast(0.0),
                     note = open.note
                 )
             } else {
@@ -597,7 +602,9 @@ class PaperBook(
                 cashUsd = cur.cashUsd,
                 price = px
             )
-            val useQty = if (rawStake > cur.cashUsd + 1e-9) cappedQty else qty
+            // capContracts counts the fee that is debited with the stake; comparing the fee-free stake to cash let a
+            // clip that just fit before fees drive cash below zero.
+            val useQty = if (rawStake > cur.cashUsd + 1e-9) cappedQty else minOf(qty, cappedQty)
             if (useQty < 1) {
                 publish(cur.copy(lastMessage = "Paper skip $ticker — cash ${fmt(cur.cashUsd)} cannot cover ${fmt(rawStake)}"))
                 return null

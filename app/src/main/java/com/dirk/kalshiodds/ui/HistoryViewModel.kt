@@ -100,9 +100,10 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
 
     fun marketModel(row: SettledWindowRow): MarketUiModel {
         val bids = runCatching {
-            container.archive.bidHistory(row.ticker, (row.closeMs ?: 0L) - 3_600_000L, 240)
+            container.archive.bidHistory(row.ticker, (row.closeMs ?: 0L) - 3_600_000L, com.dirk.kalshiodds.chart.ChartSeriesMerge.STORED_READ_LIMIT)
         }.getOrElse { emptyList() }
-        return settledToMarket(row, bids)
+        // Thin a whole window's ticks to the chart's point budget.
+        return settledToMarket(row, com.dirk.kalshiodds.chart.ChartSeriesMerge.merge(bids))
     }
 
     private fun betsPage(cur: HistoryUiState, offset: Int, page: Int): HistoryUiState {
@@ -128,7 +129,7 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun signalsPage(offset: Int, page: Int, cur: HistoryUiState): HistoryUiState {
-        val snaps = container.resultsStore.recentSnapshots(offset + page)
+        val snaps = container.resultsStore.recentSnapshots(offset + page + 1)
         val settled = container.archive.recentSettled(null, 400)
         val all = HistoryAssembler.signals(snaps, settled)
         val sliced = HistoryPager.page(all, offset, page)
@@ -141,7 +142,7 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun sessionsPage(offset: Int, page: Int, cur: HistoryUiState): HistoryUiState {
-        val rows = container.archive.recentSessions(offset + page)
+        val rows = container.archive.recentSessions(offset + page + 1)
         val sliced = HistoryPager.page(rows, offset, page)
         return cur.copy(
             tab = 2,
@@ -166,7 +167,7 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun marketsPage(offset: Int, page: Int, cur: HistoryUiState): HistoryUiState {
-        val rows = container.archive.recentSettled(null, offset + page)
+        val rows = container.archive.recentSettled(null, offset + page + 1)
         val sliced = HistoryPager.page(rows, offset, page)
         return cur.copy(
             tab = 4,

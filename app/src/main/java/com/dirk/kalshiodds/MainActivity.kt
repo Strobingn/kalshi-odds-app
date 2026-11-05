@@ -198,10 +198,13 @@ class MainActivity : ComponentActivity() {
                                 ChartDetailScreen(
                                     market = market,
                                     points = market.bidHistory.ifEmpty {
+                                        // Stamp the odds samples back from now (or the close, if it has passed): from the
+                                        // future close they all piled onto the chart's right edge mid-window, and with
+                                        // no close time they went negative.
+                                        val endMs = minOf(System.currentTimeMillis(), market.closeTimeEpochMs ?: Long.MAX_VALUE)
                                         market.oddsHistory.mapIndexed { i, mid ->
                                             com.dirk.kalshiodds.chart.BidPoint(
-                                                tMs = (market.closeTimeEpochMs ?: 0L) -
-                                                    (market.oddsHistory.size - 1 - i) * 2_000L,
+                                                tMs = endMs - (market.oddsHistory.size - 1 - i) * 2_000L,
                                                 upBidCents = mid,
                                                 downBidCents = 100f - mid,
                                                 spotUsd = market.spotUsd

@@ -146,14 +146,14 @@ fun BidChart(
                 .then(
                     if (scrub) {
                         Modifier
-                            .pointerInput(downsampled) {
+                            .pointerInput(downsampled, windowStartMs, windowEndMs) {
                                 detectTapGestures { off ->
-                                    scrubIdx = indexAt(off.x, size.width.toFloat(), downsampled.size)
+                                    scrubIdx = indexAt(off.x, size.width.toFloat(), downsampled, windowStartMs, windowEndMs)
                                 }
                             }
-                            .pointerInput(downsampled) {
+                            .pointerInput(downsampled, windowStartMs, windowEndMs) {
                                 detectDragGestures { change, _ ->
-                                    scrubIdx = indexAt(change.position.x, size.width.toFloat(), downsampled.size)
+                                    scrubIdx = indexAt(change.position.x, size.width.toFloat(), downsampled, windowStartMs, windowEndMs)
                                 }
                             }
                     } else Modifier
@@ -319,9 +319,25 @@ private fun SpotPathCanvas(
     }
 }
 
-private fun indexAt(x: Float, width: Float, n: Int): Int {
+/**
+ * The point under the finger. Points are drawn by time across the whole window, so the tap is turned into a time and
+ * the nearest point picked; mapping x straight to an index picked the wrong point whenever the data did not yet fill
+ * the window (mid-window, a tap at half width chose a point drawn near the left).
+ */
+internal fun indexAt(x: Float, width: Float, points: List<BidPoint>, windowStartMs: Long?, windowEndMs: Long?): Int {
+    val n = points.size
     if (n <= 1 || width <= 0f) return 0
-    return ((x / width) * (n - 1)).toInt().coerceIn(0, n - 1)
+    val t0 = windowStartMs ?: points.first().tMs
+    val t1 = windowEndMs ?: points.last().tMs
+    val span = (t1 - t0).coerceAtLeast(1L)
+    val t = t0 + ((x / width).coerceIn(0f, 1f) * span).toLong()
+    var best = 0
+    var bestGap = Long.MAX_VALUE
+    for (i in 0 until n) {
+        val gap = kotlin.math.abs(points[i].tMs - t)
+        if (gap < bestGap) { bestGap = gap; best = i }
+    }
+    return best
 }
 
 private fun fmtCents(c: Float?): String =

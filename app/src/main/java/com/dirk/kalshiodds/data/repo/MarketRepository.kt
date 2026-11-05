@@ -145,8 +145,11 @@ class MarketRepository(
         watchSol: Boolean,
         extraTickers: List<String>,
         edgeThresholdPp: Double
-    ): MarketsSnapshot = coroutineScope {
-        try {
+    ): MarketsSnapshot = try {
+        // The try sits outside coroutineScope: a failed async child cancels the scope, so a catch inside it returned
+        // its fallback snapshot and coroutineScope threw anyway. A 429 then never reached the caller as rateLimited
+        // (no back-off) and the cached snapshot was never shown.
+        coroutineScope {
             val client = resolveApi()
             val btcDeferred = async {
                 if (watchBtc) client.getMarkets(KalshiApi.SERIES_BTC, status = "open") else null
@@ -198,7 +201,10 @@ class MarketRepository(
                 avgEdgeWhenRight = lastEdgeRight,
                 avgEdgeWhenWrong = lastEdgeWrong
             )
-        } catch (e: Exception) {
+        }
+    } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+        throw e
+    } catch (e: Exception) {
             val rateLimited = isRateLimited(e)
             val message = when {
                 rateLimited -> "Rate limited — backing off"
@@ -224,7 +230,6 @@ class MarketRepository(
                     avgEdgeWhenWrong = lastEdgeWrong
                 )
             }
-        }
     }
 
     private suspend fun refreshScorecard() {

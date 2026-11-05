@@ -52,6 +52,7 @@ class LiveSignalsService : Service() {
     @Volatile private var rolloverBound = false
     private var wakeLock: PowerManager.WakeLock? = null
     @Volatile private var explicitStop = false
+    @Volatile private var dataSyncTimedOut = false
     @Volatile private var lastTickerCount = 0
     @Volatile private var foregroundFailed = false
     @Volatile private var foregroundTypeInUse = 0
@@ -430,21 +431,17 @@ class LiveSignalsService : Service() {
     }
 
     private fun handleDataSyncTimeout() {
-        // API 35 dataSync time-box. Re-promote as dataSync; never specialUse.
-        if (LiveSignalsPolicy.shouldRestartAfterKill(
-                LiveSignalsKeepAlive.isEnabled(this),
-                explicitStop,
-                foregroundFailed
-            )
-        ) {
-            promoteToForeground()
-        } else {
-            stopSelf()
-        }
+        // API 35 dataSync time-box (6 h a day). The service must stop within seconds or the system crashes the app,
+        // and with the time used up startForeground throws, so re-promoting here could never work. Stop instead; the
+        // next time the app is on screen ensureServiceFromUi starts it again (the time-box resets then).
+        dataSyncTimedOut = true
+        runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
+        stopSelf()
     }
 
     override fun onDestroy() {
-        val restart = LiveSignalsPolicy.shouldRestartAfterKill(
+        // After a dataSync time-out a restart from here would be refused (no foreground time left).
+        val restart = !dataSyncTimedOut && LiveSignalsPolicy.shouldRestartAfterKill(
             LiveSignalsKeepAlive.isEnabled(this),
             explicitStop,
             foregroundFailed

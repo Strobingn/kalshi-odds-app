@@ -493,6 +493,8 @@ class PaperScalper(
         lastDecision.remove(ticker)
         onceDone.remove(ticker)
         forgetWindow(ticker)
+        // The grid cleanup in gridFor only frees tapes of grids it still holds; this one was just removed.
+        microTape.forget(ticker)
         book(events, forcePersist = events.isNotEmpty(), nowMs = nowMs)
     }
 
@@ -895,7 +897,12 @@ class PaperScalper(
             } else {
                 com.dirk.kalshiodds.signal.scalper.fleet.Fleet.decide(st, view)
             }
-            for (o in orders) {
+            for (fo in orders) {
+                // A size set on the strategy wins over the fleet's own sizing (Kelly / quote size), as the README says.
+                // Orders with legs on other markets keep their size so the legs stay matched.
+                val o = tn.knobs.contracts?.coerceAtLeast(1)
+                    ?.takeIf { !st.micro && fo.offBook.isEmpty() && it != fo.contracts }
+                    ?.let { fo.copy(contracts = it) } ?: fo
                 if (!tn.sideAllowed(o.side)) continue
                 // The self-learning gate: an entry that looks like the strategy's past losers is skipped.
                 val gx = gate?.let {
@@ -1160,9 +1167,9 @@ data class ScalperSummary(
 
         /** The queue-aware subset on the recorded order books: a short queue was a level about to break. */
         const val QUEUE_AWARE_HISTORY = "−1.73¢"
-        const val NOTE =
+        val NOTE: String =
             "Every strategy at once on the same live Bitcoin window and the same real trade prints, " +
-                "10 contracts an order, no caps; the best P&L is on top. Resting orders fill only after the " +
+                "${ScalpTuning.DEFAULT_CONTRACTS} contracts an order, no caps; the best P&L is on top. Resting orders fill only after the " +
                 "queue ahead has traded; buy-now entries and stop / time-out exits pay the taker fee; " +
                 "\"hold\" strategies ride to the settlement. In brackets: what a filled scalp of that kind made " +
                 "per contract on 7 days of recorded order books, real queue counted (\"new\" = added in 1.9.0 or later, " +

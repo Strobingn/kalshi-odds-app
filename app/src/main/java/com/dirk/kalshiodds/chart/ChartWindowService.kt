@@ -25,7 +25,7 @@ class ChartWindowService(
     private fun storedFor(ticker: String, start: Long, end: Long, now: Long): List<BidPoint> {
         val key = "$ticker|$start|$end"
         storedCache[key]?.let { (at, pts) -> if (now - at in 0 until STORED_TTL_MS) return pts }
-        val pts = archive.chartTicks(ticker, start, end, ChartSeriesMerge.MAX_WINDOW_POINTS).map { it.toBidPoint() }
+        val pts = archive.chartTicks(ticker, start, end, ChartSeriesMerge.STORED_READ_LIMIT).map { it.toBidPoint() }
         if (storedCache.size > 32) storedCache.clear()
         storedCache[key] = now to pts
         return pts
@@ -67,7 +67,7 @@ class ChartWindowService(
 
     fun restoreWindow(ticker: String, windowStartMs: Long, windowEndMs: Long): List<BidPoint> {
         if (!CryptoMarkets.isCryptoTicker(ticker)) return emptyList()
-        val stored = archive.chartTicks(ticker, windowStartMs, windowEndMs, ChartSeriesMerge.MAX_WINDOW_POINTS)
+        val stored = archive.chartTicks(ticker, windowStartMs, windowEndMs, ChartSeriesMerge.STORED_READ_LIMIT)
             .map { it.toBidPoint() }
         book.seedBids(ticker, stored)
         val live = book.bidHistory(ticker)

@@ -77,6 +77,24 @@ class ScalperEngineTest {
     }
 
     @Test
+    fun aBidWhoseWaitRunsOutOnATradePrintIsHandledLikeOnTheClock() {
+        // The expiry can be reached from onTrade (after the window's last clock tick). An unfilled bid used to be
+        // removed twice and throw; a partly filled one was dropped instead of becoming a position.
+        val e = engine()
+        e.post(ScalpStrategy.ML_REST, t, "YES", 0.50, 0.0, 0.4, 0.4, 0L)
+        val gone = e.onTrade(t, false, 0.60, 1.0, 20_001L, noQueue)
+        assertTrue(gone.single() is ScalpEvent.Unfilled)
+        assertEquals(0 to 0, e.working(t))
+
+        val e2 = engine()
+        e2.post(ScalpStrategy.ML_REST, t, "YES", 0.50, 0.0, 0.4, 0.4, 0L)
+        e2.onTrade(t, false, 0.49, 4.0, 1_000L, noQueue)
+        val f = e2.onTrade(t, false, 0.60, 1.0, 20_001L, noQueue).single() as ScalpEvent.Filled
+        assertEquals(4, f.order.contracts)
+        assertEquals(4.0, e2.inventory(ScalpStrategy.ML_REST, t), 0.0)
+    }
+
+    @Test
     fun aBidPartlyFilledAtTheCloseSettlesItsPart() {
         val e = engine()
         e.post(ScalpStrategy.FLOW_FADE, t, "YES", 0.50, 0.0, 0.0, 0.0, 0L)

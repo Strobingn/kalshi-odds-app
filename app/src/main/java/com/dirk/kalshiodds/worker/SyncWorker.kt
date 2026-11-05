@@ -58,7 +58,8 @@ class SyncWorker(
             settingsJson.lastOrNull()?.let { container.preferences.restoreSnapshot(it) }
             result
         }.getOrElse { SupabaseSync.Status(ok = false, message = it.message ?: "sync failed") }
-        runCatching { container.dataPrefs.updateSyncStatus(status.message, status.atMs) }
+        // Only a sync that got its rows out moves the sync time on; otherwise the next run retries the same rows.
+        runCatching { container.dataPrefs.updateSyncStatus(status.message, if (status.ok) status.atMs else hub.lastSyncAtMs) }
         if (status.ok) Result.success() else Result.retry()
     }
 
