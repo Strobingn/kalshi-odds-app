@@ -97,6 +97,10 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
         return AiDashboard.withGate(
             AiDashboard.build(base, System.currentTimeMillis(), container.aiActivity.events.value, strategies, bets),
             gate.points(), gate.rows()
+        ).copy(
+            upDown = UpDownCardState.build(
+                container.upDownModel, container.upDownLive, container.upDownBettor.bets(), container.upDownBettorOn, bets
+            )
         )
     }
 
@@ -143,6 +147,7 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
     fun runNow() = container.kickAi()
     fun setLiveTuner(on: Boolean) { container.liveTunerOn = on; _dashboard.update { it.copy(liveTunerOn = on) } }
     fun setGate(on: Boolean) { container.gateOn = on; _dashboard.update { it.copy(gateOn = on) } }
+    fun setUpDownBettor(on: Boolean) { container.upDownBettorOn = on; _dashboard.update { it.copy(upDown = it.upDown.copy(bettorOn = on)) } }
 
     fun send(which: String, text: String) { viewModelScope.launch(Dispatchers.IO) { container.aiChat.send(which, text) } }
     fun apply(id: Long) { viewModelScope.launch(Dispatchers.IO) { container.aiChat.apply(id) } }

@@ -19,6 +19,48 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.24.0 (Claude branch): an ONNX up/down model for the Bitcoin 15-minute market
+
+**What it is.** A trained model of the chance that the live Bitcoin window settles UP, every second, from the book
+(mid, spread, top-of-book imbalance, how the mid moved in 30 and 60 s), the Coinbase spot (its moves in volatility
+units) and the app's own fair price. It is a logistic regression on 11 inputs, shipped twice:
+`assets/updown_model.json` (the Kotlin answer) and `assets/updown_model.onnx` (the same model for ONNX Runtime, run in
+the `:ml` process like the scalper's trees). ONNX Runtime is used only after it gives the Kotlin answer on 64 test rows;
+if that process dies, Kotlin carries on and the card says why.
+
+**How it tested (honest numbers).** Trained on the cloud recorder's 1-second files in the `scalper-data` release
+(858 settled windows, 2026-10-03 → 10-12). Walk-forward: every day from the 4th on was predicted by a model trained
+only on the days before it (609 windows, 7 days, out of sample):
+
+| | log loss | Brier | accuracy | calibration error |
+|---|---|---|---|---|
+| **model** | 0.4611 | 0.1550 | 75.9% | 1.9% |
+| market mid | 0.4603 | 0.1548 | 76.0% | 2.0% |
+| the app's fair (math) | 0.4748 | 0.1588 | 75.7% | 1.3% |
+
+The model **ties the market's own price; it does not beat it** (the 95% ranges overlap almost entirely). The math's
+fair price alone is worse than the market, most of all in the last 2 minutes. A small LightGBM did worse (0.486: it
+overfit 10 days), and boosting on top of the market's price did not help either. Replay of one 1-lot a minute when the
+model beat the ask plus the taker fee: −0.86¢ a contract over 1,127 bets with no cut (95% −5.9 to +3.8), −7.8¢ over
+102 bets with a 2¢ cut. **No edge after fees on these days.** Full report: `tools/research/updown/` (rerun with
+`build_updown.py`, `train_updown.py`, `export_updown_onnx.py`).
+
+**Where it is used:**
+
+- **Paper AI:** the feed carries `modelUpCents` and `modelVsMidCents`, and its prompt says plainly what the model is
+  worth (a second opinion, not an edge). Every Paper AI bet records the model's chance for its side (`modelCents`), so
+  its record can be split by whether the model agreed. The Scalping AI's feed carries the same two numbers.
+- **Model paper bettor** (AI tab switch, on): once a minute it buys the side whose model chance beats the ask plus the
+  fee by 1¢, 100 contracts, asks 10–85¢, filled only from the offers the book shows and never at a price where the edge
+  is gone. No limit on bets. Paper only; it never reaches an order. Its record is kept apart from the Paper AI's.
+- **AI tab → Dashboard:** the model's live chance against the market mid and the fair price, second by second through
+  the window; the model bettor's running net, what it said against what it won; and the test: log loss, accuracy,
+  calibration against the market, log loss by time left and the replay by cut.
+
+Kotlin tests: the inputs match the trainer's on 30 recorded moments (`updown_parity.json`), the ONNX file gives the
+Kotlin chance on ONNX Runtime's JVM build, a stale ONNX file is refused, a failing engine falls back, and the bettor's
+rules. Python: `tools/research/updown/test_updown.py`.
+
 ## 1.23.1 (Claude branch): a bug sweep, and charts on the screens that had none
 
 **Charts.** Signal history now opens with totals, an up/down donut, signals per hour (ET), the edge of each signal and

@@ -89,7 +89,9 @@ data class AiDashboardState(
     val gateRows: List<Triple<String, Double, String>> = emptyList(),
     val gateLearned: Int = 0,
     val gateSkipped: Int = 0,
-    val gateActive: Int = 0
+    val gateActive: Int = 0,
+    /** The ONNX up/down model: its live reading, its paper bets and how it tested. */
+    val upDown: UpDownCardState = UpDownCardState()
 )
 
 object AiDashboard {
@@ -263,7 +265,8 @@ fun AiDashboardContent(
     onOpenKeys: () -> Unit = {},
     /** Switches for the on-phone live tuner and the self-learning gate; null hides them (screenshots). */
     onLiveTuner: ((Boolean) -> Unit)? = null,
-    onGate: ((Boolean) -> Unit)? = null
+    onGate: ((Boolean) -> Unit)? = null,
+    onUpDownBettor: ((Boolean) -> Unit)? = null
 ) {
     val c = DipTheme.colors
     val scalpColor = c.accentBlue
@@ -383,6 +386,7 @@ fun AiDashboardContent(
             if (s.paperLessons.isEmpty()) Empty("No lessons yet")
             s.paperLessons.forEach { Text(it, fontSize = 11.sp, color = c.textPrimary) }
         }
+        UpDownCards(s.upDown, onUpDownBettor)
         AiCard("Scalping AI journal", "Newest first") {
             if (s.recentChanges.isEmpty()) Empty("No changes yet")
             s.recentChanges.forEach { Text(it, fontSize = 11.sp, color = c.textPrimary, maxLines = 2) }

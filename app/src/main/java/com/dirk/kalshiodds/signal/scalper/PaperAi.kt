@@ -42,7 +42,9 @@ data class PaperBet(
     val chanceCents: Double? = null,
     /** The AI's best case for UP and for DOWN, written before it picked a side. */
     val bullCase: String? = null,
-    val bearCase: String? = null
+    val bearCase: String? = null,
+    /** The ONNX up/down model's chance for this side when the bet was placed (0–100), if the feed had one. */
+    val modelCents: Double? = null
 )
 
 @Serializable
@@ -203,6 +205,8 @@ class PaperAi(
         // Recorded for the review afterwards, never used to block: a bet inside the limits is always placed.
         val fairYes = (f["fairYesCents"] as? JsonPrimitive)?.doubleOrNull?.takeIf { it in 0.0..100.0 }
         val fairSide = fairYes?.let { if (decision == "YES") it else 100.0 - it }
+        val modelUp = (f["modelUpCents"] as? JsonPrimitive)?.doubleOrNull?.takeIf { it in 0.0..100.0 }
+        val modelSide = modelUp?.let { if (decision == "YES") it else 100.0 - it }
         val trust = synchronized(lock) { PaperAiCalibration.read(bets.filter { it.result != null }).trust }
         val adjusted = PaperAiCalibration.adjust(conf.toDouble(), askCents, trust)
         val chance = if (fairSide != null) (adjusted + fairSide) / 2.0 else adjusted
@@ -212,7 +216,7 @@ class PaperAi(
                 id = nextId++, ticker = ticker, side = decision, price = price, contracts = contracts,
                 feeUsd = fill.feeUsd, openedMs = nowMs(), confidence = conf, reason = reason,
                 fairCents = fairSide?.let { Math.round(it * 10.0) / 10.0 }, chanceCents = Math.round(chance * 10.0) / 10.0,
-                bullCase = bull, bearCase = bear
+                bullCase = bull, bearCase = bear, modelCents = modelSide?.let { Math.round(it * 10.0) / 10.0 }
             ).also { bets = (bets + it).takeLast(KEEP_BETS); save() }
         }
         journal("bet", json.encodeToJsonElement(PaperBet.serializer(), bet) as JsonObject)
@@ -300,6 +304,7 @@ class PaperAi(
                 put("ticker", b.ticker); put("side", b.side); put("priceCents", Math.round(b.price * 100.0))
                 put("confidence", b.confidence); put("result", b.result ?: "open")
                 b.fairCents?.let { put("fairCents", it) }
+                b.modelCents?.let { put("modelCents", it) }
                 b.pnlUsd?.let { put("pnlUsd", it) }; put("reason", b.reason)
             })
         }
@@ -322,6 +327,7 @@ class PaperAi(
         val SYSTEM = """You are the PAPER BETTING AI for a Bitcoin-only Kalshi 15-minute UP/DOWN market. You are not the scalping AI: another AI tunes the scalping algorithms, you decide, every minute, whether to place another paper bet (there is no limit on how many bets you place in a window; you may bet again, the same side or the other, as the window moves).
 Each call you get the live feed, the limits, your record, your calibration, your last bets with results and lessons you wrote after earlier windows settled. YES = Bitcoin finishes UP (at or above strikePrice), NO = DOWN.
 The feed's fairYesCents is the math's chance of YES (0-100) from the settlement index, the strike, its volatility and the time left. spotMinusStrike says how far Bitcoin is from the strike now.
+modelUpCents is a trained model's chance of YES (0-100, ONNX, from the book, the Coinbase spot and that fair price). In testing on 609 recorded windows it was about as accurate as the market's own mid, not better, and betting its small disagreements with the market lost money after the fee: treat it as a second opinion, not an edge. modelVsMidCents is how far it sits from yesMidCents.
 Before you choose, write bull_case (the best reason UP wins) and bear_case (the best reason DOWN wins), then pick the side whose case is stronger at its price, or SKIP.
 Goal: positive net profit after the taker fee (0.07 x price x (1 - price) per contract). Every bet you place inside the limits is placed: bet often to learn, but only with an edge (the side's ask below your real chance of winning). Give your real chance as confidence; trustInYourConfidence shows how much of the edge you claimed has shown up. SKIP is a good answer when there is no edge.
 Paper only. Answer only by calling place_bet."""

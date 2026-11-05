@@ -1,0 +1,64 @@
+name: Train up/down model (Claude)
+
+# Retrains the ONNX up/down model the app ships (app/src/main/assets/updown_model.json + .onnx) on every 1-second
+# recording in the "scalper-data" release (book_, spot_ and settle_ files), walk-forward tests it, rewrites the Kotlin
+# parity fixture, runs the Python checks and commits the new files to this branch. Run by hand only. Public data only,
+# no API key, no orders.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: train-updown-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q numpy scikit-learn lightgbm onnx onnxruntime
+
+      - name: Download the recordings
+        run: |
+          mkdir -p rec
+          gh release download scalper-data -D rec -p 'book_*.csv.gz' -p 'spot_*.csv.gz' -p 'settle_*.csv'
+          ls -la rec | tail -n 40
+
+      - name: Build rows, walk-forward test, final fit, ONNX
+        run: |
+          python3 tools/research/updown/build_updown.py rec rows.npz 5
+          python3 tools/research/updown/train_updown.py rows.npz updown_report.json app/src/main/assets/updown_model.json
+          python3 tools/research/updown/export_updown_onnx.py app/src/main/assets/updown_model.json app/src/main/assets/updown_model.onnx
+          python3 tools/research/updown/make_updown_fixture.py rec app/src/main/assets/updown_model.json app/src/test/resources/updown_parity.json
+          python3 tools/research/updown/test_updown.py
+          {
+            echo "## Up/down model, walk-forward"
+            echo '```json'
+            python3 -c "import json; r=json.load(open('updown_report.json')); print(json.dumps({k: {kk: v[kk] for kk in ('logloss','brier','accuracy','ece','logloss_ci95')} for k, v in r['metrics'].items()}, indent=1)); print(json.dumps(r['paper_bets']['compact'], indent=1))"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: updown-report
+          path: updown_report.json
+
+      - name: Commit the new model
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/assets/updown_model.json app/src/main/assets/updown_model.onnx app/src/test/resources/updown_parity.json
+          if git diff --cached --quiet; then echo "no change"; exit 0; fi
+          git commit -m "Retrain the up/down model on the scalper-data recordings"
+          git push origin "HEAD:${GITHUB_REF_NAME}"

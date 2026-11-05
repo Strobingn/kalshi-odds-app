@@ -93,6 +93,12 @@ class MlClient(private val app: Context) {
         call(MlProtocol.CLOSE_TREES, {}) { }
     }
 
+    /** Opens the up/down model on ONNX Runtime in the ML process; returns its label. Throws with the reason when it cannot. */
+    fun openUpDown(): String = call(MlProtocol.OPEN_UPDOWN, {}) { it.readString() ?: "ONNX Runtime (CPU)" } + " · separate process"
+
+    /** The up/down model's chance of UP for one input row, from the ML process. */
+    fun runUpDown(x: FloatArray): Double = call(MlProtocol.RUN_UPDOWN, { it.writeFloatArray(x) }) { it.readDouble() }
+
     /** TimesFM's session runs in the ML process too. */
     val timesFm: TimesFm.Runner = object : TimesFm.Runner {
         override fun run(file: File, threads: Int, inputs: FloatArray, masks: FloatArray): Pair<Array<Array<FloatArray>>, Array<Array<FloatArray>>>? =

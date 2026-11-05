@@ -423,6 +423,60 @@ class AppContainer(context: Context) {
         }
     )
 
+    /**
+     * The up/down model (assets/updown_model.json, and the same model as updown_model.onnx for ONNX Runtime in the `:ml`
+     * process): the chance the live Bitcoin window settles UP, once a second. Null when the file cannot be read.
+     */
+    val upDownModel: com.dirk.kalshiodds.signal.updown.UpDownModel? = runCatching {
+        com.dirk.kalshiodds.signal.updown.UpDownModel.parse(
+            app.assets.open(com.dirk.kalshiodds.signal.updown.UpDownModel.ASSET_NAME).use { String(it.readBytes(), Charsets.UTF_8) }
+        )
+    }.getOrNull()
+
+    val upDownLive: com.dirk.kalshiodds.signal.updown.UpDownLive? = upDownModel?.let { m ->
+        com.dirk.kalshiodds.signal.updown.UpDownLive(
+            model = m,
+            spot = { now -> coinbaseIndex.series("BTC", now, com.dirk.kalshiodds.signal.updown.UpDownFeatures.SPOT_SECONDS) },
+            window = { now ->
+                scalper.liveWindow(now)?.takeIf { it.ticker.startsWith("KXBTC15M", ignoreCase = true) }?.let { lw ->
+                    com.dirk.kalshiodds.signal.updown.UpDownLive.Window(
+                        lw.ticker, lw.openMs, scoring.book.closeTime(lw.ticker) ?: (lw.openMs + 900_000L),
+                        scoring.book.strike(lw.ticker) ?: com.dirk.kalshiodds.signal.engine.DirectionSanity.parseStrike(lw.ticker)
+                    )
+                }
+            },
+            top = { scoring.book.topOfBook(it) }
+        )
+    }
+
+    private val upDownPrefs = app.getSharedPreferences("bitcoin_claude_updown", Context.MODE_PRIVATE)
+
+    /** Paper bets on the model alone, once a minute, 100 contracts, asks 10-85c. Never an order. */
+    val upDownBettor = com.dirk.kalshiodds.signal.updown.UpDownBettor(
+        initial = com.dirk.kalshiodds.signal.updown.UpDownBettor.parse(upDownPrefs.getString("bets_json", null)),
+        persist = { upDownPrefs.edit().putString("bets_json", it).apply() },
+        depth = { ticker, side ->
+            val top = scoring.book.topOfBook(ticker)
+            val ask = (if (side == "YES") top?.yesAsk else top?.noAsk)
+            ask?.let { com.dirk.kalshiodds.signal.scalper.BookFill.askLevels(scoring.book.snapshotBook(ticker), side, it) }
+                ?: ask?.let { a -> (if (side == "YES") top?.yesAskQty else top?.noAskQty)?.takeIf { it > 0 }?.let { listOf(a to it) } }
+        },
+        sink = { line -> supervisorLog.append("updown_bets", line) }
+    ).also { it.enabled = upDownPrefs.getBoolean("bettor_on", true) }
+
+    /** The model's paper bettor on / off (AI tab). */
+    var upDownBettorOn: Boolean
+        get() = upDownBettor.enabled
+        set(v) {
+            upDownBettor.enabled = v
+            upDownPrefs.edit().putBoolean("bettor_on", v).apply()
+        }
+
+    private fun upDownStep(nowMs: Long) {
+        val r = upDownLive?.tick(nowMs) ?: return
+        upDownBettor.onReading(r, nowMs)
+    }
+
     /** The chat screen: one thread per AI, history kept on the phone. */
     private val chatLlm = com.dirk.kalshiodds.signal.scalper.HttpLlmChat(llmProviders(*ALL_LLM.toTypedArray()), onError = llmError("chat_errors"), onCall = callsOf(com.dirk.kalshiodds.signal.scalper.AiEvent.CHAT), speed = llmSpeed)
     val aiChat = com.dirk.kalshiodds.signal.scalper.AiChat(
@@ -588,6 +642,23 @@ class AppContainer(context: Context) {
                 kotlinx.coroutines.withTimeoutOrNull(PAPER_AI_GAP_MS) { aiKick.receive() }
             }
         }
+        // The up/down model on the live Bitcoin window, once a second (paper only). Its ONNX copy opens in the ML
+        // process and is used only once it gives the Kotlin answer; until then, or if that process dies, Kotlin runs it.
+        upDownModel?.let { m ->
+            Thread({
+                runCatching {
+                    val label = scalper.ml.openUpDown()
+                    m.attachOnnx({ x -> scalper.ml.runUpDown(x) }, label)?.let { why -> m.markKotlin("ONNX Runtime: $why") }
+                }.onFailure { m.markKotlin("ONNX Runtime did not open: " + (it.message ?: it.javaClass.simpleName).take(100)) }
+            }, "updown-onnx").apply { isDaemon = true }.start()
+        }
+        supervisorScope.launch {
+            kotlinx.coroutines.delay(4_000L)
+            while (true) {
+                runCatching { upDownStep(System.currentTimeMillis()) }
+                kotlinx.coroutines.delay(1_000L)
+            }
+        }
         // The live window, once a second: the live tuner learns the trades just closed, and the Scalping AI is called
         // early when the window does something worth a fresh look.
         supervisorScope.launch {
@@ -654,6 +725,11 @@ class AppContainer(context: Context) {
             if (spot != null && strike != null) put("spotMinusStrike", Math.round((spot - strike) * 100.0) / 100.0)
             // The math's chance of YES (0-100): the same fair price the late favourites trade on.
             runCatching { scalperFairYes(w.ticker, now) }.getOrNull()?.let { put("fairYesCents", Math.round(it * 1000.0) / 10.0) }
+            // The ONNX up/down model's chance of YES (0-100), when it read this window in the last 5 s.
+            upDownLive?.latest?.value?.takeIf { it.ticker == w.ticker && now - it.atMs in 0..5_000L }?.let { r ->
+                put("modelUpCents", Math.round(r.up * 1000.0) / 10.0)
+                last?.let { put("modelVsMidCents", Math.round((r.up - it) * 1000.0) / 10.0) }
+            }
             put("openPaperPositions", w.open.size)
         }
     }
@@ -747,6 +823,7 @@ class AppContainer(context: Context) {
                 centBetter.ledger.openTickers() + clearLead.ledger.openTickers() + lateComeback.ledger.openTickers() +
                 scalper.openTickers() +
                 paperLimits.openTickers() +
+                upDownBettor.openTickers() +
                 recorder.pendingSettlementTickers()
         },
         onMarketSettled = { ticker, result ->
@@ -759,6 +836,7 @@ class AppContainer(context: Context) {
             lateComeback.ledger.settle(ticker, result)
             scalper.settle(ticker, result)
             paperAi.onSettled(ticker, result)
+            upDownBettor.onSettled(ticker, result)
             paperLimits.closeTicker(ticker)
             recorder.onSettled(ticker, result)
         },

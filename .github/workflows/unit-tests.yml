@@ -51,6 +51,7 @@ jobs:
           pip install -q onnx onnxruntime
           PYTHONPATH=tools/research/scalp python3 tools/research/scalp/test_export_onnx.py
           PYTHONPATH=tools/research/scalp python3 tools/research/scalp/test_export_npu.py
+          python3 tools/research/updown/test_updown.py
 
       - name: Kotlin unit tests
         run: ./gradlew :app:testDebugUnitTest --no-daemon --continue

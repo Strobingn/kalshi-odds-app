@@ -11,6 +11,7 @@ import com.dirk.kalshiodds.signal.scalper.NpuTrees
 import com.dirk.kalshiodds.signal.scalper.OnnxTrees
 import com.dirk.kalshiodds.signal.scalper.ScalperModel
 import com.dirk.kalshiodds.signal.scalper.fleet.TimesFm
+import com.dirk.kalshiodds.signal.updown.UpDownModel
 import java.io.File
 
 /**
@@ -29,6 +30,8 @@ internal class MlBinder(private val ctx: Context) : Binder() {
     private var trees: AutoCloseable? = null
     private var run: ((FloatArray) -> Double)? = null
     private val timesFm = HashMap<String, TimesFm.LocalRunner>()
+    /** The up/down model (assets/updown_model.onnx) on ONNX Runtime's CPU provider. */
+    private var upDown: OnnxTrees? = null
 
     override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
         if (code !in MlProtocol.ALL) return super.onTransact(code, data, reply, flags)
@@ -50,6 +53,22 @@ internal class MlBinder(private val ctx: Context) : Binder() {
                 MlProtocol.CLOSE_TREES -> {
                     synchronized(lock) { runCatching { trees?.close() }; trees = null; run = null }
                     r.writeInt(MlProtocol.OK)
+                }
+                MlProtocol.OPEN_UPDOWN -> {
+                    val t0 = System.nanoTime()
+                    synchronized(lock) {
+                        runCatching { upDown?.close() }
+                        upDown = null
+                        val json = ctx.assets.open(UpDownModel.ASSET_NAME).use { it.readBytes() }
+                        val model = UpDownModel.parse(String(json, Charsets.UTF_8))
+                        upDown = OnnxTrees.open(ctx.assets.open(UpDownModel.ONNX_ASSET_NAME).use { it.readBytes() }, json, model.features)
+                    }
+                    r.writeInt(MlProtocol.OK); r.writeString(MlEngine.ONNX_CPU.label); r.writeLong((System.nanoTime() - t0) / 1_000_000)
+                }
+                MlProtocol.RUN_UPDOWN -> {
+                    val x = data.createFloatArray() ?: error("no row")
+                    val m = synchronized(lock) { upDown } ?: error("up/down model not open")
+                    r.writeInt(MlProtocol.OK); r.writeDouble(m.predict(x))
                 }
                 MlProtocol.TIMESFM -> {
                     val path = data.readString() ?: error("no file")
@@ -116,7 +135,9 @@ internal object MlProtocol {
     const val RUN_TREES = Binder.FIRST_CALL_TRANSACTION + 1
     const val CLOSE_TREES = Binder.FIRST_CALL_TRANSACTION + 2
     const val TIMESFM = Binder.FIRST_CALL_TRANSACTION + 3
-    val ALL = setOf(OPEN_TREES, RUN_TREES, CLOSE_TREES, TIMESFM)
+    const val OPEN_UPDOWN = Binder.FIRST_CALL_TRANSACTION + 4
+    const val RUN_UPDOWN = Binder.FIRST_CALL_TRANSACTION + 5
+    val ALL = setOf(OPEN_TREES, RUN_TREES, CLOSE_TREES, TIMESFM, OPEN_UPDOWN, RUN_UPDOWN)
     const val OK = 0
     const val ERROR = 1
 
