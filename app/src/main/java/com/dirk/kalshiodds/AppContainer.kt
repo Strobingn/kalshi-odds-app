@@ -647,8 +647,8 @@ class AppContainer(context: Context) {
         upDownModel?.let { m ->
             Thread({
                 runCatching {
-                    val label = scalper.ml.openUpDown()
-                    m.attachOnnx({ x -> scalper.ml.runUpDown(x) }, label)?.let { why -> m.markKotlin("ONNX Runtime: $why") }
+                    val label = scalperStore.ml.openUpDown()
+                    m.attachOnnx({ x -> scalperStore.ml.runUpDown(x) }, label)?.let { why -> m.markKotlin("ONNX Runtime: $why") }
                 }.onFailure { m.markKotlin("ONNX Runtime did not open: " + (it.message ?: it.javaClass.simpleName).take(100)) }
             }, "updown-onnx").apply { isDaemon = true }.start()
         }
