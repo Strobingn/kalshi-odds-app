@@ -253,10 +253,10 @@ object ChatPrompt {
     fun atm(strikes: List<ScalpRule.Quote>, spot: Double?, openPx: Double? = null): ScalpRule.Quote? =
         AtmStrike.pick(strikes, { q -> AtmStrike.priceDistance(q.strike, spot) }, { q -> AtmStrike.priceDistance(q.strike, openPx) })
 
-    /** GBM P(YES) when the asset is loaded, otherwise the spot-implied fair. */
+    /** GBM P(YES) when the asset is loaded, otherwise the settlement-aware fair or spot-implied fair. */
     fun modelUp(q: ScalpRule.Quote?, dm60: Double): Double? {
         if (q == null) return null
-        return GbmModel.pSide(q, "YES", dm60) ?: q.fair("YES")
+        return GbmModel.pSide(q, "YES", dm60) ?: com.dirk.kalshiodds.decision.Research.fair(q)?.pYes ?: q.cfFair("YES") ?: q.fair("YES")
     }
 
     fun liveWindow(w: LiveWindow): String {
@@ -271,6 +271,7 @@ object ChatPrompt {
         val move = moveSinceOpen(spot, w.btcAtOpen)
         val up = w.modelUp?.takeIf { it.isFinite() }?.let { String.format(Locale.US, "%.2f", it.coerceIn(0.0, 1.0)) } ?: "unavailable"
         val strikeLines = strikes.joinToString("\n") { q -> strikeLine(q, q.ticker == atm?.ticker) }
+        val micro = atm?.let { atmTelemetry(it) }.orEmpty()
         val tickers = strikes.map { it.ticker.uppercase() }.toSet()
         val positions = w.positions.filter { p ->
             p.state != ScalpState.CLOSED && p.state != ScalpState.NO_FILL && isBtc15m(p.ticker) &&
@@ -290,6 +291,7 @@ object ChatPrompt {
             appendLine("BTC price: ${spot?.let { money(it) } ?: "unknown"}")
             appendLine("move since window opened: $move")
             appendLine("model P(UP): $up")
+            if (micro.isNotBlank()) appendLine(micro)
             appendLine("open strikes:")
             appendLine(strikeLines)
             appendLine("open scalper positions in this window:")
@@ -301,6 +303,51 @@ object ChatPrompt {
         val strike = q.strike?.takeIf { it.isFinite() && it > 0.0 }?.let { money(it) } ?: "unknown"
         val mark = if (atm) " (at the money)" else ""
         return "${q.ticker}$mark strike $strike YES bid/ask ${px(q.yesBid)}/${px(q.yesAsk)} NO bid/ask ${px(q.bid("NO"))}/${px(q.ask("NO"))}"
+    }
+
+    /** High-signal book + fair telemetry for the ATM contract. */
+    fun atmTelemetry(q: ScalpRule.Quote): String {
+        val parts = ArrayList<String>()
+        val spotFair = q.fair("YES")?.takeIf { it.isFinite() }
+        spotFair?.let { parts += String.format(Locale.US, "spot fair YES %.2f", it) }
+        val rFair = com.dirk.kalshiodds.decision.Research.fair(q)
+        val brtiFair = rFair?.takeIf { it.brti }?.pYes?.takeIf { it.isFinite() }
+        val cfDigitalFair = q.cfFair("YES")?.takeIf { it.isFinite() }
+        val spotSettleFair = rFair?.takeIf { !it.brti }?.pYes?.takeIf { it.isFinite() }
+        when {
+            brtiFair != null -> parts += String.format(Locale.US, "BRTI fair YES %.2f", brtiFair)
+            cfDigitalFair != null -> parts += String.format(Locale.US, "CF fair YES %.2f", cfDigitalFair)
+            spotSettleFair != null -> parts += String.format(Locale.US, "settle fair YES (spot) %.2f", spotSettleFair)
+        }
+        val edgeFair = brtiFair ?: cfDigitalFair ?: spotSettleFair ?: spotFair
+        if (edgeFair != null) {
+            val ya = q.yesAsk
+            val na = q.ask("NO")
+            val yesEdge = ya?.let { com.dirk.kalshiodds.decision.Research.edgeAfterCosts(edgeFair, it, 10, holdToSettle = true) }
+            val noEdge = na?.let { com.dirk.kalshiodds.decision.Research.edgeAfterCosts(1.0 - edgeFair, it, 10, holdToSettle = true) }
+            when {
+                yesEdge != null && (noEdge == null || yesEdge > noEdge) ->
+                    parts += String.format(Locale.US, "net edge YES %+.1f¢", yesEdge * 100.0)
+                noEdge != null && (yesEdge == null || noEdge > yesEdge) ->
+                    parts += String.format(Locale.US, "net edge NO %+.1f¢", noEdge * 100.0)
+            }
+        }
+        val yb = q.yesBid; val ya = q.yesAsk
+        if (yb != null && ya != null && ya >= yb) {
+            parts += String.format(Locale.US, "spread %.1f¢", (ya - yb) * 100.0)
+        }
+        val bSz = q.yesBidSize?.takeIf { it.isFinite() && it >= 0.0 }
+        val aSz = q.yesAskSize?.takeIf { it.isFinite() && it >= 0.0 }
+        if (bSz != null && aSz != null && bSz + aSz > 0.0) {
+            val imb = (bSz - aSz) / (bSz + aSz)
+            parts += String.format(Locale.US, "top depth %.0f×%.0f (imb %+.0f%%)", bSz, aSz, imb * 100.0)
+        }
+        val ageMs = (q.nowMs - q.bookAtMs).coerceAtLeast(0L)
+        parts += "book age ${ageMs}ms"
+        if (q.cfSpot != null && q.cfSpot.isFinite()) {
+            parts += "CF ${money(q.cfSpot)}" + (q.cfAgeMs?.let { " (${it}ms)" }.orEmpty())
+        }
+        return if (parts.isEmpty()) "" else "ATM telemetry: " + parts.joinToString(" · ")
     }
 
     private fun moveSinceOpen(spot: Double?, atOpen: Double?): String {
@@ -392,10 +439,18 @@ object ChatPrompt {
         for (i in 1 until pts.size) {
             val a = pts[i - 1]
             val b = pts[i]
-            if (b.atMs - lastEvent < 15_000L) continue
+            val sameStrike = a.strike != null && b.strike != null &&
+                a.strike.isFinite() && b.strike.isFinite() &&
+                kotlin.math.abs(a.strike - b.strike) < 1e-6
+            val crossed = sameStrike && a.btc != null && b.btc != null &&
+                (a.btc - b.strike!!) * (b.btc - b.strike) < 0.0
+            if (b.atMs - lastEvent < 8_000L && !crossed) continue
             val btcJump = a.btc != null && b.btc != null && kotlin.math.abs(b.btc - a.btc) >= 10.0
             val oddsJump = a.up != null && b.up != null && kotlin.math.abs(b.up - a.up) >= 0.10
-            if (btcJump || oddsJump) {
+            if (crossed) {
+                lines += "strike cross ${tickRow(b)}"
+                lastEvent = b.atMs
+            } else if (btcJump || oddsJump) {
                 lines += "big move ${tickRow(b)}"
                 lastEvent = b.atMs
             }

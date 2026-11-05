@@ -5,7 +5,7 @@ package com.dirk.kalshiodds.signal.engine
  * on every delta OOMs / ANRs the process. Latest-wins + min interval.
  */
 object BookScoreGate {
-    const val MIN_INTERVAL_MS = 400L
+    const val MIN_INTERVAL_MS = 150L
 
     fun shouldPublish(
         ticker: String,

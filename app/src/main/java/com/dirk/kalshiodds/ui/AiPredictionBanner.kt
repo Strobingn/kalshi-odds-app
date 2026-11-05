@@ -23,23 +23,24 @@ import com.dirk.kalshiodds.decision.GbmModel
 import com.dirk.kalshiodds.ui.theme.DipTheme
 import kotlinx.coroutines.delay
 
-/** Live wrapper: ticks every second off the scalper's marks + on-phone GBM, so it updates and rolls with the window. */
+/** Live wrapper: reacts immediately to the scalper's live marks + on-phone GBM, and ticks every 250 ms for countdown / rollover. */
 @Composable
 fun AiPredictionBannerLive(modifier: Modifier = Modifier) {
     val container = (LocalContext.current.applicationContext as? KalshiOddsApp)?.let { runCatching { it.container }.getOrNull() }
     val book = container?.scalp
+    val marks = book?.marks?.collectAsState()?.value ?: emptyMap()
     var f by remember { mutableStateOf(AiDirection.Forecast(AiDirection.Call.NONE, null, null, null)) }
-    LaunchedEffect(book) {
+    LaunchedEffect(book, marks) {
         while (true) { // off Main; dm60 read under the book lock
             f = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
                 val now = System.currentTimeMillis()
-                val marks = book?.marks?.value ?: emptyMap()
-                val close = marks.values.filter { it.ticker.uppercase().contains("BTC") && it.closeMs > now }.minOfOrNull { it.closeMs }
+                val curMarks = book?.marks?.value ?: emptyMap()
+                val close = curMarks.values.filter { it.ticker.uppercase().contains("BTC") && it.closeMs > now }.minOfOrNull { it.closeMs }
                 val openPx = close?.let { book?.spotAt("BTC", it - 900_000L) }
-                val q = AiDirection.current(marks, now, openPx)
+                val q = AiDirection.current(curMarks, now, openPx)
                 AiDirection.forecast(q, now) { GbmModel.pSide(it, "YES", book?.dm60Snapshot(it.ticker.uppercase(), it.nowMs) ?: 0.0) }
             }
-            delay(1000)
+            delay(250)
         }
     }
     AiPredictionBanner(f, modifier)

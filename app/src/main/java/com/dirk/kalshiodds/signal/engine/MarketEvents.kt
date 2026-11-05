@@ -55,9 +55,9 @@ class MarketEventDebouncer(
     }
 
     companion object {
-        const val DEBOUNCE_MS = 150L
+        const val DEBOUNCE_MS = 75L
         /** Timer only for exits / time stops (and Home status); entries are event-driven. */
-        const val EXIT_TIMER_MS = 1_000L
+        const val EXIT_TIMER_MS = 500L
     }
 }
 

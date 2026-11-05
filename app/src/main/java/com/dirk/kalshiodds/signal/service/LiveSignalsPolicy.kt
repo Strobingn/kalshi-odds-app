@@ -89,7 +89,7 @@ object LiveSignalsPolicy {
             "orderbook plus last-minute signal alerts while the user is away " +
             "from the app. Not a time-limited data transfer."
 
-    const val TICKET_REBUILD_DEBOUNCE_MS = 300L
+    const val TICKET_REBUILD_DEBOUNCE_MS = 120L
     const val LIFECYCLE_CHANNEL = "market_lifecycle_v2"
 
     fun startCommand(explicitStop: Boolean): Int =

@@ -113,7 +113,7 @@ object SignalConstants {
     /** L2-style pull of each channel weight toward the prior (1.0). */
     const val ADAPTER_PRIOR_SHRINK = 0.05
 
-    const val EXTERNAL_CACHE_MS = 25_000L
+    const val EXTERNAL_CACHE_MS = 10_000L
     const val EXTERNAL_CONNECT_TIMEOUT_MS = 3_000L
     const val EXTERNAL_READ_TIMEOUT_MS = 4_000L
 
