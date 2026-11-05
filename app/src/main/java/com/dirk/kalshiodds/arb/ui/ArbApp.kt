@@ -21,6 +21,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
+import com.dirk.kalshiodds.ui.ArbGapChart
+import com.dirk.kalshiodds.ui.ThinScreenChartData
 import com.dirk.kalshiodds.ui.theme.DipTheme
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -158,6 +160,7 @@ private fun ScanTab(state: ArbUiState, vm: ArbViewModel, now: Long, onNotifyOn: 
         item { Summary(state, now) }
         if (report != null) {
             val r = report.result
+            item(key = "gap-chart") { ArbGapChart(ThinScreenChartData.arbGaps(r)) }
             if (r.opportunities.isEmpty()) {
                 item {
                     Text(

@@ -12,6 +12,7 @@ import com.dirk.kalshiodds.data.importing.ResultsImporter
 import com.dirk.kalshiodds.data.importing.SeenKeys
 import com.dirk.kalshiodds.data.local.archive.DataStats
 import com.dirk.kalshiodds.data.prefs.DataHubSettings
+import com.dirk.kalshiodds.domain.CryptoMarkets
 import com.dirk.kalshiodds.data.supabase.SupabaseMirror
 import com.dirk.kalshiodds.prediction.EdgeModel
 import com.dirk.kalshiodds.worker.BackfillWorker
@@ -24,8 +25,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.InputStreamReader
 
+/** Settled windows read for the Data charts: the strip shows the newest 96, the hour-of-day rate uses all of these. */
+private const val SETTLED_CHART_ROWS = 2_000
+
 data class DataUiState(
     val stats: DataStats = DataStats(),
+    /** Charts under the stats card: the newest settled Bitcoin windows (ThinScreenCharts.kt). */
+    val settledChart: ThinScreenChartData.SettledStats = ThinScreenChartData.settledStats(emptyList()),
     val settings: DataHubSettings = DataHubSettings(),
     val importSummary: ImportSummary? = null,
     val message: String? = null,
@@ -145,7 +151,12 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshStats() {
         viewModelScope.launch {
             val stats = withContext(Dispatchers.IO) { runCatching { archive.stats() }.getOrElse { DataStats() } }
-            _state.update { it.copy(stats = stats, modelNote = modelLabel()) }
+            val settled = withContext(Dispatchers.IO) {
+                runCatching { archive.recentSettled(CryptoMarkets.DEFAULT_SERIES.first(), SETTLED_CHART_ROWS) }.getOrElse { emptyList() }
+            }
+            _state.update {
+                it.copy(stats = stats, settledChart = ThinScreenChartData.settledStats(settled), modelNote = modelLabel())
+            }
         }
     }
 

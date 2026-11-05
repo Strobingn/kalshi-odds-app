@@ -169,7 +169,8 @@ class MainActivity : ComponentActivity() {
                         signalHistory = {
                             com.dirk.kalshiodds.ui.SignalHistoryScreen(
                                 cards = com.dirk.kalshiodds.ui.signalHistoryCards(oddsState.recentAlerts),
-                                onBack = { navigator.back() }
+                                onBack = { navigator.back() },
+                                alerts = oddsState.recentAlerts
                             )
                         },
                         chart = {

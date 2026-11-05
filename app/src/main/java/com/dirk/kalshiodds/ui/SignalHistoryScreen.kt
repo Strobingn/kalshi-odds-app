@@ -18,6 +18,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.signal.model.SignalAlert
@@ -28,8 +29,11 @@ import com.dirk.kalshiodds.ui.theme.DipTheme
 @Composable
 fun SignalHistoryScreen(
     cards: List<SignalCopy.Card>,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    alerts: List<SignalAlert> = emptyList()
 ) {
+    val live = remember(alerts) { alerts.filter { com.dirk.kalshiodds.domain.CryptoMarkets.isLiveTicker(it.ticker) } }
+    val stats = remember(live) { ThinScreenChartData.signalStats(live, System.currentTimeMillis()) }
     val colors = DipTheme.colors
     Scaffold(
         containerColor = colors.bg,
@@ -57,6 +61,9 @@ fun SignalHistoryScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            if (live.isNotEmpty()) {
+                item { SignalHistoryCharts(stats) }
+            }
             if (cards.isEmpty()) {
                 item {
                     Text(

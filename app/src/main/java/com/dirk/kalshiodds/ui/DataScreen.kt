@@ -95,6 +95,7 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
             )
 
             StatsCard(state)
+            SettledWindowCharts(state.settledChart)
 
             Button(
                 onClick = onOpenHistory,
