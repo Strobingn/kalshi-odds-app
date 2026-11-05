@@ -57,6 +57,15 @@ class SyncMergeTest {
         assertEquals("new", out.single().key)
     }
 
+    @Test
+    fun incomingHoldsOnlyNewAndNewerRemoteRecords() {
+        val local = listOf(rec("mine", 100, "{}"), rec("both-old", 100, "{}"), rec("both-new", 100, "{}"))
+        val remote = listOf(rec("theirs", 50, "{}"), rec("both-old", 90, "{}"), rec("both-new", 200, "{}"))
+        val r = SyncMerge.merge(local, remote)
+        assertEquals(4, r.upserts.size)
+        assertEquals(listOf("theirs", "both-new"), r.incoming.map { it.key })
+    }
+
     private fun rec(key: String, at: Long, payload: String) =
         SyncMerge.Record(key = key, kind = "ticket", updatedAtMs = at, payload = payload)
 }

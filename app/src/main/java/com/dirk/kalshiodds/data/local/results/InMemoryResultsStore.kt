@@ -213,6 +213,12 @@ class InMemoryResultsStore(
     override fun existingFillIds(): Set<String> = fills.keys.toSet()
 
     @Synchronized
+    override fun syncKeys(): Set<String> =
+        snapshots.map { SyncKeys.snapshot(it.ticker, it.createdAtMs) }.toSet() +
+            alerts.map { SyncKeys.alert(it.alertId) } +
+            tickets.map { SyncKeys.ticket(it.ticker, it.createdAtMs, it.side) }
+
+    @Synchronized
     override fun existingSnapshotKeys(): Set<String> =
         snapshots.map { "${it.ticker}|${it.createdAtMs}" }.toSet()
 

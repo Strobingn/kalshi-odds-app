@@ -23,7 +23,13 @@ object SyncMerge {
         val upserts: List<Record>,
         val skipped: Int,
         val conflictsWon: Int,
-        val conflictsLost: Int
+        val conflictsLost: Int,
+        /**
+         * Only the remote records this device should take: new keys and remote copies newer than the local one.
+         * [upserts] also holds every local record; applying those wrote each local row into the database again on
+         * every sync (1.24.1).
+         */
+        val incoming: List<Record> = emptyList()
     )
 
     val FORBIDDEN_KEYS = setOf(
@@ -54,6 +60,7 @@ object SyncMerge {
         var skipped = 0
         var won = 0
         var lost = 0
+        val taken = LinkedHashMap<String, Record>()
         for (incoming in remote) {
             if (incoming.key.isBlank() || isForbiddenPayload(incoming.payload)) {
                 skipped++
@@ -62,11 +69,13 @@ object SyncMerge {
             val existing = byKey[incoming.key]
             if (existing == null) {
                 byKey[incoming.key] = incoming
+                taken[incoming.key] = incoming
                 continue
             }
             when {
                 incoming.updatedAtMs > existing.updatedAtMs -> {
                     byKey[incoming.key] = incoming
+                    taken[incoming.key] = incoming
                     won++
                 }
                 incoming.updatedAtMs < existing.updatedAtMs -> {
@@ -82,7 +91,8 @@ object SyncMerge {
             upserts = byKey.values.toList(),
             skipped = skipped,
             conflictsWon = won,
-            conflictsLost = lost
+            conflictsLost = lost,
+            incoming = taken.values.toList()
         )
     }
 

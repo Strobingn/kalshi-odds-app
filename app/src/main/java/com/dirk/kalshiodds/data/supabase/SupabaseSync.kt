@@ -6,6 +6,7 @@ import com.dirk.kalshiodds.data.local.history.SettingsRestore
 import com.dirk.kalshiodds.data.local.results.AlertRow
 import com.dirk.kalshiodds.data.local.results.ResultsStore
 import com.dirk.kalshiodds.data.local.results.ScoredSnapshotRow
+import com.dirk.kalshiodds.data.local.results.SyncKeys
 import com.dirk.kalshiodds.data.local.results.TicketAttemptRow
 import com.dirk.kalshiodds.data.prefs.DataHubSettings
 import com.dirk.kalshiodds.signal.config.SignalSettings
@@ -97,7 +98,7 @@ class SupabaseSync(
                 .put("marketPp", s.marketPp)
                 .put("createdAtMs", s.createdAtMs)
                 .put("note", s.note)
-            out.add(rec("snapshot:${s.ticker}:${s.createdAtMs}", "snapshot", s.createdAtMs, payload))
+            out.add(rec(SyncKeys.snapshot(s.ticker, s.createdAtMs), "snapshot", s.createdAtMs, payload))
         }
         bundle.alerts.forEach { a ->
             val payload = JSONObject()
@@ -108,7 +109,7 @@ class SupabaseSync(
                 .put("edgePp", a.edgePp)
                 .put("reason", a.reason)
                 .put("createdAtMs", a.createdAtMs)
-            out.add(rec("alert:${a.alertId}", "alert", a.createdAtMs, payload))
+            out.add(rec(SyncKeys.alert(a.alertId), "alert", a.createdAtMs, payload))
         }
         bundle.tickets.forEach { t ->
             val payload = JSONObject()
@@ -119,7 +120,7 @@ class SupabaseSync(
                 .put("result", t.result)
                 .put("createdAtMs", t.createdAtMs)
                 .put("note", t.note)
-            out.add(rec("ticket:${t.ticker}:${t.createdAtMs}:${t.side}", "ticket", t.createdAtMs, payload))
+            out.add(rec(SyncKeys.ticket(t.ticker, t.createdAtMs, t.side), "ticket", t.createdAtMs, payload))
         }
         bundle.settingsChanges.forEach { c ->
             if (FORBIDDEN_SETTING_KEYS.contains(c.key.lowercase())) return@forEach
@@ -150,7 +151,7 @@ class SupabaseSync(
         bundle.settingsSnapshot?.takeIf { !SyncMerge.isForbiddenPayload(it) }?.let { snap ->
             out.add(
                 rec(
-                    "settings:current",
+                    SETTINGS_CURRENT,
                     "settings_snapshot",
                     System.currentTimeMillis(),
                     JSONObject(snap)
@@ -160,17 +161,28 @@ class SupabaseSync(
         return out.filter { !SyncMerge.isForbiddenPayload(it.payload) }
     }
 
+    /**
+     * Writes remote records into this device. Pass only the records the merge took ([SyncMerge.Result.incoming]) and
+     * the keys already stored ([ResultsStore.syncKeys]): a snapshot, alert or ticket this device has is skipped, so a
+     * sync never stores the same row twice. Settings come back only from the `settings:current` snapshot; the
+     * settings change log is history, not something to restore (restoring it brought old settings back).
+     */
     fun apply(
         merged: List<SyncMerge.Record>,
         store: ResultsStore,
         onSettings: (String) -> Unit,
-        onPaper: (PaperFill) -> Unit
+        onPaper: (PaperFill) -> Unit,
+        existing: Set<String> = emptySet()
     ) {
+        val seen = HashSet(existing)
         val snapshots = ArrayList<ScoredSnapshotRow>()
         for (rec in merged) {
             val o = runCatching { JSONObject(rec.payload) }.getOrNull() ?: continue
             when (rec.kind) {
-                "snapshot" -> snapshots.add(
+                "snapshot" -> {
+                    val created = o.optLong("createdAtMs", rec.updatedAtMs)
+                    if (!seen.add(SyncKeys.snapshot(o.optString("ticker"), created))) continue
+                    snapshots.add(
                     ScoredSnapshotRow(
                         ticker = o.optString("ticker"),
                         series = o.optString("series"),
@@ -180,13 +192,17 @@ class SupabaseSync(
                         marketPp = o.optDouble("marketPp"),
                         regime = o.optString("regime").takeIf { it.isNotBlank() },
                         uncertainty = null,
-                        createdAtMs = o.optLong("createdAtMs", rec.updatedAtMs),
+                        createdAtMs = created,
                         note = o.optString("note").takeIf { it.isNotBlank() }
                     )
                 )
-                "alert" -> store.insertAlert(
+                }
+                "alert" -> {
+                    val alertId = o.optString("alertId").ifBlank { rec.key }
+                    if (!seen.add(SyncKeys.alert(alertId))) continue
+                    store.insertAlert(
                     AlertRow(
-                        alertId = o.optString("alertId").ifBlank { rec.key },
+                        alertId = alertId,
                         ticker = o.optString("ticker"),
                         series = o.optString("series"),
                         side = o.optString("side"),
@@ -198,20 +214,24 @@ class SupabaseSync(
                         createdAtMs = o.optLong("createdAtMs", rec.updatedAtMs)
                     )
                 )
-                "ticket" -> store.insertTicket(
+                }
+                "ticket" -> {
+                    val created = o.optLong("createdAtMs", rec.updatedAtMs)
+                    if (!seen.add(SyncKeys.ticket(o.optString("ticker"), created, o.optString("side")))) continue
+                    store.insertTicket(
                     TicketAttemptRow(
                         ticker = o.optString("ticker"),
                         side = o.optString("side"),
                         stakeUsd = o.optDouble("stakeUsd"),
                         approved = o.optBoolean("approved"),
                         result = o.optString("result"),
-                        createdAtMs = o.optLong("createdAtMs", rec.updatedAtMs),
+                        createdAtMs = created,
                         note = o.optString("note").takeIf { it.isNotBlank() }
                     )
                 )
-                "settings", "settings_snapshot" -> {
-                    val snap = o.optString("snapshotJson").ifBlank { rec.payload }
-                    if (!SyncMerge.isForbiddenPayload(snap)) onSettings(snap)
+                }
+                "settings_snapshot" -> {
+                    if (rec.key == SETTINGS_CURRENT && !SyncMerge.isForbiddenPayload(rec.payload)) onSettings(rec.payload)
                 }
                 "paper" -> {
                     val fill = PaperFill(
@@ -256,7 +276,8 @@ class SupabaseSync(
             val packed = pack(local)
             val remote = pull(settings)
             val merged = SyncMerge.merge(packed, remote)
-            apply(merged.upserts, store, onSettings, onPaper)
+            val have = runCatching { store.syncKeys() }.getOrElse { emptySet() }
+            apply(merged.incoming, store, onSettings, onPaper, existing = have)
             val outgoing = SyncMerge.outgoing(packed, lastPushMs)
             val pushed = push(settings, outgoing)
             // A failed upsert pushes 0; calling that a success moved the sync time past rows never sent, so they
@@ -265,7 +286,7 @@ class SupabaseSync(
             Status(
                 ok = pushOk,
                 atMs = startedMs,
-                message = (if (pushOk) "Synced" else "Push failed, will retry") + " · pulled ${remote.size} · merged ${merged.upserts.size} · pushed $pushed",
+                message = (if (pushOk) "Synced" else "Push failed, will retry") + " · pulled ${remote.size} · new here ${merged.incoming.size} · pushed $pushed",
                 pulled = remote.size,
                 pushed = pushed
             )
@@ -317,6 +338,8 @@ class SupabaseSync(
 
     companion object {
         const val TABLE = "diphunter_sync"
+        /** The one record a sync may restore settings from: this device's whole settings snapshot. */
+        const val SETTINGS_CURRENT = "settings:current"
         private val JSON = "application/json; charset=utf-8".toMediaType()
         val FORBIDDEN_SETTING_KEYS = setOf(
             "api_key_id", "apikeyid", "private_key_pem", "pem", "github_token", "githubtoken"

@@ -88,4 +88,17 @@ interface ResultsStore {
     fun recentTickets(limit: Int = 40): List<TicketAttemptRow>
     fun recentOddsMids(limit: Int = 800): List<OddsMidRow>
     fun exportBundle(limit: Int = 400): ResultsBundle
+
+    /**
+     * The cloud-sync key ([SyncKeys]) of every snapshot, alert and ticket already stored, so a sync can skip rows this
+     * device has. Empty means "unknown": the sync then relies on the merge alone.
+     */
+    fun syncKeys(): Set<String> = emptySet()
+}
+
+/** Cloud-sync identities of stored rows; the same strings SupabaseSync.pack uses as record keys. */
+object SyncKeys {
+    fun snapshot(ticker: String, createdAtMs: Long) = "snapshot:$ticker:$createdAtMs"
+    fun alert(alertId: String) = "alert:$alertId"
+    fun ticket(ticker: String, createdAtMs: Long, side: String) = "ticket:$ticker:$createdAtMs:$side"
 }

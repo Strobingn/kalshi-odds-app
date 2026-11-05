@@ -19,6 +19,23 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.24.1 (Claude branch): cloud sync stores each row once and stops bringing old settings back
+
+**Duplicate rows.** Every cloud sync wrote this device's recent snapshots, alerts and tickets into the database again
+(about 400 + 200 + 200 rows every 15 minutes), plus every older row pulled from the cloud, so the same row sat there many
+times and pruning pushed real history out. Now a sync takes only cloud rows that are new to this device or newer than
+its own copy, and skips any snapshot, alert or ticket already stored (`ResultsStore.syncKeys`).
+
+**Stored data.** The database moves to v6. The upgrade deletes only exact copies (same ticker, time and side; alerts
+also the same alert id), keeping the first one stored, which is the original. Nothing else changes, and no table or
+column is dropped. History that pruning pushed out earlier comes back from the cloud on the next sync, because those
+cloud rows are now new to the device.
+
+**Old settings.** A sync restored settings from whichever settings-change record came last, often an old one, and
+sometimes a change record with no full snapshot at all. Now it restores only from the `settings:current` snapshot, and
+only when the cloud copy is newer than this device's. The settings change log stays history. Restoring a past setting
+from History still works as before.
+
 ## 1.24.0 (Claude branch): an ONNX up/down model for the Bitcoin 15-minute market
 
 **What it is.** A trained model of the chance that the live Bitcoin window settles UP, every second, from the book

@@ -625,6 +625,21 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
         return out
     }
 
+    override fun syncKeys(): Set<String> {
+        val out = HashSet<String>()
+        val r = db.readableDatabase
+        r.rawQuery("SELECT ticker, created_at_ms FROM $TABLE_SNAP", null).use { c ->
+            while (c.moveToNext()) out.add(SyncKeys.snapshot(c.getString(0).orEmpty(), c.getLong(1)))
+        }
+        r.rawQuery("SELECT alert_id FROM $TABLE_ALERT WHERE alert_id IS NOT NULL", null).use { c ->
+            while (c.moveToNext()) out.add(SyncKeys.alert(c.getString(0)))
+        }
+        r.rawQuery("SELECT ticker, created_at_ms, side FROM $TABLE_TICKET", null).use { c ->
+            while (c.moveToNext()) out.add(SyncKeys.ticket(c.getString(0).orEmpty(), c.getLong(1), c.getString(2).orEmpty()))
+        }
+        return out
+    }
+
     override fun existingSnapshotKeys(): Set<String> {
         val out = HashSet<String>()
         db.readableDatabase.rawQuery("SELECT ticker, created_at_ms FROM $TABLE_SNAP", null).use { c ->
@@ -887,6 +902,7 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
             }
             if (oldVersion < 4) createHistoryTables(db)
             if (oldVersion < 5) createChartTickTable(db)
+            if (oldVersion < SyncDedupeSchema.VERSION) for (sql in SyncDedupeSchema.upgradeSql()) db.execSQL(sql)
         }
 
         private fun createChartTickTable(db: SQLiteDatabase) {
@@ -997,7 +1013,7 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
 
     companion object {
         const val DB_NAME = "diphunter_results.db"
-        const val DB_VERSION = 5
+        const val DB_VERSION = SyncDedupeSchema.VERSION
         const val TABLE_SETTINGS = "settings_history"
         const val TABLE_SESSION = "sessions"
         const val MAX_SETTINGS = 400
